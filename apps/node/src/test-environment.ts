@@ -96,7 +96,7 @@ export async function trustedTestRuntimes(context: CacheContext): Promise<Runtim
   const node = capability('node', process.versions.node, { abi: process.versions, npm });
   const [python, postgres] = await Promise.all([pythonRuntime(context), postgresRuntime(context)]);
   checkCacheContext(context);
-  return [node, ...python, ...postgres];
+  return [node, ...python, ...postgres, capability('hornhoof-test-execution', '2.0.0', { batch: 2, oncePreparation: 2 })];
 }
 
 
@@ -106,8 +106,15 @@ export async function safeCheckoutPath(checkout: string, path: string): Promise<
   if (inside === '..' || inside.startsWith('../')) fail('environment_invalid', 'A command or selected file escapes its checkout.');
   return full;
 }
-export async function buildTestInvocation(suite: TestSuite, files: string[], context: { checkout: string; filesPath: string }): Promise<{ command: Command; env: Record<string, string> }> {
+function shardCommand(suite: TestSuite, shard: { index: number; count: number } | undefined): Command {
+  if (suite.split.kind !== 'vitest-shard') return suite.run;
+  if (!shard || !Number.isInteger(shard.index) || !Number.isInteger(shard.count) || shard.index < 1 || shard.index > shard.count || shard.count > 10) fail('environment_invalid', 'A native Vitest invocation needs valid local shard coordinates.');
+  if (suite.run.args.some(arg => arg === '--shard' || arg.startsWith('--shard='))) fail('environment_invalid', 'The pinned suite command already sets shard coordinates.');
+  return { ...suite.run, args: [...suite.run.args, `--shard=${shard.index}/${shard.count}`] };
+}
+export async function buildTestInvocation(suite: TestSuite, files: string[], context: { checkout: string; filesPath: string; shard?: { index: number; count: number } }): Promise<{ command: Command; env: Record<string, string> }> {
   if (!files.length) fail('environment_invalid', 'A suite needs a nonempty file inventory.');
+  const command = shardCommand(suite, context.shard);
   await safeCheckoutPath(context.checkout, suite.run.cwd);
   for (const file of files) {
     await safeCheckoutPath(context.checkout, file);
@@ -118,7 +125,7 @@ export async function buildTestInvocation(suite: TestSuite, files: string[], con
   if (suite.split.kind === 'argv-files') return { command: { ...suite.run, args: [...suite.run.args, ...paths] }, env: {} };
   const output = await open(context.filesPath, 'wx', 0o600);
   try { await output.writeFile(JSON.stringify(paths)); } finally { await output.close(); }
-  return { command: suite.run, env: { HH_TEST_FILES: context.filesPath } };
+  return { command, env: { HH_TEST_FILES: context.filesPath } };
 }
 
 

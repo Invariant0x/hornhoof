@@ -936,20 +936,26 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models });
   });
 
-  it('cleans up and says so when Hornhoof removes the subscription', async () => {
+  it('revokes sign-in and retains workspaces, source and journals when removed', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
+    const retained = ['work/agents/a/repositories/r/repo/unpublished.txt', 'work/agents/a/task-workspaces/w/repo/dirty.txt', 'work/agents/a/task-workspaces/w/private-context', 'workspace-journals/operation.json'];
+    for (const path of retained) {
+      const target = join(dir, path);
+      mkdirSync(join(target, '..'), { recursive: true });
+      writeFileSync(target, `retained:${path}`);
+    }
     const node = await runNode({ dir, adapter, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
     expect(existsSync(join(dir, 'home'))).toBe(false);
-    expect(existsSync(join(dir, 'work'))).toBe(false);
+    for (const path of retained) expect(readFileSync(join(dir, path), 'utf8')).toBe(`retained:${path}`);
     expect(isRemoved(dir)).toBe(true);
   });
 
-  it('stops its running jobs before it deletes their folders on removal', async () => {
+  it('settles running jobs before revocation while retaining their work on removal', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     let folderAtStop: boolean | null = null;
@@ -971,7 +977,7 @@ describe('runNode', () => {
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
     expect(folderAtStop).toBe(true);
-    expect(existsSync(join(dir, 'work'))).toBe(false);
+    expect(readFileSync(join(dir, 'work', 'file'), 'utf8')).toBe('x');
   });
 
   it('answers agent_failed and keeps serving when a job cannot even start', async () => {

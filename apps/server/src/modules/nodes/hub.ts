@@ -72,9 +72,12 @@ const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' ||
 
 const closeReason = (reason?: Buffer) => (reason?.length ? reason.toString() : null);
 
+/* Provenance created by the server for the socket, never a field of its frames. */
+export type NodeTransport = Readonly<{ linkId: string }>;
+
 type HubOptions = {
   pingMs: number;
-  onMessage(id: NodeIdentity, msg: ProgramNodeMessage): Promise<void>;
+  onMessage(id: NodeIdentity, msg: ProgramNodeMessage, transport: NodeTransport): Promise<void>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
   onClose(id: NodeIdentity): Promise<void>;
@@ -163,7 +166,7 @@ export class NodeHub {
       this.forwardTerminal(id, msg);
       return chain;
     }
-    const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg) : Promise.resolve());
+    const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg, { linkId: entry.link }) : Promise.resolve());
     const report = (err: unknown) => this.opts.onError?.(err);
     if (isAwaitedFrame(msg)) {
       void deliver().catch(report);
@@ -174,6 +177,10 @@ export class NodeHub {
 
   isOnline(id: NodeIdentity): boolean {
     return this.sockets.get(keyOf(id))?.socket.readyState === 1;
+  }
+
+  isCurrentLink(id: NodeIdentity, linkId: string): boolean {
+    return this.openEntry(id)?.link === linkId;
   }
 
   /* Since when the node is away, none while it is online. One that went away before this Hornhoof started is away from

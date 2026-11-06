@@ -5,7 +5,7 @@ description: { en: "Runs the product the way its user meets it, walks the flow a
 kind: procedure
 sources: [openai/skills skills/.curated/playwright/SKILL.md, anthropics/skills skills/webapp-testing/SKILL.md]
 ---
-Unit tests do not show what a user meets. For any change a user can notice:
+Unit tests do not show what a user meets. The test engineer or QA owns live product and browser-engine checks once per turn on the final candidate. Developers submit their failing-before-change test, green affected-test result from run_tests and commit SHA, without repeating this final acceptance flow on each task. For the tester's assigned final scope:
 
 1. Start the product the way the project documents it, or use the preview your head gave you. Never test against production data.
 2. Use it through the surface its user uses: a web page with Playwright through `run_tests` on a free compatible machine where browsers are already prepared (verify the browser opens instead of running `playwright install` by hand; follow `hh-run-checks`) or your browser tool; a command-line tool through its commands; a service through its public API; a library through a small program that calls it the way its users do; any other app through its own test driver, emulator or simulator. A lightweight screenshot capture of a single view for visual inspection is distinct from a browser test suite, and a browser binary name alone does not make that capture a suite. Act as a person or a calling program would.

@@ -5,6 +5,10 @@ description: { en: "Ends a review with one clear verdict: work goes back only fo
 kind: gate
 sources: [obra/superpowers skills/requesting-code-review/code-reviewer.md]
 ---
+Work marked `small: true` has no separate task gate. Review it in the shared turn review and use the turn's quality evidence instead of demanding task reports, matrices, complexity metrics or duplicate checks. The executor's completion is a line stating the change and commit SHA.
+
+For ordinary work too, authors submit the tests written, green affected-test evidence from run_tests and commit SHA. The test engineer or QA owns all other checks once per turn on the final candidate. Review their verified results without rerunning them or demanding final metrics from each author. Findings return to authors as tasks, small fixes by the fast path.
+
 End every review with `"verdict"`, pinning the 40-character `reviewedCommit` and structured `issues` (`{ taskId?, category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking, path, line, harm }`) on a first look:
 
 **Verdict**: APPROVE, CHANGES_REQUESTED or BLOCKED.
