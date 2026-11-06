@@ -425,8 +425,9 @@ describe('a task', () => {
       ],
       options: [],
     } satisfies MaterialManifest;
+    const legacy: import('../src/types').WaitingRequest = { ...REQUESTS[0]!, materialRevision: null, materialDigest: null };
     const asked: import('../src/types').WaitingRequest = {
-      ...REQUESTS[0]!,
+      ...legacy,
       id: requestId,
       task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
       materialRevision: 1,
