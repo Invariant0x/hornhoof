@@ -90,6 +90,8 @@ async function emptied({ client, truncate, shape }: Shared): Promise<boolean> {
 let shared: Shared | undefined;
 let held = false;
 
+export const sharedDatabase = () => shared?.client;
+
 async function closeShared(): Promise<void> {
   const client = shared?.client;
   shared = undefined;

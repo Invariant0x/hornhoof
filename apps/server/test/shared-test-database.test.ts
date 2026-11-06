@@ -1,17 +1,21 @@
-import { PGlite } from '@electric-sql/pglite';
+import type { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
 
-const closes = vi.spyOn(PGlite.prototype, 'close');
-/* Hooks run last first, so this one looks after the one helpers-db.ts adds as it loads below. A database left open at the
-   end of a file is a whole Postgres in memory, and a file that leaves them grows until it is killed. */
+/* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
+   killed. Hooks run last first, so this one looks after the one helpers-db.ts adds as it loads below. */
+let lastShared: PGlite | undefined;
 afterAll(() => {
-  expect(closes.mock.calls.length).toBe(databasesOpened());
+  expect(lastShared?.closed).toBe(true);
 });
-const { createTestDb, databasesOpened } = await import('./helpers-db.js');
+const { createTestDb, databasesOpened, sharedDatabase } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
+afterAll(() => {
+  lastShared = sharedDatabase();
+  expect(lastShared?.closed).toBe(false);
+});
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 const reader = readerRole('postgres');
@@ -144,7 +148,7 @@ describe('work a test leaves behind', { shuffle: false }, () => {
 
   it('cannot write into the next test', async () => {
     const db = await createTestDb();
-    await expect(late()).rejects.toThrow('PGlite is closed');
+    await expect(late()).rejects.toMatchObject({ cause: { message: 'PGlite is closed' } });
     expect(await db.select().from(companies)).toEqual([]);
   });
 
