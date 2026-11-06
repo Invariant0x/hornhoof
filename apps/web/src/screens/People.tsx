@@ -315,6 +315,24 @@ function replacePerson(people: PersonView[] | null, person: PersonView): PersonV
 
 const missingSelection = (selected: CardRoute['selected'], people: PersonView[] | null, person: PersonView | null | undefined) => selected && people && !person;
 
+const peopleUnavailable = (failure: unknown, selected: CardRoute['selected'], people: PersonView[] | null, person: PersonView | null | undefined) =>
+  unavailableFailure(failure) || missingSelection(selected, people, person);
+
+function PeopleHeader({ canManage, panel, onInvite }: { canManage: boolean; panel: Panel; onInvite: () => void }) {
+  const t = useT();
+  return (
+      <header className="people-head">
+        <div>
+          <h1>{t.people.heading}</h1>
+          <p className="muted">{t.people.intro}</p>
+        </div>
+        {canManage && !panel && (
+          <button className="btn" type="button" onClick={onInvite}>{t.people.invitePerson}</button>
+        )}
+      </header>
+  );
+}
+
 export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; onRenamed?: (name: string) => void } & CardRoute) {
   const t = useT();
   const [people, setPeople] = useState<PersonView[] | null>(null);
@@ -370,19 +388,11 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       setPanel({ kind: 'link', name: res.person.name, url: res.inviteUrl });
     });
 
-  if (unavailableFailure(failure) || missingSelection(selected, people, person)) return <RouteUnavailable onHome={onHome} />;
+  if (peopleUnavailable(failure, selected, people, person)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people">
-      <header className="people-head">
-        <div>
-          <h1>{t.people.heading}</h1>
-          <p className="muted">{t.people.intro}</p>
-        </div>
-        {canManage && !panel && (
-          <button className="btn" type="button" onClick={() => setPanel({ kind: 'invite' })}>{t.people.invitePerson}</button>
-        )}
-      </header>
+      <PeopleHeader canManage={canManage} panel={panel} onInvite={() => setPanel({ kind: 'invite' })} />
 
       <InvitationPanel
         panel={panel}

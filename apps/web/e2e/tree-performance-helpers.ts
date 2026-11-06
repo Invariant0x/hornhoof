@@ -23,8 +23,7 @@ export type TraceEvent = {
 };
 export type Measurement = { events: TraceEvent[]; frames: number[]; chipRenders: number; movements: number };
 
-
-export async function instrumentChipRenders(page: Page) {
+export async function instrumentChipRenders(page: Page): Promise<void> {
   await page.addInitScript(() => {
     (window as unknown as { __chipRenders: string[] }).__chipRenders = [];
   });
@@ -38,7 +37,7 @@ export async function instrumentChipRenders(page: Page) {
   });
 }
 
-export async function resetChipRenders(page: Page) {
+export async function resetChipRenders(page: Page): Promise<void> {
   await page.evaluate(() => {
     (window as unknown as { __chipRenders: string[] }).__chipRenders.length = 0;
   });
@@ -52,7 +51,7 @@ export async function chipRenders(page: Page): Promise<number> {
   return (await chipRenderNames(page)).length;
 }
 
-export async function serveFullDepartment(page: Page) {
+export async function serveFullDepartment(page: Page): Promise<{ full: Tree; renameBrunoTask: (title: string) => void }> {
   const full = fullDepartment();
   let shown: Tree = full;
   await serveTree(page, { during: true });
@@ -72,7 +71,7 @@ export async function serveFullDepartment(page: Page) {
   };
 }
 
-export async function openDepartment(page: Page, tree = true) {
+export async function openDepartment(page: Page, tree = true): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: /Development/ }).click();
   if (tree) {
@@ -85,7 +84,7 @@ export async function openDepartment(page: Page, tree = true) {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
-export async function startFrames(page: Page) {
+export async function startFrames(page: Page): Promise<void> {
   await page.evaluate(() => {
     const state = window as unknown as { __frames: number[]; __frameRequest: number };
     state.__frames = [];
@@ -138,7 +137,9 @@ export async function measure(page: Page, selector: string): Promise<Measurement
   return { events, frames, chipRenders: renders, movements };
 }
 
-export function summarizeFrames(measurement: Measurement) {
+type FrameSummary = { fps: number; frames: number; mainTasks: TraceEvent[]; otherTasks: TraceEvent[]; chipRenders: number; movements: number };
+
+export function summarizeFrames(measurement: Measurement): FrameSummary {
   const { frames, events } = measurement;
   const fps = frames.length > 1 ? (frames.length - 1) * 1000 / (frames.at(-1)! - frames[0]!) : 0;
   const main = events.find(event => event.name === 'EventDispatch');
@@ -151,7 +152,7 @@ export function summarizeFrames(measurement: Measurement) {
   };
 }
 
-export const taskTiming = (event: TraceEvent) => ({ at: event.ts, durationMs: event.dur! / 1000, pid: event.pid, tid: event.tid });
+export const taskTiming = (event: TraceEvent): { at: number; durationMs: number; pid: number; tid: number } => ({ at: event.ts, durationMs: event.dur! / 1000, pid: event.pid, tid: event.tid });
 
 const isLongTask = (event: TraceEvent) => event.ph === 'X'
   && ['RunTask', 'ThreadControllerImpl::RunTask'].includes(event.name) && (event.dur ?? 0) > 50_000;
