@@ -113,6 +113,13 @@ describe('real framework invocations of planned fixture selections', () => {
     expect(await readFile(marker, 'utf8').catch(() => null)).toBeNull();
   });
 
+  it('refuses a CLI filename filter which excludes a file from the assigned selection', async () => {
+    const fixture = await plannedVitestFixture();
+    const result = await invoke(fixture, 'vitest-planned-filter-conflict', [fixture.files[0]!], ['--shard=1/2', 'tests/second.test.js']);
+    expect(result.code).toBe(1); expect(result.stderr).toContain('was not collected');
+    expect(reportOf(result).numTotalTests).toBe(0);
+  });
+
   it('runs the weighted Vitest file selections without discovering the failing unselected file', async () => {
     const fixture = await vitestFixture(), plan = fixturePlan(fixture), seen: string[] = [];
     expect(plan.parts.map(part => part.units.length).sort()).toEqual([1, 2]);

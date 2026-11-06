@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { selectPlannedVitestSpecs } from './planned-vitest-sequencer.js';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { TEST_DESCRIPTION_BYTES } from '@hornhoof/protocol';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { readPlannedVitestSelection, selectPlannedVitestSpecs } from './planned-vitest-sequencer.js';
 
 const root = '/fixture root';
 const specs = [
@@ -25,5 +28,35 @@ describe('planned Vitest selection', () => {
   });
   it.each([undefined, null, {}, [], [''], [7], ['tests/a\0b'], ['/outside.test.ts'], ['../outside.test.ts'], ['C:\\outside.test.ts'], ['tests/slow.test.ts', './tests/slow.test.ts']].map(selected => ({ selected })))('refuses an invalid or duplicate selection: $selected', ({ selected }) => {
     expect(() => selectPlannedVitestSpecs(specs, selected, root)).toThrow(/selection/);
+  });
+});
+
+async function selectionFile(bytes: string | Buffer): Promise<string> {
+  const base = join(process.cwd(), '.metrics/task-588/selection');
+  await mkdir(base, { recursive: true });
+  const folder = await mkdtemp(join(base, 'case-'));
+  onTestFinished(async () => { await rm(folder, { recursive: true, force: true }); });
+  const path = join(folder, 'files.json'); await writeFile(path, bytes); return path;
+}
+
+describe('node-written planned selection bytes', () => {
+  it('reads the real UTF-8 JSON file without changing names with spaces', async () => {
+    const path = await selectionFile('["./tests/name with spaces.test.ts"]');
+    expect(await readPlannedVitestSelection(path)).toEqual(['./tests/name with spaces.test.ts']);
+  });
+  it('refuses an absent selection instead of selecting the whole project', async () => {
+    await expect(readPlannedVitestSelection(undefined)).rejects.toThrow(/HH_TEST_FILES/);
+  });
+  it('refuses malformed JSON instead of treating it as an empty selection', async () => {
+    const path = await selectionFile('[');
+    await expect(readPlannedVitestSelection(path)).rejects.toThrow(SyntaxError);
+  });
+  it('refuses malformed UTF-8 instead of replacing invalid filename bytes', async () => {
+    const path = await selectionFile(Buffer.from([0xff]));
+    await expect(readPlannedVitestSelection(path)).rejects.toThrow(TypeError);
+  });
+  it('refuses oversized valid JSON before parsing its selection', async () => {
+    const path = await selectionFile(' '.repeat(TEST_DESCRIPTION_BYTES) + '[]');
+    await expect(readPlannedVitestSelection(path)).rejects.toThrow(/byte limit/);
   });
 });

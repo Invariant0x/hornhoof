@@ -2,7 +2,7 @@ import { open } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { RepositoryPath, TEST_DESCRIPTION_BYTES } from '@hornhoof/protocol';
 import { z } from 'zod';
-import { BaseSequencer, type TestSpecification, type Vitest } from 'vitest/node';
+import { BaseSequencer, parseCLI, type TestSpecification, type Vitest } from 'vitest/node';
 
 function plannedPaths(input: unknown, cwd: string): Set<string> {
   const result = z.array(RepositoryPath).min(1).max(10_000).safeParse(input);
@@ -20,9 +20,9 @@ export function selectPlannedVitestSpecs<T extends { moduleId: string }>(specs: 
   return specs.filter(spec => paths.has(resolve(cwd, spec.moduleId)));
 }
 
-async function selectionInput(): Promise<unknown> {
-  if (!process.env.HH_TEST_FILES) throw new Error('The planned selection requires HH_TEST_FILES.');
-  const file = await open(process.env.HH_TEST_FILES, 'r');
+export async function readPlannedVitestSelection(path: string | undefined): Promise<unknown> {
+  if (!path) throw new Error('The planned selection requires HH_TEST_FILES.');
+  const file = await open(path, 'r');
   try {
     const bytes = Buffer.alloc(TEST_DESCRIPTION_BYTES + 1), { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
     if (bytesRead > TEST_DESCRIPTION_BYTES) throw new Error('The planned selection exceeds its byte limit.');
@@ -38,8 +38,9 @@ export default class PlannedVitestSequencer extends BaseSequencer {
   }
   private async selectedFiles(): Promise<Set<string>> {
     // Collect across all sequence groups so a selected file in another group is not mistaken for missing.
-    const specs = await this.ctx.getRelevantTestSpecifications(this.ctx.filenamePattern);
-    return new Set(selectPlannedVitestSpecs(specs, await selectionInput(), process.cwd()).map(spec => resolve(spec.moduleId)));
+    const { filter } = parseCLI(['vitest', ...process.argv.slice(2)]);
+    const specs = await this.ctx.getRelevantTestSpecifications(filter);
+    return new Set(selectPlannedVitestSpecs(specs, await readPlannedVitestSelection(process.env.HH_TEST_FILES), process.cwd()).map(spec => resolve(spec.moduleId)));
   }
   override async shard(files: TestSpecification[]): Promise<TestSpecification[]> {
     const selected = await (this.selected ??= this.selectedFiles());
