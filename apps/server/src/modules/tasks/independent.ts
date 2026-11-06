@@ -20,20 +20,24 @@ function existingIndependent(part: IndependentPartInput | undefined, none: strin
   return current;
 }
 
+function withoutAfter(part: IndependentPartInput | undefined, none: string | undefined): null {
+  if (part || none !== undefined) throw invalid('independentPart and independentNone need a nonempty after.');
+  return null;
+}
+
+function independentReason(none: string): IndependentDeclaration {
+  if (!none.trim()) throw invalid('independentNone needs a reason.');
+  return { kind: 'none', reason: none.trim() };
+}
+
 export function checkIndependent(after: string[], part: IndependentPartInput | undefined, none: string | undefined, current: IndependentDeclaration | null): IndependentDeclaration | null {
   if (part && none !== undefined) throw invalid(REQUIRED);
-  if (!after.length) {
-    if (part || none !== undefined) throw invalid('independentPart and independentNone need a nonempty after.');
-    return null;
-  }
+  if (!after.length) return withoutAfter(part, none);
   const existing = existingIndependent(part, none, current);
   if (existing) return existing;
   if (part) return { kind: 'part', part: IndependentPartSchema.parse(part) };
   if (current) return current;
-  if (none !== undefined) {
-    if (!none.trim()) throw invalid('independentNone needs a reason.');
-    return { kind: 'none', reason: none.trim() };
-  }
+  if (none !== undefined) return independentReason(none);
   throw invalid(REQUIRED);
 }
 
