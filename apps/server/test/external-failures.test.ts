@@ -3,16 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, externalOperations, externalRecoveryCases, externalRecoveryMembers, jobs, people, subscriptions, taskEvents, tasks, taskWaits, testParts, testRuns, waitNotices } from '../src/db/schema.js';
-import type { Actor, Tx } from '../src/modules/tasks/engine.js';
-import type { TaskWait } from '../src/modules/tasks/wait-state.js';
-import * as external from '../src/modules/failures/external.js';
+import { endGitOperationWait, syncGitOperationWait, type GitOperationWaitSource } from '../src/modules/failures/external.js';
 import { createTestDb } from './helpers.js';
 
-type WaitSource = { caseId: string; operationId: string; sourceRevision: number; actor: Actor };
-const adapter = external as unknown as {
-  syncGitOperationWait?: (tx: Tx, source: WaitSource) => Promise<TaskWait>;
-  endGitOperationWait?: (tx: Tx, source: WaitSource & { proofRef: string }) => Promise<TaskWait | null>;
-};
+type WaitSource = GitOperationWaitSource;
 const FIRST = new Date('2030-01-01T10:00:00Z');
 const DUE = new Date('2030-01-01T10:15:00Z');
 const NEXT = new Date('2030-01-01T10:01:00Z');
@@ -46,8 +40,8 @@ async function fixture() {
   };
   const operation = await newOperation();
   const source: WaitSource = { caseId: episode!.id, operationId: operation.id, sourceRevision: 1, actor: { agentId: author!.id } };
-  const sync = (change: Partial<WaitSource> = {}) => db.transaction(async tx => adapter.syncGitOperationWait?.(tx, { ...source, ...change }));
-  const end = (change: Partial<WaitSource> = {}) => db.transaction(async tx => adapter.endGitOperationWait?.(tx, { ...source, ...change, proofRef: `receipt:${operation.id}` }));
+  const sync = (change: Partial<WaitSource> = {}) => db.transaction(tx => syncGitOperationWait(tx, { ...source, ...change }));
+  const end = (change: Partial<WaitSource> = {}) => db.transaction(tx => endGitOperationWait(tx, { ...source, ...change, proofRef: `receipt:${operation.id}` }));
   return { db, company: company!, foreign: foreign!, development: development!, operations: operations!, author: author!, owner: owner!, head: head!, stranger: stranger!, task: task!, job: job!, episode: episode!, operation, unrelated, source, sync, end, newOperation };
 }
 
@@ -119,7 +113,7 @@ describe('registered Git operation accountability', () => {
     const f = await fixture();
     await expect(f.db.transaction(async tx => {
       await tx.update(externalRecoveryCases).set({ nextAttemptAt: DUE }).where(eq(externalRecoveryCases.id, f.episode.id));
-      expect(await adapter.syncGitOperationWait?.(tx, f.source)).toBeDefined();
+      expect(await syncGitOperationWait(tx, f.source)).toBeDefined();
       throw new Error('Abort source transition');
     })).rejects.toThrow('Abort source transition');
     expect(await f.db.select().from(taskWaits)).toEqual([]);
