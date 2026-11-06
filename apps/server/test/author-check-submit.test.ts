@@ -62,7 +62,12 @@ describe('author check on submit', () => {
     const node = await nodeOf(f);
     const { run } = await finish(f, node, input(), authorLine(), true, 0);
     const [submitted] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
-    expect(submitted).toMatchObject({ data: { authorCheckOutcome: { runId: run.id, status: 'partial' }, review: { commit: SHA, quality: { status: 'partial', record: { runId: run.id, numbers: { worstCrap: 6.5, dryerFlags: 2 } } } } });
+    expect(submitted).toMatchObject({
+      data: {
+        authorCheckOutcome: { runId: run.id, status: 'partial' },
+        review: { commit: SHA, quality: { status: 'partial', record: { runId: run.id, numbers: { worstCrap: 6.5, dryerFlags: 2 } } } },
+      },
+    });
     expect((await currentTask(f)).externalWait).toBeNull();
   });
 
