@@ -612,7 +612,7 @@ async function productSelection(msg: TestRun, state: ProductState, env: Record<s
 async function productSuite(execution: TestExecution, operation: Extract<ProductOperation, { kind: 'suite' }>, state: ProductState, env: Record<string, string>, index: number): Promise<void> {
   const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === operation.suiteId)!;
   const filesPath = join(state.root, `selection-${index}.json`);
-  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath });
+  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 } });
   if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
   await productResets(execution, suite.id, state, env);
   await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env });

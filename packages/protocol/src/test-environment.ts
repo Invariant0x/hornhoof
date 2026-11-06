@@ -48,6 +48,7 @@ export type TestReset = z.infer<typeof TestReset>;
 export const TestSplit = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('argv-files') }),
   z.strictObject({ kind: z.literal('json-file') }),
+  z.strictObject({ kind: z.literal('vitest-shard') }),
   z.strictObject({ kind: z.literal('whole-package') }),
 ]);
 export const TestSuite = z.strictObject({ id: Id, root: RepositoryPath, files: Inputs.min(1), run: Command, split: TestSplit, profiles: ProfileIds, finalChecks: z.array(Command).max(1000).optional() });
