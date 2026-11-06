@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { mutateSources, outcomeOf, selectedSources, testCommand } from '../mutation/run.mjs';
+import { judgedAgain, keepJudges, mutateSources, mutatorArgs, outcomeOf, selectedSources, testCommand } from '../mutation/run.mjs';
 
 const table = (killed, survived, uncovered, sites) => `name   ns  killed survived uncovered sites score\n-----\nfoo    a        ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n-----\nTotal         ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n\n`;
 
@@ -36,11 +39,45 @@ test('a run takes what it was given, and everything when run by hand', () => {
 
 test('a source no fast test reaches fails without running, and the others still run', async () => {
   const ran = [];
-  const files = await mutateSources(['a/none.ts', 'a/some.ts'], new Map([['a/none.ts', []], ['a/some.ts', ['a/test/some.test.ts']]]), async (source, tests) => {
-    ran.push([source, tests]);
-    return { code: 3, output: table(1, 1, 0, 2) };
+  const files = await mutateSources(['a/none.ts', 'a/some.ts'], new Map([['a/none.ts', []], ['a/some.ts', ['a/test/some.test.ts']]]), {
+    testsPass: async () => true,
+    mutate: async (source, tests) => {
+      ran.push([source, tests]);
+      return { code: 3, output: table(1, 1, 0, 2) };
+    },
   });
   assert.deepEqual(ran, [['a/some.ts', ['a/test/some.test.ts']]]);
   assert.ok(files.every(file => file.ms >= 0));
   assert.deepEqual(files.map(file => ({ ...file, ms: 0 })), [{ file: 'a/none.ts', status: 'failed', ms: 0 }, { file: 'a/some.ts', status: 'passed', note: '1 killed, 1 survived, 0 uncovered of 2 sites', ms: 0 }]);
+});
+
+test('a source whose tests fail unmutated fails without mutating: from its snapshot the tool would call every mutant killed', async () => {
+  const ran = [];
+  const files = await mutateSources(['a/red.ts', 'a/green.ts'], new Map([['a/red.ts', ['a/test/red.test.ts']], ['a/green.ts', ['a/test/green.test.ts']]]), {
+    testsPass: async tests => tests[0] === 'a/test/green.test.ts',
+    mutate: async source => {
+      ran.push(source);
+      return { code: 0, output: table(1, 0, 0, 1) };
+    },
+  });
+  assert.deepEqual(ran, ['a/green.ts']);
+  assert.deepEqual(files.map(file => [file.file, file.status]), [['a/red.ts', 'failed'], ['a/green.ts', 'passed']]);
+});
+
+test('what the tool runs says to mutate everything only when asked', () => {
+  assert.ok(!mutatorArgs('a/one.ts', ['a/test/one.test.ts'], false).includes('--mutate-all'));
+  assert.ok(mutatorArgs('a/one.ts', ['a/test/one.test.ts'], true).includes('--mutate-all'));
+  assert.deepEqual(mutatorArgs('a/one.ts', ['a/test/one.test.ts'], false).slice(0, 4), ['--root', '.', '--source-root', 'a/one.ts']);
+});
+
+test('a source is judged again by tests that changed, and keeps what it was judged by only once it went well', async t => {
+  const folder = mkdtempSync(join(tmpdir(), 'hh-judges-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const source = 'apps/a/src/one.ts', oids = oid => new Map([['apps/a/test/one.test.ts', oid]]), tests = ['apps/a/test/one.test.ts'];
+  assert.equal(judgedAgain(folder, source, tests, oids('1')), true);
+  keepJudges(folder, source, tests, oids('1'));
+  assert.equal(judgedAgain(folder, source, tests, oids('1')), false);
+  assert.equal(judgedAgain(folder, source, tests, oids('2')), true);
+  assert.equal(judgedAgain(folder, source, [...tests, 'apps/a/test/two.test.ts'], oids('1')), true);
+  assert.equal(judgedAgain(folder, 'apps/a/src/two.ts', tests, oids('1')), true);
 });
