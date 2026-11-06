@@ -368,13 +368,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Only personal subscriptions are removed this way; the built-in node stays. */
       if (builtin || stopped) return;
       stopped = true;
-      /* The agents stop first, so nothing writes into the folders while they go. */
+      /* Stop the agents before revoking sign-in. Retained work and operation journals are not cleanup targets. */
       const jobs = [...running.values(), ...testing.values(), ...testMessages.activeDescriptions()];
       for (const job of jobs) job.stop.abort();
       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
       await host?.stop();
       await login?.shutdown();
-      for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
+      rmSync(join(dir, 'home'), { recursive: true, force: true });
       markRemoved(dir);
       emit({ type: 'removed' });
       log('This node was removed in Hornhoof.');
