@@ -21,7 +21,7 @@
     "check:author": "node scripts/author-check.mjs",
     "test:related": "vitest related --run",
     "typecheck:tests": "npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit",
-    "test": "node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present",
+    "test": "node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present --",
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w apps/server"
   },

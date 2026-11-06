@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { ensureOperations, placeOperator } from '../src/modules/operations/ensure.js';
-import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations } from './helpers.js';
+import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations, ownDatabases } from './helpers.js';
+
+ownDatabases();
 
 /* A company whose Operations has no plan yet, and an empty Development to tell it from. */
 async function company() {

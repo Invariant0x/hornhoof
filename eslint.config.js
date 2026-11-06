@@ -1,4 +1,5 @@
 import tseslint from 'typescript-eslint';
+import noDdlOnSharedDatabase from './scripts/no-ddl-on-shared-database.mjs';
 
 /* The tsconfig that checks the files of each workspace. A file reaches only its own: eslint keeps every TypeScript
    program it builds until it exits, and the four together need more than the 2 GB node allows by default on a machine
@@ -51,6 +52,13 @@ export default [
     files: typedFiles.map(pattern => [`${workspace}/**`, pattern]),
     languageOptions: { parserOptions: { project: [`./${workspace}/${tsconfig}`] } },
   })),
+  {
+    /* Postgres specs have private databases of their own. */
+    files: ['apps/server/test/**/*.ts'],
+    ignores: ['apps/server/test/postgres/**'],
+    plugins: { hornhoof: { rules: { 'no-ddl-on-shared-database': noDdlOnSharedDatabase } } },
+    rules: { 'hornhoof/no-ddl-on-shared-database': 'error' },
+  },
   {
     files: ['scripts/**/*.mjs', 'vitest.config.mjs'],
     languageOptions: { globals: { process: 'readonly' } },

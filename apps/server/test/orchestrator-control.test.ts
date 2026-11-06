@@ -12,8 +12,10 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, ownDatabases } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
+
+ownDatabases();
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';

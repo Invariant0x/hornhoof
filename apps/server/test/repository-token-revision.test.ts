@@ -6,7 +6,11 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { companies, departments } from '../src/db/schema.js';
 import { as, createTestDb, setUpCompany, testApp } from './helpers.js';
+import { ownDatabases } from './helpers-db.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
+
+/* One test adds a constraint to make the database refuse a write. */
+ownDatabases();
 
 async function fixture() {
   const { app, db } = await testApp();
