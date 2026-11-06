@@ -690,6 +690,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Restart the agent's program in the same session, when it cannot come back by itself. The node checks the same
      conditions against its own events first, then types the note and the turn's words the program had not taken in. */
   z.object({ type: z.literal('agent.restart'), agentKey: Id, jobId: Id, note: z.string().max(4000) }),
+  /* The agent left this node's plan: its program goes once it is idle. jobId is the last turn it was sent here, so a word that
+     comes late does not close a program that ran a later one. */
+  z.object({ type: z.literal('agent.release'), agentKey: Id, jobId: Id }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
