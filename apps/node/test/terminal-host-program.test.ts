@@ -72,8 +72,8 @@ describe.skipIf(!hasTmux)("what a turn's program does, as the host tells Hornhoo
     await setUp({ lookMs: 200, secrets: () => ['WORK here'] });
     const jobId = `job-gone-${kind}`;
     const run = host.run(jobs[kind](`gone-${kind}`, 'WORK here', { jobId }));
-    /* agy can report idle before it accepts the prompt; kill only during the running turn. */
-    await until(() => told(jobId).some(message => message.state === 'thinking'), 10_000);
+    /* agy's turn counts as running while its prompt is on the way, with nothing on its screen yet: kill once it took the prompt. */
+    await until(() => host['agents'].get(`gone-${kind}`)?.took === true && told(jobId).some(message => message.state === 'thinking'), 10_000);
     process.kill((await tmux.programPid(`a-gone-${kind}`))!, 'SIGKILL');
     expect(await run).toMatchObject({ ok: false });
     const gone = told(jobId).at(-1)!;
