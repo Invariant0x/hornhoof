@@ -125,7 +125,8 @@ describe('the calls of the outbound gateway, as a reader of the protocol gets th
   });
 
   it('makes up nothing the caller left out', () => {
-    const { sampling: _sampling, ...noSampling } = policy;
+    const noSampling: Record<string, unknown> = { ...policy };
+    delete noSampling.sampling;
     expect(OutboundPolicyValue.safeParse(noSampling).success).toBe(false);
     expect(OutboundPolicyValue.parse(policy)).toEqual(policy);
     expect(OutboundSubmit.parse(submit)).toEqual(submit);

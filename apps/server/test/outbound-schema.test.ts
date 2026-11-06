@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { modelCheckCertificates, modelChecks, outboundAccounts, outboundApprovals, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContactEvents, outboundContacts, outboundDailyUsage, outboundEvents, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundPolicies, outboundReviewReceipts, outboundSamplingCounters, supportClassifications, supportTickets } from '../src/db/schema.js';
 import { createTestDb } from './helpers.js';
-import { aBinding, aBucket, aChannel, aClassification, aCompany, aContact, aFinishedRun, aMessage, anAccount, anApproval, approachApprovalValues, aPermission, aPolicy, aRequest, aRevision, attemptValues, aTicket, messageApprovalValues, POLICY, PRICE, sha, theBytes } from './outbound-fixture.js';
+import { aBinding, aBucket, aChannel, aClassification, aCompany, aContact, aFinishedRun, aMessage, anAccount, anApproval, approachApprovalValues, aPermission, aPolicy, aRequest, aRevision, attemptValues, aTicket, messageApprovalValues, POLICY, PRICE, sha, theBytes, type Sending } from './outbound-fixture.js';
 
 const refusedBy = (constraint: string) => ({ cause: { constraint } });
 const FROZEN = { cause: { code: '23001' } };
@@ -240,8 +240,7 @@ describe('a revision of the catalog', () => {
 });
 
 function aRevisionEnding(db: Awaited<ReturnType<typeof createTestDb>>, row: typeof outboundCatalogRevisions.$inferSelect, validUntil: Date) {
-  const { id: _id, createdAt: _createdAt, ...values } = row;
-  return db.insert(outboundCatalogRevisions).values({ ...values, revision: 2, validUntil });
+  return db.insert(outboundCatalogRevisions).values({ companyId: row.companyId, departmentId: row.departmentId, entryId: row.entryId, revision: 2, kind: row.kind, value: row.value, digest: row.digest, createdByKind: row.createdByKind, createdById: row.createdById, validFrom: row.validFrom, validUntil });
 }
 
 describe('a contact', () => {
@@ -517,7 +516,7 @@ describe('a review of a message', () => {
     const sending = await aMessage(db, at);
     await theBytes(db, at, sending);
     const { check } = await aFinishedRun(db, at);
-    const values = { companyId: at.companyId, messageId: sending.message.id, messageRevision: 1, checkId: check.id, bindingDigest: sha('binding'), subjectDigest: sha('bytes 1'), reviewer: { providerId: 'codex', vendorId: 'openai', modelId: 'm', revisionId: 'r', inferenceConfigHash: sha('config') }, result: { kind: 'review', decision: 'allow', reasonCodes: [] } } as const;
+    const values = { companyId: at.companyId, messageId: sending.message.id, messageRevision: 1, checkId: check.id, bindingDigest: sha('binding'), subjectDigest: sha('bytes 1'), reviewer: { providerId: 'codex' as const, vendorId: 'openai', modelId: 'm', revisionId: 'r', inferenceConfigHash: sha('config') }, result: { kind: 'review' as const, decision: 'allow' as const, reasonCodes: [] } };
     return { db, values, row: (await db.insert(outboundReviewReceipts).values(values).returning())[0]! };
   }
 
@@ -586,16 +585,16 @@ describe('an attempt', () => {
   });
 
   it('is the only unresolved one of its account', async () => {
-    const { db, at, values } = await ready();
+    const { db, at, sending, values } = await ready();
     await db.insert(outboundAttempts).values({ ...values, ...started });
-    const second = await aMessageOnTheSameAccount(db, at, values);
+    const second = await aMessageOnTheSameAccount(db, at, sending);
     await expect(db.insert(outboundAttempts).values({ ...values, messageId: second, ...started })).rejects.toMatchObject(refusedBy('outbound_attempts_one_of_account'));
   });
 
   it('keeps the account closed while its outcome is unknown', async () => {
-    const { db, at, values } = await ready();
+    const { db, at, sending, values } = await ready();
     await db.insert(outboundAttempts).values({ ...values, status: 'unknown', safeCode: 'timeout', endedAt: LATER });
-    const second = await aMessageOnTheSameAccount(db, at, values);
+    const second = await aMessageOnTheSameAccount(db, at, sending);
     await expect(db.insert(outboundAttempts).values({ ...values, messageId: second, ...started })).rejects.toMatchObject(refusedBy('outbound_attempts_one_of_account'));
   });
 
@@ -635,13 +634,10 @@ describe('an attempt', () => {
   });
 });
 
-async function aMessageOnTheSameAccount(db: Awaited<ReturnType<typeof createTestDb>>, at: Awaited<ReturnType<typeof aCompany>>, values: { messageId: string }) {
-  const [first] = await db.select().from(outboundMessages).where(eq(outboundMessages.id, values.messageId));
-  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...copy } = first!;
-  const [second] = await db.insert(outboundMessages).values({ ...copy, idempotencyKey: randomUUID() }).returning();
-  const sealed = { companyId: at.companyId, messageId: second!.id, revision: 1, document: { locale: 'en', templateId: randomUUID(), templateRevision: 1, blocks: [], variables: [] }, contentDigest: sha('second'), sealedEnc: 'sealed', sourceRevisionsDigest: sha('sources'), policyDigest: sha('policy') };
-  const [frozen] = await db.select().from(outboundMessageRevisions).where(eq(outboundMessageRevisions.messageId, values.messageId));
-  await db.insert(outboundMessageRevisions).values({ ...sealed, policyId: frozen!.policyId });
+/* A second message from the same account, frozen too, for what its account allows. */
+async function aMessageOnTheSameAccount(db: Awaited<ReturnType<typeof createTestDb>>, at: Awaited<ReturnType<typeof aCompany>>, sending: Sending) {
+  const [second] = await db.insert(outboundMessages).values({ ...sending.values, idempotencyKey: randomUUID() }).returning();
+  await theBytes(db, at, { ...sending, message: second! });
   return second!.id;
 }
 

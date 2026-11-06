@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { OutboundPolicyValue } from '@hornhoof/protocol';
-import { agents, companies, departments, modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks, outboundAccounts, outboundApprovals, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundPolicies, people, requests, supportClassifications, supportTickets, tasks } from '../src/db/schema.js';
-import type { TestDb } from './helpers.js';
+import { agents, companies, departments, modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks, outboundAccounts, outboundApprovals, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundPolicies, people, requests, supportClassifications, supportTickets, tasks } from '../src/db/schema.js';
+import type { createTestDb } from './helpers.js';
 import { binding } from './model-check-fixture.js';
+
+type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
 /* Rows of the outbound tables for tests of what the database itself refuses. They hold no real price, contact or consent. */
 export const sha = (text: string): string => createHash('sha256').update(text).digest('hex');

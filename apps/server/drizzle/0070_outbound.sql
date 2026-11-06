@@ -1,4 +1,6 @@
-CREATE TABLE "model_check_certificates" (
+ALTER TABLE "departments" ADD CONSTRAINT "departments_company_id" UNIQUE("company_id","id");
+--> statement-breakpointALTER TABLE "requests" ADD CONSTRAINT "requests_company_id" UNIQUE("company_id","id");
+--> statement-breakpointCREATE TABLE "model_check_certificates" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"check_id" uuid NOT NULL,
 	"binding_digest" text NOT NULL,
@@ -476,8 +478,6 @@ CREATE UNIQUE INDEX "outbound_bindings_one_account" ON "outbound_bindings" USING
 CREATE INDEX "outbound_messages_due" ON "outbound_messages" USING btree ("scheduled_at") WHERE "outbound_messages"."status" = 'scheduled';--> statement-breakpoint
 CREATE INDEX "outbound_messages_task" ON "outbound_messages" USING btree ("task_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "outbound_permissions_active" ON "outbound_permissions" USING btree ("contact_id","channel_id","purpose") WHERE "outbound_permissions"."status" = 'granted';--> statement-breakpoint
-ALTER TABLE "departments" ADD CONSTRAINT "departments_company_id" UNIQUE("company_id","id");--> statement-breakpoint
-ALTER TABLE "requests" ADD CONSTRAINT "requests_company_id" UNIQUE("company_id","id");--> statement-breakpoint
 -- What is frozen stays frozen whoever writes: revisions, bytes, approvals, receipts and generations (#403, sections 6 to 8).
 CREATE FUNCTION outbound_refuse_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
