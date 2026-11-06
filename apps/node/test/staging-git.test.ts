@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareStagingCandidate, type StagingGitContext, type StagingGitOptions, type StagingPreparationRequest, type StagingPreparationResult } from '../src/staging-git.js';
+import { prepareStagingCandidate, publishStagingTrial, type StagingGitContext, type StagingGitOptions, type StagingPreparationRequest, type StagingPreparationResult, type StagingTrialPublicationRequest } from '../src/staging-git.js';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const identity = { name: 'Fixture Publisher', email: 'publisher@example.invalid' };
@@ -147,5 +147,120 @@ describe('staging candidate preparation on disposable Git remotes', () => {
     expect(await Promise.race([started.then(() => true), pending.then(() => false)])).toBe(true);
     stop.abort(reason); await Promise.resolve(); expect(settled).toBe(false);
     release(); await expect(pending).rejects.toBe(reason);
+  });
+});
+
+async function trialFixture() {
+  const f = await fixture(), cache = await f.cache(), candidate = await prepareStagingCandidate(f.request, cache.context);
+  prepared(candidate);
+  const publication: StagingTrialPublicationRequest = { batchId: f.request.batchId, trialId: f.request.trialId, turn: f.request.turn, commitSha: candidate.commitSha };
+  return { ...f, ...cache, candidate, publication, fullRef: `refs/tags/${candidate.ref}` };
+}
+
+describe('immutable trial tags on disposable Git remotes', () => {
+  it('creates only the exact trial tag with ordinary push and exact remote readback', async () => {
+    const f = await trialFixture(), calls: string[][] = [], real = f.context.git;
+    f.context.git = (args, options) => { calls.push([...args]); return real(args, options); };
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/turn-8'])).toBe(f.request.baseSha);
+    expect(calls.filter(args => args[0] === 'push')).toEqual([['push', '--porcelain', '--no-follow-tags', 'origin', `${f.candidate.commitSha}:${f.fullRef}`]]);
+  });
+  it('replays the same operation without another push or ref update', async () => {
+    const f = await trialFixture(), calls: string[][] = [], real = f.context.git;
+    f.context.git = (args, options) => { calls.push([...args]); return real(args, options); };
+    const expected = { status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha };
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual(expected);
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual(expected);
+    expect(calls.filter(args => args[0] === 'push')).toHaveLength(1);
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+  });
+  it('refuses to replace a preexisting ancestor even though a branch update would be FF', async () => {
+    const f = await trialFixture();
+    await git(f.writer, ['push', '--quiet', 'origin', `${f.request.baseSha}:${f.fullRef}`]);
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'conflict' });
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.request.baseSha);
+  });
+  it('does not overwrite an ancestor created between the initial read and push', async () => {
+    const f = await trialFixture(), real = f.context.git; let raced = false;
+    f.context.git = async (args, options) => {
+      if (args[0] === 'push') { await git(f.writer, ['push', '--quiet', 'origin', `${f.request.baseSha}:${f.fullRef}`]); raced = true; }
+      return real(args, options);
+    };
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'conflict' });
+    expect(raced).toBe(true);
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.request.baseSha);
+  });
+  it('allows one of two different concurrent candidates and preserves the winner', async () => {
+    const f = await trialFixture(), second = await f.cache();
+    const candidate = await prepareStagingCandidate({ ...f.request, heads: [...f.request.heads].reverse() }, second.context); prepared(candidate);
+    expect(candidate.commitSha).not.toBe(f.candidate.commitSha);
+    const results = await Promise.all([publishStagingTrial(f.publication, f.context), publishStagingTrial({ ...f.publication, commitSha: candidate.commitSha }, second.context)]);
+    expect(results.map(result => result.status).sort()).toEqual(['conflict', 'published']);
+    const winner = results.find(result => result.status === 'published');
+    if (winner?.status !== 'published') throw new Error('No candidate was published.');
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(winner.commitSha);
+  });
+  it('reconciles two concurrent retries of the same deterministic candidate', async () => {
+    const f = await trialFixture(), second = await f.cache();
+    const candidate = await prepareStagingCandidate(f.request, second.context); prepared(candidate);
+    const expected = { status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha };
+    expect(await Promise.all([publishStagingTrial(f.publication, f.context), publishStagingTrial(f.publication, second.context)])).toEqual([expected, expected]);
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+  });
+  it('reconciles a lost push acknowledgment using an independent exact readback', async () => {
+    const f = await trialFixture(), real = f.context.git;
+    f.context.git = async (args, options) => { const result = await real(args, options); return args[0] === 'push' ? { code: 128, stdout: 'fixture acknowledgment lost' } : result; };
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+  });
+  it('does not confirm publication without readback and retains the remote ref for retry', async () => {
+    const f = await trialFixture(), real = f.context.git; let reads = 0;
+    f.context.git = (args, options) => args[0] === 'ls-remote' && ++reads === 2 ? Promise.resolve({ code: 128, stdout: 'private-fixture-marker' }) : real(args, options);
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'unavailable' });
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+    f.context.git = real;
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
+  });
+  it('replays an existing exact tag from a fresh cache without relying on old local objects', async () => {
+    const f = await trialFixture();
+    expect((await publishStagingTrial(f.publication, f.context)).status).toBe('published');
+    const fresh = await f.cache();
+    expect(await publishStagingTrial(f.publication, fresh.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
+  });
+  it('does not publish a noncommit object under a trial tag', async () => {
+    const f = await trialFixture(), tree = await git(f.bare, ['rev-parse', `${f.candidate.commitSha}^{tree}`]);
+    expect(await publishStagingTrial({ ...f.publication, commitSha: tree }, f.context)).toEqual({ status: 'unavailable' });
+    expect(await git(f.origin, ['for-each-ref', '--format=%(refname)', f.fullRef])).toBe('');
+  });
+  it.each([{ trialId: '../main' }, { turn: 0 }, { commitSha: 'f'.repeat(39) }])('refuses malformed publication input before Git %j', async change => {
+    const f = await trialFixture(); let calls = 0;
+    f.context.git = async () => { calls++; return { code: 128, stdout: '' }; };
+    expect(await publishStagingTrial({ ...f.publication, ...change }, f.context)).toEqual({ status: 'unavailable' }); expect(calls).toBe(0);
+  });
+  it('keeps a failed Git read opaque and never calls it published', async () => {
+    const f = await trialFixture(); f.context.git = async () => ({ code: 128, stdout: 'private-fixture-marker' });
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'unavailable' });
+  });
+  it('does not begin publication after cancellation', async () => {
+    const f = await trialFixture(), stop = new AbortController(), reason = new Error('Cancelled before publication');
+    stop.abort(reason); f.context.signal = stop.signal;
+    await expect(publishStagingTrial(f.publication, f.context)).rejects.toBe(reason);
+    expect(await git(f.origin, ['for-each-ref', '--format=%(refname)', f.fullRef])).toBe('');
+  });
+  it('settles in-flight publication before rejecting cancellation and retains created bytes', async () => {
+    const f = await trialFixture(), stop = new AbortController(), reason = new Error('Cancelled while publishing'), real = f.context.git;
+    let entered!: () => void, release!: () => void, settled = false;
+    const started = new Promise<void>(resolve => { entered = resolve; }); f.context.signal = stop.signal;
+    f.context.git = async (args, options) => {
+      const result = await real(args, options);
+      if (args[0] === 'push') { entered(); await new Promise<void>(resolve => { release = resolve; }); }
+      return result;
+    };
+    const pending = publishStagingTrial(f.publication, f.context); void pending.catch(() => { settled = true; });
+    expect(await Promise.race([started.then(() => true), pending.then(() => false)])).toBe(true);
+    stop.abort(reason); await Promise.resolve(); expect(settled).toBe(false);
+    release(); await expect(pending).rejects.toBe(reason);
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
   });
 });

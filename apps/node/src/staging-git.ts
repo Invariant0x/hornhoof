@@ -16,6 +16,15 @@ export interface StagingGitContext {
 export type StagingPreparationResult = { status: 'prepared'; ref: string; commitSha: string; treeSha: string; members: string[] }
   | { status: 'conflict'; submissionId: string } | { status: 'unavailable' };
 
+export interface StagingTrialPublicationRequest { batchId: string; trialId: string; turn: number; commitSha: string }
+export type StagingTrialPublicationResult = { status: 'published'; ref: string; commitSha: string } | { status: 'conflict' | 'unavailable' };
+
+/* Exact remote effect only; private operation/plan/inclusion authority belongs to the protected caller. */
+export async function publishStagingTrial(request: StagingTrialPublicationRequest, context: StagingGitContext): Promise<StagingTrialPublicationResult> {
+  void request; void context;
+  return { status: 'unavailable' };
+}
+
 async function git(context: StagingGitContext, args: string[], options: StagingGitOptions = {}) {
   context.signal.throwIfAborted();
   const result = await context.git(args, { ...options, signal: context.signal });
