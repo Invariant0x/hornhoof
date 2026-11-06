@@ -26,7 +26,13 @@ async function setupBoundCheck() {
   const c = await company();
   await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
   const place = { companyId: c.companyId, departmentId: c.dev.id, productId: null, kind: 'outbound_review' as const };
-  const model = binding().model;
+  const model = {
+    ...binding().model,
+    providerId: 'openai_api' as const,
+    vendorId: 'openai',
+    modelId: 'gpt-5-mini',
+    revisionId: 'gpt-5-mini-2026-10',
+  };
   await syncOutboundCheckDefinition(c.app.ctx, place, {
     sourceListHash: hashOf('sources-v1'),
     taxonomyHash: null,

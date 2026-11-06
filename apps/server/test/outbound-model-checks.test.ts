@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import type { CheckBinding, CheckInput, ModelIdentity } from '@hornhoof/protocol';
+import { canonicalJson, type CheckBinding, type CheckInput, type CheckReceipt, type CheckUnavailable, type ModelIdentity } from '@hornhoof/protocol';
 
 type ReviewInput = Exclude<CheckInput, { kind: 'support_classification' }>;
-import { outboundReviewReceipts } from '../src/db/schema.js';
+import { encryptSecret } from '../src/crypto/secrets.js';
+import { modelCheckDatasets, modelCheckRevisions, modelChecks, outboundChannels, outboundReviewReceipts } from '../src/db/schema.js';
+import type { Ctx } from '../src/app.js';
 import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
+import { OUTBOUND_CHECK_HASHES } from '../src/modules/outbound/evaluation-port.js';
+import * as modelChecksModule from '../src/modules/outbound/model-checks.js';
 import {
   areVendorsIndependent,
   createEvaluatorModelRunner,
@@ -15,9 +19,11 @@ import {
   type FreshModelInvoke,
   type FreshModelResponse,
 } from '../src/modules/outbound/model-checks.js';
+import type { ModelCheckPorts } from '../src/modules/outbound/ports.js';
 import { aCompany, aFinishedRun, aMessage, sha, theBytes } from './outbound-fixture.js';
 import { TAXONOMY, binding, classCase, reviewCase } from './model-check-fixture.js';
 import { createTestDb } from './helpers.js';
+import { QUIET, dispatched, world } from './outbound-world.js';
 
 const OPENAI_MODEL: ModelIdentity = {
   providerId: 'openai_api',
@@ -244,5 +250,123 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
 
     const stored = await db.select().from(outboundReviewReceipts).where(eq(outboundReviewReceipts.messageId, sending.message.id));
     expect(stored).toHaveLength(1);
+  });
+
+  it('reviews a queued waiting_checks message via reviewQueuedMessage and recordReview, leaving unavailable untouched and stopping the channel on block', async () => {
+    const w = await world({ ...QUIET, sampling: { ...QUIET.sampling, everyNth: 1 } });
+    try {
+      const now = new Date('2026-11-06T12:00:00.000Z');
+      const thresholds = { falseAllowRate: 0, falseDenyRate: 0.2, classErrorRate: 0 };
+      const [chk] = await w.c.db
+        .insert(modelChecks)
+        .values({
+          companyId: w.c.companyId,
+          departmentId: w.c.dev.id,
+          kind: 'outbound_review',
+          status: 'on',
+          bindingDigest: sha('initial'),
+          thresholds,
+          thresholdsBy: w.c.ids.ceo,
+          validUntil: new Date('2026-11-13T00:00:00.000Z'),
+        })
+        .returning();
+      const hashes = OUTBOUND_CHECK_HASHES.outbound_review;
+      const sourceListHash = sha('outbound-sources');
+      await w.c.db.insert(modelCheckRevisions).values({
+        checkId: chk!.id,
+        definitionVersion: 1,
+        ...hashes,
+        sourceListHash,
+        taxonomyHash: null,
+        model: OPENAI_MODEL,
+        authorKind: 'person',
+        authorId: w.c.ids.ceo,
+      });
+      const datasetHash = sha('outbound-dataset');
+      const [ds] = await w.c.db
+        .insert(modelCheckDatasets)
+        .values({
+          checkId: chk!.id,
+          version: 1,
+          hash: datasetHash,
+          jsonlEnc: encryptSecret('{}', w.ctx.config.secret),
+          cases: 2,
+          holdoutCases: 1,
+          mustBlockCases: 1,
+          addedByKind: 'person',
+          addedById: w.c.ids.ceo,
+        })
+        .returning();
+      const computedDigest = bindingDigest({
+        schemaVersion: 1,
+        companyId: w.c.companyId,
+        departmentId: w.c.dev.id,
+        productId: null,
+        checkId: chk!.id,
+        kind: 'outbound_review',
+        definitionVersion: 1,
+        ...hashes,
+        sourceListHash,
+        taxonomyHash: null,
+        model: OPENAI_MODEL,
+        datasetVersion: ds!.id,
+        datasetHash,
+        thresholdsHash: sha(canonicalJson(thresholds)),
+      });
+      await w.c.db.update(modelChecks).set({ bindingDigest: computedDigest }).where(eq(modelChecks.id, chk!.id));
+
+      const queued1 = await w.submit({ scheduledAt: now.toISOString() });
+      expect(queued1.status).toBe('waiting_checks');
+
+      const reviewQueued = (
+        modelChecksModule as {
+          reviewQueuedMessage?: (
+            ctx: Ctx,
+            ports: Pick<ModelCheckPorts, 'runModelCheck'>,
+            messageId: string,
+            at?: Date,
+          ) => Promise<CheckReceipt | CheckUnavailable | null>;
+        }
+      ).reviewQueuedMessage;
+      expect(typeof reviewQueued).toBe('function');
+
+      let mode: 'unavailable' | 'allow' | 'block' = 'unavailable';
+      const seenInputs: CheckInput[] = [];
+      const ports: Pick<ModelCheckPorts, 'runModelCheck'> = {
+        runModelCheck: async (given, input) => {
+          seenInputs.push(input);
+          if (mode === 'unavailable') return { kind: 'unavailable', code: 'unavailable' };
+          return {
+            schemaVersion: 1,
+            checkId: given.checkId,
+            bindingDigest: bindingDigest(given),
+            subjectDigest: input.subject.contentDigest,
+            reviewer: OPENAI_MODEL,
+            result: { kind: 'review', decision: mode, reasonCodes: mode === 'block' ? ['forbidden_content'] : [] },
+          };
+        },
+      };
+
+      const unavailOut = await reviewQueued!(w.ctx, ports, queued1.messageId, now);
+      expect(unavailOut).toEqual({ kind: 'unavailable', code: 'unavailable' });
+      expect(await w.messageOf(queued1.messageId)).toMatchObject({ status: 'waiting_checks', reasonCodes: ['review_unavailable'] });
+
+      mode = 'allow';
+      const allowOut = await reviewQueued!(w.ctx, ports, queued1.messageId, now);
+      expect(allowOut && 'result' in allowOut && allowOut.result.kind === 'review' && allowOut.result.decision).toBe('allow');
+      expect(seenInputs[0]).toMatchObject({ kind: 'outbound_review', authorVendorId: 'anthropic' });
+      expect(await w.messageOf(queued1.messageId)).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+      expect((await dispatched(w, queued1.messageId, now)).kind).toBe('begun');
+
+      const queued2 = await w.submit({ scheduledAt: now.toISOString() });
+      expect(queued2.status).toBe('waiting_checks');
+      mode = 'block';
+      await reviewQueued!(w.ctx, ports, queued2.messageId, now);
+      expect(await w.messageOf(queued2.messageId)).toMatchObject({ status: 'rejected', reasonCodes: ['review_failed'] });
+      const [chan] = await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id));
+      expect(chan).toMatchObject({ status: 'stopped', stoppedReason: 'review_failed' });
+    } finally {
+      await w.c.app.close();
+    }
   });
 });

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '@hornhoof/protocol';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
+import { ApiError } from '../src/errors.js';
 import {
   outboundAccounts,
   outboundApprovals,
@@ -32,7 +34,10 @@ const SECRET_TICKET = 'SECRET_TICKET_LOG_993: raw customer stack trace and priva
 const SECRET_PROVIDER_RECEIPT = 'SECRET_PROVIDER_RECEIPT_994';
 
 let current: Company | null = null;
+let currentViewApp: FastifyInstance | null = null;
 afterEach(async () => {
+  if (currentViewApp) await currentViewApp.close();
+  currentViewApp = null;
   if (current) await current.app.close();
   current = null;
 });
@@ -40,7 +45,16 @@ afterEach(async () => {
 async function seedOutboundViewWorld() {
   const c = await company();
   current = c;
-  outboundViewRoutes(c.app, c.app.ctx);
+  const viewApp = Fastify();
+  viewApp.setErrorHandler((err, _req, reply) => {
+    if (err instanceof ApiError) {
+      return reply.code(err.status).send({ error: err.code, message: err.message, reason: err.reason });
+    }
+    throw err;
+  });
+  outboundViewRoutes(viewApp, c.app.ctx);
+  await viewApp.ready();
+  currentViewApp = viewApp;
   await c.setOwner(c.ceoToken, c.sales.id, c.ids.sam);
 
   const [channel] = await c.db
@@ -421,14 +435,14 @@ async function seedOutboundViewWorld() {
     decidedAt: NOW,
   });
 
-  return { c, msgReq: msgReq!, approachReq: approachReq!, waitingMsg: waitingMsg!, unknownMsg: unknownMsg!, ticketUuid, channel: channel!, account: account! };
+  return { c, viewApp, msgReq: msgReq!, approachReq: approachReq!, waitingMsg: waitingMsg!, unknownMsg: unknownMsg!, ticketUuid, channel: channel!, account: account! };
 }
 
 describe('safe outbound & bound approval read views (#447 T8-17)', () => {
   it('returns exact frozen content, catalog revisions, unknown recovery guidance, and escalations to the department owner with zero credential or PII leaks', async () => {
     const w = await seedOutboundViewWorld();
 
-    const overviewRes = await w.c.app.inject({
+    const overviewRes = await w.viewApp.inject({
       method: 'GET',
       url: '/api/outbound',
       headers: { cookie: w.c.samToken },
@@ -466,7 +480,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
       ownerPersonId: w.c.ids.sam,
     });
 
-    const msgApprovalRes = await w.c.app.inject({
+    const msgApprovalRes = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
       headers: { cookie: w.c.samToken },
@@ -491,7 +505,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
       'template@3',
     ]);
 
-    const approachRes = await w.c.app.inject({
+    const approachRes = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.approachReq.id}/outbound-approval`,
       headers: { cookie: w.c.samToken },
@@ -509,7 +523,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
   it('distinguishes read-only whole-company viewers from decision owners and denies cross-department or unauthenticated callers', async () => {
     const w = await seedOutboundViewWorld();
 
-    const wesOverview = await w.c.app.inject({
+    const wesOverview = await w.viewApp.inject({
       method: 'GET',
       url: '/api/outbound',
       headers: { cookie: w.c.wholeToken },
@@ -519,7 +533,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     expect(wesDto.escalations[0].canAnswer).toBe(false);
     expect(wesDto.approvals.every((a: { canAnswer: boolean }) => a.canAnswer === false)).toBe(true);
 
-    const wesBound = await w.c.app.inject({
+    const wesBound = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
       headers: { cookie: w.c.wholeToken },
@@ -530,21 +544,21 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
       decidedBy: { kind: 'owner_and_ceo' },
     });
 
-    const danaOverview = await w.c.app.inject({
+    const danaOverview = await w.viewApp.inject({
       method: 'GET',
       url: `/api/outbound?department=${w.c.sales.id}`,
       headers: { cookie: w.c.danaToken },
     });
     expect(danaOverview.statusCode).toBe(404);
 
-    const danaBound = await w.c.app.inject({
+    const danaBound = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
       headers: { cookie: w.c.danaToken },
     });
     expect(danaBound.statusCode).toBe(404);
 
-    const anonBound = await w.c.app.inject({
+    const anonBound = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
     });

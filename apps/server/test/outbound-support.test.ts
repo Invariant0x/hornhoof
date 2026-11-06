@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import {
+  modelCheckDatasets,
   modelCheckRevisions,
   modelChecks,
   outboundAccounts,
@@ -32,6 +33,9 @@ import {
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
+import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
+import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
+import { beginDispatch, reserveDispatch } from '../src/modules/outbound/core.js';
 import { OUTBOUND_CHECK_HASHES } from '../src/modules/outbound/evaluation-port.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
 import { company } from './department-owner-fixture.js';
@@ -101,9 +105,10 @@ async function addCatalogRevision(
 }
 
 async function seedSupportWorld() {
-  const c = await company();
+  const c = await company({ PUBLIC_URL: 'https://hornhoof.example' });
   current = c;
   await c.setOwner(c.ceoToken, c.sales.id, c.ids.sam);
+  await c.setRule(c.samToken, c.sales.id, 'message', { mode: 'within_limits', limit: 100, unit: 'USD' });
 
   const [channel] = await c.db
     .insert(outboundChannels)
@@ -142,7 +147,7 @@ async function seedSupportWorld() {
       companyId: c.companyId,
       kind: 'email',
       addressEnc: encryptSecret('ann@customer.example', c.app.ctx.config.secret),
-      addressHash: sha('ann@customer.example'),
+      addressHash: recipientDigest('ann@customer.example'),
     })
     .returning();
   await c.db.insert(outboundPermissions).values({
@@ -161,6 +166,7 @@ async function seedSupportWorld() {
   });
 
   for (const kind of ['support_classification', 'support_reply_review'] as const) {
+    const thresholds = { falseAllowRate: 0, falseDenyRate: 0.2, classErrorRate: 0 };
     const [chk] = await c.db
       .insert(modelChecks)
       .values({
@@ -169,24 +175,58 @@ async function seedSupportWorld() {
         kind,
         status: 'on',
         bindingDigest: sha(`support-binding-${kind}`),
-        thresholds: { falseAllowRate: 0, falseDenyRate: 0.2, classErrorRate: 0 },
+        thresholds,
         thresholdsBy: c.ids.sam,
         validUntil: new Date('2026-11-12T00:00:00.000Z'),
       })
       .returning();
     const hashes = OUTBOUND_CHECK_HASHES[kind];
+    const sourceListHash = sha('support-sources');
+    const taxonomyHash = kind === 'support_classification' ? taxonomyRev.digest : null;
     await c.db.insert(modelCheckRevisions).values({
       checkId: chk!.id,
       definitionVersion: 1,
       checkerCodeHash: hashes.checkerCodeHash,
       promptHash: hashes.promptHash,
       outputSchemaHash: hashes.outputSchemaHash,
-      sourceListHash: sha('support-sources'),
-      taxonomyHash: kind === 'support_classification' ? taxonomyRev.digest : null,
+      sourceListHash,
+      taxonomyHash,
       model: REVIEWER_MODEL,
       authorKind: 'person',
       authorId: c.ids.sam,
     });
+    const datasetHash = sha(`support-dataset-${kind}`);
+    const [ds] = await c.db
+      .insert(modelCheckDatasets)
+      .values({
+        checkId: chk!.id,
+        version: 1,
+        hash: datasetHash,
+        jsonlEnc: encryptSecret('{}', c.app.ctx.config.secret),
+        cases: 2,
+        holdoutCases: 1,
+        mustBlockCases: 1,
+        addedByKind: 'person',
+        addedById: c.ids.sam,
+      })
+      .returning();
+    const computedDigest = bindingDigest({
+      schemaVersion: 1,
+      companyId: c.companyId,
+      departmentId: c.sales.id,
+      productId: null,
+      checkId: chk!.id,
+      kind,
+      definitionVersion: 1,
+      ...hashes,
+      sourceListHash,
+      taxonomyHash,
+      model: REVIEWER_MODEL,
+      datasetVersion: ds!.id,
+      datasetHash,
+      thresholdsHash: sha(canonicalJson(thresholds)),
+    });
+    await c.db.update(modelChecks).set({ bindingDigest: computedDigest }).where(eq(modelChecks.id, chk!.id));
   }
 
   const slotKbEn = randomUUID();
@@ -293,7 +333,7 @@ async function seedSupportWorld() {
     },
   });
 
-  const addTicket = async (text: string, revision = 1, ticketId: string = randomUUID()) => {
+  const addTicket = async (text: string, revision = 1, ticketId: string = randomUUID(), forContactId: string = contact!.id) => {
     const [row] = await c.db
       .insert(supportTickets)
       .values({
@@ -301,7 +341,7 @@ async function seedSupportWorld() {
         departmentId: c.sales.id,
         ticketId,
         revision,
-        contactId: contact!.id,
+        contactId: forContactId,
         textEnc: encryptSecret(text, c.app.ctx.config.secret),
         digest: sha(`${ticketId}:${revision}:${text}`),
       })
@@ -530,6 +570,20 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       NOW,
     );
     expect(enSent).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    const reservedEn = await reserveDispatch(w.c.app.ctx, enSent.messageId, 1, NOW);
+    expect(reservedEn.kind).toBe('reserved');
+    const begunEn = await beginDispatch(w.c.app.ctx, enSent.messageId, 1, NOW);
+    expect(begunEn.kind).toBe('begun');
+    if (begunEn.kind === 'begun') {
+      const tokenMatch = /https:\/\/hornhoof\.example\/api\/outbound\/unsubscribe\/(\S+)/.exec(begunEn.sealedPayload.text);
+      expect(tokenMatch).not.toBeNull();
+      expect(readUnsubscribeToken(w.c.app.ctx.config.secret, tokenMatch![1]!)).toEqual({
+        companyId: w.c.companyId,
+        contactId: w.contact.id,
+        channelId: w.channel.id,
+        purpose: 'transactional_support',
+      });
+    }
 
     const ticketRu = await w.addTicket('Как сбросить пароль?');
     const classRu = await classifySupportTicket(
@@ -621,18 +675,33 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     expect(suppressed.status).toBe('rejected');
     expect(suppressed.reasonCodes).toContain('contact_suppressed');
 
-    await w.c.db.update(outboundContacts).set({ doNotContact: false, suppressedAt: null }).where(eq(outboundContacts.id, w.contact.id));
-    await w.c.db.update(outboundPermissions).set({ source: 'asserted_import' }).where(eq(outboundPermissions.contactId, w.contact.id));
-    const assertedImportDenied = await submitSupportReply(
+    const [noConsentContact] = await w.c.db
+      .insert(outboundContacts)
+      .values({
+        companyId: w.c.companyId,
+        kind: 'email',
+        addressEnc: encryptSecret('bob@customer.example', w.c.app.ctx.config.secret),
+        addressHash: recipientDigest('bob@customer.example'),
+      })
+      .returning();
+    const noConsentTicket = await w.addTicket('How do I reset my password?', 1, randomUUID(), noConsentContact!.id);
+    const noConsentClass = await classifySupportTicket(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      { task: w.taskId, idempotencyKey: randomUUID(), ticketId: noConsentTicket.ticketId, ticketRevision: 1 },
+      NOW,
+    );
+    const missingConsentDenied = await submitSupportReply(
       w.c.app.ctx,
       model,
       w.caller,
       {
         ...baseSubmit,
         idempotencyKey: randomUUID(),
-        ticketId: ticket.ticketId,
+        ticketId: noConsentTicket.ticketId,
         ticketRevision: 1,
-        classificationReceiptId: classified.classificationReceiptId,
+        classificationReceiptId: noConsentClass.classificationReceiptId,
         document: {
           locale: 'en',
           templateId: w.enTemplate.entryId,
@@ -646,8 +715,8 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       },
       NOW,
     );
-    expect(assertedImportDenied.status).toBe('rejected');
-    expect(assertedImportDenied.reasonCodes).toContain('consent_missing');
+    expect(missingConsentDenied.status).toBe('rejected');
+    expect(missingConsentDenied.reasonCodes).toContain('consent_missing');
   });
 
   it('refuses price blocks, refund/legal/date promises, secrets, third-party PII, and mismatched classification receipts', async () => {
@@ -777,6 +846,94 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     );
     expect(withPromiseText.status).toBe('rejected');
     expect(withPromiseText.reasonCodes).toContain('support_intent_forbidden');
+    expect(await w.c.db.select().from(outboundMessages)).toHaveLength(0);
+  });
+
+  it('holds sampled replies in waiting_checks when review is unavailable and stops the channel through recordReview on block', async () => {
+    const w = await seedSupportWorld();
+    const ticketA = await w.addTicket('How do I reset my password?');
+    const ticketB = await w.addTicket('Where is the reset link?');
+    let decision: 'unavailable' | 'block' = 'unavailable';
+    const model = fakeModelRunner({
+      review: () => (decision === 'unavailable' ? 'unavailable' : { decision: 'block', reasonCodes: ['forbidden_content'] }),
+    });
+
+    const classA = await classifySupportTicket(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      { task: w.taskId, idempotencyKey: randomUUID(), ticketId: ticketA.ticketId, ticketRevision: 1 },
+      NOW,
+    );
+    const held = await submitSupportReply(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      {
+        task: w.taskId,
+        idempotencyKey: randomUUID(),
+        channelId: w.channel.id,
+        accountId: w.account.id,
+        bindingGeneration: 1,
+        scheduledAt: NOW.toISOString(),
+        ticketId: ticketA.ticketId,
+        ticketRevision: 1,
+        classificationReceiptId: classA.classificationReceiptId,
+        document: {
+          locale: 'en',
+          templateId: w.enTemplate.entryId,
+          templateRevision: 1,
+          blocks: [
+            { kind: 'knowledge', id: w.enKb.entryId, revision: 1 },
+            { kind: 'link', id: w.enLink.entryId, revision: 1 },
+          ],
+          variables: [],
+        },
+      },
+      NOW,
+    );
+    expect(held.status).toBe('waiting_checks');
+    expect(held.reasonCodes).toContain('review_unavailable');
+    expect(await reserveDispatch(w.c.app.ctx, held.messageId, 1, NOW)).toEqual({ kind: 'refused', reasonCodes: [] });
+
+    decision = 'block';
+    const classB = await classifySupportTicket(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      { task: w.taskId, idempotencyKey: randomUUID(), ticketId: ticketB.ticketId, ticketRevision: 1 },
+      NOW,
+    );
+    const blocked = await submitSupportReply(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      {
+        task: w.taskId,
+        idempotencyKey: randomUUID(),
+        channelId: w.channel.id,
+        accountId: w.account.id,
+        bindingGeneration: 1,
+        scheduledAt: NOW.toISOString(),
+        ticketId: ticketB.ticketId,
+        ticketRevision: 1,
+        classificationReceiptId: classB.classificationReceiptId,
+        document: {
+          locale: 'en',
+          templateId: w.enTemplate.entryId,
+          templateRevision: 1,
+          blocks: [
+            { kind: 'knowledge', id: w.enKb.entryId, revision: 1 },
+            { kind: 'link', id: w.enLink.entryId, revision: 1 },
+          ],
+          variables: [],
+        },
+      },
+      NOW,
+    );
+    expect(blocked).toMatchObject({ status: 'rejected', reasonCodes: ['review_failed'] });
+    const [channelAfter] = await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id));
+    expect(channelAfter).toMatchObject({ status: 'stopped', stoppedReason: 'review_failed' });
   });
 
   it('routes requiresHuman tickets and uncertain/unavailable reviews to the department owner (#316) with CEO fallback instead of auto-sending', async () => {
