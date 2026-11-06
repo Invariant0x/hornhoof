@@ -5,6 +5,12 @@ description: { en: "Gives each of the CEO's goals to one department as one whole
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md]
 ---
+## Small-task fast path
+
+At assignment, the head decides whether a task is small: a change in a single place, with a clear result, no dependencies, and finishable by a developer in a work turn. Mark it `small: true` in `create_task` or `update_task`. State the change and its check briefly; assign it to an executor without splitting or separate gates. The executor writes a failing test, makes the change, runs only affected tests, merges into the turn's branch, and submits a line stating what changed and the commit SHA. Reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. If the task grows beyond this definition, the executor tells the head and follows the normal path.
+
+For other work, follow the process below.
+
 A turn holds the CEO's goals for it. Each goal is one task for the one department that owns it end to end.
 
 1. Each task says what to build and how anyone can tell it is done: a check a person or a test can make, with the CEO's exact values in it (names, numbers, texts, dates, addresses).
