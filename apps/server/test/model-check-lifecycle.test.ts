@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CheckBinding } from '@hornhoof/protocol';
-import { afterChange, afterRun, bindingDigest, canonicalJson, isOn, weeklyRun, type BindingPart, type CheckState } from '../src/modules/model-checks/lifecycle.js';
+import { canonicalJson, type CheckBinding } from '@hornhoof/protocol';
+import { afterChange, afterRun, bindingDigest, isOn, weeklyRun, type BindingPart, type CheckState } from '../src/modules/model-checks/lifecycle.js';
 import type { Decision } from '../src/modules/model-checks/score.js';
 import { binding, hashOf } from './model-check-fixture.js';
 

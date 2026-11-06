@@ -1,5 +1,5 @@
 {
-  "id": "e390efcf-19d2-4021-abdf-a883a59b61c3",
+  "id": "d2a600d2-1ab3-43f8-b7cf-2873498fa5a2",
   "prevId": "6ba12d16-20dc-47d1-81ef-00a9ac56fe94",
   "version": "7",
   "dialect": "postgresql",
@@ -1369,7 +1369,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "departments_company_id": {
+          "name": "departments_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "departments_work_mode": {
@@ -2303,6 +2312,143 @@
         "map_returns_given_back": {
           "name": "map_returns_given_back",
           "value": "(\"map_returns\".\"returned_at\" IS NULL) = (\"map_returns\".\"returned_epoch\" IS NULL) AND (\"map_returns\".\"returned_at\" IS NULL) = (\"map_returns\".\"source_key\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.model_check_certificates": {
+      "name": "model_check_certificates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "check_id": {
+          "name": "check_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "binding_digest": {
+          "name": "binding_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evaluated_at": {
+          "name": "evaluated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "invalidated_reason": {
+          "name": "invalidated_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invalidated_at": {
+          "name": "invalidated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "model_check_certificates_one_active": {
+          "name": "model_check_certificates_one_active",
+          "columns": [
+            {
+              "expression": "check_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"model_check_certificates\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "model_check_certificates_check_id_model_checks_id_fk": {
+          "name": "model_check_certificates_check_id_model_checks_id_fk",
+          "tableFrom": "model_check_certificates",
+          "tableTo": "model_checks",
+          "columnsFrom": [
+            "check_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "model_check_certificates_report": {
+          "name": "model_check_certificates_report",
+          "tableFrom": "model_check_certificates",
+          "tableTo": "model_check_evaluations",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "model_check_certificates_status": {
+          "name": "model_check_certificates_status",
+          "value": "\"model_check_certificates\".\"status\" IN ('active', 'invalidated')"
+        },
+        "model_check_certificates_validity": {
+          "name": "model_check_certificates_validity",
+          "value": "\"model_check_certificates\".\"valid_until\" > \"model_check_certificates\".\"evaluated_at\""
+        },
+        "model_check_certificates_end": {
+          "name": "model_check_certificates_end",
+          "value": "(\"model_check_certificates\".\"status\" = 'invalidated') = (\"model_check_certificates\".\"invalidated_reason\" IS NOT NULL) AND (\"model_check_certificates\".\"status\" = 'invalidated') = (\"model_check_certificates\".\"invalidated_at\" IS NOT NULL)"
+        },
+        "model_check_certificates_binding": {
+          "name": "model_check_certificates_binding",
+          "value": "\"model_check_certificates\".\"binding_digest\" ~ '^[0-9a-f]{64}$'"
         }
       },
       "isRLSEnabled": false
@@ -3561,6 +3707,2978 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.outbound_accounts": {
+      "name": "outbound_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_domain": {
+          "name": "sender_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "config_enc": {
+          "name": "config_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "config_generation": {
+          "name": "config_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_accounts_company_id_companies_id_fk": {
+          "name": "outbound_accounts_company_id_companies_id_fk",
+          "tableFrom": "outbound_accounts",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_accounts_created_by_people_id_fk": {
+          "name": "outbound_accounts_created_by_people_id_fk",
+          "tableFrom": "outbound_accounts",
+          "tableTo": "people",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_accounts_department": {
+          "name": "outbound_accounts_department",
+          "tableFrom": "outbound_accounts",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_accounts_product": {
+          "name": "outbound_accounts_product",
+          "tableFrom": "outbound_accounts",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_accounts_channel": {
+          "name": "outbound_accounts_channel",
+          "tableFrom": "outbound_accounts",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_accounts_company_id": {
+          "name": "outbound_accounts_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_accounts_label": {
+          "name": "outbound_accounts_label",
+          "nullsNotDistinct": false,
+          "columns": [
+            "channel_id",
+            "label"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_accounts_domain": {
+          "name": "outbound_accounts_domain",
+          "value": "\"outbound_accounts\".\"sender_domain\" = lower(\"outbound_accounts\".\"sender_domain\") AND \"outbound_accounts\".\"sender_domain\" <> ''"
+        },
+        "outbound_accounts_status": {
+          "name": "outbound_accounts_status",
+          "value": "\"outbound_accounts\".\"status\" IN ('active', 'invalid', 'revoked')"
+        },
+        "outbound_accounts_generation": {
+          "name": "outbound_accounts_generation",
+          "value": "\"outbound_accounts\".\"config_generation\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_approvals": {
+      "name": "outbound_approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message_revision": {
+          "name": "message_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_digest": {
+          "name": "content_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "binding_generation": {
+          "name": "binding_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "template_revision": {
+          "name": "template_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "segment_id": {
+          "name": "segment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "policy_digest": {
+          "name": "policy_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_revisions_digest": {
+          "name": "source_revisions_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "authority_fingerprint": {
+          "name": "authority_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_approvals_company_id_companies_id_fk": {
+          "name": "outbound_approvals_company_id_companies_id_fk",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_approvals_of_request": {
+          "name": "outbound_approvals_of_request",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "company_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_approvals_message": {
+          "name": "outbound_approvals_message",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "outbound_messages",
+          "columnsFrom": [
+            "company_id",
+            "message_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_approvals_account": {
+          "name": "outbound_approvals_account",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "outbound_accounts",
+          "columnsFrom": [
+            "company_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_approvals_channel": {
+          "name": "outbound_approvals_channel",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_approvals_revision": {
+          "name": "outbound_approvals_revision",
+          "tableFrom": "outbound_approvals",
+          "tableTo": "outbound_message_revisions",
+          "columnsFrom": [
+            "message_id",
+            "message_revision"
+          ],
+          "columnsTo": [
+            "message_id",
+            "revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_approvals_request": {
+          "name": "outbound_approvals_request",
+          "nullsNotDistinct": false,
+          "columns": [
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_approvals_kind": {
+          "name": "outbound_approvals_kind",
+          "value": "CASE \"outbound_approvals\".\"kind\"\n    WHEN 'message' THEN \"outbound_approvals\".\"message_id\" IS NOT NULL AND \"outbound_approvals\".\"message_revision\" IS NOT NULL AND \"outbound_approvals\".\"content_digest\" IS NOT NULL AND \"outbound_approvals\".\"account_id\" IS NOT NULL AND \"outbound_approvals\".\"binding_generation\" IS NOT NULL AND \"outbound_approvals\".\"channel_id\" IS NULL AND \"outbound_approvals\".\"template_id\" IS NULL AND \"outbound_approvals\".\"template_revision\" IS NULL AND \"outbound_approvals\".\"segment_id\" IS NULL AND \"outbound_approvals\".\"locale\" IS NULL\n    WHEN 'approach' THEN \"outbound_approvals\".\"channel_id\" IS NOT NULL AND \"outbound_approvals\".\"template_id\" IS NOT NULL AND \"outbound_approvals\".\"template_revision\" IS NOT NULL AND \"outbound_approvals\".\"segment_id\" IS NOT NULL AND \"outbound_approvals\".\"locale\" IS NOT NULL AND \"outbound_approvals\".\"message_id\" IS NULL AND \"outbound_approvals\".\"message_revision\" IS NULL AND \"outbound_approvals\".\"content_digest\" IS NULL AND \"outbound_approvals\".\"account_id\" IS NULL AND \"outbound_approvals\".\"binding_generation\" IS NULL\n    ELSE false END"
+        },
+        "outbound_approvals_content": {
+          "name": "outbound_approvals_content",
+          "value": "\"outbound_approvals\".\"content_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_approvals_policy": {
+          "name": "outbound_approvals_policy",
+          "value": "\"outbound_approvals\".\"policy_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_approvals_sources": {
+          "name": "outbound_approvals_sources",
+          "value": "\"outbound_approvals\".\"source_revisions_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_approvals_authority": {
+          "name": "outbound_approvals_authority",
+          "value": "\"outbound_approvals\".\"authority_fingerprint\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_attempts": {
+      "name": "outbound_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_revision": {
+          "name": "message_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "binding_generation": {
+          "name": "binding_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "config_generation": {
+          "name": "config_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_generation": {
+          "name": "channel_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_bucket_id": {
+          "name": "account_bucket_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain_bucket_id": {
+          "name": "domain_bucket_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_receipt": {
+          "name": "provider_receipt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "safe_code": {
+          "name": "safe_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "outbound_attempts_one_of_message": {
+          "name": "outbound_attempts_one_of_message",
+          "columns": [
+            {
+              "expression": "message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"outbound_attempts\".\"status\" <> 'definitely_not_accepted'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "outbound_attempts_one_of_account": {
+          "name": "outbound_attempts_one_of_account",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"outbound_attempts\".\"status\" IN ('sending', 'unknown')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "outbound_attempts_company_id_companies_id_fk": {
+          "name": "outbound_attempts_company_id_companies_id_fk",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_message": {
+          "name": "outbound_attempts_message",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_messages",
+          "columnsFrom": [
+            "company_id",
+            "message_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_account": {
+          "name": "outbound_attempts_account",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_accounts",
+          "columnsFrom": [
+            "company_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_account_bucket": {
+          "name": "outbound_attempts_account_bucket",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_daily_usage",
+          "columnsFrom": [
+            "company_id",
+            "account_bucket_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_domain_bucket": {
+          "name": "outbound_attempts_domain_bucket",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_daily_usage",
+          "columnsFrom": [
+            "company_id",
+            "domain_bucket_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_revision": {
+          "name": "outbound_attempts_revision",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_message_revisions",
+          "columnsFrom": [
+            "message_id",
+            "message_revision"
+          ],
+          "columnsTo": [
+            "message_id",
+            "revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_attempts_binding": {
+          "name": "outbound_attempts_binding",
+          "tableFrom": "outbound_attempts",
+          "tableTo": "outbound_bindings",
+          "columnsFrom": [
+            "account_id",
+            "binding_generation"
+          ],
+          "columnsTo": [
+            "account_id",
+            "generation"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_attempts_company_id": {
+          "name": "outbound_attempts_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_attempts_status": {
+          "name": "outbound_attempts_status",
+          "value": "\"outbound_attempts\".\"status\" IN ('reserved', 'sending', 'accepted', 'definitely_not_accepted', 'unknown')"
+        },
+        "outbound_attempts_outcome": {
+          "name": "outbound_attempts_outcome",
+          "value": "CASE \"outbound_attempts\".\"status\"\n    WHEN 'accepted' THEN \"outbound_attempts\".\"provider_receipt\" IS NOT NULL AND \"outbound_attempts\".\"safe_code\" IS NULL AND \"outbound_attempts\".\"ended_at\" IS NOT NULL\n    WHEN 'definitely_not_accepted' THEN \"outbound_attempts\".\"safe_code\" IS NOT NULL AND \"outbound_attempts\".\"provider_receipt\" IS NULL AND \"outbound_attempts\".\"ended_at\" IS NOT NULL\n    WHEN 'unknown' THEN \"outbound_attempts\".\"safe_code\" IS NOT NULL AND \"outbound_attempts\".\"provider_receipt\" IS NULL AND \"outbound_attempts\".\"ended_at\" IS NOT NULL\n    ELSE \"outbound_attempts\".\"safe_code\" IS NULL AND \"outbound_attempts\".\"provider_receipt\" IS NULL AND \"outbound_attempts\".\"ended_at\" IS NULL END"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_bindings": {
+      "name": "outbound_bindings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "outbound_bindings_one_author": {
+          "name": "outbound_bindings_one_author",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"outbound_bindings\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "outbound_bindings_one_account": {
+          "name": "outbound_bindings_one_account",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"outbound_bindings\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "outbound_bindings_company_id_companies_id_fk": {
+          "name": "outbound_bindings_company_id_companies_id_fk",
+          "tableFrom": "outbound_bindings",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_bindings_agent_id_agents_id_fk": {
+          "name": "outbound_bindings_agent_id_agents_id_fk",
+          "tableFrom": "outbound_bindings",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_bindings_created_by_people_id_fk": {
+          "name": "outbound_bindings_created_by_people_id_fk",
+          "tableFrom": "outbound_bindings",
+          "tableTo": "people",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_bindings_account": {
+          "name": "outbound_bindings_account",
+          "tableFrom": "outbound_bindings",
+          "tableTo": "outbound_accounts",
+          "columnsFrom": [
+            "company_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_bindings_generation": {
+          "name": "outbound_bindings_generation",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_id",
+            "generation"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_bindings_status": {
+          "name": "outbound_bindings_status",
+          "value": "\"outbound_bindings\".\"status\" IN ('active', 'released')"
+        },
+        "outbound_bindings_positive": {
+          "name": "outbound_bindings_positive",
+          "value": "\"outbound_bindings\".\"generation\" > 0"
+        },
+        "outbound_bindings_release": {
+          "name": "outbound_bindings_release",
+          "value": "(\"outbound_bindings\".\"status\" = 'released') = (\"outbound_bindings\".\"released_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_catalog_revisions": {
+      "name": "outbound_catalog_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entry_id": {
+          "name": "entry_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "digest": {
+          "name": "digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'proposed'"
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_kind": {
+          "name": "created_by_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_by": {
+          "name": "published_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_catalog_revisions_company_id_companies_id_fk": {
+          "name": "outbound_catalog_revisions_company_id_companies_id_fk",
+          "tableFrom": "outbound_catalog_revisions",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_catalog_revisions_published_by_people_id_fk": {
+          "name": "outbound_catalog_revisions_published_by_people_id_fk",
+          "tableFrom": "outbound_catalog_revisions",
+          "tableTo": "people",
+          "columnsFrom": [
+            "published_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_catalog_department": {
+          "name": "outbound_catalog_department",
+          "tableFrom": "outbound_catalog_revisions",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_catalog_product": {
+          "name": "outbound_catalog_product",
+          "tableFrom": "outbound_catalog_revisions",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_catalog_channel": {
+          "name": "outbound_catalog_channel",
+          "tableFrom": "outbound_catalog_revisions",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_catalog_company_id": {
+          "name": "outbound_catalog_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_catalog_revision": {
+          "name": "outbound_catalog_revision",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "entry_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_catalog_positive": {
+          "name": "outbound_catalog_positive",
+          "value": "\"outbound_catalog_revisions\".\"revision\" > 0"
+        },
+        "outbound_catalog_kind": {
+          "name": "outbound_catalog_kind",
+          "value": "\"outbound_catalog_revisions\".\"value\" ->> 'kind' = \"outbound_catalog_revisions\".\"kind\""
+        },
+        "outbound_catalog_status": {
+          "name": "outbound_catalog_status",
+          "value": "\"outbound_catalog_revisions\".\"status\" IN ('proposed', 'published', 'revoked')"
+        },
+        "outbound_catalog_author": {
+          "name": "outbound_catalog_author",
+          "value": "\"outbound_catalog_revisions\".\"created_by_kind\" IN ('person', 'agent')"
+        },
+        "outbound_catalog_published": {
+          "name": "outbound_catalog_published",
+          "value": "(\"outbound_catalog_revisions\".\"status\" = 'proposed') = (\"outbound_catalog_revisions\".\"published_by\" IS NULL) AND (\"outbound_catalog_revisions\".\"published_by\" IS NULL) = (\"outbound_catalog_revisions\".\"published_at\" IS NULL)"
+        },
+        "outbound_catalog_revoked": {
+          "name": "outbound_catalog_revoked",
+          "value": "(\"outbound_catalog_revisions\".\"status\" = 'revoked') = (\"outbound_catalog_revisions\".\"revoked_at\" IS NOT NULL)"
+        },
+        "outbound_catalog_validity": {
+          "name": "outbound_catalog_validity",
+          "value": "\"outbound_catalog_revisions\".\"valid_until\" IS NULL OR \"outbound_catalog_revisions\".\"valid_until\" > \"outbound_catalog_revisions\".\"valid_from\""
+        },
+        "outbound_catalog_digest": {
+          "name": "outbound_catalog_digest",
+          "value": "\"outbound_catalog_revisions\".\"digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_channels": {
+      "name": "outbound_channels",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "adapter": {
+          "name": "adapter",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'new'"
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "stopped_reason": {
+          "name": "stopped_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_channels_company_id_companies_id_fk": {
+          "name": "outbound_channels_company_id_companies_id_fk",
+          "tableFrom": "outbound_channels",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_channels_created_by_people_id_fk": {
+          "name": "outbound_channels_created_by_people_id_fk",
+          "tableFrom": "outbound_channels",
+          "tableTo": "people",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_channels_department": {
+          "name": "outbound_channels_department",
+          "tableFrom": "outbound_channels",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_channels_product": {
+          "name": "outbound_channels_product",
+          "tableFrom": "outbound_channels",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_channels_company_id": {
+          "name": "outbound_channels_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_channels_place": {
+          "name": "outbound_channels_place",
+          "nullsNotDistinct": true,
+          "columns": [
+            "department_id",
+            "product_id",
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_channels_adapter": {
+          "name": "outbound_channels_adapter",
+          "value": "\"outbound_channels\".\"adapter\" IN ('smtp', 'webhook')"
+        },
+        "outbound_channels_audience": {
+          "name": "outbound_channels_audience",
+          "value": "\"outbound_channels\".\"audience\" IN ('direct', 'public')"
+        },
+        "outbound_channels_status": {
+          "name": "outbound_channels_status",
+          "value": "\"outbound_channels\".\"status\" IN ('new', 'active', 'stopped')"
+        },
+        "outbound_channels_generation": {
+          "name": "outbound_channels_generation",
+          "value": "\"outbound_channels\".\"generation\" > 0"
+        },
+        "outbound_channels_stop": {
+          "name": "outbound_channels_stop",
+          "value": "(\"outbound_channels\".\"status\" = 'stopped') = (\"outbound_channels\".\"stopped_at\" IS NOT NULL) AND (\"outbound_channels\".\"status\" = 'stopped') = (\"outbound_channels\".\"stopped_reason\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_contact_events": {
+      "name": "outbound_contact_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dedup_key": {
+          "name": "dedup_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence_digest": {
+          "name": "evidence_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_contact_events_company_id_companies_id_fk": {
+          "name": "outbound_contact_events_company_id_companies_id_fk",
+          "tableFrom": "outbound_contact_events",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_contact_events_contact": {
+          "name": "outbound_contact_events_contact",
+          "tableFrom": "outbound_contact_events",
+          "tableTo": "outbound_contacts",
+          "columnsFrom": [
+            "company_id",
+            "contact_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_contact_events_dedup": {
+          "name": "outbound_contact_events_dedup",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "dedup_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_contact_events_kind": {
+          "name": "outbound_contact_events_kind",
+          "value": "\"outbound_contact_events\".\"kind\" IN ('consent_granted', 'consent_revoked', 'unsubscribed', 'suppressed')"
+        },
+        "outbound_contact_events_evidence": {
+          "name": "outbound_contact_events_evidence",
+          "value": "\"outbound_contact_events\".\"evidence_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_contacts": {
+      "name": "outbound_contacts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address_enc": {
+          "name": "address_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address_hash": {
+          "name": "address_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "do_not_contact": {
+          "name": "do_not_contact",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "suppressed_at": {
+          "name": "suppressed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_contacts_company_id_companies_id_fk": {
+          "name": "outbound_contacts_company_id_companies_id_fk",
+          "tableFrom": "outbound_contacts",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_contacts_company_id": {
+          "name": "outbound_contacts_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_contacts_address": {
+          "name": "outbound_contacts_address",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "kind",
+            "address_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_contacts_kind": {
+          "name": "outbound_contacts_kind",
+          "value": "\"outbound_contacts\".\"kind\" IN ('email', 'direct')"
+        },
+        "outbound_contacts_suppressed": {
+          "name": "outbound_contacts_suppressed",
+          "value": "\"outbound_contacts\".\"do_not_contact\" = (\"outbound_contacts\".\"suppressed_at\" IS NOT NULL)"
+        },
+        "outbound_contacts_hash": {
+          "name": "outbound_contacts_hash",
+          "value": "\"outbound_contacts\".\"address_hash\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_daily_usage": {
+      "name": "outbound_daily_usage",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope_key": {
+          "name": "scope_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "limit_version": {
+          "name": "limit_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reserved": {
+          "name": "reserved",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "unknown": {
+          "name": "unknown",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "definitely_failed": {
+          "name": "definitely_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_daily_usage_company_id_companies_id_fk": {
+          "name": "outbound_daily_usage_company_id_companies_id_fk",
+          "tableFrom": "outbound_daily_usage",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_daily_usage_company_id": {
+          "name": "outbound_daily_usage_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_daily_usage_bucket": {
+          "name": "outbound_daily_usage_bucket",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "scope",
+            "scope_key",
+            "day",
+            "timezone",
+            "limit_version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_daily_usage_scope": {
+          "name": "outbound_daily_usage_scope",
+          "value": "\"outbound_daily_usage\".\"scope\" IN ('account', 'domain')"
+        },
+        "outbound_daily_usage_counts": {
+          "name": "outbound_daily_usage_counts",
+          "value": "\"outbound_daily_usage\".\"reserved\" >= 0 AND \"outbound_daily_usage\".\"accepted\" >= 0 AND \"outbound_daily_usage\".\"unknown\" >= 0 AND \"outbound_daily_usage\".\"definitely_failed\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_events": {
+      "name": "outbound_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_event_id": {
+          "name": "provider_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_events_company_id_companies_id_fk": {
+          "name": "outbound_events_company_id_companies_id_fk",
+          "tableFrom": "outbound_events",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_events_attempt": {
+          "name": "outbound_events_attempt",
+          "tableFrom": "outbound_events",
+          "tableTo": "outbound_attempts",
+          "columnsFrom": [
+            "company_id",
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_events_once": {
+          "name": "outbound_events_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "source",
+            "provider_event_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_events_kind": {
+          "name": "outbound_events_kind",
+          "value": "\"outbound_events\".\"kind\" IN ('delivered', 'bounce', 'refusal', 'complaint')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_message_revisions": {
+      "name": "outbound_message_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document": {
+          "name": "document",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_digest": {
+          "name": "content_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sealed_enc": {
+          "name": "sealed_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_revisions_digest": {
+          "name": "source_revisions_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy_id": {
+          "name": "policy_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy_digest": {
+          "name": "policy_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_message_revisions_company_id_companies_id_fk": {
+          "name": "outbound_message_revisions_company_id_companies_id_fk",
+          "tableFrom": "outbound_message_revisions",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_message_revisions_message": {
+          "name": "outbound_message_revisions_message",
+          "tableFrom": "outbound_message_revisions",
+          "tableTo": "outbound_messages",
+          "columnsFrom": [
+            "company_id",
+            "message_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_message_revisions_policy": {
+          "name": "outbound_message_revisions_policy",
+          "tableFrom": "outbound_message_revisions",
+          "tableTo": "outbound_policies",
+          "columnsFrom": [
+            "company_id",
+            "policy_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_message_revisions_number": {
+          "name": "outbound_message_revisions_number",
+          "nullsNotDistinct": false,
+          "columns": [
+            "message_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_message_revisions_positive": {
+          "name": "outbound_message_revisions_positive",
+          "value": "\"outbound_message_revisions\".\"revision\" > 0"
+        },
+        "outbound_message_revisions_content": {
+          "name": "outbound_message_revisions_content",
+          "value": "\"outbound_message_revisions\".\"content_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_message_revisions_sources": {
+          "name": "outbound_message_revisions_sources",
+          "value": "\"outbound_message_revisions\".\"source_revisions_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_message_revisions_policy_digest": {
+          "name": "outbound_message_revisions_policy_digest",
+          "value": "\"outbound_message_revisions\".\"policy_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_messages": {
+      "name": "outbound_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author_agent_id": {
+          "name": "author_agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author_job_id": {
+          "name": "author_job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_digest": {
+          "name": "request_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "binding_generation": {
+          "name": "binding_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_kind": {
+          "name": "target_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "audience_entry_id": {
+          "name": "audience_entry_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticket_id": {
+          "name": "ticket_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticket_revision": {
+          "name": "ticket_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "classification_id": {
+          "name": "classification_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "segment_id": {
+          "name": "segment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sampling_ordinals": {
+          "name": "sampling_ordinals",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_codes": {
+          "name": "reason_codes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "scheduled_at": {
+          "name": "scheduled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "outbound_messages_due": {
+          "name": "outbound_messages_due",
+          "columns": [
+            {
+              "expression": "scheduled_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"outbound_messages\".\"status\" = 'scheduled'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "outbound_messages_task": {
+          "name": "outbound_messages_task",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "outbound_messages_company_id_companies_id_fk": {
+          "name": "outbound_messages_company_id_companies_id_fk",
+          "tableFrom": "outbound_messages",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_task_id_tasks_id_fk": {
+          "name": "outbound_messages_task_id_tasks_id_fk",
+          "tableFrom": "outbound_messages",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_author_agent_id_agents_id_fk": {
+          "name": "outbound_messages_author_agent_id_agents_id_fk",
+          "tableFrom": "outbound_messages",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "author_agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_author_job_id_jobs_id_fk": {
+          "name": "outbound_messages_author_job_id_jobs_id_fk",
+          "tableFrom": "outbound_messages",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "author_job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_department": {
+          "name": "outbound_messages_department",
+          "tableFrom": "outbound_messages",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_product": {
+          "name": "outbound_messages_product",
+          "tableFrom": "outbound_messages",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_channel": {
+          "name": "outbound_messages_channel",
+          "tableFrom": "outbound_messages",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_account": {
+          "name": "outbound_messages_account",
+          "tableFrom": "outbound_messages",
+          "tableTo": "outbound_accounts",
+          "columnsFrom": [
+            "company_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_contact": {
+          "name": "outbound_messages_contact",
+          "tableFrom": "outbound_messages",
+          "tableTo": "outbound_contacts",
+          "columnsFrom": [
+            "company_id",
+            "contact_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_classification": {
+          "name": "outbound_messages_classification",
+          "tableFrom": "outbound_messages",
+          "tableTo": "support_classifications",
+          "columnsFrom": [
+            "company_id",
+            "classification_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_binding": {
+          "name": "outbound_messages_binding",
+          "tableFrom": "outbound_messages",
+          "tableTo": "outbound_bindings",
+          "columnsFrom": [
+            "account_id",
+            "binding_generation"
+          ],
+          "columnsTo": [
+            "account_id",
+            "generation"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_messages_ticket": {
+          "name": "outbound_messages_ticket",
+          "tableFrom": "outbound_messages",
+          "tableTo": "support_tickets",
+          "columnsFrom": [
+            "company_id",
+            "ticket_id",
+            "ticket_revision"
+          ],
+          "columnsTo": [
+            "company_id",
+            "ticket_id",
+            "revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_messages_company_id": {
+          "name": "outbound_messages_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_messages_idempotency": {
+          "name": "outbound_messages_idempotency",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "author_agent_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_messages_positive": {
+          "name": "outbound_messages_positive",
+          "value": "\"outbound_messages\".\"revision\" > 0"
+        },
+        "outbound_messages_status": {
+          "name": "outbound_messages_status",
+          "value": "\"outbound_messages\".\"status\" IN ('scheduled', 'waiting_checks', 'waiting_approval', 'rejected', 'reserved', 'sending', 'sent', 'definitely_failed', 'unknown', 'cancelled')"
+        },
+        "outbound_messages_target": {
+          "name": "outbound_messages_target",
+          "value": "CASE \"outbound_messages\".\"target_kind\"\n    WHEN 'contact' THEN \"outbound_messages\".\"contact_id\" IS NOT NULL AND \"outbound_messages\".\"segment_id\" IS NOT NULL AND \"outbound_messages\".\"audience_entry_id\" IS NULL AND \"outbound_messages\".\"ticket_id\" IS NULL AND \"outbound_messages\".\"ticket_revision\" IS NULL AND \"outbound_messages\".\"classification_id\" IS NULL\n    WHEN 'audience' THEN \"outbound_messages\".\"audience_entry_id\" IS NOT NULL AND \"outbound_messages\".\"segment_id\" IS NOT NULL AND \"outbound_messages\".\"contact_id\" IS NULL AND \"outbound_messages\".\"ticket_id\" IS NULL AND \"outbound_messages\".\"ticket_revision\" IS NULL AND \"outbound_messages\".\"classification_id\" IS NULL\n    WHEN 'ticket' THEN \"outbound_messages\".\"contact_id\" IS NOT NULL AND \"outbound_messages\".\"ticket_id\" IS NOT NULL AND \"outbound_messages\".\"ticket_revision\" IS NOT NULL AND \"outbound_messages\".\"classification_id\" IS NOT NULL AND \"outbound_messages\".\"segment_id\" IS NULL AND \"outbound_messages\".\"audience_entry_id\" IS NULL\n    ELSE false END"
+        },
+        "outbound_messages_rejected": {
+          "name": "outbound_messages_rejected",
+          "value": "\"outbound_messages\".\"status\" <> 'rejected' OR jsonb_array_length(\"outbound_messages\".\"reason_codes\") > 0"
+        },
+        "outbound_messages_request": {
+          "name": "outbound_messages_request",
+          "value": "\"outbound_messages\".\"request_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_permissions": {
+      "name": "outbound_permissions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'granted'"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence_digest": {
+          "name": "evidence_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "granted_at": {
+          "name": "granted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "outbound_permissions_active": {
+          "name": "outbound_permissions_active",
+          "columns": [
+            {
+              "expression": "contact_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"outbound_permissions\".\"status\" = 'granted'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "outbound_permissions_company_id_companies_id_fk": {
+          "name": "outbound_permissions_company_id_companies_id_fk",
+          "tableFrom": "outbound_permissions",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_permissions_contact": {
+          "name": "outbound_permissions_contact",
+          "tableFrom": "outbound_permissions",
+          "tableTo": "outbound_contacts",
+          "columnsFrom": [
+            "company_id",
+            "contact_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_permissions_channel": {
+          "name": "outbound_permissions_channel",
+          "tableFrom": "outbound_permissions",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_permissions_company_id": {
+          "name": "outbound_permissions_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_permissions_status": {
+          "name": "outbound_permissions_status",
+          "value": "\"outbound_permissions\".\"status\" IN ('granted', 'revoked')"
+        },
+        "outbound_permissions_revoked": {
+          "name": "outbound_permissions_revoked",
+          "value": "(\"outbound_permissions\".\"status\" = 'revoked') = (\"outbound_permissions\".\"revoked_at\" IS NOT NULL)"
+        },
+        "outbound_permissions_evidence": {
+          "name": "outbound_permissions_evidence",
+          "value": "\"outbound_permissions\".\"evidence_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_policies": {
+      "name": "outbound_policies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "digest": {
+          "name": "digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_policies_company_id_companies_id_fk": {
+          "name": "outbound_policies_company_id_companies_id_fk",
+          "tableFrom": "outbound_policies",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_policies_created_by_people_id_fk": {
+          "name": "outbound_policies_created_by_people_id_fk",
+          "tableFrom": "outbound_policies",
+          "tableTo": "people",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_policies_channel": {
+          "name": "outbound_policies_channel",
+          "tableFrom": "outbound_policies",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_policies_company_id": {
+          "name": "outbound_policies_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "outbound_policies_revision": {
+          "name": "outbound_policies_revision",
+          "nullsNotDistinct": false,
+          "columns": [
+            "channel_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_policies_positive": {
+          "name": "outbound_policies_positive",
+          "value": "\"outbound_policies\".\"revision\" > 0"
+        },
+        "outbound_policies_digest": {
+          "name": "outbound_policies_digest",
+          "value": "\"outbound_policies\".\"digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_review_receipts": {
+      "name": "outbound_review_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_revision": {
+          "name": "message_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "check_id": {
+          "name": "check_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "binding_digest": {
+          "name": "binding_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject_digest": {
+          "name": "subject_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_review_receipts_company_id_companies_id_fk": {
+          "name": "outbound_review_receipts_company_id_companies_id_fk",
+          "tableFrom": "outbound_review_receipts",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_review_receipts_check_id_model_checks_id_fk": {
+          "name": "outbound_review_receipts_check_id_model_checks_id_fk",
+          "tableFrom": "outbound_review_receipts",
+          "tableTo": "model_checks",
+          "columnsFrom": [
+            "check_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_review_receipts_message": {
+          "name": "outbound_review_receipts_message",
+          "tableFrom": "outbound_review_receipts",
+          "tableTo": "outbound_messages",
+          "columnsFrom": [
+            "company_id",
+            "message_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_review_receipts_revision": {
+          "name": "outbound_review_receipts_revision",
+          "tableFrom": "outbound_review_receipts",
+          "tableTo": "outbound_message_revisions",
+          "columnsFrom": [
+            "message_id",
+            "message_revision"
+          ],
+          "columnsTo": [
+            "message_id",
+            "revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_review_receipts_once": {
+          "name": "outbound_review_receipts_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "message_id",
+            "message_revision",
+            "binding_digest"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_review_receipts_binding": {
+          "name": "outbound_review_receipts_binding",
+          "value": "\"outbound_review_receipts\".\"binding_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "outbound_review_receipts_subject": {
+          "name": "outbound_review_receipts_subject",
+          "value": "\"outbound_review_receipts\".\"subject_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.outbound_sampling_counters": {
+      "name": "outbound_sampling_counters",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope_key": {
+          "name": "scope_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next": {
+          "name": "next",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "clean_outcomes": {
+          "name": "clean_outcomes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "outbound_sampling_counters_company_id_companies_id_fk": {
+          "name": "outbound_sampling_counters_company_id_companies_id_fk",
+          "tableFrom": "outbound_sampling_counters",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "outbound_sampling_counters_channel": {
+          "name": "outbound_sampling_counters_channel",
+          "tableFrom": "outbound_sampling_counters",
+          "tableTo": "outbound_channels",
+          "columnsFrom": [
+            "company_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "outbound_sampling_counters_scope": {
+          "name": "outbound_sampling_counters_scope",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "channel_id",
+            "scope",
+            "scope_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "outbound_sampling_counters_kind": {
+          "name": "outbound_sampling_counters_kind",
+          "value": "\"outbound_sampling_counters\".\"scope\" IN ('channel', 'segment', 'author')"
+        },
+        "outbound_sampling_counters_values": {
+          "name": "outbound_sampling_counters_values",
+          "value": "\"outbound_sampling_counters\".\"next\" > 0 AND \"outbound_sampling_counters\".\"clean_outcomes\" >= 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.pending_wakes": {
@@ -5886,7 +9004,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "requests_company_id": {
+          "name": "requests_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "requests_material_stamp": {
@@ -6154,6 +9281,352 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.support_classifications": {
+      "name": "support_classifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ticket_id": {
+          "name": "ticket_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ticket_revision": {
+          "name": "ticket_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ticket_digest": {
+          "name": "ticket_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "binding_digest": {
+          "name": "binding_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "class_id": {
+          "name": "class_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requires_human": {
+          "name": "requires_human",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason_codes": {
+          "name": "reason_codes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "support_classifications_company_id_companies_id_fk": {
+          "name": "support_classifications_company_id_companies_id_fk",
+          "tableFrom": "support_classifications",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_classifications_ticket": {
+          "name": "support_classifications_ticket",
+          "tableFrom": "support_classifications",
+          "tableTo": "support_tickets",
+          "columnsFrom": [
+            "company_id",
+            "ticket_id",
+            "ticket_revision"
+          ],
+          "columnsTo": [
+            "company_id",
+            "ticket_id",
+            "revision"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "support_classifications_company_id": {
+          "name": "support_classifications_company_id",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "id"
+          ]
+        },
+        "support_classifications_once": {
+          "name": "support_classifications_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "ticket_id",
+            "ticket_revision",
+            "binding_digest"
+          ]
+        },
+        "support_classifications_idempotency": {
+          "name": "support_classifications_idempotency",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "support_classifications_status": {
+          "name": "support_classifications_status",
+          "value": "\"support_classifications\".\"status\" IN ('pending', 'ready', 'unavailable')"
+        },
+        "support_classifications_decision": {
+          "name": "support_classifications_decision",
+          "value": "CASE \"support_classifications\".\"status\"\n    WHEN 'pending' THEN \"support_classifications\".\"class_id\" IS NULL AND \"support_classifications\".\"requires_human\" IS NULL AND \"support_classifications\".\"reviewer\" IS NULL AND \"support_classifications\".\"decided_at\" IS NULL\n    WHEN 'ready' THEN \"support_classifications\".\"class_id\" IS NOT NULL AND \"support_classifications\".\"requires_human\" IS NOT NULL AND \"support_classifications\".\"reviewer\" IS NOT NULL AND \"support_classifications\".\"decided_at\" IS NOT NULL\n    ELSE \"support_classifications\".\"class_id\" IS NULL AND \"support_classifications\".\"requires_human\" IS NULL AND \"support_classifications\".\"decided_at\" IS NOT NULL END"
+        },
+        "support_classifications_ticket_digest": {
+          "name": "support_classifications_ticket_digest",
+          "value": "\"support_classifications\".\"ticket_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "support_classifications_binding_digest": {
+          "name": "support_classifications_binding_digest",
+          "value": "\"support_classifications\".\"binding_digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.support_tickets": {
+      "name": "support_tickets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department_id": {
+          "name": "department_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticket_id": {
+          "name": "ticket_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contact_id": {
+          "name": "contact_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text_enc": {
+          "name": "text_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "digest": {
+          "name": "digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "external_ref": {
+          "name": "external_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "support_tickets_company_id_companies_id_fk": {
+          "name": "support_tickets_company_id_companies_id_fk",
+          "tableFrom": "support_tickets",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_tickets_department": {
+          "name": "support_tickets_department",
+          "tableFrom": "support_tickets",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "department_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_tickets_product": {
+          "name": "support_tickets_product",
+          "tableFrom": "support_tickets",
+          "tableTo": "departments",
+          "columnsFrom": [
+            "company_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_tickets_contact": {
+          "name": "support_tickets_contact",
+          "tableFrom": "support_tickets",
+          "tableTo": "outbound_contacts",
+          "columnsFrom": [
+            "company_id",
+            "contact_id"
+          ],
+          "columnsTo": [
+            "company_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "support_tickets_revision": {
+          "name": "support_tickets_revision",
+          "nullsNotDistinct": false,
+          "columns": [
+            "company_id",
+            "ticket_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "support_tickets_positive": {
+          "name": "support_tickets_positive",
+          "value": "\"support_tickets\".\"revision\" > 0"
+        },
+        "support_tickets_status": {
+          "name": "support_tickets_status",
+          "value": "\"support_tickets\".\"status\" IN ('open', 'escalated', 'closed')"
+        },
+        "support_tickets_digest": {
+          "name": "support_tickets_digest",
+          "value": "\"support_tickets\".\"digest\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.task_events": {
       "name": "task_events",
       "schema": "",
@@ -6291,397 +9764,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.task_waits": {
-      "name": "task_waits",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_key": {
-          "name": "source_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_revision": {
-          "name": "source_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "generation": {
-          "name": "generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_agent_id": {
-          "name": "owner_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owner_person_id": {
-          "name": "owner_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "plan": {
-          "name": "plan",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owner_due_at": {
-          "name": "owner_due_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "head_due_at": {
-          "name": "head_due_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decision_due_at": {
-          "name": "decision_due_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "level": {
-          "name": "level",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_action_at": {
-          "name": "next_action_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "review_ordinal": {
-          "name": "review_ordinal",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_review_at": {
-          "name": "next_review_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attention_agent_id": {
-          "name": "attention_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attention_person_id": {
-          "name": "attention_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "final_decision_person_id": {
-          "name": "final_decision_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fallback_to_ceo": {
-          "name": "fallback_to_ceo",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "route_revision": {
-          "name": "route_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "source_state": {
-          "name": "source_state",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "proof_ref": {
-          "name": "proof_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "task_waits_open_source": {
-          "name": "task_waits_open_source",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"task_waits\".\"state\" IN ('active', 'legacy_needs_plan')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "task_waits_task": {
-          "name": "task_waits_task",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "task_waits_next_action": {
-          "name": "task_waits_next_action",
-          "columns": [
-            {
-              "expression": "next_action_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"task_waits\".\"state\" = 'active'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "task_waits_company_id_companies_id_fk": {
-          "name": "task_waits_company_id_companies_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_task_id_tasks_id_fk": {
-          "name": "task_waits_task_id_tasks_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_owner_agent_id_agents_id_fk": {
-          "name": "task_waits_owner_agent_id_agents_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "owner_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_owner_person_id_people_id_fk": {
-          "name": "task_waits_owner_person_id_people_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "people",
-          "columnsFrom": [
-            "owner_person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_attention_agent_id_agents_id_fk": {
-          "name": "task_waits_attention_agent_id_agents_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "attention_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_attention_person_id_people_id_fk": {
-          "name": "task_waits_attention_person_id_people_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "people",
-          "columnsFrom": [
-            "attention_person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_waits_final_decision_person_id_people_id_fk": {
-          "name": "task_waits_final_decision_person_id_people_id_fk",
-          "tableFrom": "task_waits",
-          "tableTo": "people",
-          "columnsFrom": [
-            "final_decision_person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "task_waits_kind": {
-          "name": "task_waits_kind",
-          "value": "\"task_waits\".\"kind\" IN ('after', 'review', 'person', 'run', 'external')"
-        },
-        "task_waits_state": {
-          "name": "task_waits_state",
-          "value": "\"task_waits\".\"state\" IN ('active', 'resolved', 'cancelled', 'superseded', 'legacy_needs_plan')"
-        },
-        "task_waits_counts": {
-          "name": "task_waits_counts",
-          "value": "\"task_waits\".\"source_revision\" >= 0 AND \"task_waits\".\"generation\" >= 1 AND \"task_waits\".\"review_ordinal\" >= 0 AND \"task_waits\".\"route_revision\" >= 0 AND \"task_waits\".\"level\" BETWEEN 0 AND 3"
-        },
-        "task_waits_one_owner": {
-          "name": "task_waits_one_owner",
-          "value": "\"task_waits\".\"owner_agent_id\" IS NULL OR \"task_waits\".\"owner_person_id\" IS NULL"
-        },
-        "task_waits_one_attention": {
-          "name": "task_waits_one_attention",
-          "value": "\"task_waits\".\"attention_agent_id\" IS NULL OR \"task_waits\".\"attention_person_id\" IS NULL"
-        },
-        "task_waits_active_is_whole": {
-          "name": "task_waits_active_is_whole",
-          "value": "\"task_waits\".\"state\" <> 'active' OR (\n    (\"task_waits\".\"owner_agent_id\" IS NULL) <> (\"task_waits\".\"owner_person_id\" IS NULL) AND \"task_waits\".\"plan\" IS NOT NULL AND \"task_waits\".\"owner_due_at\" IS NOT NULL AND \"task_waits\".\"head_due_at\" IS NOT NULL\n    AND \"task_waits\".\"decision_due_at\" IS NOT NULL AND \"task_waits\".\"next_action_at\" IS NOT NULL)"
-        },
-        "task_waits_reviews_go_on": {
-          "name": "task_waits_reviews_go_on",
-          "value": "\"task_waits\".\"state\" <> 'active' OR \"task_waits\".\"next_review_at\" IS NOT NULL OR (\"task_waits\".\"review_ordinal\" >= 1 AND \"task_waits\".\"kind\" = 'external' AND \"task_waits\".\"source_key\" LIKE 'operation:%')"
-        },
-        "task_waits_legacy_has_no_dates": {
-          "name": "task_waits_legacy_has_no_dates",
-          "value": "\"task_waits\".\"state\" <> 'legacy_needs_plan' OR (\"task_waits\".\"plan\" IS NULL AND \"task_waits\".\"owner_due_at\" IS NULL AND \"task_waits\".\"head_due_at\" IS NULL AND \"task_waits\".\"decision_due_at\" IS NULL AND \"task_waits\".\"next_action_at\" IS NULL AND \"task_waits\".\"next_review_at\" IS NULL)"
-        },
-        "task_waits_ended": {
-          "name": "task_waits_ended",
-          "value": "(\"task_waits\".\"state\" IN ('active', 'legacy_needs_plan')) = (\"task_waits\".\"ended_at\" IS NULL AND \"task_waits\".\"outcome\" IS NULL AND \"task_waits\".\"proof_ref\" IS NULL)"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.tasks": {
@@ -8202,36 +11284,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "wait_id": {
-          "name": "wait_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "generation": {
-          "name": "generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "level": {
-          "name": "level",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "purpose": {
-          "name": "purpose",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "route_revision": {
-          "name": "route_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -8247,46 +11299,6 @@
           ],
           "isUnique": false,
           "where": "\"wait_notices\".\"delivered_at\" IS NULL AND \"wait_notices\".\"cancelled_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "wait_notices_one_per_level": {
-          "name": "wait_notices_one_per_level",
-          "columns": [
-            {
-              "expression": "wait_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "generation",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "level",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "purpose",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "route_revision",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"wait_notices\".\"wait_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -8318,19 +11330,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "wait_notices_wait_id_task_waits_id_fk": {
-          "name": "wait_notices_wait_id_task_waits_id_fk",
-          "tableFrom": "wait_notices",
-          "tableTo": "task_waits",
-          "columnsFrom": [
-            "wait_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8345,184 +11344,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "wait_notices_wait_whole": {
-          "name": "wait_notices_wait_whole",
-          "value": "\"wait_notices\".\"wait_id\" IS NULL OR (\"wait_notices\".\"generation\" IS NOT NULL AND \"wait_notices\".\"level\" IS NOT NULL AND \"wait_notices\".\"purpose\" IS NOT NULL AND \"wait_notices\".\"route_revision\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.wait_policies": {
-      "name": "wait_policies",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "department_id": {
-          "name": "department_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stage": {
-          "name": "stage",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_ms": {
-          "name": "owner_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_ms": {
-          "name": "head_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "decision_ms": {
-          "name": "decision_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "review_interval_ms": {
-          "name": "review_interval_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_person_id": {
-          "name": "created_by_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_agent_id": {
-          "name": "created_by_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "wait_policies_company_id_companies_id_fk": {
-          "name": "wait_policies_company_id_companies_id_fk",
-          "tableFrom": "wait_policies",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wait_policies_department_id_departments_id_fk": {
-          "name": "wait_policies_department_id_departments_id_fk",
-          "tableFrom": "wait_policies",
-          "tableTo": "departments",
-          "columnsFrom": [
-            "department_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wait_policies_created_by_person_id_people_id_fk": {
-          "name": "wait_policies_created_by_person_id_people_id_fk",
-          "tableFrom": "wait_policies",
-          "tableTo": "people",
-          "columnsFrom": [
-            "created_by_person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "wait_policies_created_by_agent_id_agents_id_fk": {
-          "name": "wait_policies_created_by_agent_id_agents_id_fk",
-          "tableFrom": "wait_policies",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "created_by_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "wait_policies_version": {
-          "name": "wait_policies_version",
-          "nullsNotDistinct": false,
-          "columns": [
-            "company_id",
-            "department_id",
-            "kind",
-            "stage",
-            "version"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "wait_policies_order": {
-          "name": "wait_policies_order",
-          "value": "\"wait_policies\".\"owner_ms\" > 0 AND \"wait_policies\".\"owner_ms\" <= \"wait_policies\".\"head_ms\" AND \"wait_policies\".\"head_ms\" <= \"wait_policies\".\"decision_ms\" AND \"wait_policies\".\"review_interval_ms\" > 0 AND \"wait_policies\".\"version\" >= 1"
-        },
-        "wait_policies_kind": {
-          "name": "wait_policies_kind",
-          "value": "\"wait_policies\".\"kind\" IN ('after', 'review', 'person', 'run', 'external')"
-        },
-        "wait_policies_one_author": {
-          "name": "wait_policies_one_author",
-          "value": "(\"wait_policies\".\"created_by_person_id\" IS NULL) <> (\"wait_policies\".\"created_by_agent_id\" IS NULL)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
