@@ -1,4 +1,5 @@
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
+import type { ProviderId } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
@@ -16,6 +17,7 @@ import { improvementRoutes } from './modules/improvements/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
+import { outboundRoutes } from './modules/outbound/routes.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose } from './modules/nodes/messages.js';
@@ -56,7 +58,7 @@ import type { Db } from './db/client.js';
 import { readCompare, type CompareReader } from './modules/testruns/compare.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -91,7 +93,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
+    onMessage: (id, msg, transport) => receiveNodeMessage(ctx, id, msg, transport),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
     onConnected: (id, link, at) => nodeConnected(ctx, id, link, at),
@@ -151,5 +153,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   partFileRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
+  outboundRoutes(app, ctx);
   return app;
 }

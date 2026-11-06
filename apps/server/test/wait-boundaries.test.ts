@@ -26,9 +26,9 @@ async function pendingQuiet() {
   const since = new Date(now.getTime() - 900_000);
   const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Deliver', openedAt: since }).returning();
   const task = await c.task();
-  await c.db.update(tasks).set({ turnId: turn!.id, updatedAt: since, externalWait: { reason: 'Machine', since: since.toISOString(), until: new Date(now.getTime() + 3_600_000).toISOString() } }).where(eq(tasks.id, task.id));
+  await c.db.update(tasks).set({ turnId: turn!.id, updatedAt: since, externalWait: null }).where(eq(tasks.id, task.id));
   const observation = (await quietDepartment(c.ctx, turn!.id, c.dev.id, now))!;
-  await recordWaitNotice(c.db, { companyId: c.companyId, agentId: c.watcher.id, dedupKey: `quiet:${observation.key}`, guard: { tasks: taskVersions(observation.work), quiet: { turnId: turn!.id, departmentId: c.dev.id, key: observation.key } }, message: await notificationMessage(c.ctx, c.companyId, 'department_quiet', 'The department waits.') });
+  await recordWaitNotice(c.db, { companyId: c.companyId, agentId: c.head.id, dedupKey: `quiet:${observation.key}`, guard: { tasks: taskVersions(observation.work), quiet: { turnId: turn!.id, departmentId: c.dev.id, key: observation.key } }, message: await notificationMessage(c.ctx, c.companyId, 'department_quiet', 'The department waits.') });
   return { ...c, now };
 }
 
@@ -101,22 +101,23 @@ describe('wait notice acceptance boundaries', () => {
 
   it('drops a pending quiet observation if work starts behind the input lock', async () => {
     const c = await pendingQuiet();
-    const lock = await heldInput(c, c.watcher.id);
+    const lock = await heldInput(c, c.head.id);
     const sending = deliverWaitNotices(c.ctx, c.now);
     await lock.entered();
     await c.run();
     lock.release();
     await Promise.all([lock.held, sending]);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
+    expect(await c.messages(c.head.id)).toEqual([]);
     expect((await c.db.select().from(waitNotices))[0]!.cancelledAt).not.toBeNull();
   });
 
-  it.each(['removed', 'off', 'subscription'] as const)('retargets a pending quiet notice if its watcher becomes %s', async kind => {
+  it.each(['removed', 'off', 'subscription'] as const)('retargets a pending quiet notice if its head becomes %s', async kind => {
     const c = await pendingQuiet();
     const now = c.now;
-    await c.db.update(agents).set(kind === 'removed' ? { removedAt: now } : kind === 'off' ? { switchedOffAt: now } : { subscriptionId: null }).where(eq(agents.id, c.watcher.id));
+    await c.db.update(agents).set(kind === 'removed' ? { removedAt: now } : kind === 'off' ? { switchedOffAt: now } : { subscriptionId: null }).where(eq(agents.id, c.head.id));
     await checkWaitHealth(c.ctx, now);
     await checkWaitHealth({ ...c.ctx }, new Date(now.getTime() + 120_000));
+    expect(await c.messages(c.head.id)).toEqual([]);
     expect(await c.messages(c.watcher.id)).toEqual([]);
     expect(await c.messages(c.orchestrator.id)).toHaveLength(1);
     expect(await c.db.select().from(waitNotices)).toHaveLength(1);

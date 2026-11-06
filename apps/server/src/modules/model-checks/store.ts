@@ -7,7 +7,7 @@ import type { Db } from '../../db/client.js';
 import { modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks } from '../../db/schema.js';
 import { parseDataset, withLiveMiss, type Dataset, type DatasetProblem, type DatasetRules, type Party } from './dataset.js';
 import { afterChange, afterRun, isOn, weeklyRun } from './lifecycle.js';
-import { evaluateCheck, NO_MODEL_YET, unreadableSet, type RunModelCheck, type RunOutcome } from './run.js';
+import { evaluateCheck, NO_MODEL_YET, unreadableSet, type Evaluation, type RunModelCheck, type RunOutcome } from './run.js';
 import { parseThresholds, type Thresholds } from './score.js';
 import { recordCheckSignal } from './signal.js';
 import { departmentHasWork } from './work.js';
@@ -182,12 +182,22 @@ async function finishRun(ctx: Pick<Ctx, 'db' | 'templates'>, run: RunRow, outcom
   });
 }
 
+/* What a passed run leads to beyond its check being on: #317 holds a certificate of it. */
+type PassedRun = (evaluation: Evaluation) => Promise<void>;
+const NOTHING_MORE: PassedRun = async () => {};
+
+async function endRun(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, check: CheckRow, run: RunRow, call: RunModelCheck, passed: PassedRun, now: Date): Promise<void> {
+  const outcome = await outcomeOf(ctx, check, run, call, now);
+  await finishRun(ctx, run, outcome, now);
+  if (outcome.decision.status === 'passed') await passed(outcome.evaluation);
+}
+
 /* Takes the oldest run that waits and runs it to its end. A run of a binding already replaced asks nothing and says nothing. */
-export async function runNextEvaluation(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, call: RunModelCheck, now: Date): Promise<string | null> {
+export async function runNextEvaluation(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, call: RunModelCheck, now: Date, passed: PassedRun = NOTHING_MORE): Promise<string | null> {
   const run = await claimNext(ctx.db, now);
   if (!run) return null;
   const [check] = await ctx.db.select().from(modelChecks).where(eq(modelChecks.id, run.checkId));
-  if (check!.bindingDigest === run.bindingDigest) await finishRun(ctx, run, await outcomeOf(ctx, check!, run, call, now), now);
+  if (check!.bindingDigest === run.bindingDigest) await endRun(ctx, check!, run, call, passed, now);
   else await ctx.db.update(modelCheckEvaluations).set({ status: 'incomplete', finishedAt: now }).where(stillTheRun(run));
   return run.id;
 }
@@ -210,13 +220,13 @@ const rounds = new WeakSet<object>();
 
 /* One round at a time, however long its model takes: the server's minute goes on meanwhile. With no model yet every run ends
    as no result, which leaves its check off. */
-export async function modelCheckRound(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, now: Date, call: RunModelCheck = NO_MODEL_YET): Promise<void> {
+export async function modelCheckRound(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, now: Date, call: RunModelCheck = NO_MODEL_YET, passed: PassedRun = NOTHING_MORE): Promise<void> {
   if (rounds.has(ctx)) return;
   rounds.add(ctx);
   try {
     await weeklyRound(ctx, now);
-    let ran = await runNextEvaluation(ctx, call, now);
-    while (ran) ran = await runNextEvaluation(ctx, call, now);
+    let ran = await runNextEvaluation(ctx, call, now, passed);
+    while (ran) ran = await runNextEvaluation(ctx, call, now, passed);
   } finally {
     rounds.delete(ctx);
   }

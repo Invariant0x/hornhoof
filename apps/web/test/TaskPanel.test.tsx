@@ -1,9 +1,10 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { MaterialManifest } from '../src/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
@@ -98,7 +99,7 @@ describe('a task', () => {
     const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
     expect(within(panel).getByText(text)).toHaveClass('muted');
     mockApi({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait: null } }] });
-    await user.type(within(panel).getByLabelText(language === 'ru' ? 'Комментарий' : 'Comment'), 'Images ready.');
+    await user.type(within(panel).getByRole('textbox', { name: language === 'ru' ? 'Комментарий' : 'Comment' }), 'Images ready.');
     await user.click(within(panel).getByRole('button', { name: language === 'ru' ? 'Добавить комментарий' : 'Add comment' }));
     await waitFor(() => expect(within(panel).queryByText(text)).toBeNull());
     localStorage.removeItem('hh-lang');
@@ -326,7 +327,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }] });
     const panel = await openTask(user);
-    await user.type(within(panel).getByLabelText('Comment'), 'Ship it today.');
+    await user.type(within(panel).getByRole('textbox', { name: 'Comment' }), 'Ship it today.');
     await user.click(within(panel).getByRole('button', { name: 'Add comment' }));
     expect(calls.find(c => c.path === '/api/tasks/t12/comments')?.body).toEqual({ text: 'Ship it today.' });
   });
@@ -381,6 +382,121 @@ describe('a task', () => {
     expect(within(panel).getByRole('region', { name: heading })).toHaveTextContent('The same author owns every file.');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('#13');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('Bruno');
+  });
+
+  it('lists answered and open task questions with their authors and states', async () => {
+    const user = userEvent.setup();
+    const requests = [
+      { id: 'q1', kind: 'question' as const, text: 'Use the existing token?', commit: null, status: 'answered', answer: 'Yes, keep it.', agent: null, at: '2026-11-03T10:00:00.000Z' },
+      { id: 'q2', kind: 'choice' as const, text: 'Which layout ships?', commit: null, status: 'awaiting_review', answer: null, agent: { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null }, at: '2026-11-03T10:05:00.000Z' },
+    ];
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, requests } }] });
+    const panel = await openTask(user);
+    const questions = within(panel).getByRole('heading', { name: 'Questions' }).closest('section')!;
+    expect(questions).toHaveTextContent('Hornhoof: Use the existing token? answered');
+    expect(questions).toHaveTextContent('Yes, keep it.');
+    expect(questions).toHaveTextContent('Bruno: Which layout ships? awaiting_review');
+    expect(questions).not.toHaveTextContent('undefined');
+  });
+
+  it('opens versioned materials without answering and sends their stamps only with the explicit answer', async () => {
+    const user = userEvent.setup();
+    const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const fileId = '11111111-1111-4111-8111-111111111111';
+    const linkId = '22222222-2222-4222-8222-222222222222';
+    const materialDigest = 'a'.repeat(64);
+    const materialRoot = `/api/requests/${requestId}/materials`;
+    const manifest = {
+      materialRevision: 1,
+      materialDigest,
+      common: [
+        {
+          id: fileId,
+          name: 'Release notes.txt',
+          kind: 'file',
+          state: 'available',
+          contentUrl: `${materialRoot}/${fileId}/content`,
+          downloadUrl: `${materialRoot}/${fileId}/download`,
+          size: 128,
+          sha256: 'b'.repeat(64),
+          mediaType: 'text/plain',
+        },
+        { id: linkId, name: 'Approved preview', kind: 'link', state: 'available', url: 'https://preview.example.com/result' },
+      ],
+      options: [],
+    } satisfies MaterialManifest;
+    const legacy: import('../src/types').WaitingRequest = { ...REQUESTS[0]!, materialRevision: null, materialDigest: null };
+    const asked: import('../src/types').WaitingRequest = {
+      ...legacy,
+      id: requestId,
+      task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
+      materialRevision: 1,
+      materialDigest,
+      hasMaterials: true,
+    };
+    const calls = shell({
+      'GET /api/requests': [200, decisions([asked])],
+      [`GET ${materialRoot}`]: [200, manifest],
+      [`POST /api/requests/${requestId}`]: [200, { request: { id: requestId, status: 'answered' } }],
+    });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
+    await user.click(await within(waiting).findByRole('button', { name: /Release notes\.txt/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Release notes.txt' });
+    const download = within(dialog).getByRole('link', { name: 'Download file' });
+    download.addEventListener('click', event => event.preventDefault(), { once: true });
+    await user.click(download);
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('dialog', { name: 'Approved preview' })).toBeInTheDocument();
+    const external = within(dialog).getByRole('link', { name: 'Open link' });
+    expect(external).toHaveAttribute('href', 'https://preview.example.com/result');
+    expect(external).toHaveAttribute('target', '_blank');
+    external.addEventListener('click', event => event.preventDefault(), { once: true });
+    await user.click(external);
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.type(within(waiting).getByLabelText('Your answer'), 'The result is ready.');
+    await user.click(within(waiting).getByRole('button', { name: 'Send answer' }));
+    expect(calls.find(call => call.method === 'POST')?.body).toEqual({ materialRevision: 1, materialDigest, answer: 'The result is ready.' });
+  });
+
+  it('forwards native proposal stamps from the decisions list to the material manifest loader', async () => {
+    const user = userEvent.setup();
+    const materialDigest = 'd'.repeat(64);
+    const proposal: import('../src/types').ProposalDecision = {
+      id: 'pr-native', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null,
+      brief: 'Build the approved structure.', at: '2026-11-03T10:00:00.000Z', ownerPersonId: 'p1', canAnswer: true,
+      items: [{ template: 'design', checked: true, note: '' }], materialRevision: 1, materialDigest, hasMaterials: true,
+    };
+    const manifest = { materialRevision: 1, materialDigest, common: [], options: [] } satisfies MaterialManifest;
+    const calls = shell({
+      'GET /api/requests': [200, decisions([], { proposals: [proposal] })],
+      'GET /api/proposals/pr-native/materials': [200, manifest],
+    });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/proposals/pr-native/materials')).toBe(true));
+  });
+
+  it('forwards native proposal stamps from the orchestrator window to the material manifest loader', async () => {
+    const user = userEvent.setup();
+    const materialDigest = 'e'.repeat(64);
+    const agents = [{ ...RUNNING_AGENTS[0]!, id: 'a1', name: 'Orchestrator' }];
+    const proposal = { proposalId: 'pr-window', brief: 'Build the approved structure.', items: [], materialRevision: 1, materialDigest };
+    const manifest = { materialRevision: 1, materialDigest, common: [], options: [] } satisfies MaterialManifest;
+    const calls = shell({
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
+      'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
+      'GET /api/agents/orchestrator/events?after=0': [200, { events: [{ seq: 1, kind: 'proposal', data: proposal, jobId: null, person: null, at: '2026-11-03T10:00:00.000Z' }], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+      'GET /api/proposals/pr-window/materials': [200, manifest],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Machines' }));
+    await user.click(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' }));
+    await user.click(screen.getByRole('button', { name: 'Open Orchestrator' }));
+    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/proposals/pr-window/materials')).toBe(true));
   });
 
   it('closes with its cross and with Escape', async () => {

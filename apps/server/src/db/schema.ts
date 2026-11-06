@@ -1,9 +1,10 @@
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement } from '@hornhoof/protocol';
+import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { BindingPart } from '../modules/model-checks/lifecycle.js';
+import type { IntegrationTarget, NodeRef, WorkspaceProblemCode } from '@hornhoof/protocol';
 import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -22,6 +23,51 @@ const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
    structure and append-only semantics before persisting it. */
 const materialHistoryBound = (history: AnyPgColumn) => sql`
   ${history} IS NULL OR (jsonb_typeof(${history}) = 'object' AND octet_length(${history}::text) <= 1048576)`;
+
+/* Source metadata is private server state, not classification or route authority. Unknown legacy provenance stays null. */
+const questionColumns = () => ({
+  audience: text('audience').$type<QuestionAudience>().notNull().default('internal'),
+  questionRevision: bigint('question_revision', { mode: 'number' }).notNull().default(1),
+  sourceKey: text('source_key'),
+  sourceJobId: uuid('source_job_id').references(() => jobs.id),
+  sourceSequence: bigint('source_sequence', { mode: 'number' }),
+  triageAgentId: uuid('triage_agent_id').references(() => agents.id),
+  routeRevision: bigint('route_revision', { mode: 'number' }).notNull().default(1),
+  classification: jsonb('classification').$type<QuestionClassificationSnapshot>(),
+});
+type QuestionColumns = { [K in keyof ReturnType<typeof questionColumns>]: AnyPgColumn } & { companyId: AnyPgColumn };
+const safeRevision = (column: AnyPgColumn) => sql`${column} BETWEEN 1 AND 9007199254740991`;
+const safeSequence = (column: AnyPgColumn) => sql`${column} BETWEEN 0 AND 9007199254740991`;
+const questionObjectBound = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'object' AND octet_length(${column}::text) <= 32768`;
+const questionChecks = (name: string, t: QuestionColumns) => [
+  check(`${name}_question_audience`, sql`${t.audience} IN ('internal', 'human', 'legacy')`),
+  check(`${name}_question_revision`, safeRevision(t.questionRevision)),
+  check(`${name}_route_revision`, safeRevision(t.routeRevision)),
+  check(`${name}_source_sequence`, safeSequence(t.sourceSequence)),
+  check(`${name}_source_key`, sql`length(btrim(${t.sourceKey})) BETWEEN 1 AND 512 AND ${t.sourceKey} !~ '[[:cntrl:]]'`),
+  check(`${name}_classification_bound`, questionObjectBound(t.classification)),
+  unique(`${name}_source_episode`).on(t.companyId, t.sourceKey),
+];
+export type QuestionRecoveryIntent = {
+  sourceKey: string;
+  reason: 'internal_route_unavailable' | 'plan_unavailable';
+  recordedAt: string;
+};
+const internalResolutionColumns = () => ({
+  executorInstruction: text('executor_instruction'),
+  resolvedByAgentId: uuid('resolved_by_agent_id').references(() => agents.id),
+  resolvedByJobId: uuid('resolved_by_job_id').references(() => jobs.id),
+  resolvedSourceSequence: bigint('resolved_source_sequence', { mode: 'number' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  recoveryIntent: jsonb('recovery_intent').$type<QuestionRecoveryIntent>(),
+});
+type ResolutionColumns = { [K in keyof ReturnType<typeof internalResolutionColumns>]: AnyPgColumn };
+const resolutionChecks = (name: string, t: ResolutionColumns) => [
+  check(`${name}_resolver_whole`, sql`num_nonnulls(${t.resolvedByAgentId}, ${t.resolvedByJobId}, ${t.resolvedAt}) IN (0, 3)
+    AND (${t.resolvedSourceSequence} IS NULL OR ${t.resolvedAt} IS NOT NULL)`),
+  check(`${name}_resolver_sequence`, safeSequence(t.resolvedSourceSequence)),
+  check(`${name}_recovery_bound`, questionObjectBound(t.recoveryIntent)),
+];
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -99,6 +145,8 @@ export const departments = pgTable('departments', {
   repoUrl: text('repo_url'),
   repoBranch: text('repo_branch'),
   repoTokenEnc: text('repo_token_enc'),
+  /* Server-only credential scope; every token write or clear advances it. */
+  repoTokenRevision: integer('repo_token_revision').notNull().default(1),
   repoTokenLast4: text('repo_token_last4'),
   /* Who the agents' commits are by; without one each agent's program sets its own. */
   repoAuthorName: text('repo_author_name'),
@@ -111,7 +159,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
@@ -436,6 +484,9 @@ export const jobs = pgTable(
     createdBy: uuid('created_by').references(() => people.id),
     /* The task a turn works on, when a task woke the agent. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
+    workspaceId: uuid('workspace_id').references((): AnyPgColumn => taskWorkspaces.id),
+    workspaceSpecVersion: integer('workspace_spec_version'),
     /* The turn this one runs once more, after a node restart cut it off. */
     retryOf: uuid('retry_of').references((): AnyPgColumn => jobs.id),
     interruption: jsonb('interruption').$type<Interruption>(),
@@ -448,7 +499,11 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    check('jobs_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
+    check('jobs_workspace_pair', sql`(${t.workspaceId} IS NULL AND ${t.workspaceSpecVersion} IS NULL) OR (${t.workspaceId} IS NOT NULL AND ${t.workspaceSpecVersion} IS NOT NULL AND ${t.workspaceSpecVersion} > 0)`),
+    index('jobs_workspace_id').on(t.workspaceId),
+  ],
 );
 
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
@@ -491,6 +546,7 @@ export const proposals = pgTable('proposals', {
   companyId: companyId(),
   agentId: uuid('agent_id').notNull().references(() => agents.id),
   jobId: uuid('job_id').references(() => jobs.id),
+  ...questionColumns(),
   brief: text('brief').notNull().default(''),
   materialRevision: bigint('material_revision', { mode: 'number' }),
   materialDigest: text('material_digest'),
@@ -505,6 +561,7 @@ export const proposals = pgTable('proposals', {
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, t => [
+  ...questionChecks('proposals', t),
   check('proposals_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
   check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
 ]);
@@ -576,6 +633,7 @@ export const tasks = pgTable(
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
     /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
     gates: jsonb('gates').$type<string[]>().notNull().default([]),
     /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
     panel: jsonb('panel').$type<string[]>().notNull().default([]),
@@ -614,6 +672,7 @@ export const tasks = pgTable(
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
     check('tasks_counts', sql`${t.stage} >= 0 AND ${t.bounces} >= 0 AND ${t.silent} >= 0`),
+    check('tasks_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
     check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
@@ -622,7 +681,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -698,7 +757,7 @@ export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as cons
    person, the rest only to the CEO. */
 export const DECISION_TOPICS = ['task', 'employee', 'people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release'] as const;
 export type DecisionTopic = (typeof DECISION_TOPICS)[number];
-export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
+export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn', 'resolved_internal'] as const;
 
 /* One of the ways a person can pick from, with the picture that shows it. */
 export type RequestOption = { label: string; image: string | null };
@@ -713,6 +772,7 @@ export const requests = pgTable(
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
+    ...questionColumns(),
     text: text('text').notNull(),
     commit: text('commit'),
     /* Null together on legacy sources; no private file/disclosure metadata here. */
@@ -737,11 +797,24 @@ export const requests = pgTable(
     approvalChannel: text('approval_channel', { enum: APPROVAL_CHANNELS }),
     approvalKind: text('approval_kind'),
     approvalAmount: doublePrecision('approval_amount'),
+    /* A goal in danger, as whoever may say so said it: which goal, which episode of it, how bad and whether it is over. An
+       answer to the question does not end the episode, and neither a text nor a date ever opens one. */
+    goalRefKind: text('goal_ref_kind', { enum: ['task', 'turn'] }),
+    goalRefId: uuid('goal_ref_id'),
+    goalEpisodeId: uuid('goal_episode_id'),
+    goalImpact: text('goal_impact', { enum: ['at_risk', 'missed'] }),
+    goalRevision: integer('goal_revision'),
+    goalState: text('goal_state', { enum: ['open', 'resolved'] }),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
+    ...questionChecks('requests', t),
+    check('requests_internal_not_person_answer', sql`${t.status} <> 'resolved_internal' OR
+      num_nonnulls(${t.answeredBy}, ${t.answeredByAgentId}, ${t.answerJobId}, ${t.answerSourceSeq}, ${t.answeredAt}) = 0`),
     check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+    check('requests_goal_whole', sql`num_nonnulls(${t.goalRefKind}, ${t.goalRefId}, ${t.goalEpisodeId}, ${t.goalImpact}, ${t.goalRevision}, ${t.goalState}) IN (0, 6)`),
+    uniqueIndex('requests_one_open_goal').on(t.companyId, t.goalRefKind, t.goalRefId).where(sql`${t.goalState} = 'open'`),
     unique('requests_company_id').on(t.companyId, t.id),
     index('requests_task_id').on(t.taskId),
     index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
@@ -749,15 +822,50 @@ export const requests = pgTable(
   ],
 );
 
-/* Materials sidecar only. Internal question lifecycle/authority is added by its
-   own producer; SQL agents cannot read or forge these private packages. */
+/* Private content and actual internal resolver provenance, without a second lifecycle. */
 export const requestInternal = pgTable('request_internal', {
   requestId: uuid('request_id').primaryKey().references(() => requests.id),
   companyId: companyId(),
   materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
+  technicalText: text('technical_text'),
+  ...internalResolutionColumns(),
 }, t => [
+  ...resolutionChecks('request_internal', t),
+  foreignKey({ columns: [t.companyId, t.requestId], foreignColumns: [requests.companyId, requests.id], name: 'request_internal_company_request' }),
   index('request_internal_company_id').on(t.companyId),
   check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
+
+/* The ASK source only. computer.json remains authoritative for native access and control revision. */
+export const computerAccessIntents = pgTable('computer_access_intents', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  ...questionColumns(),
+  technicalText: text('technical_text').notNull(),
+  ...internalResolutionColumns(),
+  status: text('status', { enum: ['open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown'] }).notNull().default('open'),
+  applyOperationId: uuid('apply_operation_id'),
+  applyRevision: bigint('apply_revision', { mode: 'number' }),
+  applyRouteRevision: bigint('apply_route_revision', { mode: 'number' }),
+  applyControlRevision: bigint('apply_control_revision', { mode: 'number' }),
+  applyTargetUntil: timestamp('apply_target_until', { withTimezone: true }),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  ...questionChecks('computer_access_intents', t),
+  ...resolutionChecks('computer_access_intents', t),
+  check('computer_access_intents_status', sql`${t.status} IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')`),
+  check('computer_access_intents_apply_whole', sql`num_nonnulls(${t.applyOperationId}, ${t.applyRevision}, ${t.applyRouteRevision}, ${t.applyControlRevision}, ${t.applyTargetUntil}) IN (0, 5)`),
+  check('computer_access_intents_apply_started', sql`${t.applyOperationId} IS NULL OR ${t.status} IN ('apply_unknown', 'granted', 'declined', 'withdrawn')`),
+  check('computer_access_intents_apply_revision', safeRevision(t.applyRevision)),
+  check('computer_access_intents_apply_route_revision', safeRevision(t.applyRouteRevision)),
+  check('computer_access_intents_apply_control_revision', safeSequence(t.applyControlRevision)),
+  check('computer_access_intents_apply_outcome', sql`
+    (${t.status} NOT IN ('apply_unknown', 'granted') OR ${t.applyOperationId} IS NOT NULL)
+    AND (${t.status} <> 'granted' OR ${t.appliedAt} IS NOT NULL)
+    AND (${t.appliedAt} IS NULL OR ${t.status} = 'granted')`),
 ]);
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
@@ -1073,7 +1181,9 @@ export const publicLinks = pgTable('public_links', {
 export const waitNotices = pgTable('wait_notices', {
   id: id(),
   companyId: companyId(),
-  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  /* Who it is for: an employee, who gets it as a turn, or a person, who keeps it as a card until they say they saw it. */
+  agentId: uuid('agent_id').references(() => agents.id),
+  personId: uuid('person_id').references(() => people.id),
   dedupKey: text('dedup_key').notNull(),
   message: jsonb('message').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeMessage>().notNull(),
   guard: jsonb('guard').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeGuard>().notNull(),
@@ -1088,8 +1198,13 @@ export const waitNotices = pgTable('wait_notices', {
   level: integer('level'),
   purpose: text('purpose'),
   routeRevision: integer('route_revision'),
+  /* A person saw the card. It decides nothing: the question it speaks of stays as it is. */
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  acknowledgedByPersonId: uuid('acknowledged_by_person_id').references(() => people.id),
 }, t => [
   unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
+  check('wait_notices_one_recipient', sql`(${t.agentId} IS NULL) <> (${t.personId} IS NULL)`),
+  index('wait_notices_cards').on(t.personId, t.createdAt).where(sql`${t.personId} IS NOT NULL AND ${t.acknowledgedAt} IS NULL`),
   index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
   uniqueIndex('wait_notices_one_per_level').on(t.waitId, t.generation, t.level, t.purpose, t.routeRevision).where(sql`${t.waitId} IS NOT NULL`),
   check('wait_notices_wait_whole', sql`${t.waitId} IS NULL OR (${t.generation} IS NOT NULL AND ${t.level} IS NOT NULL AND ${t.purpose} IS NOT NULL AND ${t.routeRevision} IS NOT NULL)`),
@@ -1285,6 +1400,7 @@ const at = (name: string) => timestamp(name, { withTimezone: true });
 
 /* A way out of the company: one adapter, one purpose, direct to contacts or public. A stop holds a reason and only a
    person's decision ends it; each stop or reopening is a new generation, so what was admitted under an older one is stale. */
+export type StopReason = GateCode | 'complaint_threshold' | 'refusal_threshold' | 'bounce_threshold';
 export const outboundChannels = pgTable('outbound_channels', {
   id: id(),
   ...placeColumns(),
@@ -1294,7 +1410,7 @@ export const outboundChannels = pgTable('outbound_channels', {
   audience: text('audience', { enum: ['direct', 'public'] }).notNull(),
   status: text('status', { enum: ['new', 'active', 'stopped'] }).notNull().default('new'),
   generation: integer('generation').notNull().default(1),
-  stoppedReason: text('stopped_reason').$type<GateCode>(),
+  stoppedReason: text('stopped_reason').$type<StopReason>(),
   stoppedAt: at('stopped_at'),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),
@@ -1879,4 +1995,156 @@ export const externalRecoveryNotices = pgTable('external_recovery_notices', {
   foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
   unique('external_notices_one_logical_signal').on(t.companyId, t.caseId, t.noticeKind),
   check('external_notices_kind', sql`${t.noticeKind} = 'operations'`),
+]);
+
+/* Private repository guard rows carry identity only, never a Git credential. */
+export const workspaceRepositories = pgTable('workspace_repositories', {
+  id: id(), companyId: companyId(), canonicalUrl: text('canonical_url').notNull(), createdAt: createdAt(),
+}, t => [
+  unique('workspace_repositories_company_identity').on(t.companyId, t.canonicalUrl),
+  unique('workspace_repositories_company_id').on(t.companyId, t.id),
+  check('workspace_repositories_https', sql`${t.canonicalUrl} ~ '^https://[^/@?#[:space:]]+/[^?#[:space:]]+$'`),
+]);
+
+const workspaceCount = (column: AnyPgColumn, minimum: 0 | 1 = 0) => sql`${column} BETWEEN ${sql.raw(String(minimum))} AND 9007199254740991`;
+const workspaceSha = (column: AnyPgColumn) => sql`${column} ~ '^[0-9a-f]{40}$'`;
+const workspaceList = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'array' AND jsonb_array_length(${column}) > 0 AND octet_length(${column}::text) <= 65536`;
+export const WORKSPACE_PHASES = ['reserved', 'preparing', 'work', 'submitting', 'submission_waiting', 'review', 'merge_pending', 'merged', 'cleanup_pending', 'removed', 'return_pending', 'pausing_other', 'paused', 'retained', 'problem'] as const;
+
+/* A planned task without an integration plan has no row here and owns no slot or area. */
+export const taskWorkspaces = pgTable('task_workspaces', {
+  id: id(), companyId: companyId(),
+  repositoryId: uuid('repository_id').notNull(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  nodeId: uuid('node_id').references(() => nodes.id), builtin: boolean('builtin').notNull(),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), baseSha: text('base_sha').notNull(), baseRef: text('base_ref').notNull(),
+  specVersion: integer('spec_version').notNull().default(1),
+  areas: jsonb('areas').$type<string[]>().notNull(),
+  requiredIntegrations: jsonb('required_integrations').$type<IntegrationTarget[]>().notNull(),
+  phase: text('phase', { enum: WORKSPACE_PHASES }).notNull().default('reserved'),
+  isCurrent: boolean('is_current').notNull().default(true),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull().default(0),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  problem: text('problem').$type<WorkspaceProblemCode>(),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'task_workspaces_company_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  unique('task_workspaces_binding_identity').on(t.companyId, t.id, t.bindingVersion),
+  uniqueIndex('task_workspaces_current_assignment').on(t.companyId, t.taskId, t.assignmentEpoch).where(sql`${t.isCurrent}`),
+  index('task_workspaces_author_phase').on(t.companyId, t.agentId, t.phase),
+  check('task_workspaces_node', sql`(${t.builtin} AND ${t.nodeId} IS NULL) OR (NOT ${t.builtin} AND ${t.nodeId} IS NOT NULL)`),
+  check('task_workspaces_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.bindingVersion, 1)} AND ${workspaceCount(t.submissionRevision)} AND ${workspaceCount(t.switchGeneration)}`),
+  check('task_workspaces_pin', sql`${workspaceSha(t.baseSha)} AND ${t.specVersion} = 1 AND length(${t.taskBranch}) BETWEEN 1 AND 240 AND length(${t.baseRef}) BETWEEN 1 AND 240`),
+  check('task_workspaces_policy', sql`${workspaceList(t.areas)} AND ${workspaceList(t.requiredIntegrations)}`),
+  check('task_workspaces_phase', sql`${t.phase} IN ('reserved','preparing','work','submitting','submission_waiting','review','merge_pending','merged','cleanup_pending','removed','return_pending','pausing_other','paused','retained','problem')`),
+]);
+
+/* Durable capacity is not reconstructed from task workflow status or reviewer panel membership. */
+export const authorWorkspaceSlots = pgTable('author_workspace_slots', {
+  companyId: companyId(), agentId: uuid('agent_id').notNull().references(() => agents.id),
+  heldTaskIds: uuid('held_task_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  executionTaskId: uuid('execution_task_id').references(() => tasks.id),
+  executionJobId: uuid('execution_job_id').references(() => jobs.id),
+  reviewTaskId: uuid('review_task_id').references(() => tasks.id),
+  pausedTaskId: uuid('paused_task_id').references(() => tasks.id),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.companyId, t.agentId] }),
+  check('author_workspace_slots_held', sql`cardinality(${t.heldTaskIds}) <= 2 AND array_position(${t.heldTaskIds}, NULL) IS NULL AND (cardinality(${t.heldTaskIds}) < 2 OR ${t.heldTaskIds}[1] <> ${t.heldTaskIds}[2])`),
+  check('author_workspace_slots_execution', sql`(${t.executionTaskId} IS NULL OR ${t.executionTaskId} = ANY(${t.heldTaskIds})) AND (${t.executionJobId} IS NULL OR ${t.executionTaskId} IS NOT NULL)`),
+  check('author_workspace_slots_review', sql`${t.reviewTaskId} IS NULL OR ${t.reviewTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_paused', sql`${t.pausedTaskId} IS NULL OR ${t.pausedTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_counts', sql`${workspaceCount(t.switchGeneration)} AND ${workspaceCount(t.version)}`),
+]);
+
+const workspaceLink = () => ({
+  companyId: companyId(), workspaceId: uuid('workspace_id').notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+});
+const workspaceForeignKey = (name: string, columns: { companyId: AnyPgColumn; workspaceId: AnyPgColumn; bindingVersion: AnyPgColumn }) =>
+  foreignKey({ name, columns: [columns.companyId, columns.workspaceId, columns.bindingVersion], foreignColumns: [taskWorkspaces.companyId, taskWorkspaces.id, taskWorkspaces.bindingVersion] });
+
+export const taskAreaLocks = pgTable('task_area_locks', {
+  id: id(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  area: text('area').notNull(), areaKey: text('area_key').notNull(),
+  createdAt: createdAt(), releasedAt: timestamp('released_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_area_locks_binding_fk', t),
+  foreignKey({ name: 'task_area_locks_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  uniqueIndex('task_area_locks_active_claim').on(t.companyId, t.workspaceId, t.areaKey).where(sql`${t.releasedAt} IS NULL`),
+  index('task_area_locks_repository').on(t.companyId, t.repositoryId),
+  check('task_area_locks_nonempty', sql`length(${t.area}) BETWEEN 1 AND 4096 AND length(${t.areaKey}) BETWEEN 1 AND 4096`),
+]);
+
+/* Pending plan metadata has no physical workspace. Other records are private durable outbox intents. */
+export const taskWorkspaceOperations = pgTable('task_workspace_operations', {
+  id: id(), companyId: companyId(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  jobId: uuid('job_id').references(() => jobs.id), workspaceId: uuid('workspace_id'),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }),
+  sourceNode: jsonb('source_node').$type<NodeRef>(),
+  kind: text('kind').notNull(), phase: text('phase').notNull(), idempotencyKey: text('idempotency_key').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), sentAt: timestamp('sent_at', { withTimezone: true }),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_operations_binding_fk', t),
+  unique('task_workspace_operations_idempotent').on(t.companyId, t.idempotencyKey),
+  index('task_workspace_operations_outbox').on(t.companyId, t.phase, t.createdAt),
+  check('task_workspace_operations_pending', sql`${t.phase} <> 'pending_integration_plan' OR (${t.workspaceId} IS NULL AND ${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_binding_pair', sql`(${t.workspaceId} IS NULL) = (${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.version)} AND (${t.bindingVersion} IS NULL OR ${workspaceCount(t.bindingVersion, 1)})`),
+  check('task_workspace_operations_payload', sql`jsonb_typeof(${t.payload}) = 'object' AND octet_length(${t.payload}::text) <= 1048576`),
+]);
+
+export const taskWorkspaceSubmissions = pgTable('task_workspace_submissions', {
+  id: id(), ...workspaceLink(), revision: bigint('revision', { mode: 'number' }).notNull(),
+  headSha: text('head_sha').notNull(), publicationReceiptId: uuid('publication_receipt_id'),
+  publication: jsonb('publication').$type<Record<string, unknown>>(),
+  sourceOperationId: uuid('source_operation_id').references(() => taskWorkspaceOperations.id),
+  phase: text('phase').notNull(), createdAt: createdAt(), sealedAt: timestamp('sealed_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_submissions_binding_fk', t),
+  unique('task_workspace_submissions_revision').on(t.companyId, t.workspaceId, t.bindingVersion, t.revision),
+  check('task_workspace_submissions_revision_positive', workspaceCount(t.revision, 1)),
+  check('task_workspace_submissions_pin', workspaceSha(t.headSha)),
+  check('task_workspace_submissions_publication_pair', sql`(${t.publicationReceiptId} IS NULL) = (${t.publication} IS NULL)`),
+]);
+
+export const taskWorkspaceSessions = pgTable('task_workspace_sessions', {
+  id: id(), ...workspaceLink(), provider: text('provider').notNull(),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  model: text('model'), instructionsHash: text('instructions_hash').notNull(),
+  nativeSessionId: text('native_session_id'), lastJobId: uuid('last_job_id').references(() => jobs.id),
+  createdAt: createdAt(), endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_sessions_binding_fk', t),
+  index('task_workspace_sessions_lookup').on(t.companyId, t.workspaceId, t.bindingVersion, t.provider),
+  check('task_workspace_sessions_instructions', sql`${t.instructionsHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
+/* Only the registered integration producer supplies this exact H -> M receipt and confirmation time. */
+export const taskWorkspaceMergeReceipts = pgTable('task_workspace_merge_receipts', {
+  id: uuid('id').primaryKey(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), submittedHeadSha: text('submitted_head_sha').notNull(),
+  publicationReceiptId: uuid('publication_receipt_id').notNull(),
+  integrationKind: text('integration_kind', { enum: ['turn', 'main'] }).notNull(), integrationRef: text('integration_ref').notNull(),
+  integrationCommitSha: text('integration_commit_sha').notNull(), batchOrReleaseId: text('batch_or_release_id').notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+}, t => [
+  workspaceForeignKey('task_workspace_merge_receipts_binding_fk', t),
+  foreignKey({ name: 'workspace_receipts_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  foreignKey({ name: 'workspace_receipts_submission_fk', columns: [t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision], foreignColumns: [taskWorkspaceSubmissions.companyId, taskWorkspaceSubmissions.workspaceId, taskWorkspaceSubmissions.bindingVersion, taskWorkspaceSubmissions.revision] }),
+  unique('task_workspace_receipts_target').on(t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision, t.integrationKind, t.integrationRef),
+  check('task_workspace_receipts_pins', sql`${workspaceSha(t.submittedHeadSha)} AND ${workspaceSha(t.integrationCommitSha)}`),
+  check('task_workspace_receipts_target_kind', sql`${t.integrationKind} IN ('turn','main')`),
 ]);

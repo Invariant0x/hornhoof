@@ -1,7 +1,7 @@
 ---
 id: orch-trouble
 title: { en: "When work goes wrong", ru: "Когда работа идет не так" }
-description: { en: "Finds why work stalled, failed or came back by looking first, the database included, then decides and fixes the cause itself.", ru: "Находит, почему работа встала, сломалась или вернулась: сначала смотрит сам, в том числе в базу данных, потом решает и устраняет причину." }
+description: { en: "Finds why work stalled, failed or came back, including external service failures, by looking first, the database included, then decides and fixes the cause itself.", ru: "Находит, почему работа встала, сломалась или вернулась, включая внешние сбои: сначала смотрит сам, в том числе в базу данных, потом решает и устраняет причину." }
 kind: procedure
 sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---
@@ -12,4 +12,6 @@ When a task stalls, fails or comes back again, or something looks broken, find o
 3. Decide and fix the cause yourself, not the symptom: an unclear task is made clear with update_task, work in the wrong department becomes a task where it belongs, a wrong row is fixed with "database" after you read it. A fix to the schema or to Hornhoof itself goes to the head of Operations as one task. Only sign-ins, payments and machines go to the CEO; never ask the CEO to run SQL.
 4. Change one thing at a time and check it worked before the next.
 5. Trouble with your own session or tools never outranks the CEO's goals: keep their work moving first.
-6. When the same fix fails a second time, give the cause to the head of Operations as one task and tell the CEO in a line what you saw and did.
+6. When the same internal fix fails a second time, give the cause to the head of Operations as one task and tell the CEO in a line what you saw and did; a transient external service failure needs no diagnosis task unless the service stays broken.
+
+External outages and holds: An external service failure is not grounds for a general hold lasting longer than the failure itself. Decide any such hold or its lifting yourself and communicate it at once in one action to every affected holder, never through a department head's queue. An agent needs no permission for an ordinary retry of a transient external failure. Rules against force pushes, alternate refs, permission changes, irreversible actions and retrying dangerous or non-idempotent actions without checking first remain in full force.

@@ -118,11 +118,17 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
+  'GET /api/outbound': 'outbound-views.test.ts: channels and messages of the departments the person may see',
+  'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
 const NO_AGENT_DATA: string[] = [
   'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/outbound/accounts', 'POST /api/outbound/accounts/:id/events', 'POST /api/outbound/accounts/:id/bind', 'POST /api/outbound/accounts/:id/release', 'POST /api/outbound/accounts/:id/revoke', 'POST /api/outbound/accounts/:id/rotate', 'POST /api/outbound/attempts/:id/settle', 'GET /api/outbound/channels/:id/accounts',
+  'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
+  'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
+  'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',

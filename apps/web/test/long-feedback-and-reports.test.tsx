@@ -100,8 +100,8 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
   });
 
   it.each([
-    ['en', 'Comment or feedback', 'Send'],
-    ['ru', 'Комментарий или замечания', 'Отправить'],
+    ['en', 'Comment or feedback', 'Send without choosing'],
+    ['ru', 'Комментарий или замечания', 'Отправить без выбора'],
   ] as const)('sends a full 12,000-character neutral choice feedback without pick in %s', async (lang, label, sendLabel) => {
     const feedback12k = makeLongText(`CHOICE-${lang.toUpperCase()}`, 12_000);
     const calls = mockApi({
@@ -211,7 +211,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     const box = screen.getByLabelText('Комментарий или замечания') as HTMLTextAreaElement;
     await user.click(box);
     await user.paste(feedback12k);
-    const send = screen.getByRole('button', { name: 'Отправить' });
+    const send = screen.getByRole('button', { name: 'Отправить без выбора' });
     await user.click(send);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(ru.errors.codes.validation);
@@ -231,7 +231,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     renderIn('en', <Requests {...requestProps({ requests: [{ ...CHOICE, canAnswer: false }] })} />);
     expect(screen.getByText(en.tasks.decidedByCeo)).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send without choosing' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Option A/ })).not.toBeInTheDocument();
   });
 
@@ -490,7 +490,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     /* TASK_DETAIL has no files, so Files section stays hidden. */
     expect(within(panel).queryByRole('region', { name: 'Файлы' })).not.toBeInTheDocument();
 
-    const box = within(panel).getByLabelText('Комментарий') as HTMLTextAreaElement;
+    const box = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.click(box);
     await user.paste(comment12k);
     expect(box.value.length).toBe(12_000);
@@ -639,7 +639,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     expect(fileAlert).toHaveTextContent('Файл недоступен.');
     expect(fileAlert.textContent).not.toMatch(/картин/i);
 
-    const commentBox = within(panel).getByLabelText('Комментарий') as HTMLTextAreaElement;
+    const commentBox = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.type(commentBox, 'Очень большой текст');
     await user.click(within(panel).getByRole('button', { name: 'Добавить комментарий' }));
     const commentAlerts = await within(panel).findAllByRole('alert');
