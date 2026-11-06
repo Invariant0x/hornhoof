@@ -175,6 +175,13 @@ describe('immutable trial tags on disposable Git remotes', () => {
     expect(calls.filter(args => args[0] === 'push')).toHaveLength(1);
     expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
   });
+  it('publishes the exact tag even when an unqualified reader would find a same-name branch', async () => {
+    const f = await trialFixture();
+    await git(f.writer, ['push', '--quiet', 'origin', `${f.request.baseSha}:refs/heads/${f.candidate.ref}`]);
+    expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
+    expect(await git(f.origin, ['rev-parse', `refs/heads/${f.candidate.ref}`])).toBe(f.request.baseSha);
+    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+  });
   it('refuses to replace a preexisting ancestor even though a branch update would be FF', async () => {
     const f = await trialFixture();
     await git(f.writer, ['push', '--quiet', 'origin', `${f.request.baseSha}:${f.fullRef}`]);
@@ -218,7 +225,8 @@ describe('immutable trial tags on disposable Git remotes', () => {
     const f = await trialFixture(), real = f.context.git; let reads = 0;
     f.context.git = (args, options) => args[0] === 'ls-remote' && ++reads === 2 ? Promise.resolve({ code: 128, stdout: 'private-fixture-marker' }) : real(args, options);
     expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'unavailable' });
-    expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
+    const remote = await rawGit(f.origin, ['rev-parse', '--verify', f.fullRef]);
+    expect({ code: remote.code, sha: remote.stdout.trim() }).toEqual({ code: 0, sha: f.candidate.commitSha });
     f.context.git = real;
     expect(await publishStagingTrial(f.publication, f.context)).toEqual({ status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha });
   });
