@@ -126,7 +126,11 @@ test('real server applies both plan and department to map, schema, tree and list
     await expect(ann.locator('.dcanvas .dept-chip')).toHaveCount(1);
     await expect(ann.locator('.dcanvas')).toContainText('Mina');
     for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);
-    ann.on('response', response => { if (response.url().includes('/tree')) console.log('ACL TREE RESPONSE', response.status()); });
+    ann.on('response', response => {
+      if (!response.url().includes('/tree')) return;
+      console.log('ACL TREE RESPONSE', response.status());
+      void response.json().then(body => console.log('ACL TREE BODY', JSON.stringify(body).slice(0, 1200)));
+    });
     ann.on('requestfailed', request => { if (request.url().includes('/tree')) console.log('ACL TREE FAILED', request.failure()?.errorText); });
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
     console.log('ACL TREE TEXT', await ann.locator('.tview').innerText());
