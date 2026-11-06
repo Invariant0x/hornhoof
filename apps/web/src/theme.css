@@ -472,6 +472,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) tr { display: table-row; width: auto; padding: 0; border: 0; }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) :is(td, th) { overflow-wrap: normal; }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) .pname { overflow-wrap: normal; }
+.fit > :is(.ptable, .dt):not([data-fit="entries"]) .nm b { overflow-wrap: normal; }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) td { display: table-cell; width: auto; padding: 12px 14px; border-block-end: 1px solid var(--line); }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) tr:last-child td { border-block-end: 0; }
 .fit > :is(.ptable, .dt):not([data-fit="entries"]) .status { white-space: nowrap; }
