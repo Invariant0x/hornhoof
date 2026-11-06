@@ -5,6 +5,7 @@ import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldConnections, serverStarted } from '../nodes/connections.js';
+import { tellOfMachinesAway } from '../nodes/machine-away.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile } from '../tasks/reconcile.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../tasks/silent.js';
@@ -130,6 +131,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     modelCheckRound(ctx, now).catch(failed('running model checks failed')),
+    tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
   ]);
 }
 

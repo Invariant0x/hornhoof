@@ -4,10 +4,11 @@ import { deptLabel, errorText, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTasks, useTurns } from '../tasks';
 import { searchTasks } from '../task-search';
-import type { Decisions, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
+import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
 import { CEO_DECIDES } from '../ui/DecidedBy';
+import { MachineAway } from '../ui/MachineAway';
 import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
@@ -208,16 +209,16 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
   place: (p: TaskLine['department']) => string;
 };
 
-type Shown = Pick<Decisions, 'requests' | 'proposals' | 'computerAccess'>;
+type Shown = Pick<Decisions, 'requests' | 'proposals' | 'computerAccess'> & { machinesAway: MachineAwayCard[] };
 
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => (personId ? items.filter(i => i.ownerPersonId === personId) : items);
   const computer = decisions?.computerAccess ? theirs([decisions.computerAccess]) : [];
-  return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null };
+  return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null, machinesAway: decisions?.machinesAway ?? [] };
 }
 
-const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess;
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess && !s.machinesAway.some(m => !m.back);
 
 /* The person whose decisions show, with a cross that shows everyone's again. */
 function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
@@ -256,9 +257,10 @@ type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' 
 /* Each decision with the buttons it already has elsewhere: requests, then the orchestrator's cards, then the computer. */
 function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
   const t = useT();
-  const { requests, proposals, computerAccess } = shown;
+  const { requests, proposals, computerAccess, machinesAway } = shown;
   return (
     <>
+      <MachineAway machines={machinesAway} />
       {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
       {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
       {proposals.map(c => (
