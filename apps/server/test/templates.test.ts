@@ -31,6 +31,15 @@ describe('templates', () => {
     expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
   });
 
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('keeps small work in the developer context in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/already working in that area[\s\S]*context/);
+    expect(body).toMatch(/do not search for a free developer or start a new chain/);
+    expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
+    expect(body).toMatch(/several tasks ahead[\s\S]*free developer/);
+    expect(body).toMatch(/separate small commit[\s\S]*return to their own work/);
+  });
+
   it.each([
     'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
     'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
