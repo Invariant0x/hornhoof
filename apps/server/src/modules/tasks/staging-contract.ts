@@ -29,6 +29,7 @@ export interface StagingInclusionKey {
 }
 
 /* Contract scaffold only. A matching DTO is never evidence of a trusted producer. */
-export function matchStagingInclusion(_record: unknown, _expected: unknown): MergeInclusionReceipt | null {
+export function matchStagingInclusion(record: unknown, expected: unknown): MergeInclusionReceipt | null {
+  void record; void expected;
   return null;
 }
