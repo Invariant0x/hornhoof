@@ -1275,6 +1275,7 @@ function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: strin
 }
 
 const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
 
 /* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
    still come. Nothing else changes with them, so no move that read the task loses its place. */
@@ -1326,7 +1327,8 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
   await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
-  const reviewIndependent = declaration?.kind === 'part' && existing?.kind !== 'part' && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
   let independent: Task | null = null;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
@@ -1335,7 +1337,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     set.after = c.after;
     fields.push('after');
   }
-  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1359,7 +1361,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const wakes: Wake[] = [];
   const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
-    if (declaration?.kind === 'part' && existing?.kind !== 'part') {
+    if (createsIndependent) {
       const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
       independent = made.child;
       wakes.push(made.wake);
