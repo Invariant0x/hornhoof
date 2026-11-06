@@ -1881,6 +1881,8 @@ describe('skills are independent cubes: any can be on for any role and together 
     for (const saving of ['A small step, not a big plan', 'Read only what the step needs', 'Do not prove it twice', 'A short report', 'Do not wait without a reason', 'Effort by size']) expect(fast.body, saving).toContain(saving);
     expect(fast.body).toMatch(/the check and the approval win/);
     expect(fast.body).toMatch(/passed on this exact commit or version stands/);
+    /* Reading less must not argue with reading a skill or a check's output whole. */
+    expect(fast.body).toMatch(/A skill you follow and the output of a check are read whole/);
     expect(text(fast)).not.toMatch(/\bdev-|\bhead of\b|\bdeveloper\b|\breviewer\b|\b\d+\s*(?:%|minutes?|hours?|days?)\b/i);
     expect(fast.kind).not.toBe('core');
   });

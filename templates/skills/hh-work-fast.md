@@ -8,7 +8,7 @@ sources: [unclebob/ub-mode SKILL.md, addyosmani/agent-skills skills/incremental-
 Spend less on everything except the proof: the result must stay just as checkable. Where a rule here would cost you a check or an approval, the check and the approval win.
 
 - **A small step, not a big plan.** Take the smallest step whose result you can check, check it, then choose the next one. Write a plan only when steps depend on each other or the work is new and large.
-- **Read only what the step needs.** Start from what the task names. Search before you open, read the part that answers the question rather than the whole file, log or thread, and stop when you can act. Widen only when a question stays open. Hand bulk reading to a helper and keep its conclusion.
+- **Read only what the step needs.** Start from what the task names. Search before you open, read the part that answers the question rather than the whole file, log or thread, and stop when you can act. Widen only when a question stays open. Hand bulk reading to a helper and keep its conclusion. A skill you follow and the output of a check are read whole.
 - **Use what exists.** Before you make something, look for it in your project, your tools and your skills.
 - **Do not prove it twice.** A check that passed on this exact commit or version stands: read its result instead of running it again. After a change, run only what that change could affect.
 - **Do things at once.** Reads, searches and checks that do not depend on each other go together.
