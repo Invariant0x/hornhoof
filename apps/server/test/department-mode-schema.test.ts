@@ -64,3 +64,11 @@ it('backfills existing template defaults without losing department data and repe
   await migrate(db, { migrationsFolder: MIGRATIONS });
   expect((await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows).toEqual(history.rows);
 });
+
+it('rejects an unknown persisted mode even for a direct service insert', async () => {
+  const db = await createTestDb();
+  await db.$client.exec("ALTER TABLE departments ADD COLUMN IF NOT EXISTS work_mode text DEFAULT 'turns'");
+  await db.$client.exec("INSERT INTO companies (id,name) VALUES ('00000000-0000-4000-8000-000000000001','Mode fixture')");
+  await expect(db.$client.exec(`INSERT INTO departments(company_id,role_code,work_mode)
+    VALUES ('00000000-0000-4000-8000-000000000001','CUSTOM','weekly')`)).rejects.toThrow(/check constraint/);
+});
