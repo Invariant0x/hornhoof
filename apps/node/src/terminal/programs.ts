@@ -6,6 +6,7 @@ import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
 import { codexRootFlags } from '../program-folder.js';
+import { GUARD_REGISTRATION } from '../command-guard.js';
 import { agyPlanLimits } from '../providers/antigravity.js';
 import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
@@ -160,6 +161,7 @@ export async function prepareAgy(workDir: string, mcpUrl: string, fs: AgentFs = 
   await fs.write(join(dir, 'hooks.json'), JSON.stringify({ hornhoof: {
     PreInvocation: [{ type: 'command', command: 'hh-hook invocation' }],
     Stop: [{ type: 'command', command: 'hh-hook stop' }],
+    ...GUARD_REGISTRATION.antigravity,
   } }, null, 2));
 }
 
@@ -177,22 +179,29 @@ const KIMI_HOOKS = [
   ['SessionEnd', 'end'],
 ] as const;
 
+/* Settings with the hooks they lack added at the end, or null when they lack none or list theirs on one line, which could
+   take no more and is left alone. A program that reads such settings runs without these hooks, the guard among them. */
+export function kimiConfigWithHooks(config: string, hooks: readonly (readonly [string, string])[]): string | null {
+  const entries = config.split(/\[\[hooks\]\]/).slice(1);
+  const missing = hooks.filter(([name, event]) => !entries.some(entry => new RegExp(`event\\s*=\\s*"${name}"`).test(entry) && entry.includes(`"hh-hook ${event}"`)));
+  if (!missing.length || /^\s*hooks\s*=/m.test(config)) return null;
+  const added = missing.map(([name, event]) => `[[hooks]]\nevent = "${name}"\ncommand = "hh-hook ${event}"\n`).join('\n');
+  return `${config}${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${added}`;
+}
+
 /* Kimi has no flags for tools or hooks. Its tools come from the agent folder's .kimi-code/mcp.json, through the bridge,
    and its hooks from config.toml in its home, which the person's own settings share: Hornhoof's are added at the end
-   once. Settings that list their hooks on one line could take no more, and are left alone. */
+   once. */
 export async function prepareKimi(home: string, workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
   const dir = join(workDir, '.kimi-code');
   await fs.mkdir(dir);
   await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2));
   const file = join(home, 'config.toml');
   /* A home that was never signed in has none yet. */
-  const config = (await fs.read(file)) ?? '';
-  const entries = config.split(/\[\[hooks\]\]/).slice(1);
-  const missing = KIMI_HOOKS.filter(([name, event]) => !entries.some(entry => new RegExp(`event\\s*=\\s*"${name}"`).test(entry) && entry.includes(`"hh-hook ${event}"`)));
-  if (!missing.length || /^\s*hooks\s*=/m.test(config)) return;
-  const added = missing.map(([name, event]) => `[[hooks]]\nevent = "${name}"\ncommand = "hh-hook ${event}"\n`).join('\n');
+  const next = kimiConfigWithHooks((await fs.read(file)) ?? '', KIMI_HOOKS);
+  if (next === null) return;
   await fs.mkdir(home);
-  await fs.write(file, `${config}${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${added}`);
+  await fs.write(file, next);
 }
 
 /* Kimi Code keeps a session's log by the folder's workspace and the session's id; the main agent has its own log. */

@@ -6,6 +6,7 @@ import { asAgent, type JobUser } from '../isolation.js';
 import { programDirOf, toldPlace } from '../program-folder.js';
 import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
+import { GUARD_REGISTRATION } from '../command-guard.js';
 import { READY } from '../terminal/program-state.js';
 import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
@@ -484,8 +485,9 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
          only the program's user reads, for this run alone. */
       const programDir = programDirOf(input);
       const mcpJson = join(programDir, '.agents', 'mcp_config.json');
+      agentDir(join(programDir, '.agents'), user);
+      writePrivate(join(programDir, '.agents', 'hooks.json'), JSON.stringify({ hornhoof: GUARD_REGISTRATION.antigravity }, null, 2), user);
       if (input.tools) {
-        agentDir(join(programDir, '.agents'), user);
         const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       }

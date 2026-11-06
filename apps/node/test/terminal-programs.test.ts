@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, kimiConfigWithHooks, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -208,12 +208,13 @@ describe('Antigravity CLI in a terminal', () => {
     expect(again.sessionId).toBe('conversation-1');
   });
 
-  it('writes MCP and invocation and stop hooks in the agent folder without a print log', async () => {
+  it('writes MCP, invocation, stop and command guard hooks in the agent folder without a print log', async () => {
     const work = mkdtempSync(join(tmpdir(), 'agy-work-'));
     await prepareAgy(work, URLS.mcpUrl);
     expect(JSON.parse(readFileSync(join(work, '.agents', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { serverUrl: URLS.mcpUrl } } });
     expect(JSON.parse(readFileSync(join(work, '.agents', 'hooks.json'), 'utf8'))).toEqual({ hornhoof: {
       PreInvocation: [{ type: 'command', command: 'hh-hook invocation' }], Stop: [{ type: 'command', command: 'hh-hook stop' }],
+      PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'hh-hook tool' }] }],
     } });
     expect(existsSync(join(work, '.hh-agy.jsonl'))).toBe(false);
   });
@@ -271,6 +272,15 @@ describe('Kimi Code in a terminal', () => {
     expect(config).toContain('event = "SessionStart"\ncommand = "hh-hook start"');
     expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
     expect(config).toContain('event = "UserPromptQueued"\ncommand = "hh-hook queued"');
+  });
+
+  it('adds hooks to settings text once, whatever it held, and takes nothing from settings it cannot add to', () => {
+    const guard = [['PreToolUse', 'tool']] as const;
+    const fresh = kimiConfigWithHooks('', guard);
+    expect(fresh).toBe('[[hooks]]\nevent = "PreToolUse"\ncommand = "hh-hook tool"\n');
+    expect(kimiConfigWithHooks(fresh!, guard)).toBeNull();
+    expect(kimiConfigWithHooks('a = 1', guard)).toBe('a = 1\n\n[[hooks]]\nevent = "PreToolUse"\ncommand = "hh-hook tool"\n');
+    expect(kimiConfigWithHooks('hooks = []\n', guard)).toBeNull();
   });
 
   it('adds UserPromptQueued to existing hooks and leaves an installed receipt hook alone', async () => {

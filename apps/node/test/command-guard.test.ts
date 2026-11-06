@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { classifyAgentCommand, classifyRunWork, COMMAND_LIMITS, encodeNativeDecision, localCommandFiles, refusalText, type CommandDenial, type CommandFiles, type NativeProgram } from '../src/command-guard.js';
+import { classifyAgentCommand, classifyRunWork, COMMAND_LIMITS, encodeNativeDecision, GUARD_REGISTRATION, localCommandFiles, refusalText, type CommandDenial, type CommandFiles, type NativeProgram } from '../src/command-guard.js';
 
 /* The whole command is told before anything of it runs, on real files in a real folder. Nothing here is proof of a CLI's own
    hook path: that takes each program itself, and is not run here. */
@@ -487,6 +487,16 @@ describe('the refusal', () => {
 });
 
 /* What each program's own documentation says it reads. None of this shows that an installed version respects it. */
+describe('the hook that asks', () => {
+  it('runs one command in the words of each program', () => {
+    const entry = { type: 'command', command: 'hh-hook tool' };
+    expect(GUARD_REGISTRATION.claude).toEqual({ PreToolUse: [{ hooks: [entry] }] });
+    expect(GUARD_REGISTRATION.codex).toEqual(['-c', 'hooks.PreToolUse=[{hooks=[{type="command",command="hh-hook tool"}]}]']);
+    expect(GUARD_REGISTRATION.kimi).toEqual([['PreToolUse', 'tool']]);
+    expect(GUARD_REGISTRATION.antigravity).toEqual({ PreToolUse: [{ matcher: 'run_command', hooks: [entry] }] });
+  });
+});
+
 describe('the answer to a program that asked', () => {
   const FIRST_LINE = 'запусти через run_tests';
   const denied: CommandDenial = { allow: false, code: 'heavy_check_local', category: 'guard_failed' };

@@ -21,6 +21,15 @@ export type CommandDenial = { allow: false; code: 'heavy_check_local' | 'depende
 export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'single_test_file' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 export type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 
+const GUARD_ENTRY = { type: 'command', command: 'hh-hook tool' };
+/* The one hook every program runs before a tool, as each program's documentation writes it. That an installed version
+   honors it is for that version to show. */
+export const GUARD_REGISTRATION = {
+  claude: { PreToolUse: [{ hooks: [GUARD_ENTRY] }] },
+  codex: ['-c', `hooks.PreToolUse=[{hooks=[{type="command",command="${GUARD_ENTRY.command}"}]}]`],
+  kimi: [['PreToolUse', 'tool']],
+  antigravity: { PreToolUse: [{ matcher: 'run_command', hooks: [GUARD_ENTRY] }] },
+} as const;
 export type NativeProgram = 'claude' | 'codex' | 'kimi' | 'antigravity';
 export type NativeAnswer = { stdout: string; stderr: string; exitCode: number };
 

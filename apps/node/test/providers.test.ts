@@ -31,7 +31,9 @@ const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
 const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
 /* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. */
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576', '-c', 'check_for_update_on_startup=false'];
+const CLAUDE_GUARD = JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'hh-hook tool' }] }] } });
+const CODEX_GUARD = ['--dangerously-bypass-hook-trust', '-c', 'hooks.PreToolUse=[{hooks=[{type="command",command="hh-hook tool"}]}]'];
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576', '-c', 'check_for_update_on_startup=false', ...CODEX_GUARD];
 
 type Logged = {
   name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
@@ -187,7 +189,7 @@ describe('Claude Code', () => {
     const { argv, cwd } = lastRun();
     expect(argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--session-id', expect.stringMatching(/^[0-9a-f-]{36}$/),
-      '--permission-mode', 'bypassPermissions', '--', '-rf looks like a flag',
+      '--permission-mode', 'bypassPermissions', '--settings', CLAUDE_GUARD, '--', '-rf looks like a flag',
     ]);
     expect(cwd).toBe(work);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION, error: null });
@@ -197,7 +199,7 @@ describe('Claude Code', () => {
     const res = await adapter('claude').run(input({ sessionId: CLAUDE_SESSION, model: 'opus' }));
     expect(lastRun().argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--resume', CLAUDE_SESSION,
-      '--permission-mode', 'bypassPermissions', '--model', 'opus', '--', 'say ready',
+      '--permission-mode', 'bypassPermissions', '--settings', CLAUDE_GUARD, '--model', 'opus', '--', 'say ready',
     ]);
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION });
   });
@@ -635,6 +637,19 @@ describe('OpenAI API key', () => {
 });
 
 describe('Kimi Code', () => {
+  it('runs with the command guard in its settings, once, and leaves settings alone that cannot take more', async () => {
+    const a = adapter('kimi');
+    await a.run(input());
+    const file = join(home, 'config.toml');
+    const written = readFileSync(file, 'utf8');
+    expect(written).toBe('[[hooks]]\nevent = "PreToolUse"\ncommand = "hh-hook tool"\n');
+    await a.run(input());
+    expect(readFileSync(file, 'utf8')).toBe(written);
+    writeFileSync(file, 'hooks = []\n');
+    await a.run(input());
+    expect(readFileSync(file, 'utf8')).toBe('hooks = []\n');
+  });
+
   it('starts and resumes a session with its home set', async () => {
     const a = adapter('kimi');
     const first = await a.run(input());
@@ -697,6 +712,13 @@ describe('Kimi Code', () => {
 });
 
 describe('Antigravity CLI', () => {
+  it('runs with the command guard on run_command in its folder', async () => {
+    await adapter('antigravity').run(input());
+    expect(JSON.parse(readFileSync(join(work, '.agents', 'hooks.json'), 'utf8'))).toEqual({ hornhoof: {
+      PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'hh-hook tool' }] }],
+    } });
+  });
+
   it('runs a prompt in print mode with every tool allowed in its own home, and goes on in the conversation it named', async () => {
     const a = adapter('antigravity');
     const first = await a.run(input());

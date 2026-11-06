@@ -6,9 +6,10 @@ import type { JobUser } from '../isolation.js';
 import { programDirOf, toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
-import { kimiPlanLimits } from '../terminal/programs.js';
+import { GUARD_REGISTRATION } from '../command-guard.js';
+import { kimiConfigWithHooks, kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { agentDir, childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { agentDir, childEnv, ensureDir, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 import { NPM_PACKAGES } from './packages.js';
 
@@ -139,6 +140,10 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       const args = [`--prompt=${input.prompt}`, '--output-format', 'stream-json'];
       if (input.sessionId) args.push('--session', input.sessionId);
       if (input.model) args.push('-m', input.model);
+
+      const settings = join(ensureDir(home), 'config.toml');
+      const guarded = kimiConfigWithHooks(readPrivate(settings) ?? '', GUARD_REGISTRATION.kimi);
+      if (guarded !== null) writePrivate(settings, guarded, user);
 
       /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
       const mcpJson = join(ensureDir(home), 'mcp.json');
