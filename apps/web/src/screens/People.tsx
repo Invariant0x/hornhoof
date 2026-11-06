@@ -300,12 +300,16 @@ function usePeopleTable(people: PersonView[] | null) {
   return tableHost;
 }
 
+function renamePerson(people: PersonView[] | null, id: string, name: string): PersonView[] | null {
+  return people?.map(p => p.id === id ? { ...p, name } : p) ?? null;
+}
+
 function useOwnName(me: Me, setPeople: (update: (list: PersonView[] | null) => PersonView[] | null) => void) {
   const previousName = useRef(me.person.name);
   useEffect(() => {
     if (previousName.current === me.person.name) return;
     previousName.current = me.person.name;
-    setPeople(list => list?.map(p => p.id === me.person.id ? { ...p, name: me.person.name } : p) ?? null);
+    setPeople(list => renamePerson(list, me.person.id, me.person.name));
   }, [me.person.id, me.person.name]);
 }
 

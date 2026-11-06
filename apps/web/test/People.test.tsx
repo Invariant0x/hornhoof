@@ -30,14 +30,15 @@ describe('People', () => {
     expect(within(rowOf('Sasha')).getByRole('cell', { name: 'SMM' })).toBeInTheDocument();
   });
 
-  it('keeps the loaded names when your name has not changed', async () => {
+  it('keeps the loaded names when your identity changes with the same name', async () => {
     const people = [{ ...PEOPLE[0]!, name: 'Ivan K' }, ...PEOPLE.slice(1)];
     mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const view = render(<People me={ME} />);
     await screen.findByRole('cell', { name: 'Ivan K' });
-    view.rerender(<People me={{ ...ME, person: { ...ME.person } }} />);
+    view.rerender(<People me={{ ...ME, person: { ...ME.person, id: 'p2' } }} />);
     expect(screen.getByRole('cell', { name: 'Ivan K' })).toBeInTheDocument();
     expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Maria' })).toBeInTheDocument();
   });
 
   it('keeps the people request pending when your name changes before it loads', async () => {
