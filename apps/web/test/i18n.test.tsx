@@ -131,6 +131,11 @@ describe('work tree words', () => {
     expect(ru.window.pictureUploaded).toBe('Путь к картинке вставлен в терминал. Нажмите Enter для отправки.');
   });
 
+  it('names the notebook saving state in English and Russian', () => {
+    expect(en.notebook.saving).toBe('Saving');
+    expect(ru.notebook.saving).toBe('Сохранение');
+  });
+
   it('names a hidden employee in English and Russian', () => {
     expect(en.window.hiddenEmployee).toBe('Employee');
     expect(ru.window.hiddenEmployee).toBe('Сотрудник');
