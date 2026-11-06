@@ -153,19 +153,25 @@ async function readyFolders(adapter: ProviderAdapter, { provider, skills }: JobR
 
 type TurnPlace = Pick<RunInput, 'workDir' | 'programDir' | 'workspaceBinding'> & { sessionId: string | null; context: string | null };
 
-/* Where a turn runs and what it goes on from, in folders ready for it. A session the program loses with its folder is told of,
-   and what it may know from before goes with the new one. */
+async function readyWorkDir({ owner }: ProviderAdapter, workDir: string): Promise<void> {
+  if (owner?.mkdir) await owner.mkdir(workDir);
+  else mkdirSync(workDir, { recursive: true });
+  owner?.prepare(workDir);
+}
+
+/* A session the program loses with its folder is told of, and what it may know from before goes with the new one. */
+const anewInTask = (inTask: ProgramWorkspace | undefined, known: string | null, sessionId: string | null) => (inTask && known && !sessionId ? freshStart(inTask.catchUp) : null);
+
+/* Where a turn runs and what it goes on from, in folders ready for it. */
 async function placeOfTurn(adapter: ProviderAdapter, msg: JobRun, dir: string, emit: (event: AgentEvent) => void, { workspace, carries, superpowers }: { workspace: ProgramWorkspace | undefined; carries: ReadonlySet<ProviderId>; superpowers: string | null }): Promise<TurnPlace> {
   const inTask = msg.workspace ? workspace : undefined;
   const programDir = inTask?.programDir ?? null;
   const { workDir, sessionId } = workDirFor(msg, dir, programDir, carries);
-  if (adapter.owner?.mkdir) await adapter.owner.mkdir(workDir);
-  else mkdirSync(workDir, { recursive: true });
-  adapter.owner?.prepare(workDir);
+  await readyWorkDir(adapter, workDir);
   await readyFolders(adapter, msg, workDir, programDir, superpowers);
-  const anew = inTask && msg.sessionId && !sessionId ? freshStart(inTask.catchUp) : null;
+  const anew = anewInTask(inTask, msg.sessionId, sessionId);
   if (anew) emit({ kind: 'text', text: anew.note });
-  return { workDir, sessionId, context: anew?.context ?? msg.context ?? null, ...(inTask ? { programDir: inTask.programDir, workspaceBinding: inTask.binding } : {}) };
+  return { workDir, sessionId, context: anew?.context ?? msg.context ?? null, ...(inTask && { programDir: inTask.programDir, workspaceBinding: inTask.binding }) };
 }
 
 type RunOptions = {
