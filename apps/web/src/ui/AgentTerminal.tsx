@@ -124,9 +124,13 @@ function screenCame(view: View, data: string) {
   confirmSize(view.term, opened, view.send);
 }
 
-function viewUrl(path: string, size: Size) {
+function socketUrl(path: string) {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.host}${path}${path.includes('?') ? '&' : '?'}cols=${size.cols}&rows=${size.rows}`;
+  return `${scheme}://${location.host}${path}`;
+}
+
+function viewUrl(path: string, size: Size) {
+  return `${socketUrl(path)}${path.includes('?') ? '&' : '?'}cols=${size.cols}&rows=${size.rows}`;
 }
 
 /* The node cannot show a view, or the person may no longer reach the agent: trying again changes nothing. */
@@ -212,8 +216,7 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
 }
 
 function testViewUrl(viewId: string) {
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.host}/api/test-terminals/views/${viewId}/stream`;
+  return socketUrl(`/api/test-terminals/views/${viewId}/stream`);
 }
 
 function testCloseReason(close: { code: number; reason: string }): TestTerminalGoneReason | undefined {
@@ -290,6 +293,10 @@ class TestViewConnection {
       return this.fail(this.admitted ? 'unknown' : 'denied');
     }
     if (!this.admitted) return this.admit(response, frame);
+    this.receiveAdmitted(frame);
+  }
+
+  private receiveAdmitted(frame: unknown) {
     const parsed = TestTerminalServerFrame.safeParse(frame);
     if (!parsed.success || parsed.data.type === 'ready') return this.fail('unknown');
     if (parsed.data.type === 'error') return this.fail(parsed.data.reason);
