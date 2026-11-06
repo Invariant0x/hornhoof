@@ -31,8 +31,10 @@ function makePlan({ sha, base }, ports) {
   return buildPlan({ sha, base, cwdOf: path => cwdOf(suites, path) }, { git: ports.git, complexity: complexityAt(ports.git) });
 }
 
+/* --ignore-scripts keeps the scripts of the dependencies off, and the repository's own prepare with them: a package needs what that links. */
 export async function prepare(ports) {
-  const steps = [...(ports.exists('node_modules') ? [] : [['ci', '--ignore-scripts']]), ['run', '-s', 'build', '-w', '@hornhoof/protocol'], ['run', '-s', 'build', '-w', '@hornhoof/node']];
+  const install = ports.exists('node_modules') ? [] : [['ci', '--ignore-scripts'], ['run', '-s', 'prepare']];
+  const steps = [...install, ['run', '-s', 'build', '-w', '@hornhoof/protocol'], ['run', '-s', 'build', '-w', '@hornhoof/node']];
   for (const args of steps) if ((await ports.exec('npm', args, { cwd: '.' })).code !== 0) return 'prepare_failed';
   return null;
 }

@@ -627,7 +627,7 @@ test('preparing a run installs only what is missing and builds what the selector
   const asked = [];
   const ports = have => ({ exists: () => have, exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code: 0 }; } });
   assert.equal(await prepare(ports(false)), null);
-  assert.deepEqual(asked, ['npm ci --ignore-scripts', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
+  assert.deepEqual(asked, ['npm ci --ignore-scripts', 'npm run -s prepare', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
   asked.length = 0;
   assert.equal(await prepare(ports(true)), null);
   assert.equal(asked.length, 2);
