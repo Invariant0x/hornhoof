@@ -22,11 +22,11 @@ How work moves through development. Check each item only where a mistake cannot 
 
 ## By sample
 
-- Mutation testing runs once per release, only on the riskiest pure logic and only against its fast tests (dev-engineering-rules).
+- The test engineer or QA runs mutation testing once per turn on its final candidate, only on the riskiest pure logic and only against its fast tests (dev-engineering-rules).
 
 ## By code
 
-- On ordinary tasks, the tests selected by impact, types, lint, crapper and dryer run on what it changed.
+- Developers write a failing test before the change, run only affected tests through run_tests, and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate (dev-gates), without duplicate runs.
 - Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
 
 ## By a model

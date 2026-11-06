@@ -384,9 +384,10 @@ describe('templates', () => {
     const changed = 'git diff --name-only --diff-filter=d';
     for (const id of ['dev-engineering-rules', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
-    /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
+    /* Shared final metrics keep their gates, but authors do not run them before submitting. */
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).not.toMatch(/developer runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/test engineer or QA[\s\S]*shared final check/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
@@ -408,7 +409,7 @@ describe('templates', () => {
   it('keeps test selection, release mutation testing and evidence rules consistent', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const policy = body('dev-engineering-rules');
-    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per release or phase', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
+    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per turn on the final candidate', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
       expect(policy, words).toContain(words);
     }
     const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
