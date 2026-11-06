@@ -1,6 +1,7 @@
-import type { ExternalGitOutcome } from '@hornhoof/protocol';
+import type { ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { classifyGitOutcome } from '../src/modules/failures/git.js';
+import * as gitPolicy from '../src/modules/failures/git.js';
 
 const child = (stderr: string, extra: Partial<Extract<ExternalGitOutcome, { kind: 'child' }>> = {}): ExternalGitOutcome =>
   ({ kind: 'child', exitCode: 1, signal: null, osCode: null, stderr, stderrTruncated: false, ...extra });
@@ -56,5 +57,33 @@ describe('typed Git failure classification', () => {
     { name: 'an unknown transport failure', outcome: http(503, { transportError: 'unknown' }), expected: { kind: 'unknown' } },
   ])('classifies $name without granting execution', ({ outcome, expected }) => {
     expect(classifyGitOutcome(outcome)).toEqual(expected);
+  });
+});
+
+describe('Git outcome state', () => {
+  const state = (gitPolicy as unknown as { gitOutcomeState?: (intent: ExternalGitIntent, outcome: ExternalGitOutcome, settled: boolean, observedHead?: string | null) => string }).gitOutcomeState;
+  const push: ExternalGitIntent = { kind: 'git_push', repositoryId: '00000000-0000-4000-8000-000000000001', sourceSha: 'a'.repeat(40), destinationRef: 'refs/heads/task-559' };
+  const fetch: ExternalGitIntent = { kind: 'git_fetch', repositoryId: push.repositoryId, target: { kind: 'commit', commitSha: 'a'.repeat(40) } };
+  const refs: ExternalGitIntent = { kind: 'git_refs', repositoryId: push.repositoryId, selector: 'refs/heads/task-559' };
+  const temporary = child('remote: fatal error in commit_refs_rules\n! [remote rejected]');
+
+  it.each([
+    { name: 'a successful child still lacking cleanup settlement', intent: push, outcome: child('', { exitCode: 0 }), settled: false, head: undefined, expected: 'outcome_unknown' },
+    { name: 'a matching ref still lacking settlement', intent: push, outcome: temporary, settled: false, head: 'a'.repeat(40), expected: 'outcome_unknown' },
+    { name: 'a successful settled push', intent: push, outcome: child('', { exitCode: 0 }), settled: true, head: undefined, expected: 'satisfied' },
+    { name: 'a settled write whose target could not be read', intent: push, outcome: temporary, settled: true, head: undefined, expected: 'outcome_unknown' },
+    { name: 'an exact already-published target after a temporary refusal', intent: push, outcome: temporary, settled: true, head: 'a'.repeat(40), expected: 'satisfied' },
+    { name: 'an exact target after an otherwise unclassified exit', intent: push, outcome: child('unrecognized result'), settled: true, head: 'a'.repeat(40), expected: 'satisfied' },
+    { name: 'a different observed target after a settled temporary refusal', intent: push, outcome: temporary, settled: true, head: 'b'.repeat(40), expected: 'deferred' },
+    { name: 'an absent target after a settled temporary refusal', intent: push, outcome: temporary, settled: true, head: null, expected: 'deferred' },
+    { name: 'a different target without transient evidence', intent: push, outcome: child('unrecognized result'), settled: true, head: 'b'.repeat(40), expected: 'outcome_unknown' },
+    { name: 'a permanent refusal despite an earlier matching observation', intent: push, outcome: child('Authentication failed'), settled: true, head: 'a'.repeat(40), expected: 'failed_permanent' },
+    { name: 'a proven non-fast-forward refusal', intent: push, outcome: child('! [rejected] (non-fast-forward)'), settled: true, head: 'b'.repeat(40), expected: 'failed_permanent' },
+    { name: 'a settled transient pinned fetch', intent: fetch, outcome: http(503), settled: true, head: undefined, expected: 'deferred' },
+    { name: 'a settled successful refs read', intent: refs, outcome: http(200), settled: true, head: undefined, expected: 'satisfied' },
+    { name: 'a settled transient refs read', intent: refs, outcome: http(429), settled: true, head: undefined, expected: 'deferred' },
+    { name: 'an unclassified fetch without a grant from a matching-looking ref', intent: fetch, outcome: child('unknown'), settled: true, head: 'a'.repeat(40), expected: 'outcome_unknown' },
+  ])('keeps $name in $expected', ({ intent, outcome, settled, head, expected }) => {
+    expect(state?.(intent, outcome, settled, head)).toBe(expected);
   });
 });
