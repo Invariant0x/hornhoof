@@ -119,10 +119,53 @@ Reviewers of different models find different things. So at each gate, one employ
 Hornhoof picks the level when a turn starts, by why it starts, and the level stays until that turn ends.
 
 - Plans, first looks, security checks and work run at the role's level, or at the level set on the employee's card.
-- A second look at the fixes for a reviewer's own finding and a merge of what passed its gates run at medium, or at the nearest level above it that the model has. A lower level stays as it is.
+- Three kinds of turn run at medium, or at the nearest level above it that the model has. A lower level stays as it is.
+  - A second look at the fixes for a reviewer's own finding.
+  - A merge of what passed its gates.
+  - Fixes where every reviewer who sent the work back marked all of its findings as mechanical in its verdict. Words in a comment or a title do not count.
+- All other fixes keep the full level, because nobody can tell from outside how hard they are.
+- A merge that fails is reported as blocked. The turn that mends it runs at the full level.
 - A turn that also brings anything else, such as a comment or a person's words, keeps the full level.
 - The card keeps the level you set. A model that names no levels gets none from Hornhoof.
 - A change of level starts the program again between turns, and the conversation goes on in the same session.
+- Words a person types into a running program start no program and change no level. They run at the level the program already has.
+
+### Which programs, models and levels fit a role?
+
+Hornhoof's own lists give these tables, so they say what it does today. A program that lists no models here shows what it has once its machine reports it. A model that lacks a level gets the nearest one it has.
+
+| Program | Models | Levels | Deep roles |
+| --- | --- | --- | --- |
+| Claude Code | Fable, Opus, Sonnet, Haiku | low, medium, high, xhigh, max | yes |
+| Codex | what its machine reports | what its machine reports | yes |
+| Kimi Code | what its machine reports | what its machine reports | no |
+| GLM | what its machine reports | what its machine reports | no |
+| Claude API | Claude Fable 5.1, Claude Opus 5.5, Claude Sonnet 5.5, Claude Haiku 5.5 | low, medium, high, xhigh, max | yes |
+| OpenAI API | GPT-6.1 Sol, GPT-6 Astra, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna | low, medium, high, xhigh, max | yes |
+| Antigravity | what its machine reports | what its machine reports | yes |
+
+| Level of the role or card | Plans, first looks, security, work, other fixes | Second look, clean merge, mechanical fix |
+| --- | --- | --- |
+| low | low | low |
+| medium | medium | medium |
+| high | high | medium |
+| xhigh | xhigh | medium |
+| max | max | medium |
+
+| Department | xhigh | high | medium |
+| --- | --- | --- | --- |
+| Business development | - | Business analyst | Head of business development, Partnerships manager |
+| Design | - | Design system designer, Product UI designer | Design QA, Head of design |
+| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
+| Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller |
+| Home devices | - | Home network helper | Head of home devices, Smart home helper |
+| Household | - | - | Bills helper, Calendar helper, Head of household, Supplies helper |
+| Marketing | - | Copywriter | Head of marketing, Search specialist, Social media manager |
+| Operations | - | Integrations engineer, Reliability engineer, Weak point collector | Accounts administrator, Head of operations, Program operator, Task watchdog |
+| Sales | - | Account executive | Head of sales, Sales development representative, Sales operations analyst |
+| Support | - | Second-line support | First-line support, Head of support, Knowledge base editor |
+
+Deep roles: Architect, Controller, Head of business development, Head of development, Security engineer.
 
 ## What if a role has nobody switched on?
 
