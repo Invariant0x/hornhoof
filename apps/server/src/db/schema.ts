@@ -1,5 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
@@ -9,6 +9,16 @@ const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
+
+/* Legacy rows keep null metadata. A versioned public stamp is always complete. */
+const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
+  (${revision} IS NULL AND ${digest} IS NULL) OR
+  (${revision} IS NOT NULL AND ${digest} IS NOT NULL AND ${revision} > 0
+   AND ${revision} <= 9007199254740991 AND ${digest} ~ '^[0-9a-f]{64}$')`;
+/* JSON bytes remain private/bounded; the sealing service validates the history
+   structure and append-only semantics before persisting it. */
+const materialHistoryBound = (history: AnyPgColumn) => sql`
+  ${history} IS NULL OR (jsonb_typeof(${history}) = 'object' AND octet_length(${history}::text) <= 1048576)`;
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -475,6 +485,10 @@ export const proposals = pgTable('proposals', {
   agentId: uuid('agent_id').notNull().references(() => agents.id),
   jobId: uuid('job_id').references(() => jobs.id),
   brief: text('brief').notNull().default(''),
+  materialRevision: bigint('material_revision', { mode: 'number' }),
+  materialDigest: text('material_digest'),
+  /* Private sealed versions, never serialized as a public proposal. */
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
   items: jsonb('items').notNull(),
   /* structure: departments for the company; staff: employees for one department. */
   kind: text('kind', { enum: ['structure', 'staff'] }).notNull().default('structure'),
@@ -483,7 +497,10 @@ export const proposals = pgTable('proposals', {
   appliedBy: uuid('applied_by').references(() => people.id),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
-});
+}, t => [
+  check('proposals_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+  check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
@@ -689,6 +706,9 @@ export const requests = pgTable(
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
     text: text('text').notNull(),
     commit: text('commit'),
+    /* Null together on legacy sources; no private file/disclosure metadata here. */
+    materialRevision: bigint('material_revision', { mode: 'number' }),
+    materialDigest: text('material_digest'),
     options: jsonb('options').$type<RequestOption[]>().notNull().default([]),
     link: text('link'),
     picked: integer('picked'),
@@ -712,11 +732,23 @@ export const requests = pgTable(
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
+    check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
     index('requests_task_id').on(t.taskId),
     index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
     check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL OR ${t.approvalChannel} IS NOT NULL`),
   ],
 );
+
+/* Materials sidecar only. Internal question lifecycle/authority is added by its
+   own producer; SQL agents cannot read or forge these private packages. */
+export const requestInternal = pgTable('request_internal', {
+  requestId: uuid('request_id').primaryKey().references(() => requests.id),
+  companyId: companyId(),
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
+}, t => [
+  index('request_internal_company_id').on(t.companyId),
+  check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
    an agent on a task put on it, of any kind, which every agent of the company downloads by its name. */
