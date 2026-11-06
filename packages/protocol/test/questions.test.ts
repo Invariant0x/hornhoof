@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { QuestionClassificationInput, HumanActionBinding, QuestionAudience, QuestionAuthorityBinding, QuestionMutationGuard, QuestionPurpose, QuestionRouteTarget, SourceRef } from '../src/questions.js';
+import { QuestionClassificationInput, QuestionClassificationSnapshot, HumanActionBinding, QuestionAudience, QuestionAuthorityBinding, QuestionMutationGuard, QuestionPurpose, QuestionRouteTarget, SourceRef } from '../src/questions.js';
 
 const SOURCE = '00000000-0000-4000-8000-000000000001';
 const OPERATION = '00000000-0000-4000-8000-000000000002';
@@ -15,6 +15,13 @@ const purposes = [
   { kind: 'manual_machine_action', resourceId: 'machine-7', machineId: SOURCE, nodeId: null, actionId: 'restart_service', until: null },
   { kind: 'ceo_permission', resourceId: 'access-7', permission: 'server_computer_access', machineId: null, until: '2026-11-07T00:00:00.000Z' },
 ];
+const snapshot = {
+  classificationId: OPERATION, source: guard.source, revision: 3, routeRevision: 2,
+  sourceBinding: { companyId: SOURCE, authorAgentId: OPERATION, sourceJobId: null, sourceSequence: null, taskAssignment: { taskId: SOURCE, taskVersion: 4, assigneeAgentId: OPERATION, executorAgentId: OPERATION, stage: 0 } },
+  digest: DIGEST, classification, humanEnvelope: envelope,
+  authority: { recipientPersonIds: [SOURCE], authorityDigest: DIGEST, purpose: purposes[0] },
+  materialRevision: 1, materialDigest: DIGEST,
+};
 
 describe('canonical internal question references', () => {
   it.each(['task_request', 'proposal', 'computer_access'])('preserves the native %s source without inventing a task', kind => {
@@ -110,6 +117,42 @@ describe('private server-derived question purpose metadata', () => {
     { recipientPersonIds: [SOURCE], authorityDigest: DIGEST, purpose: purposes[0], authorityRevision: 1 },
   ])('requires a bounded recipient set and digest without a fabricated revision %#', value => {
     expect(QuestionAuthorityBinding.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('private immutable question classification metadata', () => {
+  it('retains the exact source/task capture and nullable unknown original provenance', () => {
+    expect(QuestionClassificationSnapshot.parse(snapshot)).toEqual(snapshot);
+  });
+  it.each(['proposal', 'computer_access'])('keeps a %s snapshot native with no synthetic task', kind => {
+    const value = { ...snapshot, source: { kind, id: SOURCE }, sourceBinding: { ...snapshot.sourceBinding, taskAssignment: null } };
+    expect(QuestionClassificationSnapshot.parse(value)).toEqual(value);
+  });
+  it('retains known original provenance rather than reconstructing it from the current job', () => {
+    const value = { ...snapshot, sourceBinding: { ...snapshot.sourceBinding, sourceJobId: OPERATION, sourceSequence: 7 } };
+    expect(QuestionClassificationSnapshot.parse(value)).toEqual(value);
+  });
+  it('can bind an owner-only action with no result material', () => {
+    const value = { ...snapshot, classification: { kind: 'human_only_action', actionBinding: { kind: 'owner_login', resourceId: 'subscription-7' } }, authority: { ...snapshot.authority, purpose: purposes[2] }, materialRevision: null, materialDigest: null };
+    expect(QuestionClassificationSnapshot.parse(value)).toEqual(value);
+  });
+  it.each([
+    { ...snapshot, sourceBinding: { ...snapshot.sourceBinding, taskAssignment: null } },
+    { ...snapshot, source: { kind: 'proposal', id: SOURCE } },
+    { ...snapshot, sourceBinding: { ...snapshot.sourceBinding, taskAssignment: { ...snapshot.sourceBinding.taskAssignment, taskVersion: -1 } } },
+    { ...snapshot, sourceBinding: { ...snapshot.sourceBinding, originalActor: SOURCE } },
+    { ...snapshot, materialRevision: null, materialDigest: null }, { ...snapshot, materialDigest: null },
+    { ...snapshot, materialRevision: 0 }, { ...snapshot, digest: 'A'.repeat(64) },
+    { ...snapshot, authority: { ...snapshot.authority, purpose: purposes[2] } },
+    { ...snapshot, revision: 0 }, { ...snapshot, routeRevision: 1.5 },
+    { ...snapshot, grant: true },
+  ])('refuses malformed source/material/authority metadata %#', value => {
+    expect(QuestionClassificationSnapshot.safeParse(value).success).toBe(false);
+  });
+  it('refuses a changed action kind or resource hidden behind an otherwise valid purpose', () => {
+    for (const actionBinding of [{ kind: 'payment', resourceId: 'subscription-7' }, { kind: 'owner_login', resourceId: 'another-subscription' }]) {
+      expect(QuestionClassificationSnapshot.safeParse({ ...snapshot, classification: { kind: 'human_only_action', actionBinding }, authority: { ...snapshot.authority, purpose: purposes[2] } }).success).toBe(false);
+    }
   });
 });
 

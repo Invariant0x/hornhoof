@@ -85,3 +85,6 @@ export const QuestionAuthorityBinding = z.strictObject({
   authorityDigest: Digest, purpose: QuestionPurpose,
 }).refine(materialMetadataFits, 'Oversized authority metadata.');
 export type QuestionAuthorityBinding = z.infer<typeof QuestionAuthorityBinding>;
+
+/* No sealing or authority producer is supplied by this parser checkpoint. */
+export const QuestionClassificationSnapshot = z.never();
