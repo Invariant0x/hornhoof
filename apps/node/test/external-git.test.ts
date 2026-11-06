@@ -939,6 +939,22 @@ describe('a fetch by the settings of the remote', () => {
       expect(refsOf(agent)).not.toContain('stolen');
     });
 
+    it('and says the turn ended when that stops a read of the settings', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      planFor(s, { 'symbolic-ref': [{ do: 'real' }, { do: 'hang' }] });
+      const port = new FakePort();
+      const { env, adapter } = await serve(s, port);
+      const ran = runShim(['fetch', 'origin'], agent, env);
+      await vi.waitFor(() => { expect(calls(s, 'symbolic-ref')).toHaveLength(2); }, { timeout: 5000 });
+      adapter.unbind(KEY);
+      const ended = await ran;
+      expect(ended.code).toBe(128);
+      expect(ended.stderr).toContain('the turn ended');
+      expect(ended.stderr).not.toContain('settings');
+      expect(calls(s, 'fetch')).toEqual([]);
+    });
+
     it('when the address of the remote changed', async () => {
       const s = stand();
       const { agent } = clones(s, tracking);
