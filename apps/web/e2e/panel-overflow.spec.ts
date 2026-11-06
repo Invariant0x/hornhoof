@@ -18,10 +18,10 @@ const NOTES: NoteView[] = [
 
 test.use({ hasTouch: true });
 
-async function capture(page: Page, info: TestInfo, name: string) {
+async function capture(page: Page, info: TestInfo, name: string, fullPage = false) {
   const file = `${PHASE}-${name}.png`;
   const path = SCREENSHOT_DIR ? `${SCREENSHOT_DIR}/${file}` : info.outputPath(file);
-  await page.screenshot({ path });
+  await page.screenshot({ path, fullPage });
   await info.attach(file, { path, contentType: 'image/png' });
 }
 
@@ -144,7 +144,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.route('**/api/version', route => route.fulfill({ json: current }));
         await page.route('**/api/updates', route => route.fulfill({ json: { current, available: false, latest: null, updater: { status: null, waiting: null } } }));
         await page.route('**/api/tasks?status=all', route => route.fulfill({ json: { tasks: [task, ...TASKS.slice(1)] } }));
-        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...task, body: LONG_TEXT, parent: null, after: [], executor: task.assignee, gates: [], createdBy: null, subtasks: [], log: [], requests: [] } } }));
+        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...task, body: LONG_TEXT, parent: null, after: [], executor: task.assignee, gates: [], createdBy: null, subtasks: [TASKS[1]!], log: [{ kind: 'comment', text: 'The full review log stays readable.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00.000Z' }], requests: [] } } }));
         await page.goto('/tasks');
         const row = page.locator('button.trow').first();
         const brief = row.locator('.trow-brief');
@@ -168,6 +168,16 @@ for (const lang of ['en', 'ru'] as const) {
         await capture(page, info, `task-detail-${look}`);
         await expectWrappedText(detail.locator('.tp-brief'));
         await expectInside(detail.locator('.ac-body'), [detail.locator('.tp-brief')]);
+        await expect(detail.locator('.tp-log')).toContainText('The full review log stays readable.');
+        const comment = detail.locator('.tp-comment textarea');
+        await comment.fill(LONG_TEXT);
+        await capture(page, info, `task-detail-comment-${look}`);
+        const cancel = detail.locator('.ac-actions .entry-actions > button');
+        await cancel.scrollIntoViewIfNeeded();
+        await capture(page, info, `task-detail-cancel-${look}`);
+        await cancel.click();
+        await expect(detail.locator('.ac-actions .entry-actions > button')).toHaveCount(2);
+        await capture(page, info, `task-detail-cancel-confirm-${look}`);
         expect(errors).toEqual([]);
       });
     }
@@ -254,6 +264,11 @@ for (const lang of ['en', 'ru'] as const) {
         await expectInside(actions, [edit]);
         await edit.click();
         await expect(page.getByRole('heading', { name: m.people.editHeading(LONG_PERSON.name) })).toBeVisible();
+        await capture(page, info, `people-edit-${look}`);
+        await page.getByRole('button', { name: m.common.cancel, exact: true }).click();
+        await invite.click();
+        await expect(page.getByRole('heading', { name: m.people.invitePerson, exact: true })).toBeVisible();
+        await capture(page, info, `people-invite-${look}`);
         expect(errors).toEqual([]);
       });
 
@@ -264,6 +279,10 @@ for (const lang of ['en', 'ru'] as const) {
         const card = page.getByRole('article', { name: LONG_HOST, exact: true });
         await expect(card).toBeVisible();
         await expect(page.locator('table.dt')).toHaveAttribute('data-fit', 'entries');
+        if (width === 375) {
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await capture(page, info, `machine-table-${look}`);
+        }
         await expect(card.locator('.machine-actions').first()).toHaveCSS('justify-content', 'flex-end');
         const update = card.getByRole('button', { name: m.machines.updatePrograms, exact: true });
         await expect(update).toHaveCSS('min-height', '44px');
@@ -283,6 +302,7 @@ for (const lang of ['en', 'ru'] as const) {
         expect(disconnectBox.x + disconnectBox.width, 'Disconnect shares the confirmation end').toBe(groupBox.x + groupBox.width);
         for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `machine-confirm-${look}`);
+        if (width === 375) await capture(page, info, `machine-confirm-full-${look}`, true);
         await expectWrappedText(question);
         await expectInside(ask, [question, ...await buttons.all()]);
         const questionBox = (await question.boundingBox())!;
@@ -301,6 +321,11 @@ for (const lang of ['en', 'ru'] as const) {
         await page.goto('/settings');
         const dialog = page.getByRole('dialog', { name: m.settings.title, exact: true });
         await expect(dialog).toBeVisible();
+        await capture(page, info, `settings-view-${look}`);
+        await dialog.getByRole('button', { name: m.settings.change, exact: true }).click();
+        await expect(dialog.locator('input')).toHaveValue('evidence');
+        await capture(page, info, `settings-rename-${look}`);
+        await dialog.getByRole('button', { name: m.common.cancel, exact: true }).click();
         await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();
         const actions = dialog.locator('.settings-actions');
         const question = actions.locator('.entry-main');
