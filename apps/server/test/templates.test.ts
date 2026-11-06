@@ -1304,8 +1304,10 @@ const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => b
           /\b(?:never|do not)\s+classify\b[^.!?]*\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b[\s\S]*\bmechanical\b[^.!?]*\bmedium\b/i,
         ]),
       ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bwhen in doubt,\s*(?:mark|classify|use)\w*\b[^.!?]*\b['`]?mechanical['`]?/i),
+      ) &&
       forbidsAll(`${s.diff}\n${s.verdict}`, [
-        /\bwhen in doubt\b[^.!?;,]*\bmark\w*\b[^.!?;,]*\b['`]?mechanical['`]?/i,
         /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:security|data|spec)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?\s+to\s+run\s+at\s+medium\b/i,
       ]),
   },
