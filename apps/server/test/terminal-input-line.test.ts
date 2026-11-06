@@ -38,10 +38,9 @@ describe('the line of a program, as its terminals made it', () => {
 
   it('gets shorter as a person erases, and no shorter than empty', () => {
     const line = new InputLine();
-    expect(line.take('ab', WRITER)).toBeNull();
-    expect(line.take('\x7f', WRITER)).toBeNull();
+    for (const key of ['a', 'b', '\x7f']) expect(line.take(key, WRITER)).toBeNull();
     expect(line.take('/c', WRITER)).toBeNull();
-    expect(line.take('\b\b\b\b\b', WRITER)).toBeNull();
+    expect(line.take('\x7f\x7f\x7f\x7f\x7f', WRITER)).toBeNull();
     expect(line.take('/x', WRITER)).toBe('control');
   });
 
@@ -123,6 +122,115 @@ describe('the line of a program, as its terminals made it', () => {
     const typed = new InputLine();
     expect(typed.take(' /', WRITER)).toBe('control');
     expect(typed.take('login', WRITER)).toBe('control');
+  });
+
+  describe('takes the line for empty when an erase may have taken more than it can count', () => {
+    const typed = (line: InputLine, keys: string[], rights = WRITER) => { for (const key of keys) line.take(key, rights); };
+
+    it.each<[string, string[]]>([
+      ['a letter and its accent', ['e', '\u0301']],
+      ['a family of people', ['\u{1F468}', '\u200d', '\u{1F469}']],
+      ['a flag', ['\u{1F1FA}', '\u{1F1F8}']],
+      ['a hand and its skin tone', ['\u{1F44D}', '\u{1F3FB}']],
+      ['a heart in color', ['\u2764', '\ufe0f']],
+      ['a digit on a key', ['1', '\ufe0f', '\u20e3']],
+      ['a Hangul syllable of its parts', ['\u1112', '\u1161']],
+      ['a Thai letter and its vowel', ['\u0e01', '\u0e33']],
+      ['a number sign before its digit', ['\u0600', '1']],
+    ])('after %s, typed key by key', (_what, keys) => {
+      for (const command of ['/x\r', '!id\r']) {
+        const line = new InputLine();
+        typed(line, keys);
+        expect(line.take('\x7f', WRITER)).toBeNull();
+        expect(line.take(command, WRITER)).toBe('control');
+      }
+    });
+
+    it('with the erase and the command in one frame', () => {
+      expect(new InputLine().take('e\u0301\x7f/x\r', WRITER)).toBe('control');
+      expect(new InputLine().take('e\u0301\x7f!id\r', WRITER)).toBe('control');
+    });
+
+    it('after what an owner typed the same way', () => {
+      const line = new InputLine();
+      typed(line, ['e', '\u0301'], OWNER);
+      expect(line.take('\x7f', WRITER)).toBeNull();
+      expect(line.take('/x\r', WRITER)).toBe('control');
+    });
+
+    it('after an owner erased a command in one frame', () => {
+      const line = new InputLine();
+      line.take('/\x7f', OWNER);
+      expect(line.take('/x\r', WRITER)).toBe('control');
+    });
+
+    it('after a paste, which a program may hold and erase as one', () => {
+      for (const rights of [WRITER, OWNER]) {
+        const line = new InputLine();
+        line.take(paste('a long text\nof two lines'), rights);
+        expect(line.take('\x7f', WRITER)).toBeNull();
+        expect(line.take('/x\r', WRITER)).toBe('control');
+      }
+    });
+
+    it('after several keys in a frame, which a program may take for a paste', () => {
+      const line = new InputLine();
+      line.take('hello', WRITER);
+      expect(line.take('\x7f', WRITER)).toBeNull();
+      expect(line.take('/x\r', WRITER)).toBe('control');
+    });
+
+    it('after Ctrl+Backspace, which a program may take for a whole word', () => {
+      const line = new InputLine();
+      typed(line, ['a', 'b']);
+      expect(line.take('\b', WRITER)).toBeNull();
+      expect(line.take('/x\r', WRITER)).toBe('control');
+    });
+
+    it('and still takes the words typed after it for words', () => {
+      const line = new InputLine();
+      typed(line, ['e', '\u0301', '\x7f', 'a']);
+      expect(line.take('/x', WRITER)).toBeNull();
+    });
+
+    it('and knows each key again once that line has ended', () => {
+      const line = new InputLine();
+      typed(line, ['e', '\u0301', '\r', 'a', 'b', '\x7f']);
+      expect(line.take('/x', WRITER)).toBeNull();
+    });
+  });
+
+  it.each<[string, string]>([
+    ['a zero width space', '\u200b'],
+    ['a joiner', '\u2060'],
+    ['a byte order mark', '\ufeff'],
+    ['a soft hyphen', '\u00ad'],
+    ['a direction mark', '\u200e'],
+    ['an accent with no letter', '\u0301'],
+    ['a private character', '\ue000'],
+  ])('does not let %s start a line, as a program may leave it out', (_what, mark) => {
+    expect(new InputLine().take(`${mark}/x\r`, WRITER)).toBe('control');
+    expect(new InputLine().take(`${mark}!id\r`, WRITER)).toBe('control');
+    const line = new InputLine();
+    expect(line.take(mark, WRITER)).toBeNull();
+    expect(line.take('/x\r', WRITER)).toBe('control');
+  });
+
+  it.each<[string, string[]]>([
+    ['Russian', ['\u043f', '\u0440', '\u0438']],
+    ['Chinese', ['\u4e2d', '\u6587', '\u5b57']],
+    ['a Hangul syllable made whole', ['\uac00', '\ub098', '\ub2e4']],
+    ['one picture each', ['\u{1F44D}', '\u{1F600}', '\u{1F680}']],
+    ['Latin letters with their accent built in', ['\u00e9', '\u00e8', '\u00ea']],
+  ])('counts %s typed key by key and erased one at a time', (_what, keys) => {
+    const line = new InputLine();
+    for (const key of keys) expect(line.take(key, WRITER)).toBeNull();
+    expect(line.take('\x7f', WRITER)).toBeNull();
+    expect(line.take('!', WRITER)).toBeNull();
+    const emptied = new InputLine();
+    for (const key of keys) emptied.take(key, WRITER);
+    for (const _key of keys) emptied.take('\x7f', WRITER);
+    expect(emptied.take('!', WRITER)).toBe('control');
   });
 
   it('knows the 8-bit form of what starts a steering sequence', () => {
