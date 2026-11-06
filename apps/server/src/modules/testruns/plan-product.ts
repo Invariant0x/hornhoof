@@ -35,6 +35,14 @@ function planReason(preparation: ReturnType<typeof preparationFor>, planned: Env
   const prefix = preparation ? `One explicit preparation runs ${preparation.suiteIds.length} suites and ${preparation.commands.length} commands before batches. ` : '';
   return prefix + (planned?.testPlan.reason ?? 'All selected suites run once in preparation; no batch is needed.');
 }
+function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>): ProductPlan['leaves'] {
+  if (!preparation) return [];
+  return [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [] }];
+}
+function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null {
+  if (!planned) return null;
+  return planned.testPlan;
+}
 export async function planProductParts(input: PreparedEnvironmentPlanInput): Promise<ProductPlan> {
   const preparation = preparationFor(input), onceIds = preparation?.suiteIds ?? [], finals = finalSuites(input, onceIds);
   const remaining = input.units.filter(unit => !onceIds.includes(unit.suiteId));
@@ -42,8 +50,8 @@ export async function planProductParts(input: PreparedEnvironmentPlanInput): Pro
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
   const availableMachines = Math.min(input.availableMachines, Math.max(0, budget));
   const planned = await remainingPlan({ ...input, availableMachines }, remaining);
-  const leaves: ProductPlan['leaves'] = preparation ? [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [] }] : [];
+  const leaves = preparationLeaves(input, preparation);
   leaves.push(...batchLeaves(input, planned, preparation !== undefined));
   leaves.push(...finalLeaves(leaves, finals, onceIds));
-  return { leaves, estimate: planned?.testPlan ?? null, reason: planReason(preparation, planned) };
+  return { leaves, estimate: planEstimate(planned), reason: planReason(preparation, planned) };
 }

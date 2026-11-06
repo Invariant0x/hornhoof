@@ -31,8 +31,11 @@ export { employeeGroups };
 const frameTitle = (f: Frame, language: 'en' | 'ru', others: string) =>
   f.team ? f.team.name : f.role ? f.role.title[language] : others;
 
-const frameDescription = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
-  f.role?.schema === 'final_check' ? t.dept.finalTurnCheck : f.role?.schema === 'observer' ? t.dept.turnObserver : f.role?.description[language] ?? '';
+function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
+  if (role.schema === 'final_check') return t.dept.finalTurnCheck;
+  if (role.schema === 'observer') return t.dept.turnObserver;
+  return role.description[language] ?? '';
+}
 
 type Props = {
   me: Me;
@@ -470,7 +473,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               <Edge cut={14} corner>
                 <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
                   <span className="fn">{frameTitle(f, language, t.dept.others)}</span>
-                  {f.role && <span className="fa">{frameDescription(f, language, t)}</span>}
+                  {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
               </Edge>

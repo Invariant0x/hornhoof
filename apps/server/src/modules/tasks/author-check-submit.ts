@@ -13,6 +13,8 @@ import { captureReview, type Review, type ReviewSubmission } from './review-cont
 export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
 
 type SubmissionWithPlan = AuthorCheckSubmission & { review: z.infer<typeof ReviewSubmission> & { authorCheckPlan: string } };
+type PinnedReview = Review & { commit: string; source: NonNullable<Review['source']> };
+type Run = typeof testRuns.$inferSelect;
 const enabled = (ctx: Ctx, input: AuthorCheckSubmission): input is SubmissionWithPlan => Boolean(ctx.config.authorCheck && input.review?.authorCheckPlan);
 
 export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
@@ -23,10 +25,7 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: strin
   if (task.merging) return submit(ctx, job.agentId, taskId, input);
   const review = await captureReview(ctx, task, input.review);
   if (!validReview(review)) throw refuse(409, 'task_invalid', 'The author check needs an exact review commit and base comparison.');
-  const command = authorCommand(review.commit, review.source.baseCommit, input.review.authorCheckPlan);
-  await startRun(ctx, job, { task: task.id, branch: review.branch ?? undefined, command, parts: 1, expectedCommit: review.commit, dedupe: true });
-  const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.command, command))).orderBy(desc(testRuns.number)).limit(1);
-  if (!run || run.commitSha !== review.commit) throw refuse(409, 'task_changed', `#${task.number} moved while its author check was being pinned. Read the branch and submit again.`);
+  const run = await startAuthorRun(ctx, job, task, review, input.review.authorCheckPlan);
   const data: PendingSubmission = { version: 1, runId: run.id, summary: input.summary, evidence: input.evidence, baseCommit: review.source.baseCommit, authorCheckPlan: input.review.authorCheckPlan, review };
   const row = await move(ctx, task, {
     status: 'working', silent: 0,
@@ -36,7 +35,19 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: strin
   return { task: row, wakes: [] };
 }
 
-function validReview(review: Review | null): review is Review & { commit: string; source: NonNullable<Review['source']> } {
+async function startAuthorRun(ctx: Ctx, job: RunJob, task: Task, review: PinnedReview, plan: string): Promise<Run> {
+  const command = authorCommand(review.commit, review.source.baseCommit, plan);
+  await startRun(ctx, job, { task: task.id, branch: review.branch ?? undefined, command, parts: 1, expectedCommit: review.commit, dedupe: true });
+  return pinnedAuthorRun(ctx, task, review.commit, command);
+}
+
+async function pinnedAuthorRun(ctx: Ctx, task: Task, commit: string, command: string): Promise<Run> {
+  const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.command, command))).orderBy(desc(testRuns.number)).limit(1);
+  if (!run || run.commitSha !== commit) throw refuse(409, 'task_changed', `#${task.number} moved while its author check was being pinned. Read the branch and submit again.`);
+  return run;
+}
+
+function validReview(review: Review | null): review is PinnedReview {
   return Boolean(review?.commit && review.source);
 }
 
