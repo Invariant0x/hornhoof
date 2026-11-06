@@ -517,7 +517,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 }
 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
-export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
+export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -578,9 +578,14 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   if (heldReason) throw refuse(409, 'browser_failed', heldReason);
   const pin = await pinCommit(ctx, task, kind, input.branch, found);
   checkProductPin(mode.mode, pin.commitSha);
+  if (input.expectedCommit !== undefined && pin.commitSha !== input.expectedCommit) throw refuse(409, 'task_changed', `#${task.number} moved while its author check was being pinned. Read the branch and submit again.`);
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
+    if (input.dedupe && pin.commitSha) {
+      const [existing] = await tx.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.kind, kind), eq(testRuns.commitSha, pin.commitSha), eq(testRuns.command, input.command ?? ''))).limit(1);
+      if (existing) return existing;
+    }
     const [last] = await tx.select({ n: max(testRuns.number) }).from(testRuns).where(eq(testRuns.companyId, job.companyId));
     const [row] = await tx
       .insert(testRuns)
