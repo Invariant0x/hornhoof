@@ -498,6 +498,13 @@
       "when": 1793939855504,
       "tag": "0071_outbound",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793940899441,
+      "tag": "0072_external_failures",
+      "breakpoints": true
     }
   ]
 }
