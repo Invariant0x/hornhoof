@@ -72,15 +72,24 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/only when something it holds changes/);
   });
 
-  it('keeps routine questions internal, promotes only ready_result or human_only_action, and writes plain human explanations without commands or history rewrites', () => {
+  it('keeps routine questions internal, promotes only ready_result or human_only_action via classify_human_intent, and writes plain human explanations without commands or history rewrites', () => {
+    for (const tool of ['"internal_questions"', '"resolve_question"', '"route_question"', '"classify_human_intent"']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(tool);
+    }
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/propose_structure[\s\S]*classify_human_intent/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/propose_staff[\s\S]*classify_human_intent/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/ask_computer_access[\s\S]*classify_human_intent/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/"answer_request"[\s\S]*"resolve_question"/);
     expect(ORCHESTRATOR_INSTRUCTIONS).toContain('ready_result');
     expect(ORCHESTRATOR_INSTRUCTIONS).toContain('human_only_action');
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/internal authority[\s\S]*(?:employee|Hornhoof)/i);
-    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/explain_request[\s\S]*situation[\s\S]*consequences/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/situation[\s\S]*requiredAction[\s\S]*options[\s\S]*consequences/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/explain_request[\s\S]*legacy/i);
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/(?:no|never|without)[^.!?]*(?:commands|SQL|code|scripts)/i);
-    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/executor[\s\S]*message_employee/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/executorInstruction[\s\S]*message_employee/);
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/never[^.!?]*rewrite[^.!?]*closed/i);
-    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/\b(?:David|8eb9c651|#425|resolve_question|internal_questions|classify_human_intent)\b/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/Shown to the CEO/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/\b(?:David|8eb9c651|#425)\b/);
   });
 });
 

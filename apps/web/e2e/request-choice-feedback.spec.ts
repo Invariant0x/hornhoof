@@ -1182,8 +1182,6 @@ function makeInternalFirstBrowserRequests(lang: Language): WaitingRequest[] {
       ...baseFields,
       id: 'req-ready-499',
       kind: 'approval',
-      audience: 'human',
-      classification: { kind: 'ready_result', artifact: { kind: 'commit', sha } },
       text: 'PRIVATE_RAW_GIT_DIFF_DO_NOT_SHOW',
       executorInstruction: 'PRIVATE_EXECUTOR_STEP_DO_NOT_SHOW',
       commit: sha,
@@ -1192,33 +1190,22 @@ function makeInternalFirstBrowserRequests(lang: Language): WaitingRequest[] {
       decidedBy: { kind: 'ceo_and_delegate', department: null },
       agent: { id: 'agent-head-1', name: c.head },
       task,
-      humanEnvelope: {
+      envelope: {
         situation: c.readySituation,
         requiredAction: c.readyAction,
         options: [{ id: 'ship', label: c.readyLabel, consequence: c.readyConsequence }],
       },
+      purpose: { kind: 'decision', decisionKind: 'approval' },
     },
     {
       ...baseFields,
       id: 'req-hidden-499',
       kind: 'question',
-      audience: 'human',
-      known: false,
-      classification: {
-        kind: 'human_only_action',
-        actionBinding: {
-          kind: 'owner_login',
-          resourceId: 'sub-claude-max',
-          scope: c.loginScope,
-          duration: c.loginDuration,
-        },
-      },
       text: 'HIDDEN_TASK_999_SECRET_TRACE',
       at: '2026-11-06T00:14:00.000Z',
       decidedBy: { kind: 'ceo_and_delegate', department: null },
-      task: null,
-      agent: null,
-      humanEnvelope: { situation: c.loginSituation, requiredAction: c.loginAction },
+      envelope: { situation: c.loginSituation, requiredAction: c.loginAction, options: [] },
+      purpose: { kind: 'owner_login', provider: 'claude' },
     },
   ];
   return items as unknown as WaitingRequest[];
@@ -1285,7 +1272,7 @@ for (const lang of CHECKED_LOCALES) {
         await expect(readyCard).toContainText(t.tasks.requiredActionLabel);
         await expect(hiddenCard).toContainText(t.tasks.asks(t.window.hiddenEmployee));
         await expect(hiddenCard).toContainText(t.tasks.actionKinds.owner_login);
-        await expect(hiddenCard).toContainText('sub-claude-max');
+        await expect(hiddenCard).toContainText('Claude Code');
         await expect(hiddenCard.locator('.req-term')).toHaveCount(0);
 
         const docScrollWidth = await page.evaluate(() => {

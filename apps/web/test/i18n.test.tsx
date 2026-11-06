@@ -279,7 +279,20 @@ describe('internal-first question explanations and error reasons', () => {
     });
   });
 
-  it('translates 409 and 503 question routing and classification error reasons in both languages', () => {
+  it('translates 403, 409 and 503 question routing, classification and computer expiry strings in both languages', () => {
+    const denied = new ApiFailure(403, 'forbidden', 'Forbidden.', 'question_not_allowed');
+    expect(errorText(en, denied)).toBe(en.errors.question_not_allowed);
+    expect(errorText(ru, denied)).toBe(ru.errors.question_not_allowed);
+    expect(en.errors.question_not_allowed.length).toBeGreaterThan(10);
+    expect(ru.errors.question_not_allowed.length).toBeGreaterThan(10);
+
+    expect(en.window.computerWhatUntil('ivan-mbp', '14:30')).toContain('14:30');
+    expect(en.window.computerWhatUntil('ivan-mbp', '14:30')).toContain('ivan-mbp');
+    expect(ru.window.computerWhatUntil('ivan-mbp', '14:30')).toContain('14:30');
+    expect(ru.window.computerWhatUntil('ivan-mbp', '14:30')).toContain('ivan-mbp');
+    expect(en.window.computerOpenUntilTime('14:30')).toBe('Open until 14:30');
+    expect(ru.window.computerOpenUntilTime('14:30')).toBe('Открыть до 14:30');
+
     const reasons409 = [
       'stale_revision',
       'stale_route',

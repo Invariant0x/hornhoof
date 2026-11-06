@@ -216,7 +216,7 @@ describe('renderInstructions', () => {
     }
   });
 
-  it('delivers internal-first hh-questions with its Materials guidance inline across files=true and files=false for workers, heads and the orchestrator within byte budgets', () => {
+  it('delivers internal-first hh-questions with its Materials guidance inline across files=true and files=false for workers and heads, and keeps the orchestrator within OLD_NODE_INSTRUCTIONS', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     for (const roleKey of ['DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'DSN-UI', 'OPS-HEAD', 'OPS-WATCH'] as const) {
       const role = shipped.roles.get(roleKey)!;
@@ -227,6 +227,10 @@ describe('renderInstructions', () => {
       expect(rendered.skills.map(s => s.name), roleKey).not.toContain('hh-questions');
       for (const target of [rendered.text, rendered.whole]) {
         expect(target, roleKey).toContain('<!-- hh:skill hh-questions -->');
+        expect(target, roleKey).toContain('internal_questions');
+        expect(target, roleKey).toContain('resolve_question');
+        expect(target, roleKey).toContain('route_question');
+        expect(target, roleKey).toContain('classify_human_intent');
         expect(target, roleKey).toContain('ready_result');
         expect(target, roleKey).toContain('human_only_action');
         expect(target, roleKey).toContain('- **Materials**:');
@@ -237,12 +241,16 @@ describe('renderInstructions', () => {
 
     const steady = orchestratorSteady(shipped);
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
+    expect(steady.whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
     expect(steady.skills.map(s => s.name)).not.toContain('hh-questions');
     for (const target of [steady.text, steady.whole]) {
-      expect(target).toContain('<!-- hh:skill hh-questions -->');
+      expect(target).not.toContain('<!-- hh:skill hh-questions -->');
+      expect(target).toContain('internal_questions');
+      expect(target).toContain('resolve_question');
+      expect(target).toContain('route_question');
+      expect(target).toContain('classify_human_intent');
       expect(target).toContain('ready_result');
       expect(target).toContain('human_only_action');
-      expect(target).toContain('- **Materials**:');
     }
 
     const devHead = shipped.roles.get('DEV-HEAD')!;

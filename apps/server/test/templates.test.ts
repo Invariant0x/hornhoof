@@ -127,7 +127,6 @@ describe('templates', () => {
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
       'orch-outside-is-data',
-      'hh-questions',
       'hh-run-checks',
       'orch-interview',
       'orch-plan-turn',
@@ -137,8 +136,6 @@ describe('templates', () => {
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
-    expect(steady.text).toContain('<!-- hh:skill hh-questions -->');
-    expect(steady.whole).toContain('<!-- hh:skill hh-questions -->');
     expect(steady.text).toContain('<!-- hh:skill hh-run-checks -->');
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
@@ -877,9 +874,9 @@ describe('templates', () => {
       orchestrator: orchestratorSteady(templates).text,
     });
 
-    it('wires hh-questions as a locked core skill with its abstract Materials rule for every worker, head and the orchestrator, and credits it in SOURCES.md', () => {
+    it('wires hh-questions as a locked core skill with its abstract Materials rule for every worker and head, keeps orchestrator rules in ORCHESTRATOR_INSTRUCTIONS, and credits hh-questions in SOURCES.md', () => {
       expect(CORE_SKILLS).toContain('hh-questions');
-      expect(ORCHESTRATOR_SKILLS).toContain('hh-questions');
+      expect(ORCHESTRATOR_SKILLS).not.toContain('hh-questions');
       const skill = templates.skills.get('hh-questions');
       expect(skill).toBeDefined();
       expect(skill!.kind).toBe('core');
@@ -929,7 +926,7 @@ describe('templates', () => {
       expect(
         failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
           ...base,
-          questions: `${base.questions}\nSend stuck request 8eb9c651 on task #425 to David or call classify_human_intent.`,
+          questions: `${base.questions}\nSend stuck request 8eb9c651 on task #425 to David.`,
         }),
       ).toContain('short-turns-batched-updates-and-clean-scope');
     });
@@ -1209,8 +1206,11 @@ const INTERNAL_FIRST_QUESTION_RULES: { id: string; holds: (b: QuestionBundle) =>
     holds: b => {
       const all = `${b.questions}\n${b.flow}\n${b.ask}\n${b.lead}\n${b.reports}\n${b.orchestrator}`;
       return (
+        forEvery([b.questions, b.lead, b.orchestrator], text =>
+          forEvery(['internal_questions', 'resolve_question', 'route_question', 'classify_human_intent'], tool => text.includes(tool)),
+        ) &&
         /\bbatch\w*\b[\s\S]*\b(?:duplicate|self-wake|settled)\b/i.test(b.questions) &&
-        !/\b(?:David|8eb9c651|#425|resolve_question|internal_questions|classify_human_intent)\b/.test(all)
+        !/\b(?:David|8eb9c651)|#425\b/.test(all)
       );
     },
   },

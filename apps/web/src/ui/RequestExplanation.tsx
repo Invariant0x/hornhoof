@@ -1,4 +1,5 @@
 import { useT, type Messages } from '../i18n';
+import { PROVIDER_NAMES } from '../providers';
 import type { WaitingRequest } from '../types';
 import { Markdown } from './Markdown';
 
@@ -6,7 +7,7 @@ export type HumanActionKind = 'payment' | 'owner_login' | 'manual_machine_action
 
 export type ActionBindingView = {
   kind: HumanActionKind;
-  resourceId: string;
+  resourceId: string | null;
   scope: string | null;
   duration: string | null;
   amount: string | null;
@@ -29,10 +30,15 @@ export type PlainEnvelopeView = {
 
 type RawRecord = Record<string, unknown>;
 type ParsedClassification = { kind: 'ready_result' | 'human_only_action'; actionBinding: ActionBindingView | null };
+type ClassifiedSpec = { parsed: ParsedClassification; rawEnvelope: RawRecord | null };
 type LabeledRow = { label: string; value: string };
 
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const ACTION_KINDS = new Set<string>(['payment', 'owner_login', 'manual_machine_action', 'ceo_permission']);
+const DECISION_KINDS = new Set<string>(['question', 'approval', 'choice', 'stuck', 'staff', 'structure']);
+const NAMED_READY_KINDS = new Set<string>(['policy', 'staff', 'structure']);
+const BLOCKED_AUDIENCES = new Set<unknown>(['internal', 'legacy']);
+const ASKED_INSIDE = 'Asked inside the company.';
 const EXECUTABLE_TEXT_RE =
   /```|<script\b|\|\s*(?:ba)?sh\b|\b(?:curl|wget|sudo|ssh|rm\s+-rf|chmod|chown|systemctl|kubectl|docker\s+run)\b|\bSELECT\b[\s\S]+\bFROM\b|\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|DROP\s+TABLE)\b/i;
 
@@ -63,25 +69,28 @@ const isCommitArtifact = (rec: RawRecord): boolean =>
 const isDesignArtifact = (rec: RawRecord): boolean =>
   rec.kind === 'design' && Array.isArray(rec.images) && rec.images.length > 0;
 
+const isNamedReadyArtifact = (rec: RawRecord): boolean =>
+  typeof rec.kind === 'string' && NAMED_READY_KINDS.has(rec.kind);
+
 function isValidReadyArtifact(artifact: unknown): boolean {
   const rec = asRecord(artifact);
-  return rec !== null && (isCommitArtifact(rec) || isDesignArtifact(rec));
+  if (!rec) return false;
+  return isCommitArtifact(rec) || isDesignArtifact(rec) || isNamedReadyArtifact(rec);
 }
 
 const isActionKind = (kind: string | null): kind is HumanActionKind => kind !== null && ACTION_KINDS.has(kind);
 
 function parseActionBinding(raw: unknown): ActionBindingView | null {
   const rec = asRecord(raw);
-  if (!rec) return null;
-  const kind = cleanString(rec.kind);
-  const resourceId = cleanString(rec.resourceId);
+  const kind = cleanString(rec?.kind);
+  const resourceId = cleanString(rec?.resourceId);
   if (!isActionKind(kind) || !resourceId) return null;
   return {
     kind,
     resourceId,
-    scope: cleanString(rec.scope),
-    duration: cleanString(rec.duration),
-    amount: cleanString(rec.amount),
+    scope: cleanString(rec?.scope),
+    duration: cleanString(rec?.duration),
+    amount: cleanString(rec?.amount),
   };
 }
 
@@ -101,44 +110,123 @@ function parseClassification(raw: unknown): ParsedClassification | null {
   return null;
 }
 
-export function isHiddenSourceRequest(request: WaitingRequest): boolean {
-  const rec = request as unknown as RawRecord;
-  return rec.known === false || !asRecord(rec.task) || !asRecord(rec.agent);
+const providerLabel = (id: string): string => (PROVIDER_NAMES as Record<string, string>)[id] ?? id;
+
+const parseDecisionPurpose = (rec: RawRecord): ParsedClassification | null =>
+  typeof rec.decisionKind === 'string' && DECISION_KINDS.has(rec.decisionKind) ? { kind: 'ready_result', actionBinding: null } : null;
+
+function parseOwnerLoginPurpose(rec: RawRecord): ParsedClassification | null {
+  const provider = cleanString(rec.provider);
+  if (!provider) return null;
+  return {
+    kind: 'human_only_action',
+    actionBinding: { kind: 'owner_login', resourceId: providerLabel(provider), scope: null, duration: null, amount: null },
+  };
 }
 
-function isUnclassifiedPre491Request(rec: RawRecord): boolean {
-  const has491Fields = rec.audience !== undefined || rec.classification !== undefined || rec.humanEnvelope !== undefined;
-  return !has491Fields && asRecord(rec.task) !== null && asRecord(rec.agent) !== null;
+function parseCeoPermissionPurpose(rec: RawRecord): ParsedClassification | null {
+  const permission = cleanString(rec.permission);
+  if (!permission) return null;
+  return {
+    kind: 'human_only_action',
+    actionBinding: { kind: 'ceo_permission', resourceId: permission, scope: null, duration: cleanString(rec.until), amount: null },
+  };
+}
+
+const makeBareActionPurpose = (kind: 'payment' | 'manual_machine_action') => (rec: RawRecord): ParsedClassification => ({
+  kind: 'human_only_action',
+  actionBinding: {
+    kind,
+    resourceId: cleanString(rec.resourceId),
+    scope: cleanString(rec.scope),
+    duration: cleanString(rec.until),
+    amount: cleanString(rec.amount),
+  },
+});
+
+const PURPOSE_PARSERS: Record<string, (rec: RawRecord) => ParsedClassification | null> = {
+  decision: parseDecisionPurpose,
+  owner_login: parseOwnerLoginPurpose,
+  ceo_permission: parseCeoPermissionPurpose,
+  payment: makeBareActionPurpose('payment'),
+  manual_machine_action: makeBareActionPurpose('manual_machine_action'),
+};
+
+function parseServerPurpose(raw: unknown): ParsedClassification | null {
+  const rec = asRecord(raw);
+  if (!rec || typeof rec.kind !== 'string') return null;
+  return PURPOSE_PARSERS[rec.kind]?.(rec) ?? null;
+}
+
+const hasTaskAndAgent = (rec: RawRecord): boolean => asRecord(rec.task) !== null && asRecord(rec.agent) !== null;
+
+export function isHiddenSourceRequest(request: WaitingRequest): boolean {
+  const rec = request as unknown as RawRecord;
+  return rec.known === false || !hasTaskAndAgent(rec);
+}
+
+const isBlockedRow = (rec: RawRecord): boolean =>
+  BLOCKED_AUDIENCES.has(rec.audience) || rec.text === ASKED_INSIDE || Boolean(rec.clientPromote);
+
+const hasFixture491Fields = (rec: RawRecord): boolean =>
+  rec.audience !== undefined || rec.classification !== undefined || rec.humanEnvelope !== undefined;
+
+const omitsServerPair = (rec: RawRecord): boolean => rec.purpose === undefined && rec.envelope === undefined;
+
+const hasEmptyServerPair = (rec: RawRecord): boolean => rec.purpose === null && rec.envelope === null;
+
+function isUnclassifiedHumanRow(rec: RawRecord): boolean {
+  if (isBlockedRow(rec) || hasFixture491Fields(rec)) return false;
+  return hasTaskAndAgent(rec) && (omitsServerPair(rec) || hasEmptyServerPair(rec));
+}
+
+function resolveServerSpec(rec: RawRecord): ClassifiedSpec | null {
+  const parsed = parseServerPurpose(rec.purpose);
+  const rawEnvelope = asRecord(rec.envelope);
+  return parsed && rawEnvelope ? { parsed, rawEnvelope } : null;
+}
+
+function resolveFixtureSpec(rec: RawRecord): ClassifiedSpec | null {
+  const parsed = rec.audience === 'human' ? parseClassification(rec.classification) : null;
+  return parsed ? { parsed, rawEnvelope: asRecord(rec.humanEnvelope) } : null;
+}
+
+function resolveClassifiedSpec(rec: RawRecord): ClassifiedSpec | null {
+  if (isBlockedRow(rec)) return null;
+  return resolveServerSpec(rec) ?? resolveFixtureSpec(rec);
 }
 
 export function isAuthorizedHumanRequest(request: WaitingRequest): boolean {
   const rec = request as unknown as RawRecord;
-  if (isUnclassifiedPre491Request(rec)) return true;
-  return rec.audience === 'human' && parseClassification(rec.classification) !== null;
+  return isUnclassifiedHumanRow(rec) || resolveClassifiedSpec(rec) !== null;
 }
 
 const isPoisonedOptional = (value: string | null): boolean => value !== null && hasExecutableText(value);
 
 function readOptionRecord(item: unknown): { rec: RawRecord; label: string } | null {
   const rec = asRecord(item);
-  if (!rec) return null;
-  const label = cleanString(rec.label);
-  return label ? { rec, label } : null;
+  const label = cleanString(rec?.label);
+  return rec && label ? { rec, label } : null;
 }
 
-function parseOptionItem(item: unknown): { option: HumanOptionView | null; poisoned: boolean } {
+function fallbackImageAt(options: unknown, index: number): string | null {
+  if (!Array.isArray(options)) return null;
+  return cleanString(asRecord(options[index])?.image);
+}
+
+function parseOptionItem(item: unknown, fallbackImage: string | null): { option: HumanOptionView | null; poisoned: boolean } {
   const entry = readOptionRecord(item);
   if (!entry) return { option: null, poisoned: false };
   const consequence = cleanString(entry.rec.consequence);
   if (hasExecutableText(entry.label) || isPoisonedOptional(consequence)) return { option: null, poisoned: true };
-  return { option: { label: entry.label, consequence, image: cleanString(entry.rec.image) }, poisoned: false };
+  return { option: { label: entry.label, consequence, image: cleanString(entry.rec.image) ?? fallbackImage }, poisoned: false };
 }
 
-function parseEnvelopeOptions(raw: unknown): { options: HumanOptionView[]; poisoned: boolean } {
+function parseEnvelopeOptions(raw: unknown, fallbackOptions: unknown): { options: HumanOptionView[]; poisoned: boolean } {
   if (!Array.isArray(raw)) return { options: [], poisoned: false };
   const options: HumanOptionView[] = [];
-  for (const item of raw) {
-    const parsed = parseOptionItem(item);
+  for (let i = 0; i < raw.length; i++) {
+    const parsed = parseOptionItem(raw[i], fallbackImageAt(fallbackOptions, i));
     if (parsed.poisoned) return { options: [], poisoned: true };
     if (parsed.option) options.push(parsed.option);
   }
@@ -162,22 +250,30 @@ function legacyEnvelope(request: WaitingRequest): PlainEnvelopeView {
   };
 }
 
-function parseSafeEnvelopeBody(env: RawRecord | null): { situation: string; requiredAction: string; options: HumanOptionView[] } | null {
+function parseSafeEnvelopeBody(
+  env: RawRecord | null,
+  fallbackOptions: unknown,
+): { situation: string; requiredAction: string; options: HumanOptionView[] } | null {
   if (!env) return null;
   const situation = cleanString(env.situation);
   const requiredAction = cleanString(env.requiredAction);
-  const parsedOpts = parseEnvelopeOptions(env.options);
+  const parsedOpts = parseEnvelopeOptions(env.options, fallbackOptions);
   if (!isSafePlainText(situation) || !isSafePlainText(requiredAction) || parsedOpts.poisoned) return null;
   return { situation, requiredAction, options: parsedOpts.options };
 }
 
-export function resolvePlainEnvelope(request: WaitingRequest): PlainEnvelopeView {
-  const rec = request as unknown as RawRecord;
-  if (isUnclassifiedPre491Request(rec)) return legacyEnvelope(request);
-  const actionBinding = parseClassification(rec.classification)?.actionBinding ?? null;
-  const body = parseSafeEnvelopeBody(asRecord(rec.humanEnvelope));
+function buildClassifiedEnvelope(spec: ClassifiedSpec, fallbackOptions: unknown): PlainEnvelopeView {
+  const actionBinding = spec.parsed.actionBinding;
+  const body = parseSafeEnvelopeBody(spec.rawEnvelope, fallbackOptions);
   if (!body || !isBindingSafe(actionBinding)) return PENDING_ENVELOPE;
   return { classified: true, pending: false, ...body, actionBinding };
+}
+
+export function resolvePlainEnvelope(request: WaitingRequest): PlainEnvelopeView {
+  const rec = request as unknown as RawRecord;
+  if (isUnclassifiedHumanRow(rec)) return legacyEnvelope(request);
+  const spec = resolveClassifiedSpec(rec);
+  return spec ? buildClassifiedEnvelope(spec, request.options) : PENDING_ENVELOPE;
 }
 
 function ActionBindingDetails({ t, binding }: { t: Messages; binding: ActionBindingView }) {
@@ -191,9 +287,13 @@ function ActionBindingDetails({ t, binding }: { t: Messages; binding: ActionBind
     <ul className="req-ways">
       <li>
         <strong>{t.tasks.actionKinds[binding.kind]}</strong>
-        {` (${t.tasks.actionResourceLabel}: `}
-        <span>{binding.resourceId}</span>
-        {')'}
+        {binding.resourceId && (
+          <>
+            {` (${t.tasks.actionResourceLabel}: `}
+            <span>{binding.resourceId}</span>
+            {')'}
+          </>
+        )}
       </li>
       {extras.map(row => (
         <li key={row.label}>
@@ -242,8 +342,11 @@ function PlainSummaryBody({ t, request, envelope }: { t: Messages; request: Wait
   );
 }
 
+const legacySaidText = (t: Messages, request: WaitingRequest): string =>
+  request.kind === 'stuck' && !isHiddenSourceRequest(request) ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text;
+
 function LegacyRequestWords({ t, request }: { t: Messages; request: WaitingRequest }) {
-  const said = request.kind === 'stuck' ? t.tasks.stuckText(request.agent.name, request.task.number) : request.text;
+  const said = legacySaidText(t, request);
   if (request.explained) {
     return (
       <>
