@@ -14,6 +14,7 @@ export type FactsTask = {
   gates: number;
   bounces: number;
   workKind: WorkKind | null;
+  small?: boolean;
   /* The first line of its body, where a kind was written before it had a field. */
   firstLine: string;
   createdAt: Date;
@@ -321,6 +322,7 @@ export function pipelineFacts(input: FactsInput): PipelineFacts {
   const closedCount = (status: TaskStatus) => input.tasks.filter(t => t.status === status).length;
   return {
     tasks: { total: input.tasks.length, done: closedCount('done'), cancelled: closedCount('cancelled'), open: input.tasks.length - closedCount('done') - closedCount('cancelled') },
+    small: spread(input.tasks.filter(t => t.small && t.closedAt).map(t => seconds(t.createdAt, t.closedAt!))),
     toAcceptance: spread(work.filter(isDone).map(accepted)),
     toFirstSubmit: spread(handedIn.map(l => seconds(l.issued, handInsOf(l)[0]!.createdAt))),
     wholeTurn: seconds(input.openedAt, input.until),
@@ -399,6 +401,7 @@ function runFacts(name: string, w: RunWaits): Fact[] {
 function timeFacts(f: PipelineFacts): Fact[] {
   const agentsTotal = sum(AGENT_TIMES.filter(k => k !== 'queued').map(k => f.agents[k]));
   return times('time', {
+    'small.median': f.small?.median ?? null,
     'toAcceptance.median': f.toAcceptance.median,
     'toAcceptance.worst': f.toAcceptance.worst,
     'toFirstSubmit.median': f.toFirstSubmit.median,
@@ -446,7 +449,7 @@ function testRows(t: TestsFacts): Fact[] {
 function factsOf(counted: CountedFacts): Fact[] {
   const f = counted.facts;
   return [
-    ...counts('tasks', { 'tasks.total': f.tasks.total, 'tasks.done': f.tasks.done, 'tasks.cancelled': f.tasks.cancelled, 'tasks.open': f.tasks.open }),
+    ...counts('tasks', { 'tasks.total': f.tasks.total, 'tasks.done': f.tasks.done, 'tasks.cancelled': f.tasks.cancelled, 'tasks.open': f.tasks.open, 'small.count': f.small?.count ?? 0 }),
     ...timeFacts(f),
     ...times('stages', Object.fromEntries(PIPELINE_STAGES.map(k => [`stages.${k}`, f.stages[k]]))),
     ...times('agents', Object.fromEntries(AGENT_TIMES.map(k => [`agents.${k}`, f.agents[k]]))),

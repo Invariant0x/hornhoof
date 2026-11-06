@@ -8,6 +8,7 @@ import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type Asked } from '../computer/access.js';
+import { isAddressedTo, machinesAway, type MachineAway } from '../nodes/machine-away.js';
 import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
 import { seesTask, type TaskPlace } from './sight.js';
 
@@ -31,6 +32,7 @@ export type Decisions = {
   requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; known: boolean }[];
   proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
   computer: { asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
+  machines: MachineAway[];
   counts: Counts;
 };
 
@@ -108,7 +110,16 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
 /* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
    by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
    computer for people who see the whole company and see him. */
-export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person): Promise<Decisions> {
+/* A machine still away waits for each of its people, on each one's card as this person sees them. */
+function withMachines(counts: Counts, away: MachineAway[], me: Person): Counts {
+  const byPerson = { ...counts.byPerson };
+  for (const card of away) {
+    for (const id of new Set([me.id, card.owner?.id ?? me.id])) byPerson[id] = (byPerson[id] ?? 0) + 1;
+  }
+  return { ...counts, byPerson, total: counts.total + away.length };
+}
+
+export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
   const { access } = viewer;
@@ -133,7 +144,8 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
     ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),
   ]);
-  return { requests: seen, proposals: shownCards, computer, counts };
+  const machines = (await machinesAway(ctx, me.companyId, new Date())).filter(card => isAddressedTo(me, card));
+  return { requests: seen, proposals: shownCards, computer, machines, counts: withMachines(counts, machines.filter(card => !card.back), me) };
 }
 
 /* The number on a person's card: their decisions this viewer sees, none for the viewer's own card or for anyone's when the
