@@ -81,6 +81,7 @@ describe('author check on submit', () => {
     await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input());
     expect(await authorRuns(f)).toHaveLength(1);
     expect(await outcomes(f, run.id)).toHaveLength(1);
+    expect((await currentTask(f)).externalWait).toBeNull();
   });
 
   it('returns malformed runner output honestly without manufacturing a quality record', async () => {
@@ -105,7 +106,7 @@ describe('author check on submit', () => {
     f.app.ctx.readCompare = async () => ({ complete: true, baseSha: SHA, headSha: commit, paths: [], diff: '' });
     for (const [index, sha] of [SHA, OTHER, 'c'.repeat(40)].entries()) {
       commit = sha;
-      const { run } = await finish(f, node, input(), authorLine('lint'), false, 1);
+      const { run } = await finish(f, node, input(), authorLine('lint', sha), false, 1);
       expect(await currentTask(f)).toMatchObject({ status: index === 2 ? 'blocked' : 'working', externalWait: null });
       expect((await outcomes(f, run.id)).at(-1)).toMatchObject({ data: { authorCheckOutcome: { attempt: index + 1 } } });
     }
@@ -160,7 +161,7 @@ async function finish(f: Fixture, node: FakeNode, submission: ReturnType<typeof 
   return { run: run! };
 }
 
-function authorLine(failedStage?: string) {
+function authorLine(failedStage?: string, commit = SHA) {
   const stages = ['format', 'lint', 'types', 'tests', 'crapper', 'dryer'].map(name => ({
     name,
     status: name === failedStage ? 'failed' : name === 'format' ? 'unavailable' : 'passed',
@@ -168,7 +169,7 @@ function authorLine(failedStage?: string) {
     partId: null,
   }));
   return `AUTHOR_CHECK ${JSON.stringify({
-    version: 1, submissionCommit: SHA, checkCommit: SHA, scope: { kind: 'changed', paths: ['logic/totals.ts'] }, stages,
+    version: 1, submissionCommit: commit, checkCommit: commit, scope: { kind: 'changed', paths: ['logic/totals.ts'] }, stages,
     numbers: { tests: { passed: 12, failed: 0, skipped: 1, total: 13 }, changedLines: { covered: 18, total: 20 }, worstCrap: 6.5, dryerFlags: 2 },
   })}`;
 }
