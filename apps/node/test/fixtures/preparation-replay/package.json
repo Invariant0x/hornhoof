@@ -1,0 +1,8 @@
+{
+  "name": "hh-preparation-replay",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "replay-value": "file:vendor/replay-value"
+  }
+}

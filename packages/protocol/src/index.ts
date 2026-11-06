@@ -3,10 +3,13 @@ export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type 
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
+export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
+export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
+import { RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 
@@ -414,7 +417,7 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease,
+  CheckAcquire, CheckRelease, TestsDescribed,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -432,6 +435,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
     noRuns: z.string().max(300).optional(),
+    testEnvironmentVersion: z.literal(1).optional(),
+    testRuntimes: z.array(RuntimeCapability).max(64).optional(),
     /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
@@ -462,6 +467,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     error: z.enum(TEST_ERRORS).nullable(),
     commit: CommitSha.nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
+    environmentReceipt: TestEnvironmentReceipt.optional(),
   }),
   z.object({
     type: z.literal('status'),
@@ -473,6 +479,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     programs: Programs.optional(),
     browserError: BrowserError.nullable().optional(),
     noRuns: z.string().max(300).nullable().optional(),
+    testEnvironmentVersion: z.literal(1).optional(),
+    testRuntimes: z.array(RuntimeCapability).max(64).optional(),
   }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({
@@ -587,6 +595,12 @@ export function repoFolder(url: string): string {
   return last.replace(/\.git$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '') || 'repo';
 }
 
+function validTestMode(message: { command: string; commitSha?: string | null; environment?: TestExecution; repositoryScope?: RepositoryScope }): boolean {
+  if (!message.environment) return message.command.trim().length > 0;
+  const description = message.environment.snapshot.description;
+  return !message.command && message.commitSha === description.commitSha && JSON.stringify(message.repositoryScope) === JSON.stringify(description.repositoryScope);
+}
+
 const ServerMessage = z.discriminatedUnion('type', [
   CheckQueueReply,
   z.object({
@@ -647,6 +661,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      empty folder when there is no repository, with the task's files named in files fetched first; what it leaves in its
      output folder goes on the task. commitSha: the one commit every part of the run checks, whatever its branch points
      at by now; none on a part of work, or on one of a run from before commits were pinned. */
+  z.strictObject({ type: z.literal('tests.describe'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),
+  z.strictObject({ type: z.literal('tests.describe.cancel'), requestId: Id }),
   z.object({
     type: z.literal('tests.run'),
     partId: Id,
@@ -656,11 +672,13 @@ const ServerMessage = z.discriminatedUnion('type', [
     commitSha: CommitSha.nullable().optional(),
     files: z.array(RunFile).max(MAX_RUN_FILES).optional(),
     task: z.number().int().positive(),
-    command: z.string().min(1).max(4000),
+    command: z.string().max(4000).default(''),
+    repositoryScope: RepositoryScope.optional(),
+    environment: TestExecution.optional(),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
-  }),
+  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('tests.ack'), partId: Id }),

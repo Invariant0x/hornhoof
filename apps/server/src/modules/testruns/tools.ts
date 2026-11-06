@@ -34,7 +34,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
+        "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation. With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
         "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, any wait_for of yours on the task ends and you are woken on it " +
         `with the result: passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
@@ -42,7 +42,9 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
         "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
       inputSchema: {
-        command: z.string().trim().min(1).max(4000).describe('What runs the suite in the fresh clone, for example installing and then testing.'),
+        command: z.string().trim().min(1).max(4000).optional().describe('Manual command, including installation. Omit it for the pinned product environment.'),
+        suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
+        profile: z.string().min(1).max(64).optional().describe('Product profile ID; defaults to defaultProfile in the pinned manifest.'),
         task: TaskRef('whose branch it tests'),
         branch: Branch.optional().describe("By default the task's own: task-<number>, or the only branch that starts with task-<number>-."),
         parts: Parts,

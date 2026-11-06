@@ -38,6 +38,15 @@ describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
     return readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   }
 
+  it('leaves the server and every other program running when a paste meets a program that ended', async () => {
+    await tmux.launch('ended', { cwd: tmpdir(), command: ['sh', '-c', 'exit 3'], cols: 80, rows: 24 });
+    await tmux.launch('other', { cwd: tmpdir(), command: ['sleep', '60'], cols: 80, rows: 24 });
+    await until(async () => !(await tmux.alive('ended')));
+    await tmux.paste('ended', 'words');
+    expect(await tmux.alive('other')).toBe(true);
+    expect(await tmux.run(['list-buffers'])).toBe('');
+  });
+
   it('keeps an embedded paste terminator and the following lines inside one paste', async () => {
     expect(await pasted('before\x1b[201~after\nnext')).toEqual([{ text: 'before[201~after\nnext' }, 'enter']);
   });
