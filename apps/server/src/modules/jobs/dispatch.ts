@@ -1,4 +1,4 @@
-import type { SkillFile, Workspace } from '@hornhoof/protocol';
+import type { ModelCheckKind, ModelIdentity, ProviderId, SkillFile, Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -73,3 +73,10 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     ...jobExtras(job),
   });
 }
+
+export type FreshModelRequest = { readonly kind: ModelCheckKind; readonly expectedModel: ModelIdentity; readonly systemPrompt: string; readonly userPayload: string };
+export type FreshModelResponse = { readonly status: 'ok'; readonly reviewer: ModelIdentity; readonly rawOutput: string; readonly isolated: true } | { readonly status: 'unavailable' };
+type FreshOptions = { endpoints?: Partial<Record<ProviderId, string>>; timeoutMs?: number };
+
+export const FRESH_INFERENCE_HASH = '0'.repeat(64);
+export const freshModelCheck = (_ctx: Ctx, _options: FreshOptions = {}) => async (_request: FreshModelRequest): Promise<FreshModelResponse> => ({ status: 'unavailable' });
