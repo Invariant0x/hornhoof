@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, type ExternalWait } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
@@ -47,6 +47,11 @@ async function company(skills: string[]) {
 type Result = { content: { text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
+
+type WatchedTask = { number: number; title: string; status: string; updatedAt: string; waitsFor: number[];
+  externalWait: Pick<ExternalWait, 'reason' | 'since' | 'until'> | null; waitingForPerson: boolean };
+const watched = async (client: Client) => JSON.parse((await call(client, 'agents')).content[0]!.text) as { name: string; tasks: WatchedTask[] }[];
+const taskWaitCount = (rows: WatchedTask[]) => rows.filter(t => t.waitsFor.length && !t.externalWait && !t.waitingForPerson).length;
 
 async function messagesFrom(db: Db, agentId: string): Promise<string[]> {
   const rows = await db.select({ text: sql<string>`${agentEvents.data}->>'text'` }).from(agentEvents)
@@ -114,6 +119,64 @@ describe('tools a skill grants', () => {
     const all = JSON.parse((await call(await mcp(app, TOKEN), 'agents')).content[0]!.text) as { name: string; lastActivityAt: string | null }[];
     expect(all.find(a => a.name === 'Bruno')!.lastActivityAt).toBe(did.toISOString());
   });
+
+  it('shows only open prerequisites of the held task department, without task bodies or hidden references', async () => {
+    const { app, db, acme, dev, ops, task } = await company(['ops-task-watch']);
+    const [foreign] = await db.insert(companies).values({ name: 'Unrelated company', singleton: false }).returning();
+    const closedAt = new Date();
+    const dependencies = await db.insert(tasks).values([
+      { companyId: acme.id, departmentId: dev.id, number: 10, title: 'Private dependency title', body: 'Private dependency body' },
+      { companyId: acme.id, departmentId: dev.id, number: 11, title: 'Done dependency', status: 'done', closedAt },
+      { companyId: acme.id, departmentId: dev.id, number: 12, title: 'Cancelled dependency', status: 'cancelled', closedAt },
+      { companyId: acme.id, departmentId: dev.id, number: 13, title: 'Planned dependency', status: 'planned' },
+      { companyId: acme.id, departmentId: ops.id, number: 14, title: 'Other department dependency' },
+      { companyId: foreign!.id, number: 15, title: 'Foreign dependency' },
+      { companyId: acme.id, number: 16, title: 'Departmentless dependency' },
+    ]).returning();
+    await db.update(tasks).set({ after: dependencies.map(t => t.id), body: 'Private held body' }).where(eq(tasks.id, task.id));
+    const client = await mcp(app, TOKEN), rows = await watched(client);
+    const held = rows.find(a => a.name === 'Bruno')!.tasks;
+    expect(held).toEqual([{ number: task.number, title: task.title, status: task.status, updatedAt: expect.any(String),
+      waitsFor: [10], externalWait: null, waitingForPerson: false }]);
+    expect(taskWaitCount(held)).toBe(1);
+    const serialized = JSON.stringify(rows);
+    for (const hidden of [...dependencies.flatMap(t => [t.id, t.title]), 'Private held body', 'Private dependency body', 'Unrelated company']) expect(serialized).not.toContain(hidden);
+    await db.update(tasks).set({ status: 'done', closedAt }).where(eq(tasks.id, dependencies[0]!.id));
+    const after = (await watched(client)).find(a => a.name === 'Bruno')!.tasks;
+    expect(after[0]!.waitsFor).toEqual([]);
+    expect(taskWaitCount(after)).toBe(0);
+  });
+
+  it('distinguishes a person question from work that can be handed out, even beside an open prerequisite', async () => {
+    const { app, db, acme, dev, bruno, task } = await company(['ops-task-watch']);
+    const [dependency] = await db.insert(tasks).values({ companyId: acme.id, departmentId: dev.id, number: 10, title: 'Prerequisite' }).returning();
+    await db.update(tasks).set({ after: [dependency!.id], status: 'waiting' }).where(eq(tasks.id, task.id));
+    const [question] = await db.insert(requests).values({ companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Private question text' }).returning();
+    const client = await mcp(app, TOKEN), rows = await watched(client), held = rows.find(a => a.name === 'Bruno')!.tasks;
+    expect(held[0]).toMatchObject({ waitsFor: [10], externalWait: null, waitingForPerson: true });
+    expect(taskWaitCount(held)).toBe(0);
+    expect(JSON.stringify(rows)).not.toContain('Private question text');
+    await db.update(requests).set({ status: 'answered', answeredAt: new Date() }).where(eq(requests.id, question!.id));
+    const answered = (await watched(client)).find(a => a.name === 'Bruno')!.tasks;
+    expect(answered[0]!.waitingForPerson).toBe(false);
+    expect(taskWaitCount(answered)).toBe(1);
+  });
+
+  for (const on of [undefined, ...['time', 'ceo', 'machine', 'other'].map(event => ({ kind: 'external' as const, event: event as 'time' | 'ceo' | 'machine' | 'other' })),
+    { kind: 'employee' as const, employee: '00000000-0000-4000-8000-000000000099', name: 'Hidden dependency employee' }]) {
+    it('keeps an external wait separate from department work: ' + (on?.kind === 'external' ? on.event : on?.kind ?? 'legacy'), async () => {
+      const { app, db, acme, dev, task } = await company(['ops-task-watch']);
+      const [dependency] = await db.insert(tasks).values({ companyId: acme.id, departmentId: dev.id, number: 10, title: 'Prerequisite' }).returning();
+      const now = Date.now(), wait = { reason: 'Waiting for the agreed event', since: new Date(now).toISOString(), until: new Date(now + 60_000).toISOString() };
+      await db.update(tasks).set({ after: [dependency!.id], externalWait: { ...wait, ...(on ? { on } : {}) } }).where(eq(tasks.id, task.id));
+      const rows = await watched(await mcp(app, TOKEN)), held = rows.find(a => a.name === 'Bruno')!.tasks;
+      expect(held[0]).toMatchObject({ waitsFor: [10], waitingForPerson: false });
+      expect(held[0]!.externalWait).toEqual(wait);
+      expect(taskWaitCount(held)).toBe(0);
+      expect(JSON.stringify(rows)).not.toContain('Hidden dependency employee');
+      expect(JSON.stringify(rows)).not.toContain('00000000-0000-4000-8000-000000000099');
+    });
+  }
 
   it('show until when a plan is at its limit, so the watchdog leaves its agents to wait', async () => {
     const { app, db, sub } = await company(['ops-task-watch']);

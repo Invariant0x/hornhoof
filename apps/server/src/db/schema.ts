@@ -1,4 +1,4 @@
-import type { ExternalWait } from '@hornhoof/protocol/waits';
+import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
@@ -1082,9 +1082,95 @@ export const waitNotices = pgTable('wait_notices', {
   leaseUntil: timestamp('lease_until', { withTimezone: true }),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  /* The accountable wait a notice speaks for, at the generation and route it was written for: a later one makes it stale. */
+  waitId: uuid('wait_id').references(() => taskWaits.id),
+  generation: integer('generation'),
+  level: integer('level'),
+  purpose: text('purpose'),
+  routeRevision: integer('route_revision'),
 }, t => [
   unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
   index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+  uniqueIndex('wait_notices_one_per_level').on(t.waitId, t.generation, t.level, t.purpose, t.routeRevision).where(sql`${t.waitId} IS NOT NULL`),
+  check('wait_notices_wait_whole', sql`${t.waitId} IS NULL OR (${t.generation} IS NOT NULL AND ${t.level} IS NOT NULL AND ${t.purpose} IS NOT NULL AND ${t.routeRevision} IS NOT NULL)`),
+]);
+
+/* One record for each source a task waits on, with who answers for it and until when. Its source is what ends it: a date
+   passing proves nothing. Both SQL roles stay out (HIDDEN): the record names private work, and one written by hand could
+   move a promise or quiet an alarm. */
+export const taskWaits = pgTable('task_waits', {
+  id: id(),
+  companyId: companyId(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  kind: text('kind', { enum: WAIT_SOURCE_KINDS }).notNull(),
+  /* Stable across restarts, never made up by a sweep; for an external wait, the id of its operation. */
+  sourceKey: text('source_key').notNull(),
+  /* The source's own count of its changes. A task's version moves with any comment and has no part in it. */
+  sourceRevision: integer('source_revision').notNull(),
+  /* Grows when the owner or the plan changes, which makes what was written for the one before stale. */
+  generation: integer('generation').notNull().default(1),
+  state: text('state', { enum: WAIT_STATES }).notNull(),
+  ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+  ownerPersonId: uuid('owner_person_id').references(() => people.id),
+  plan: jsonb('plan').$type<WaitPlan>(),
+  ownerDueAt: timestamp('owner_due_at', { withTimezone: true }),
+  headDueAt: timestamp('head_due_at', { withTimezone: true }),
+  decisionDueAt: timestamp('decision_due_at', { withTimezone: true }),
+  level: integer('level').notNull().default(0),
+  nextActionAt: timestamp('next_action_at', { withTimezone: true }),
+  reviewOrdinal: integer('review_ordinal').notNull().default(0),
+  nextReviewAt: timestamp('next_review_at', { withTimezone: true }),
+  attentionAgentId: uuid('attention_agent_id').references(() => agents.id),
+  attentionPersonId: uuid('attention_person_id').references(() => people.id),
+  /* Who decides in the end: the department's named owner, and the CEO without one. Kept as authority; no alarm follows from it. */
+  finalDecisionPersonId: uuid('final_decision_person_id').references(() => people.id),
+  fallbackToCeo: boolean('fallback_to_ceo').notNull().default(false),
+  routeRevision: integer('route_revision').notNull().default(0),
+  sourceState: jsonb('source_state').$type<WaitSourceState>().notNull().default({}),
+  outcome: text('outcome', { enum: WAIT_OUTCOMES }),
+  proofRef: text('proof_ref'),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('task_waits_open_source').on(t.companyId, t.taskId, t.kind, t.sourceKey).where(sql`${t.state} IN ('active', 'legacy_needs_plan')`),
+  index('task_waits_task').on(t.taskId),
+  index('task_waits_next_action').on(t.nextActionAt).where(sql`${t.state} = 'active'`),
+  check('task_waits_kind', sql`${t.kind} IN ('after', 'review', 'person', 'run', 'external')`),
+  check('task_waits_state', sql`${t.state} IN ('active', 'resolved', 'cancelled', 'superseded', 'legacy_needs_plan')`),
+  check('task_waits_counts', sql`${t.sourceRevision} >= 0 AND ${t.generation} >= 1 AND ${t.reviewOrdinal} >= 0 AND ${t.routeRevision} >= 0 AND ${t.level} BETWEEN 0 AND 3`),
+  check('task_waits_one_owner', sql`${t.ownerAgentId} IS NULL OR ${t.ownerPersonId} IS NULL`),
+  check('task_waits_one_attention', sql`${t.attentionAgentId} IS NULL OR ${t.attentionPersonId} IS NULL`),
+  check('task_waits_active_is_whole', sql`${t.state} <> 'active' OR (
+    (${t.ownerAgentId} IS NULL) <> (${t.ownerPersonId} IS NULL) AND ${t.plan} IS NOT NULL AND ${t.ownerDueAt} IS NOT NULL AND ${t.headDueAt} IS NOT NULL
+    AND ${t.decisionDueAt} IS NOT NULL AND ${t.nextActionAt} IS NOT NULL)`),
+  /* A review goes on until its source ends. Only an external operation, whose one signal has gone, has none left. */
+  check('task_waits_reviews_go_on', sql`${t.state} <> 'active' OR ${t.nextReviewAt} IS NOT NULL OR (${t.reviewOrdinal} >= 1 AND ${t.kind} = 'external' AND ${t.sourceKey} LIKE 'operation:%')`),
+  check('task_waits_legacy_has_no_dates', sql`${t.state} <> 'legacy_needs_plan' OR (${t.plan} IS NULL AND ${t.ownerDueAt} IS NULL AND ${t.headDueAt} IS NULL AND ${t.decisionDueAt} IS NULL AND ${t.nextActionAt} IS NULL AND ${t.nextReviewAt} IS NULL)`),
+  check('task_waits_ended', sql`(${t.state} IN ('active', 'legacy_needs_plan')) = (${t.endedAt} IS NULL AND ${t.outcome} IS NULL AND ${t.proofRef} IS NULL)`),
+]);
+
+/* A version of how long a department gives a kind of wait, at a stage or at all. No company starts with one, and a plan made
+   from one keeps its dates when a later version comes. */
+export const waitPolicies = pgTable('wait_policies', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull().references(() => departments.id),
+  kind: text('kind', { enum: WAIT_SOURCE_KINDS }).notNull(),
+  stage: text('stage').notNull().default(''),
+  version: integer('version').notNull(),
+  ownerMs: bigint('owner_ms', { mode: 'number' }).notNull(),
+  headMs: bigint('head_ms', { mode: 'number' }).notNull(),
+  decisionMs: bigint('decision_ms', { mode: 'number' }).notNull(),
+  reviewIntervalMs: bigint('review_interval_ms', { mode: 'number' }).notNull(),
+  createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+  createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('wait_policies_version').on(t.companyId, t.departmentId, t.kind, t.stage, t.version),
+  check('wait_policies_order', sql`${t.ownerMs} > 0 AND ${t.ownerMs} <= ${t.headMs} AND ${t.headMs} <= ${t.decisionMs} AND ${t.reviewIntervalMs} > 0 AND ${t.version} >= 1`),
+  check('wait_policies_kind', sql`${t.kind} IN ('after', 'review', 'person', 'run', 'external')`),
+  check('wait_policies_one_author', sql`(${t.createdByPersonId} IS NULL) <> (${t.createdByAgentId} IS NULL)`),
 ]);
 
 /* Checks made by a model. Both SQL roles stay out (HIDDEN): the examples hold private words, the held-out part must not

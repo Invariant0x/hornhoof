@@ -34,6 +34,13 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
   return folder;
 }
 
+/* What migrations after this history add to retained rows: a stamp on subscriptions, and the id an open wait is kept by. */
+function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
+  if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
+  if (table !== 'tasks') return rows;
+  return rows.map(row => (row.row.external_wait ? { row: { ...row.row, external_wait: { ...(row.row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } } : row));
+}
+
 describe('migration histories merged in turn 5', () => {
   it.each(['main', 'turn-5'] as const)('upgrades an existing %s installation with all retained rows and one record per migration', async branch => {
     const source = new PGlite();
@@ -85,9 +92,7 @@ describe('migration histories merged in turn 5', () => {
     for (const [index, table] of tables.entries()) {
       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
       const after = await copy.query<SnapshotRow>(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
-      const expected = table === 'subscriptions'
-        ? before[index]!.rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }))
-        : before[index]!.rows;
+      const expected = changedByLaterMigrations(table, before[index]!.rows);
       expect(after.rows, table).toEqual(expected);
     }
     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
