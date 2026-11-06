@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs } from '../src/db/schema.js';
-import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { agents, companies, departments, jobs, people } from '../src/db/schema.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 type Seen = { type: string; jobId?: string; agentKey?: string };
 
@@ -32,7 +33,7 @@ async function twoPlans() {
   const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [bruno] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: claude }).returning();
   await until(async () => (await app.inject({ url: `/api/agents/${bruno!.id}/events`, ...as(ceo) })).json().state.ready);
-  return { app, db, url, ceo, claude, codex, onA, onB, a, b, bruno: bruno! };
+  return { app, db, url, ceo, claude, codex, onA, onB, a, b, bruno: bruno!, dev: dev! };
 }
 
 const move = (app: FastifyInstance, ceo: string, id: string, subscription: string | null) => app.inject({ method: 'PATCH', url: `/api/agents/${id}`, payload: { subscription }, ...as(ceo) });
@@ -68,6 +69,14 @@ async function oneTurn({ app, ceo, bruno, a, db }: Awaited<ReturnType<typeof two
   return jobId!;
 }
 
+/* One more turn like this one, as if it had run. */
+async function pastTurn({ db }: Awaited<ReturnType<typeof twoPlans>>, like: string, more: Partial<typeof jobs.$inferInsert>): Promise<string> {
+  const [row] = await db.select().from(jobs).where(eq(jobs.id, like));
+  const id = randomUUID();
+  await db.insert(jobs).values({ ...row!, id, ...more });
+  return id;
+}
+
 describe('an agent moved to another plan', () => {
   it('tells the old node to release the program of its last turn', async () => {
     const setup = await twoPlans();
@@ -101,6 +110,40 @@ describe('an agent moved to another plan', () => {
     expect(await nextOf(setup.a, 'agent.release')).toMatchObject({ jobId: last });
   });
 
+  it('tells it when the orchestrator moves to another plan', async () => {
+    const setup = await twoPlans();
+    const last = await oneTurn(setup);
+    const [orchestrator] = await setup.db.update(agents).set({ subscriptionId: setup.claude }).where(eq(agents.kind, 'orchestrator')).returning();
+    const his = await pastTurn(setup, last, { agentId: orchestrator!.id, createdAt: new Date(Date.now() + 1000) });
+    expect((await setup.app.inject({ method: 'POST', url: `/api/subscriptions/${setup.codex}/orchestrator`, ...as(setup.ceo) })).statusCode).toBe(200);
+    expect(await nextOf(setup.a, 'agent.release')).toEqual({ type: 'agent.release', agentKey: orchestrator!.id, jobId: his });
+  });
+
+  it('says nothing when the orchestrator is put on the plan he is on', async () => {
+    const setup = await twoPlans();
+    const last = await oneTurn(setup);
+    const [orchestrator] = await setup.db.update(agents).set({ subscriptionId: setup.claude }).where(eq(agents.kind, 'orchestrator')).returning();
+    await pastTurn(setup, last, { agentId: orchestrator!.id, createdAt: new Date(Date.now() + 1000) });
+    expect((await setup.app.inject({ method: 'POST', url: `/api/subscriptions/${setup.claude}/orchestrator`, ...as(setup.ceo) })).statusCode).toBe(200);
+    expect(await arrived(setup.a, 'agent.release')).toEqual([]);
+  });
+
+  it('tells it when the owner of its plan no longer reaches the agent', async () => {
+    const setup = await twoPlans();
+    const last = await oneTurn(setup);
+    const maria = await invitePerson(setup.app, setup.ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [setup.dev.id] } });
+    const connected = (await setup.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(maria) })).json();
+    const plan = connected.subscriptions[0].id as string;
+    const joined = (await setup.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: codeOf(connected.command), ...MACHINE, machineId: 'maria-0002-abcd', hostname: 'maria-mac' } })).json().nodes[0] as { nodeId: string; key: string };
+    const hers = await connectNode(setup.url, joined.key);
+    hers.send(hello);
+    await setup.db.update(agents).set({ subscriptionId: plan, nodeId: joined.nodeId }).where(eq(agents.id, setup.bruno.id));
+    const onHers = await pastTurn(setup, last, { subscriptionId: plan, nodeId: joined.nodeId, createdAt: new Date(Date.now() + 1000) });
+    const [person] = await setup.db.select().from(people).where(eq(people.email, 'maria@acme.com'));
+    expect((await setup.app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { access: { departments: [] } }, ...as(setup.ceo) })).statusCode).toBe(200);
+    expect(await nextOf(hers, 'agent.release')).toEqual({ type: 'agent.release', agentKey: setup.bruno.id, jobId: onHers });
+  });
+
   it('says nothing to a node that ran no turn of it', async () => {
     const setup = await twoPlans();
     await move(setup.app, setup.ceo, setup.bruno.id, setup.codex);
@@ -110,9 +153,7 @@ describe('an agent moved to another plan', () => {
   it('names no turn that never reached the node', async () => {
     const setup = await twoPlans();
     const last = await oneTurn(setup);
-    const [never] = await setup.db.select().from(jobs).where(eq(jobs.id, last));
-    const { id: _, ...row } = never!;
-    await setup.db.insert(jobs).values({ ...row, status: 'failed', startedAt: null, createdAt: new Date(Date.now() + 1000) });
+    await pastTurn(setup, last, { status: 'failed', startedAt: null, createdAt: new Date(Date.now() + 1000) });
     await move(setup.app, setup.ceo, setup.bruno.id, setup.codex);
     expect(await nextOf(setup.a, 'agent.release')).toMatchObject({ jobId: last });
   });
