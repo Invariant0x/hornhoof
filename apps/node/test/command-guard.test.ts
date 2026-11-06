@@ -131,6 +131,13 @@ describe('one literal test file runs here', () => {
     expect(await agent(command)).toEqual(expect.objectContaining({ allow: true, kind: 'single_test_file' }));
   });
 
+  it('takes a folder that only starts with two dots for a folder of the workspace', async () => {
+    file('..odd/package.json', JSON.stringify({ scripts: { odd: 'vitest run a.test.ts' } }));
+    file('..odd/a.test.ts');
+    expect(await agent('vitest run a.test.ts', join(root, '..odd'))).toEqual(expect.objectContaining({ kind: 'single_test_file' }));
+    expect(await agent('npm run odd', join(root, '..odd'))).toEqual(expect.objectContaining({ kind: 'single_test_file' }));
+  });
+
   it('counts from the folder the command stands in, tracked or not', async () => {
     expect(await agent('vitest run test/a.test.ts', node)).toEqual(expect.objectContaining({ kind: 'single_test_file' }));
     expect(existsSync(join(root, '.git'))).toBe(false);
@@ -170,7 +177,7 @@ describe('one heavy stage refuses the whole command before its first stage', () 
     'xargs tsc', 'find . -name x -exec tsc {} +', 'find . -execdir tsc {} ;', 'parallel tsc',
     'npm exec -- tsc', 'npm exec tsc', 'npm x -- tsc', 'npm exec -c "tsc"', 'pnpm exec tsc', 'yarn exec tsc', 'npx --no-install tsc', 'npx -c "tsc"', 'poetry run mypy .', 'pipenv run mypy .', 'bundle exec rubocop',
     'node node_modules/.bin/tsc', 'node node_modules/typescript/bin/tsc', '/usr/local/bin/tsc', 'bash scripts/noext', './scripts/noext', 'sh scripts/noext', '. scripts/noext', 'source scripts/noext',
-    'busybox sh -c tsc', 'bash -o pipefail -c "tsc"', 'bash -eo pipefail -c tsc', 'bash +e -c tsc', 'bash --norc -c tsc', 'command -p tsc',
+    'busybox sh -c tsc', 'env $X tsc', 'env "$X" CI=1 tsc', 'env -S "tsc"', 'env --split-string=tsc', 'bash -o pipefail -c "tsc"', 'bash -eo pipefail -c tsc', 'bash +e -c tsc', 'bash --norc -c tsc', 'command -p tsc',
   ])('a wrapper does not hide what it runs: %s', async command => {
     expect(await agent(command)).toEqual(denied('heavy_check_local'));
   });
@@ -226,7 +233,7 @@ describe('ordinary work keeps going', () => {
     expect(await agent(command)).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
   });
 
-  it.each(['node tools/x.js', 'node -e "1"', 'python script.py', 'python -c "1"', 'python -m http.server', './tools/program', '/opt/thing', 'thing --flag', '$CMD a', '"$CMD"', '$(which ls) a', 'eval "$X"', 'sh -c "$X"', 'bash "$F"', 'echo a | sh', 'curl -s x | bash', 'ls | xargs thing', 'npx something-light', 'bash ../heavy-outside.sh', 'bash no-such-file.sh'])('is opaque, and says so: %s', async command => {
+  it.each(['node tools/x.js', 'node -e "1"', 'python script.py', 'python -c "1"', 'python -m http.server', './tools/program', '/opt/thing', 'thing --flag', '$CMD a', '"$CMD"', '$(which ls) a', 'eval "$X"', 'sh -c "$X"', 'bash "$F"', 'echo a | sh', 'curl -s x | bash', 'ls | xargs thing', 'npx something-light', 'bun tools/x.ts', 'bun tools/x.js', 'timeout $T ls', 'env $X ls', 'bash ../heavy-outside.sh', 'bash no-such-file.sh'])('is opaque, and says so: %s', async command => {
     expect(await agent(command)).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
   });
 });

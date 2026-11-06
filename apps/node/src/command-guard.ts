@@ -792,7 +792,7 @@ class Guard {
   /* Whether the path stands under the workspace with no link anywhere on its way. */
   async inside(absolute: string): Promise<boolean> {
     const way = relative(this.root, absolute);
-    if (this.realRoot === null || !way || way === '..' || way.startsWith('../') || isAbsolute(way)) return false;
+    if (this.realRoot === null || !way || leavesFolder(way)) return false;
     return (await this.files.realpath(absolute)) === join(this.realRoot, way);
   }
 
@@ -817,7 +817,7 @@ class Guard {
 
   private upToRoot(from: string): string[] {
     const folders: string[] = [];
-    for (let folder = from; folder === this.root || !relative(this.root, folder).startsWith('..'); folder = dirname(folder)) {
+    for (let folder = from; !leavesFolder(relative(this.root, folder)); folder = dirname(folder)) {
       folders.push(folder);
       if (folder === this.root || folder === dirname(folder)) break;
     }
@@ -857,6 +857,8 @@ class Guard {
     return this.manifests.get(folder)!;
   }
 }
+
+const leavesFolder = (way: string): boolean => way === '..' || way.startsWith('../') || isAbsolute(way);
 
 function parseScripts(text: string | null): Record<string, unknown> | null {
   if (text === null) return null;
@@ -989,9 +991,9 @@ async function useTool(tool: ToolSpec, guard: Guard, args: Word[], place: Place)
 const withoutDashes = (args: Word[]): Word[] => (args[0]?.text === '--' ? args.slice(1) : args);
 
 /* Wrappers run the command that follows them: what is left once their own flags and fixed words are off. */
-type Wrapper = { values?: readonly string[]; positional?: number; assigns?: boolean; loop?: boolean; lookup?: readonly string[]; sameShell?: boolean };
+type Wrapper = { values?: readonly string[]; positional?: number; assigns?: boolean; loop?: boolean; lookup?: readonly string[]; sameShell?: boolean; splits?: boolean };
 const WRAPPERS: Readonly<Record<string, Wrapper>> = {
-  env: { values: ['-u', '--unset', '-C', '--chdir'], assigns: true },
+  env: { values: ['-u', '--unset', '-C', '--chdir'], assigns: true, splits: true },
   time: { values: ['-f', '--format', '-o', '--output'] },
   nice: { values: ['-n', '--adjustment'] },
   ionice: { values: ['-c', '--class', '-n', '--classdata', '-p', '--pid'] },
@@ -1031,14 +1033,29 @@ function wrapperRest(wrapper: Wrapper, args: Word[], place: Place): Word[] | nul
     changedFolder(flag, args[at], place);
   }
   at += wrapper.positional ?? 0;
-  while (wrapper.assigns && args[at]?.assign) {
+  /* A word nobody can know in the settings may be one more setting: what follows it is still told. */
+  while (wrapper.assigns && (args[at]?.assign || args[at]?.literal === false)) {
     if (taints(args[at]!)) place.tainted = true;
     at++;
   }
   return args.slice(at);
 }
 
+/* The text env -S splits into a command, if it was given one. */
+function splitString(args: Word[]): Word | null {
+  for (const [at, word] of args.entries()) {
+    if (word.text === '-S' || word.text === '--split-string') return args[at + 1] ?? null;
+    if (word.text.startsWith('--split-string=')) return { ...word, text: word.text.slice('--split-string='.length) };
+    if (!isFlag(word)) return null;
+  }
+  return null;
+}
+
 const wrapperHandler = (wrapper: Wrapper): Handler => async (guard, args, place) => {
+  const split = wrapper.splits ? splitString(args) : null;
+  if (split) return split.literal ? guard.shellText(split.text, { ...place }) : guard.unknown(place);
+  /* What runs may then be other than it looks. */
+  if (args.some(word => !word.literal)) guard.unknown(place);
   const inner = { ...place, loop: place.loop || Boolean(wrapper.loop) };
   const rest = wrapperRest(wrapper, args, inner);
   if (!rest?.length) return guard.note(RECOGNIZED);
@@ -1405,6 +1422,7 @@ const managerHandler = (manager: Manager): Handler => (guard, args, place) => us
 /* bun's own test runner and bundler come before anything named so in a manifest. */
 const BUN_HANDLER: Handler = async (guard, args, place) => {
   const first = args.find(word => !isFlag(word))?.text;
+  if (first && /\.[cm]?[jt]sx?$/.test(first)) return guard.note(OPAQUE);
   if (first === 'test') return guard.note(check('test_scope'));
   if (first === 'build') return guard.note(check('build'));
   await useManager(BUN, guard, args, place);
