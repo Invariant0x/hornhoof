@@ -958,6 +958,34 @@ describe('templates', () => {
         'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
       );
     });
+
+    it('teaches department heads abstract department-load ownership, independent after-chain slices and urgent-only team boundaries while keeping watchdog idle-fault rules intact', () => {
+      const leadSkill = templates.skills.get('hh-lead-tasks')!;
+      const breakDownSkill = templates.skills.get('hh-break-down')!;
+      expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
+      expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
+      expect(templates.roles.get('OPS-WATCH')!.body).toContain('no one stands free while work waits');
+      expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+    });
+
+    it('rejects head breakdown instructions that treat idle capacity as normal, omit independentPart/independentNone, assign ordinary work to urgent-only teams or leak incident names', () => {
+      const base: HeadLoadSkills = {
+        lead: leadTasksBody(),
+        breakDown: templates.skills.get('hh-break-down')!.body,
+      };
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, base)).toEqual([]);
+      const cases: [keyof HeadLoadSkills, string, string][] = [
+        ['lead', 'Members standing free while work waits is a normal wait, and the head only orders tasks.', 'free-members-with-runnable-work-is-fault-and-head-owns-load'],
+        ['breakDown', 'Leave after tasks without independentPart or independentNone, and send independentNone tasks out early.', 'after-chains-require-independent-part-or-none-preserving-boundaries'],
+        ['lead', 'Assign ordinary non-urgent work to an urgentOnly team whenever peers are busy.', 'urgent-only-team-refuses-non-urgent-and-names-free-peers'],
+        ['lead', 'Never give Tiger Team or Simon ordinary work on #348 after 2026-11-06.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+        ['breakDown', 'Hornhoof wakes you automatically whenever two members stand free.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+      ];
+      for (const [key, badLine, ruleId] of cases) {
+        expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { ...base, [key]: `${base[key]}\n${badLine}` }), badLine).toContain(ruleId);
+      }
+    });
   });
 });
 
@@ -1270,6 +1298,65 @@ const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => bo
 ];
 
 const UNSHIPPED_EXTERNAL_AUTOMATION_RE = /\b(?:automatically retries|intercepts git push|blocks task creation|waits for GitHub)\b/i;
+
+type HeadLoadSkills = { lead: string; breakDown: string };
+
+const HEAD_LOAD_LEAK_RE = /\b(?:tiger team|simon|david|ivan|github|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b/i;
+const UNSHIPPED_IDLE_WAKE_RE = /\bhornhoof\s+(?:automatically\s+)?wakes\s+you[^.!?]*\b(?:free|idle)\b/i;
+
+const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => boolean }[] = [
+  {
+    id: 'free-members-with-runnable-work-is-fault-and-head-owns-load',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /\bwhoever gives out the work answers for keeping the department loaded,\s*not only for ordering tasks\b/i,
+          /\bmembers standing free while\b[^.!?]*\bare a fault,\s*not a normal wait\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bstanding free\b[^.!?;,]*\bis a normal wait\b/i,
+        /\bonly orders tasks\b/i,
+      ]),
+  },
+  {
+    id: 'after-chains-require-independent-part-or-none-preserving-boundaries',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /`independentPart`/,
+          /`independentNone`/,
+          /\bsingle file ownership\b[\s\S]*\bgenuine dependenc(?:y|ies)\b[\s\S]*\brelease boundar(?:y|ies)\b/i,
+          /\bpass neither when `after` is empty\b/i,
+        ]),
+      ) &&
+      matchesAll(s.lead, [
+        /\bwaits on `after` as before\b/i,
+        /\bMembers standing free while department tasks wait on `after`:[\s\S]*"update_task"[\s\S]*`independentPart`[\s\S]*"create_task"/,
+      ]) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bleave\w*\s+after\s+tasks\s+without\s+independentPart\s+or\s+independentNone\b/i,
+        /\bsend\w*\s+independentNone\s+tasks\s+out\s+early\b/i,
+      ]),
+  },
+  {
+    id: 'urgent-only-team-refuses-non-urgent-and-names-free-peers',
+    holds: s =>
+      matchesAll(s.lead, [
+        /\bNever assign ordinary or non-urgent work to members of an urgent-only team\s*\(`urgentOnly`\)/,
+        /\brefuses the assignment and names free members in the same role\b/i,
+      ]) &&
+      /\bnever assign non-urgent work to an urgent-only team\s*\(`urgentOnly`\)/i.test(s.breakDown) &&
+      forbids(`${s.lead}\n${s.breakDown}`, /\bassign\w*\s+(?:ordinary\s+(?:or\s+)?)?non-urgent\s+work\s+to\s+(?:members\s+of\s+)?an\s+urgent(?:-only|Only)\s+team\b/i),
+  },
+  {
+    id: 'abstract-no-incident-names-or-unshipped-idle-wake',
+    holds: s => {
+      const joined = `${s.lead}\n${s.breakDown}`;
+      return !HEAD_LOAD_LEAK_RE.test(joined) && !UNSHIPPED_IDLE_WAKE_RE.test(joined) && s.lead.split('External outages and holds:').length - 1 === 1;
+    },
+  },
+];
 
 const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean }[] = [
   {
