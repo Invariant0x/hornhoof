@@ -925,7 +925,7 @@ body:has(.dview) .version-mark { display: none; }
 /* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
-.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
+.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
 .ac-head { display: grid; gap: 4px; justify-items: start; min-width: 0; }
 .ac-head h3 { font-size: 22px; }
 .ac-head p { margin: 0; }
