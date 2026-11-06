@@ -73,7 +73,7 @@ async function oneTurn({ app, ceo, bruno, a, db }: Awaited<ReturnType<typeof two
 async function pastTurn({ db }: Awaited<ReturnType<typeof twoPlans>>, like: string, more: Partial<typeof jobs.$inferInsert>): Promise<string> {
   const [row] = await db.select().from(jobs).where(eq(jobs.id, like));
   const id = randomUUID();
-  await db.insert(jobs).values({ ...row!, id, ...more });
+  await db.insert(jobs).values({ ...row!, id, toolTokenHash: null, ...more });
   return id;
 }
 
