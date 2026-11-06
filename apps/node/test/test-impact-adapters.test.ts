@@ -33,6 +33,11 @@ describe('explicit Vitest collection adapter', () => {
     const { input, collection } = setup(); collection.selected = [];
     expect(await collectVitestImpact(input, async () => collection)).toMatchObject({ status: 'ready', units: [] });
   });
+  it.each(['empty', 'unrelated'])('fails wide when a changed test is outside the collection with %s selected tests', async selection => {
+    const { input, collection } = setup(); input.changed = ['apps/node/e2e/agent-window-overlays.spec.ts'];
+    if (selection === 'empty') collection.selected = [];
+    expect(await collectVitestImpact(input, async () => collection)).toEqual(unavailable);
+  });
   it('does not collect when there are no changes', async () => {
     const { input } = setup(); input.changed = [];
     expect(await collectVitestImpact(input, async () => { throw new Error('unused'); })).toMatchObject({ status: 'ready', units: [] });
