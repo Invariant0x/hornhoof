@@ -19,13 +19,14 @@ type Boot = {
   awayTask: { id: string };
 };
 
-type Server = Boot & { child: ChildProcessWithoutNullStreams; control(command: string): Promise<void>; stop(): Promise<void> };
+type Server = Boot & { child: ChildProcessWithoutNullStreams; pages: Page[]; control(command: string): Promise<void>; stop(): Promise<void> };
 
 async function startServer(): Promise<Server> {
   const child = spawn(resolve(HERE, '../../../node_modules/.bin/vitest'), ['run', 'test/access-server-support.test.ts'], {
     cwd: resolve(HERE, '../../server'),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  const pages: Page[] = [];
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += String(chunk); });
   const boot = await new Promise<Boot>((done, fail) => {
@@ -49,12 +50,15 @@ async function startServer(): Promise<Server> {
     pending.set(command, () => { pending.delete(command); done(); });
     child.stdin.write(JSON.stringify({ control: command }) + '\n');
   });
-  const stop = () => new Promise<void>(done => {
-    if (child.exitCode !== null) return done();
-    child.once('exit', () => done());
-    child.stdin.end();
-  });
-  return { ...boot, child, control, stop };
+  const stop = async () => {
+    await Promise.all(pages.map(page => page.context().close().catch(() => undefined)));
+    if (child.exitCode !== null) return;
+    await new Promise<void>(done => {
+      child.once('exit', () => done());
+      child.stdin.end();
+    });
+  };
+  return { ...boot, child, pages, control, stop };
 }
 
 async function signedIn(browser: Browser, server: Server, who: keyof Boot['tokens'], lang: 'en' | 'ru', theme: 'light' | 'dark', width: number): Promise<Page> {
@@ -69,6 +73,7 @@ async function signedIn(browser: Browser, server: Server, who: keyof Boot['token
   page.on('pageerror', error => errors.push(error.message));
   page.on('websocket', socket => socket.on('close', () => undefined));
   (page as Page & { __errors?: string[] }).__errors = errors;
+  server.pages.push(page);
   return page;
 }
 
@@ -122,6 +127,7 @@ test('real server applies both plan and department to map, schema, tree and list
     await expect(ann.locator('.dcanvas')).toContainText('Mina');
     for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
+    console.log('ACL TREE TEXT', await ann.locator('.tv-in').innerText());
     await expect(ann.locator('.tv-labs .dept-chip')).toHaveCount(1);
     await expect(ann.locator('.tv-in')).not.toContainText('Hidden work');
     await ann.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
