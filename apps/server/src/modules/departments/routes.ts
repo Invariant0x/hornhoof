@@ -1,5 +1,5 @@
 import { notificationMessage } from '../events/notifications.js';
-import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
+import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -23,6 +23,7 @@ import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSub
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
+import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../model-checks/routes.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
@@ -236,7 +237,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
+            .values({ companyId: me.companyId, templateKey: item.template, workMode: defaultDepartmentWorkMode(item.template), name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
@@ -434,5 +435,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
+  workModeRoutes(app, ctx);
   modelCheckRoutes(app, ctx);
 }
