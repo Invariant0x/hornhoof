@@ -8,14 +8,14 @@ const body = (id: string) => templates.skills.get(id)!.body;
 describe('pipeline guidance', () => {
   it('separates author checks, shared turn checks and nonblocking improvements', () => {
     expect(body('dev-gates')).toMatch(/affected tests[\s\S]*pinned commit/);
-    expect(body('dev-gates')).toMatch(/Improvement lanes[\s\S]*ordinary tasks[\s\S]*next turn/i);
-    expect(body('dev-implement')).toMatch(/next (task|piece of work)[\s\S]*(batch|shared) checks?/i);
+    expect(body('dev-gates')).toMatch(/Improvement lanes[\s\S]*ordinary next-turn tasks/i);
+    expect(body('dev-implement')).toMatch(/next (independent )?(task|piece of work)[\s\S]*(batch|shared) checks?/i);
   });
 
   it('hands submission to the existing author check and review to its run evidence', () => {
     expect(body('dev-implement')).toMatch(/submit[\s\S]*author check/i);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) {
-      expect(body(id), id).toMatch(/run (ID|id|and number)/i);
+      expect(body(id), id).toMatch(/runs? (ID|id|and number)/i);
       expect(body(id), id).toMatch(/commit/);
       expect(body(id), id).toMatch(/instead of rerunning|without rerunning/);
     }
