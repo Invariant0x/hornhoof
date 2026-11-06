@@ -24,6 +24,11 @@ test.use({ hasTouch: true });
 async function capture(page: Page, info: TestInfo, name: string, fullPage = false) {
   const file = `${PHASE}-${name}.png`;
   const path = SCREENSHOT_DIR ? `${SCREENSHOT_DIR}/${file}` : info.outputPath(file);
+  if (name.startsWith('focus-')) {
+    const focused = page.locator(':focus');
+    await expect(focused).toHaveCount(1);
+    await expect(focused).not.toHaveCSS('outline-style', 'none');
+  }
   await page.screenshot({ path, fullPage });
   await info.attach(file, { path, contentType: 'image/png' });
 }
@@ -176,6 +181,13 @@ for (const lang of ['en', 'ru'] as const) {
       }
 
       const look = `${lang}-${theme}-${width}`;
+      test(`Agent card in its window evidence: ${look}`, async ({ page }, info) => {
+        const { openPanel } = await openAgent(page, { lang, theme, width }, 'orchestrator');
+        const card = await openPanel('card');
+        await expect(card.locator('.ac-body')).toBeVisible();
+        await capture(page, info, `agent-card-${look}`);
+      });
+
       test(`Task text wraps without clipping and still opens: ${look}`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 900 });
         await page.addInitScript(({ lang, theme }) => {
@@ -232,7 +244,7 @@ for (const lang of ['en', 'ru'] as const) {
 }
 
 const LONG_HOST = `build-${'x'.repeat(140)}.example.internal`;
-const LONG_PERSON: PersonView = { id: 'p2', name: `Alexandria${'VeryLong'.repeat(20)}`, email: 'long@acme.test', title: 'COO', status: 'active', isOwner: false, access: { whole: true, departments: [], teams: [] } };
+const LONG_PERSON: PersonView = { id: 'p2', name: `Alexandria${'VeryLong'.repeat(20)}`, email: 'long@acme.test', title: 'Chief Operating Officer With A Long Senior Executive Title', status: 'active', isOwner: false, access: { whole: true, departments: [], teams: [] } };
 const LONG_MACHINE: MachineView = {
   id: 'm1', hostname: LONG_HOST, owner: { id: 'p1', name: 'Ivan' }, os: 'linux', arch: 'x86_64', online: false,
   lastSeenAt: null, load: null, plans: [], lendsTests: true, running: { agents: [], parts: [] },
@@ -366,6 +378,7 @@ for (const lang of ['en', 'ru'] as const) {
       test(`Requests empty and read error evidence: ${look}`, async ({ page }, info) => {
         await prepareRoutes(page, lang, theme, width);
         await page.goto('/tasks');
+        await expect(page.getByText(m.tasks.nothingWaiting, { exact: true })).toBeVisible();
         await expect(page.locator('article.req')).toHaveCount(0);
         await capture(page, info, `requests-empty-${look}`);
         await page.route('**/api/requests', route => route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'Read failed.' } } }));
@@ -399,6 +412,18 @@ for (const lang of ['en', 'ru'] as const) {
         await option.focus();
         await expect(option).toBeFocused();
         await capture(page, info, `focus-req-option-${look}`);
+        let releaseAnswer!: () => void;
+        await page.route('**/api/requests/req-choice', async route => {
+          await new Promise<void>(resolve => { releaseAnswer = resolve; });
+          return route.fulfill({ json: {} });
+        });
+        const choice = cards.nth(1);
+        await choice.getByLabel(m.tasks.choiceNote, { exact: true }).fill('Use the second layout.');
+        await choice.getByRole('button', { name: m.tasks.sendFeedback, exact: true }).click();
+        await expect(choice).toHaveAttribute('aria-busy', 'true');
+        await capture(page, info, `requests-saving-${look}`);
+        releaseAnswer();
+        await expect(choice).toHaveCount(0);
       });
 
       test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {
@@ -460,6 +485,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(card).toBeVisible();
         await expect(card.locator('.status.ready').first()).toHaveText(m.machines.online);
         await expect(card.locator('.plist')).toContainText('Codex');
+        if (width === 1440) await expect(page.locator('table.dt')).not.toHaveAttribute('data-fit', 'entries');
         await capture(page, info, `machine-online-${look}`, true);
         expect(errors).toEqual([]);
       });
