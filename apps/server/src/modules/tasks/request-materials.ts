@@ -29,7 +29,10 @@ export function parseMaterialSubmission(input: unknown, optionCount: number, res
     return undefined;
   }
   const parsed = QuestionMaterials.safeParse(input);
-  if (!parsed.success) throw new ApiError(400, 'validation', `materials_invalid: ${parsed.error.issues.map(issue => issue.message).join(' ')} ${ATTACH_HINT}`, 'materials_invalid', { fields: parsed.error.issues.map(issue => issue.path), howToAttach: ATTACH_HINT });
+  if (!parsed.success) {
+    const reason = parsed.error.issues.some(issue => issue.code === 'custom' && issue.message.startsWith('materials_required:')) ? 'materials_required' : 'materials_invalid';
+    throw new ApiError(400, 'validation', `${reason}: ${parsed.error.issues.map(issue => issue.message).join(' ')} ${ATTACH_HINT}`, reason, { fields: parsed.error.issues.map(issue => issue.path), howToAttach: ATTACH_HINT });
+  }
   if (resultRequired && parsed.data.presentation !== 'result') throw new ApiError(400, 'validation', `materials_required: This source presents a result. ${ATTACH_HINT}`, 'materials_required', { field: 'materials.presentation', howToAttach: ATTACH_HINT });
   if (parsed.data.options.length !== optionCount) throw new ApiError(400, 'validation', `materials_invalid: Match the material lists to the source options in order. ${ATTACH_HINT}`, 'materials_invalid', { field: 'materials.options', howToAttach: ATTACH_HINT });
   return parsed.data;
