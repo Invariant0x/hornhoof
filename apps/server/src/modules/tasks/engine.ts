@@ -1440,6 +1440,8 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
+  onCreated?: (tx: Tx, request: Request) => Promise<void>;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1486,6 +1488,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         ...approvalColumns(q.approval),
       })
       .returning();
+    await q.onCreated?.(tx, request!);
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;

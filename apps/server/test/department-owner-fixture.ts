@@ -6,8 +6,8 @@ import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.
 
 /* A company with Development and Sales, each with a worker on a task, and Dana listed for Development, Sam for Sales and Tia
    for a team of Development only. */
-export async function company() {
-  const { app, db } = await testApp();
+export async function company(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
   await listen(app);
   const ceoToken = await setUpCompany(app);
   const [acme] = await db.select().from(companies);

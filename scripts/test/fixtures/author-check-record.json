@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "submissionCommit": "1111111111111111111111111111111111111111",
+  "checkCommit": "1111111111111111111111111111111111111111",
+  "scope": { "kind": "changed", "paths": ["apps/node/src/a.ts", "apps/node/test/a.test.ts"] },
+  "stages": [
+    { "name": "format", "status": "unavailable", "exitCode": null, "partId": null },
+    { "name": "lint", "status": "passed", "exitCode": 0, "partId": null },
+    { "name": "types", "status": "passed", "exitCode": 0, "partId": null },
+    { "name": "tests", "status": "passed", "exitCode": 0, "partId": null },
+    { "name": "crapper", "status": "passed", "exitCode": 0, "partId": null },
+    { "name": "dryer", "status": "passed", "exitCode": 0, "partId": null }
+  ],
+  "numbers": {
+    "tests": { "passed": 4, "failed": 0, "skipped": 1, "total": 5 },
+    "changedLines": { "covered": 2, "total": 3 },
+    "worstCrap": 3,
+    "dryerFlags": 0
+  }
+}

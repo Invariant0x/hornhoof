@@ -4,7 +4,7 @@ import { createVitest } from 'vitest/node';
 /* Collection/graph evidence only. This helper never invokes test callbacks. */
 export async function probe(options, changed) {
   const root = process.cwd();
-  const vitest = await createVitest({ watch: false, maxWorkers: 2, ...options, ...(changed ? { related: [resolve(root, changed)] } : {}) });
+  const vitest = await createVitest({ watch: false, maxWorkers: 2, ...options, ...(changed ? { related: [changed].flat().map(path => resolve(root, path)) } : {}) });
   try {
     const all = await vitest.globTestSpecifications();
     const selected = changed ? await vitest.getRelevantTestSpecifications() : all;
@@ -24,6 +24,6 @@ export function workspaceOptions(folder, config) {
 }
 
 export function evidence(mode, changed, result) {
-  console.log('HH_RELATED_WIDTH ' + JSON.stringify({ mode, changed, projects: result.projects, total: result.all.length,
-    selected: result.selected.length, files: result.selected }));
+  process.stdout.write('HH_RELATED_WIDTH ' + JSON.stringify({ mode, changed, projects: result.projects, total: result.all.length,
+    selected: result.selected.length, files: result.selected }) + '\n');
 }
