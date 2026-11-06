@@ -1,0 +1,65 @@
+# Targeted fixture checks only. This recipe never starts a browser or publishes anything.
+set -euo pipefail
+node --input-type=module <<'AUTHOR'
+import { spawn, execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { platform, arch, hostname, availableParallelism, loadavg, freemem } from 'node:os';
+
+const read = path => { try { return readFileSync(path, 'utf8').trim(); } catch { return null; } };
+function facts(stage, point) {
+  console.log('HH_AUTHOR_FACT ' + JSON.stringify({ stage, point, at: new Date().toISOString(), node: process.version,
+    os: platform(), arch: arch(), host: hostname(), cpus: availableParallelism(), load: loadavg(), free: freemem(),
+    dockerMarker: existsSync('/.dockerenv'), cpuMax: read('/sys/fs/cgroup/cpu.max'), cpuset: read('/sys/fs/cgroup/cpuset.cpus.effective'),
+    memoryMax: read('/sys/fs/cgroup/memory.max'), memoryCurrent: read('/sys/fs/cgroup/memory.current') }));
+}
+async function step(stage, args) {
+  facts(stage, 'before');
+  const start = performance.now(), child = spawn(args[0], args.slice(1), { stdio: 'inherit' });
+  let error;
+  child.once('error', value => { error = value.message; });
+  const timer = setInterval(() => facts(stage, 'during'), 5000);
+  const end = await new Promise(resolve => child.once('close', (code, signal) => resolve({ code: code ?? 1, signal })));
+  clearInterval(timer); facts(stage, 'after');
+  console.log('HH_AUTHOR_STAGE ' + JSON.stringify({ stage, args, ...end, error, ms: Math.round(performance.now() - start) }));
+  return end.code;
+}
+
+if (platform() !== 'linux') throw new Error('Linux is required');
+console.log('HH_AUTHOR_SCOPE ' + JSON.stringify({ task: 535, source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  fullSuite: false, liveBrowsers: false, runtimeReadiness: 'NOT_VERIFIED',
+  coverage: 'Node child report retained as unmapped diagnostic; mapped Vitest TS wrapper only feeds quality checks' }));
+let code = await step('install', ['npm', 'ci', '--prefer-offline', '--no-audit', '--no-fund']);
+if (!code) code = await step('protocol-build', ['npm', 'run', 'build', '-w', '@hornhoof/protocol']);
+if (!code) code = await step('web-build', ['npm', 'run', 'build', '-w', '@hornhoof/web']);
+if (!code) {
+  mkdirSync('coverage/raw-child', { recursive: true });
+  const fixture = 'apps/web/e2e/geometry-fixture.ts', worker = 'apps/web/e2e/geometry-server.mjs';
+  code |= await step('real-http-child-raw-coverage', ['node', '--import', 'tsx', '--test', '--experimental-test-coverage',
+    '--test-coverage-include=' + fixture, '--test-coverage-include=' + worker,
+    '--test-reporter=tap', '--test-reporter-destination=stdout', '--test-reporter=lcov',
+    '--test-reporter-destination=coverage/raw-child/lcov.info', 'apps/web/e2e/geometry-server.unit.mjs']);
+  code |= await step('mapped-wrapper-contracts', ['npx', '--no-install', 'vitest', 'run',
+    '--config', 'apps/web/vitest.geometry-fixture.config.mjs', '--maxWorkers=2', '--coverage.enabled', '--coverage.reportOnFailure']);
+  code |= await step('geometry-types', ['npx', '--no-install', 'tsc', '-p', 'apps/web/tsconfig.geometry.json', '--noEmit']);
+  code |= await step('fixture-typescript-eslint', ['npx', '--no-install', 'eslint', fixture, 'apps/web/e2e/geometry-fixture.vitest.ts']);
+  code |= await step('fixture-javascript-eslint', ['npx', '--no-install', 'eslint', worker, 'apps/web/e2e/geometry-server.unit.mjs',
+    'apps/web/vitest.geometry-fixture.config.mjs', '--rule', 'no-undef:error', '--rule', 'no-unused-vars:error',
+    '--global', 'fetch', '--global', 'process', '--global', 'console', '--global', 'Buffer']);
+  console.log('HH_AUTHOR_UNMAPPED_DIAGNOSTIC_LCOV_BEGIN'); console.log(read('coverage/raw-child/lcov.info'));
+  console.log('HH_AUTHOR_UNMAPPED_DIAGNOSTIC_LCOV_END');
+  const mapped = read('coverage/geometry-wrapper/lcov.info');
+  console.log('HH_AUTHOR_MAPPED_LCOV_BEGIN'); console.log(mapped); console.log('HH_AUTHOR_MAPPED_LCOV_END');
+  const sourceLine = read(fixture).split('\n').findIndex(line => line.startsWith('export async function geometryServer')) + 1;
+  const functionLine = Number(/^FN:(\d+),geometryServer$/m.exec(mapped ?? '')?.[1]);
+  const valid = sourceLine > 0 && functionLine === sourceLine;
+  console.log('HH_AUTHOR_COVERAGE_BINDING ' + JSON.stringify({ fixture, sourceLine, functionLine, valid }));
+  if (!valid) code |= 1;
+  else {
+    /* No counters are edited. Worker coverage is unavailable here, so its CRAP uses the conservative zero-coverage bound. */
+    writeFileSync('coverage/lcov.info', mapped + '\n');
+    code |= await step('mapped-fixture-crapper', ['crapper', '--use-existing-coverage', '--threshold', '10', fixture, worker]);
+  }
+  code |= await step('fixture-typescript-dryer', ['dryer', '--threshold', '0.8', fixture, 'apps/web/e2e/geometry-fixture.vitest.ts']);
+}
+process.exitCode = code;
+AUTHOR
