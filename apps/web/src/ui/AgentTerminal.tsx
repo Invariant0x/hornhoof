@@ -1,4 +1,5 @@
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
+import { BindViewResponse, decodeViewChallenge, encodeViewSignature, isTestViewReady, TestTerminalClose, TestTerminalServerFrame, ViewProof, type BindViewRequest } from '@hornhoof/protocol';
 import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { errorText, useT, type Messages } from '../i18n';
@@ -45,30 +46,35 @@ const NO_ACCESS = 4403;
 
 /* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it.
    watching: this person types elsewhere, so the terminal leaves the focus there as it opens. */
-type Props = { path: string; program: string; onGone(): void; watching?: boolean };
+export type TestTerminalGoneReason = 'denied' | 'expired' | 'unavailable' | 'unknown';
 type TestTerminalLease = {
   leaseId: string;
   expectedLeaseRevision: number;
   registrationId: string;
   expectedIdentityDigest: string;
 };
+export type TestTerminalSession = TestTerminalLease & {
+  bindView(request: BindViewRequest): Promise<BindViewResponse>;
+};
+type Props = { path: string; program: string; onGone(reason?: TestTerminalGoneReason): void; watching?: boolean; testSession?: TestTerminalSession };
 
 export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
   const publicKey = await crypto.subtle.exportKey('jwk', pair.publicKey);
   if (!publicKey.x || !publicKey.y) throw new Error('The browser public key is incomplete.');
-  return {
-    request: {
-      ...lease,
-      operationId: crypto.randomUUID(),
-      browserPublicKey: {
-        algorithm: 'P-256/SHA-256',
-        kty: 'EC',
-        crv: 'P-256',
-        x: publicKey.x,
-        y: publicKey.y,
-      },
+  const request: BindViewRequest = {
+    ...lease,
+    operationId: crypto.randomUUID(),
+    browserPublicKey: {
+      algorithm: 'P-256/SHA-256',
+      kty: 'EC',
+      crv: 'P-256',
+      x: publicKey.x,
+      y: publicKey.y,
     },
+  };
+  return {
+    request,
     sign(challenge: Uint8Array) {
       return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, challenge);
     },
@@ -203,6 +209,126 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
       connection.socket?.close();
     },
   };
+}
+
+function testViewUrl(viewId: string) {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${location.host}/api/test-terminals/views/${viewId}/stream`;
+}
+
+function testCloseReason(close: { code: number; reason: string }): TestTerminalGoneReason | undefined {
+  const parsed = TestTerminalClose.safeParse(close);
+  if (!parsed.success) return 'unknown';
+  return parsed.data.code === 1000 ? undefined : parsed.data.reason;
+}
+
+type TestBrowserKey = Awaited<ReturnType<typeof createTestTerminalBrowserKey>>;
+
+class TestViewConnection {
+  private socket: WebSocket | null = null;
+  private ended = false;
+  private failed = false;
+  private finished = false;
+  private proofSent = false;
+  private admitted = false;
+  private reason: TestTerminalGoneReason | undefined;
+  private view: View;
+
+  constructor(private session: TestTerminalSession, term: Terminal, private setUp: (up: boolean) => void, private gone: (reason?: TestTerminalGoneReason) => void) {
+    this.view = { term, send: () => {}, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => {}, refused: () => {} };
+  }
+
+  start() {
+    void this.bind();
+  }
+
+  end() {
+    this.ended = true;
+    this.socket?.close();
+  }
+
+  private async bind() {
+    try {
+      const key = await createTestTerminalBrowserKey(this.session);
+      if (this.ended) return;
+      const response = BindViewResponse.parse(await this.session.bindView(key.request));
+      if (!this.ended) this.open(response, key);
+    } catch {
+      this.fail('unknown');
+    }
+  }
+
+  private open(response: BindViewResponse, key: TestBrowserKey) {
+    const ws = new WebSocket(testViewUrl(response.viewId));
+    this.socket = ws;
+    ws.onopen = () => void this.prove(response, key);
+    ws.onmessage = event => this.receive(response, String(event.data));
+    ws.onclose = event => this.closed(event);
+  }
+
+  private async prove(response: BindViewResponse, key: TestBrowserKey) {
+    const ws = this.socket;
+    if (!ws) return;
+    try {
+      const signature = encodeViewSignature(new Uint8Array(await key.sign(decodeViewChallenge(response.challenge))));
+      if (this.ended || this.failed || this.socket !== ws) return;
+      const proof = ViewProof.parse({ type: 'proof', viewId: response.viewId, nonceId: response.nonceId, signature });
+      ws.send(JSON.stringify(proof));
+      this.proofSent = true;
+    } catch {
+      this.fail('unknown');
+    }
+  }
+
+  private receive(response: BindViewResponse, data: string) {
+    if (this.ended || this.failed) return;
+    if (!this.proofSent) return this.fail('denied');
+    let frame: unknown;
+    try {
+      frame = JSON.parse(data);
+    } catch {
+      return this.fail(this.admitted ? 'unknown' : 'denied');
+    }
+    if (!this.admitted) return this.admit(response, frame);
+    const parsed = TestTerminalServerFrame.safeParse(frame);
+    if (!parsed.success || parsed.data.type === 'ready') return this.fail('unknown');
+    if (parsed.data.type === 'error') return this.fail(parsed.data.reason);
+    received(this.view, { type: 'data', data: parsed.data.data });
+  }
+
+  private admit(response: BindViewResponse, frame: unknown) {
+    if (this.admitted || !isTestViewReady(response, frame)) return this.fail('unknown');
+    this.admitted = true;
+    received(this.view, frame as Frame);
+    this.view.term.options.disableStdin = true;
+  }
+
+  private fail(reason: TestTerminalGoneReason) {
+    if (this.ended || this.failed) return;
+    this.failed = true;
+    this.reason = reason;
+    if (this.socket) this.socket.close();
+    else this.finish();
+  }
+
+  private closed(event: { code: number; reason: string }) {
+    if (this.ended || this.finished) return;
+    this.failed = true;
+    this.reason ??= testCloseReason(event);
+    this.finish();
+  }
+
+  private finish() {
+    this.finished = true;
+    this.setUp(false);
+    this.gone(this.reason);
+  }
+}
+
+function connectTestView(term: Terminal, session: TestTerminalSession, setUp: (up: boolean) => void, gone: (reason?: TestTerminalGoneReason) => void) {
+  const connection = new TestViewConnection(session, term, setUp, gone);
+  connection.start();
+  return { send: () => {}, end: () => connection.end() };
 }
 
 /* Mouse reports are for selection and local history, never for the program. */
@@ -474,8 +600,8 @@ function TerminalNotices({ t, dropped, denied, pictureFailure, pictureState }: T
   );
 }
 
-/* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
-export function AgentTerminal({ path, program, onGone, watching = false }: Props) {
+/* A live agent terminal or a proof-only standalone test view, both using the same renderer and local history. */
+export function AgentTerminal({ path, program, onGone, watching = false, testSession }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -508,7 +634,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
       },
     });
   }, [path]);
-  const dragging = usePictureDrop(box, true, rights.message, addPictures, true);
+  const dragging = usePictureDrop(box, true, !testSession && rights.message, addPictures, true);
 
   useEffect(() => {
     setDropped(false);
@@ -523,9 +649,11 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     attachTerminalScroll(term);
     bindCopy(term);
     fitTerminal(term, container);
-    const view = connectView(term, path, setUp, () => gone.current(), () => setDropped(true), setDenied, setRights);
-    sendPicture.current = view.send;
-    forward(term, view.send);
+    const view = testSession
+      ? connectTestView(term, testSession, setUp, reason => gone.current(reason))
+      : connectView(term, path, setUp, () => gone.current(), () => setDropped(true), setDenied, setRights);
+    sendPicture.current = testSession ? () => {} : view.send;
+    if (!testSession) forward(term, view.send);
     const unfit = keepFitted(term, container);
     if (!leavesFocus.current) term.focus();
     return () => {
@@ -536,7 +664,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
       unfit();
       disposeLater(term);
     };
-  }, [path]);
+  }, [path, testSession]);
 
   return (
     <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
