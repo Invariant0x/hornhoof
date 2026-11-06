@@ -23,6 +23,33 @@ const snapshot = {
   materialRevision: 1, materialDigest: DIGEST,
 };
 
+describe('exact native policy approval metadata', () => {
+  const policy = { kind: 'ready_result', artifact: { kind: 'policy', digest: DIGEST } };
+  it('selects a policy approval by digest without inventing a commit or caller authority', () => {
+    const value = { ...input, classification: policy };
+    expect(QuestionClassificationInput.parse(value)).toEqual(value);
+  });
+  it('retains the policy digest in a private decision approval snapshot', () => {
+    const value = { ...snapshot, classification: policy };
+    expect(QuestionClassificationSnapshot.parse(value)).toEqual(value);
+  });
+  it.each([
+    { kind: 'policy', digest: 'A'.repeat(64) }, { kind: 'policy', digest: 'a'.repeat(63) },
+    { kind: 'policy', digest: '' }, { kind: 'policy', digest: DIGEST, approved: true },
+    { kind: 'policy', digest: DIGEST, sha: 'a'.repeat(40) },
+  ])('refuses a malformed or widened policy selector %#', artifact => {
+    expect(QuestionClassificationInput.safeParse({ ...input, classification: { ...policy, artifact } }).success).toBe(false);
+  });
+  it.each(['question', 'choice', 'stuck', 'staff', 'structure'])('does not bind policy approval as a %s decision', decisionKind => {
+    const value = { ...snapshot, classification: policy, authority: { ...snapshot.authority, purpose: { ...purposes[0], decisionKind } } };
+    expect(QuestionClassificationSnapshot.safeParse(value).success).toBe(false);
+  });
+  it('does not turn policy approval into a payment action or waive the material stamp', () => {
+    expect(QuestionClassificationSnapshot.safeParse({ ...snapshot, classification: policy, authority: { ...snapshot.authority, purpose: purposes[1] } }).success).toBe(false);
+    expect(QuestionClassificationSnapshot.safeParse({ ...snapshot, classification: policy, materialRevision: null, materialDigest: null }).success).toBe(false);
+  });
+});
+
 describe('canonical internal question references', () => {
   it.each(['task_request', 'proposal', 'computer_access'])('preserves the native %s source without inventing a task', kind => {
     expect(SourceRef.parse({ kind, id: SOURCE })).toEqual({ kind, id: SOURCE });
