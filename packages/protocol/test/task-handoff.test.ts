@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HandoffAssignment, HandoffControlMessage, HandoffMessage, ResetSource } from '../src/task-handoff.js';
+import { parseNodeMessage, parseServerMessage } from '../src/index.js';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = 'b'.repeat(64);
@@ -88,5 +89,20 @@ describe('bounded task handoff wire', () => {
     expect(ResetSource.parse('provider')).toBe('provider');
     expect(ResetSource.parse('probe')).toBe('probe');
     expect(() => ResetSource.parse('unknown-reset')).toThrow();
+  });
+
+  it('parses the actual node and server boundaries, including job.run assignment', () => {
+    expect(parseNodeMessage(JSON.stringify(valid.saved))).toEqual(valid.saved);
+    expect(parseNodeMessage(JSON.stringify(valid.ready))).toEqual(valid.ready);
+    expect(parseServerMessage(JSON.stringify(valid.capture))).toEqual(valid.capture);
+    expect(parseServerMessage(JSON.stringify(valid.offer))).toEqual(valid.offer);
+    expect(parseServerMessage(JSON.stringify(valid.resume))).toEqual(valid.resume);
+    expect(parseServerMessage(JSON.stringify(valid.release))).toEqual(valid.release);
+    const assignment = { ...base, captureId: IDS.captureId, reservationId: IDS.reservationId, baseSha: SHA, checkpointSha: SHA };
+    const run = {
+      type: 'job.run', jobId: IDS.jobId, subscriptionId: IDS.reservationId, provider: 'codex', prompt: 'Resume', sessionId: null, model: null,
+      timeoutMs: 1000, secret: null, instructions: null, toolToken: null, taskId: IDS.taskId, workspaceId: IDS.workspaceId, assignmentEpoch: 3, handoff: assignment,
+    };
+    expect(parseServerMessage(JSON.stringify(run))).toEqual(run);
   });
 });
