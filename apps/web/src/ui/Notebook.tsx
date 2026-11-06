@@ -10,13 +10,13 @@ const notebookBase = (departmentId: string | null) => (departmentId ? `/api/depa
 const notebookChanged = (message: { type: string; spot?: { departmentId: string | null } }, departmentId: string | null) =>
   (message.type === 'notebook' && message.spot?.departmentId === departmentId) || message.type === 'reconnected';
 
-function addNote(event: FormEvent, text: string, base: string, run: (action: () => Promise<unknown>, after: () => void) => void, setText: (text: string) => void) {
+function addNote(event: FormEvent, text: string, base: string, run: (action: () => Promise<unknown>, after: () => void) => Promise<void>, setText: (text: string) => void) {
   event.preventDefault();
   if (!text.trim()) return;
   void run(() => api.post(base, { text: text.trim() }), () => setText(''));
 }
 
-function saveNote(event: FormEvent, editing: Editing | null, base: string, run: (action: () => Promise<unknown>, after: () => void) => void, setEditing: (editing: Editing | null) => void) {
+function saveNote(event: FormEvent, editing: Editing | null, base: string, run: (action: () => Promise<unknown>, after: () => void) => Promise<void>, setEditing: (editing: Editing | null) => void) {
   event.preventDefault();
   if (!editing?.text.trim()) return;
   void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
