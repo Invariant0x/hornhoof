@@ -3046,5 +3046,62 @@
     "closeFocusOffsetPx": -2,
     "stableScrollbarGutter": "Accepted; record actual gutter width rather than requiring symmetric border distance.",
     "designFirefoxWebKit": "NOT_AVAILABLE in the Design prototype; no cross-engine acceptance inherited."
+  },
+  "requestsHandoff": {
+    "integratedSourceSha": "b5b73ca93c9759349cf743ee3dbd2ca8008d358f",
+    "sourceCommit": "91a649ddcabedc86ed005749d28362fb2f777edd",
+    "mergeCommit": "9b8f2b33d411b6bae17582001c7b758416acc024",
+    "uiBlobAtAllThree": "0f3e4bcbc661f977fc561b99b39624d31e579daa",
+    "harnessBaseRequestsBlob": "bb1c9e2601ce80050afbcaa302ea224eb5819ee6",
+    "sourceRelationship": "The handed-off Requests code differs from this harness branch base. Do not silently apply its states/rankings to another source snapshot. No product merge performed.",
+    "readOnlySpec": "apps/web/e2e/request-choice-feedback.spec.ts",
+    "readyFixtureNames": [
+      "makeChoiceRequest",
+      "makePanelRequests",
+      "startRealServer",
+      "requestCopyScore"
+    ],
+    "reportedLocaleScores": {
+      "ru": 409,
+      "en": 372
+    },
+    "reportedRtl": "NOT_AVAILABLE",
+    "scoresProvenance": "Reported by Requests owner at handed-off source; recompute per actual source, not a permanent pair.",
+    "statesFromSource": [
+      "normal",
+      "hover",
+      "focus",
+      "sending",
+      "save-error",
+      "read-only"
+    ],
+    "parentStates": [
+      "loading",
+      "empty"
+    ],
+    "materials507": "NOT_IMPLEMENTED",
+    "intentionalScroll": [
+      {
+        "selector": ".screen, .page",
+        "axis": "y",
+        "x": "forbidden"
+      },
+      {
+        "selector": "aside .ac-body",
+        "axis": "y",
+        "x": "forbidden",
+        "reportedWidths": {
+          "1440": 400,
+          "375": 343
+        }
+      },
+      {
+        "selector": ".req-form textarea",
+        "axis": "y",
+        "x": "no panel overflow exemption"
+      }
+    ],
+    "work187": "Prior PNG/route-fixture/real-server evidence, not three-engine proof",
+    "runtimeStatus": "NOT_RUN"
   }
 }
