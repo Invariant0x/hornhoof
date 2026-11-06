@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { canReach, WHOLE, withOwned } from '../../auth/access.js';
@@ -117,7 +117,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .select({ request: requests, task: tasks })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')))
+    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open'), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });

@@ -26,6 +26,7 @@ import { checkIndependent, currentIndependent, type IndependentDeclaration, type
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
+import { stuckRecipient } from './stuck-route.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -43,9 +44,9 @@ type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' |
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
 export const GATE_ROUNDS = 3;
-/* Turns in a row that end without moving the task before a person is asked to step in. */
+/* Turns in a row that end without moving the task before the agent's head is asked to step in. */
 export const SILENT_TURNS = 3;
-/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before a person is asked:
+/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before its head is asked:
    about six hours of work without handing anything in. */
 export const GOING_ON_TURNS = 8;
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -1563,7 +1564,7 @@ async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: s
   return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
-/* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
+/* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS its head is asked. */
 export async function silentTurn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
   if (task.externalWait) return { task, wakes: [] };
   return remindOnSilence(ctx, agentId, task);
@@ -1607,13 +1608,24 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
   return askAboutStill(ctx, agentId, task, task.silent, text);
 }
 
-/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+/* Hornhoof stops waking the agent on the task and asks its head, or the orchestrator about a head. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  const recipient = asker ? await stuckRecipient(ctx.db, asker) : null;
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
-    wakes = await explaining(tx, task, agentId, note!.id);
+    const [note] = await tx.insert(requests).values({
+      companyId: task.companyId,
+      taskId: task.id,
+      agentId,
+      kind: 'stuck',
+      text,
+      decisionTopic: 'task',
+      audience: 'internal',
+      triageAgentId: recipient?.id ?? null,
+      sourceKey: `stuck:${task.id}:${task.version}`,
+    }).returning();
+    wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
     await keepWakes(tx, task.companyId, wakes);
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
@@ -1630,7 +1642,7 @@ export async function lastMove(db: Db | Tx, taskId: string) {
 }
 
 /* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
-   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row a person is asked. */
+   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row its head is asked. */
 export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
   const last = await lastMove(ctx.db, task.id);
   const [before] = await ctx.db
@@ -1810,7 +1822,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, departmentId: tasks.departmentId, productId: tasks.productId })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
     .orderBy(asc(requests.createdAt));
   const wakes: Wake[] = [];
   for (const r of open) {
