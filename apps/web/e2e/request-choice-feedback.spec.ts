@@ -310,7 +310,7 @@ for (const lang of ['ru', 'en'] as const) {
       test(`aligns choice options and feedback form cleanly in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const { t, card, errors, posts } = await openTasksWithChoice(page, lang, theme, width);
 
-        const options = card.locator('.req-option');
+        const options = card.locator('.opts > .opt');
         await expect(options).toHaveCount(2);
         const field = card.getByLabel(t.tasks.choiceNote);
         const send = card.getByRole('button', { name: t.tasks.sendFeedback, exact: true });
@@ -742,7 +742,7 @@ test('preserves multi-line feedback on server error and succeeds on retry, and k
   await expect(send).toBeEnabled();
 
   /* Choosing option 0 after editing note sends exact pick: 0 with comment. */
-  await card.locator('.req-option').nth(0).click();
+  await card.getByRole('button', { name: t.tasks.chooseOption(1), exact: true }).click();
   await expect.poll(() => posts).toEqual([
     { url: '/api/requests/req-choice-demo', body: { answer: feedback } },
     { url: '/api/requests/req-choice-demo', body: { pick: 0, answer: feedback } },
@@ -969,7 +969,7 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     /* 2. Authorized person picks option 0 with a comment on a second choice request. */
     const pickComment = 'Оставляем шаг 8px, проверьте мобильный экран 375px';
     await pickCard.getByLabel(ru.tasks.choiceNote).fill(`  ${pickComment}  `);
-    await pickCard.locator('.req-option').nth(0).click();
+    await pickCard.getByRole('button', { name: ru.tasks.chooseOption(1), exact: true }).click();
     await expect(pickCard).toBeHidden();
 
     /* Open the first task's detail panel in the real UI and verify neutral answered state and text. */

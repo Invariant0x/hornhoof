@@ -50,10 +50,10 @@ export function restoreLiveTerminal(term: Terminal): void {
 }
 
 /* While someone reads alternate history, output grows it and the live screen in order, without moving the reader. */
-export function writeTerminalData(term: Terminal, data: string): void {
+export function writeTerminalData(term: Terminal, data: string, onWritten?: () => void): void {
   const buffers = buffersOf(term);
   if (!borrowed.has(buffers)) {
-    term.write(data);
+    term.write(data, onWritten);
     return;
   }
   term.write(data, () => {
@@ -61,6 +61,7 @@ export function writeTerminalData(term: Terminal, data: string): void {
     term.write(data, () => {
       borrowNormal(buffers);
       term.refresh(0, term.rows - 1);
+      onWritten?.();
     });
   });
 }

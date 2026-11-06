@@ -571,7 +571,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .facts dd { margin-bottom: 8px; }
 }
 /* About is a small window: small type and tight lines, in two columns on a phone too. */
-.dialog.about { gap: 8px; width: min(420px, 100%); padding: 12px 16px 14px; font-size: 13px; }
+.dialog.about { gap: 6px; width: min(420px, 100%); padding: 8px 16px 10px; font-size: 13px; }
 .dialog.about .facts { grid-template-columns: 6.5em minmax(0, 1fr); gap: 1px 10px; font-size: 12.5px; }
 .dialog.about .facts dd { margin-bottom: 0; }
 .dialog.about .about-author { font-size: 12px; }
