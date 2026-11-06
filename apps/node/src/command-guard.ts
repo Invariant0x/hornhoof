@@ -21,10 +21,14 @@ export type CommandDenial = { allow: false; code: 'heavy_check_local' | 'depende
 export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'single_test_file' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 export type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 
+export type NativeProgram = 'claude' | 'codex' | 'kimi' | 'antigravity';
+export type NativeAnswer = { stdout: string; stderr: string; exitCode: number };
+
 /* stages: of one text. walked: of a whole command, with all the scripts it reaches. */
 export const COMMAND_LIMITS = { commandBytes: 65_536, nesting: 32, stages: 256, walked: 4096, resolving: 8, fileBytes: 1_048_576, fileReads: 32 };
 
 const REFUSAL = 'запусти через run_tests';
+const CALL_CHARS = 128;
 
 export const localCommandFiles: CommandFiles = {
   lstat: async path => {
@@ -1541,6 +1545,21 @@ export function refusalText(denial: CommandDenial): string {
   const why = CATEGORY_WORDS[denial.category as Category] ?? `This is a heavy check (${denial.category}).`;
   return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A refusal is not a result: use run_tests, or tell your head when that route is unavailable.`;
 }
+
+/* A hook's answer as each program's own documentation describes it, which says nothing of what an installed version does.
+   Work that goes on gets no answer: a word of consent could only widen what the program would have asked about. */
+export function encodeNativeDecision(program: NativeProgram, verdict: AgentCommandVerdict, call?: string): NativeAnswer {
+  if (verdict.allow) return { stdout: '', stderr: '', exitCode: 0 };
+  const reason = refusalText(verdict) + callLine(call);
+  const said = program === 'antigravity' ? { decision: 'deny', reason } : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+  return { stdout: `${JSON.stringify(said)}\n`, stderr: '', exitCode: 0 };
+}
+
+/* The program's name for the call, as a reference only: it comes from the program, so nothing of it may read as words. */
+const callLine = (call = ''): string => {
+  const shown = call.replace(/[^\w.:-]+/g, '').slice(0, CALL_CHARS);
+  return shown ? `\nCall: ${shown}` : '';
+};
 
 function refusal(found: readonly Finding[], kinds: readonly ('check' | 'dependency' | 'unavailable')[]): CommandDenial | null {
   const codes = { check: 'heavy_check_local', dependency: 'dependency_install_local', unavailable: 'command_guard_unavailable' } as const;

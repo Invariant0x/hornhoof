@@ -1470,6 +1470,8 @@ export type Ask = {
   evenUnplanned?: boolean;
   /* A goal in danger, as someone who may say so said it. */
   goal?: NewGoal;
+  /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
+  onCreated?: (tx: Tx, request: Request) => Promise<void>;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1519,6 +1521,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
       .returning();
     const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
     if (q.goal) await alertGoal(tx, task, request!, wait);
+    await q.onCreated?.(tx, request!);
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;

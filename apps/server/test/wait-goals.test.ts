@@ -99,7 +99,7 @@ describe('a goal in danger', () => {
     const work = await c.held();
     await c.say(work);
     const [episode] = await c.episodes(work);
-    const { id: _id, ...copy } = episode!;
+    const copy = { ...episode!, id: randomUUID() };
     await expect(c.db.insert(requests).values({ ...copy, goalEpisodeId: randomUUID() })).rejects.toThrow();
     await expect(c.db.insert(requests).values({ ...copy, goalEpisodeId: null, goalImpact: null, goalRevision: null, goalState: null, goalRefKind: null })).rejects.toThrow();
   });
