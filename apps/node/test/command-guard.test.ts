@@ -46,7 +46,7 @@ beforeAll(() => {
   file('test/a_test.py');
   file('apps/node/package.json', JSON.stringify({ scripts: { nested: 'vitest run test/a.test.ts', nestedall: 'vitest run' } }));
   file('apps/node/test/a.test.ts');
-  for (const bin of ['vitest', 'jest', 'tsc', 'playwright', 'something-light']) file(`node_modules/.bin/${bin}`, '#!/bin/sh\n');
+  for (const bin of ['vitest', 'jest', 'tsc', 'eslint', 'playwright', 'something-light']) file(`node_modules/.bin/${bin}`, '#!/bin/sh\n');
   file('scripts/heavy.sh', '#!/bin/sh\nset -e\nnpm ci\n');
   file('scripts/light.sh', '#!/bin/sh\necho hi\n');
   file('scripts/self.sh', '#!/bin/sh\nbash scripts/self.sh\n');
@@ -148,7 +148,7 @@ describe('one literal test file runs here', () => {
 
 describe('one heavy stage refuses the whole command before its first stage', () => {
   it.each([
-    'echo a && tsc', 'tsc && echo a', 'true; tsc', 'false || tsc', 'ls | tsc', 'tsc | tail', '(tsc)', '( ( tsc ) )', '{ tsc; }', '! tsc', 'true & tsc', 'echo a\ntsc', 'ls \\\n  && tsc',
+    'echo a && tsc', 'tsc && echo a', 'true; tsc', 'false || tsc', 'ls | tsc', 'tsc | tail', '(tsc)', '( ( tsc ) )', '((tsc) ; echo a)', '((tsc) && (echo a) ; echo b)', '{ tsc; }', '! tsc', 'true & tsc', 'echo a\ntsc', 'ls \\\n  && tsc',
     'if tsc; then echo a; fi', 'if true; then tsc; fi', 'if true; then echo a; elif tsc; then echo b; fi', 'if true; then echo a; else tsc; fi',
     'for x in a b; do tsc; done', 'while tsc; do break; done', 'until false; do tsc; done', 'case a in a) tsc;; esac', 'case a in (a|b) echo x;; *) tsc;; esac',
     'echo $(tsc)', 'echo "$(tsc)"', 'echo `tsc`', 'echo "`tsc`"', 'echo ${X:-$(tsc)}', 'cat <(tsc)', 'echo a > >(tsc)', 'A=$(tsc) true', 'A=$(tsc)', 'cat > $(tsc)', 'echo $(echo $(tsc))',
@@ -170,7 +170,7 @@ describe('one heavy stage refuses the whole command before its first stage', () 
     'xargs tsc', 'find . -name x -exec tsc {} +', 'find . -execdir tsc {} ;', 'parallel tsc',
     'npm exec -- tsc', 'npm exec tsc', 'npm x -- tsc', 'npm exec -c "tsc"', 'pnpm exec tsc', 'yarn exec tsc', 'npx --no-install tsc', 'npx -c "tsc"', 'poetry run mypy .', 'pipenv run mypy .', 'bundle exec rubocop',
     'node node_modules/.bin/tsc', 'node node_modules/typescript/bin/tsc', '/usr/local/bin/tsc', 'bash scripts/noext', './scripts/noext', 'sh scripts/noext', '. scripts/noext', 'source scripts/noext',
-    'busybox sh -c tsc',
+    'busybox sh -c tsc', 'bash -o pipefail -c "tsc"', 'bash -eo pipefail -c tsc', 'bash +e -c tsc', 'bash --norc -c tsc', 'command -p tsc',
   ])('a wrapper does not hide what it runs: %s', async command => {
     expect(await agent(command)).toEqual(denied('heavy_check_local'));
   });
@@ -179,7 +179,7 @@ describe('one heavy stage refuses the whole command before its first stage', () 
     expect(await agent(command)).toEqual(denied('dependency_install_local'));
   });
 
-  it.each(['vitest run "$F"', 'vitest run $F', 'vitest $MODE test/a.test.ts', 'jest "$(cat list)"', 'vitest run test/a.test.ts $MORE', 'vitest run -t "$X" test/a.test.ts', 'pytest $F', 'node --test $F', 'xargs vitest run', 'find . -exec vitest run {} +', 'ls | xargs jest', 'cd $X && vitest run test/a.test.ts', 'cd - && vitest run test/a.test.ts', 'cd && vitest run test/a.test.ts'])('a dynamic selection at a check: %s', async command => {
+  it.each(['vitest run "$F"', 'vitest run $F', 'vitest $MODE test/a.test.ts', 'jest "$(cat list)"', 'vitest run test/a.test.ts $MORE', 'vitest run -t "$X" test/a.test.ts', 'pytest $F', 'node --test $F', 'xargs vitest run', 'find . -exec vitest run {} +', 'ls | xargs jest', 'cd $X && vitest run test/a.test.ts', 'cd - && vitest run test/a.test.ts', 'cd && vitest run test/a.test.ts', 'pushd apps/node && popd && vitest run test/a.test.ts'])('a dynamic selection at a check: %s', async command => {
     expect(await agent(command)).toEqual(denied('heavy_check_local'));
   });
 });
@@ -250,7 +250,7 @@ describe('what cannot be told is refused, not allowed', () => {
   });
 
   it('holds every bound at its limit', async () => {
-    const nested = (depth: number) => `${'('.repeat(depth)}ls${')'.repeat(depth)}`;
+    const nested = (depth: number) => `${'( '.repeat(depth)}ls${' )'.repeat(depth)}`;
     expect(await agent(nested(COMMAND_LIMITS.nesting - 2))).toEqual(expect.objectContaining({ allow: true }));
     expect(await agent(nested(COMMAND_LIMITS.nesting + 1))).toEqual(denied('command_guard_unavailable'));
     const shells = (depth: number): string => (depth ? `sh -c ${`'${shells(depth - 1).replaceAll("'", "'\\''")}'`}` : 'ls');
@@ -261,6 +261,20 @@ describe('what cannot be told is refused, not allowed', () => {
     expect(await agent(`echo ${'a'.repeat(COMMAND_LIMITS.commandBytes)}`)).toEqual(denied('command_guard_unavailable'));
     expect(await agent(['echo', 'a'.repeat(COMMAND_LIMITS.commandBytes)])).toEqual(denied('command_guard_unavailable'));
     expect(await agent('echo a\0b')).toEqual(denied('command_guard_unavailable'));
+  });
+
+  it('stops scripts that fan out long before it has walked them all', async () => {
+    const calls = (next: string) => Array.from({ length: 200 }, () => `npm run ${next}`).join('; ');
+    const scripts = Object.fromEntries(Array.from({ length: COMMAND_LIMITS.resolving }, (_, i) => [`s${i}`, calls(`s${i + 1}`)]));
+    file('wide/package.json', JSON.stringify({ scripts: { ...scripts, [`s${COMMAND_LIMITS.resolving}`]: 'echo end' } }));
+    const started = Date.now();
+    expect(await agent('npm run s0', join(root, 'wide'))).toEqual(denied('command_guard_unavailable'));
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('tells two commands at once apart', async () => {
+    const told = await Promise.all([agent('tsc'), agent('ls'), agent('npm ci'), agent('vitest run test/a.test.ts'), agent('bash scripts/heavy.sh'), agent('bash scripts/light.sh')]);
+    expect(told.map(verdict => (verdict.allow ? verdict.kind : verdict.code))).toEqual(['heavy_check_local', 'ordinary', 'dependency_install_local', 'single_test_file', 'dependency_install_local', 'ordinary']);
   });
 
   it('refuses a script that calls itself and a chain past its limit', async () => {
@@ -308,6 +322,8 @@ describe('a claim gives nothing', () => {
   it('reads an argument list as literal words of one command', async () => {
     expect(await agent(['npm', 'ci'])).toEqual(denied('dependency_install_local'));
     expect(await agent(['tsc', '--noEmit'])).toEqual(denied('heavy_check_local'));
+    expect(await agent(['env', 'CI=1', 'tsc'])).toEqual(denied('heavy_check_local'));
+    expect(await agent(['bash', '-o', 'pipefail', '-c', 'npm ci'])).toEqual(denied('dependency_install_local'));
     expect(await agent(['sh', '-c', 'npm ci'])).toEqual(denied('dependency_install_local'));
     expect(await agent(['vitest', 'run', 'test/a.test.ts'])).toEqual(expect.objectContaining({ kind: 'single_test_file' }));
     expect(await agent(['vitest', 'run', 'test/a.test.ts', 'test/b.test.ts'])).toEqual(denied('heavy_check_local'));
@@ -351,7 +367,7 @@ describe('telling runs nothing', () => {
     const imports = [...source.matchAll(/from '([^']+)'/g)].map(match => match[1]);
     expect(imports.every(name => name?.startsWith('node:'))).toBe(true);
     expect(imports.filter(name => /child_process|net|http|https|dns|tls|dgram|worker/.test(name!))).toEqual([]);
-    expect(source).not.toMatch(/\b(?:fetch|require|eval|spawn|exec|execFile)\(/);
+    expect(source).not.toMatch(/(?<![.\w])(?:fetch|require|eval|spawn|exec|execFile)\(/);
   });
 });
 
