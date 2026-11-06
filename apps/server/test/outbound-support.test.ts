@@ -11,17 +11,21 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import {
+  departments,
+  outboundAccounts,
   outboundApprovals,
   outboundChannels,
   outboundContacts,
   outboundMessageRevisions,
   outboundMessages,
   outboundPermissions,
+  outboundReviewReceipts,
   requests,
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
 import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
+import { outboundReviewRound } from '../src/modules/outbound/dispatcher.js';
 import { beginDispatch, reserveDispatch, settleAttempt } from '../src/modules/outbound/core.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
 import { as } from './helpers.js';
@@ -78,6 +82,92 @@ function fakeModelRunner(handlers: {
   };
   return { calls, runModelCheck };
 }
+
+describe('a ticket of another place', () => {
+  const classify = (w: SupportWorld, model: ReturnType<typeof fakeModelRunner>, ticketId: string, task: string = w.taskId) =>
+    classifySupportTicket(w.c.app.ctx, model, w.caller, { task, idempotencyKey: randomUUID(), ticketId, ticketRevision: 1 }, NOW);
+
+  const reply = (w: SupportWorld, model: ReturnType<typeof fakeModelRunner>, over: { ticketId: string; classificationReceiptId: string; channelId?: string; accountId?: string }) =>
+    submitSupportReply(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      {
+        task: w.taskId,
+        idempotencyKey: randomUUID(),
+        channelId: w.channel.id,
+        accountId: w.account.id,
+        bindingGeneration: 1,
+        scheduledAt: NOW.toISOString(),
+        ticketRevision: 1,
+        document: { locale: 'en', templateId: w.enTemplate.entryId, templateRevision: 1, blocks: [{ kind: 'knowledge', id: w.enKb.entryId, revision: 1 }, { kind: 'link', id: w.enLink.entryId, revision: 1 }], variables: [] },
+        ...over,
+      },
+      NOW,
+    );
+
+  const aProductOfSales = async (w: SupportWorld) =>
+    (await w.c.db.insert(departments).values({ companyId: w.c.companyId, name: 'Deals', roleCode: 'SAL', parentId: w.c.sales.id, position: 9 }).returning())[0]!;
+
+  it('is not there for a classify from another department, which reads none of its words and spends none of its check', async () => {
+    const w = await seedSupportWorld();
+    const model = fakeModelRunner({});
+    const theirs = await w.addTicket('Where is my order?', 1, randomUUID(), w.contact.id, { departmentId: w.c.dev.id });
+    await w.c.db.update(supportTickets).set({ textEnc: 'nothing that opens' }).where(eq(supportTickets.id, theirs.id));
+
+    await expect(classify(w, model, theirs.ticketId)).rejects.toMatchObject({ status: 404, code: 'ticket_unknown' });
+    expect(model.calls).toEqual([]);
+    expect(await w.c.db.select().from(supportClassifications)).toEqual([]);
+    expect((await w.c.db.select().from(supportTickets).where(eq(supportTickets.id, theirs.id)))[0]!.status).toBe('open');
+  });
+
+  it('is not there for a classify from outside its product', async () => {
+    const w = await seedSupportWorld();
+    const model = fakeModelRunner({});
+    const product = await aProductOfSales(w);
+    const theirs = await w.addTicket('Where is my order?', 1, randomUUID(), w.contact.id, { productId: product.id });
+
+    await expect(classify(w, model, theirs.ticketId)).rejects.toMatchObject({ status: 404, code: 'ticket_unknown' });
+    expect(model.calls).toEqual([]);
+  });
+
+  it('gets no reply from another department, whatever its receipt', async () => {
+    const w = await seedSupportWorld();
+    const model = fakeModelRunner({});
+    const theirs = await w.addTicket('Where is my order?', 1, randomUUID(), w.contact.id, { departmentId: w.c.dev.id });
+    const [receipt] = await w.c.db.insert(supportClassifications).values({ companyId: w.c.companyId, ticketId: theirs.ticketId, ticketRevision: 1, ticketDigest: theirs.digest, bindingDigest: sha('their binding'), idempotencyKey: randomUUID(), status: 'ready', classId: 'how_to', requiresHuman: false, reasonCodes: [], reviewer: REVIEWER_MODEL, decidedAt: NOW }).returning();
+
+    await expect(reply(w, model, { ticketId: theirs.ticketId, classificationReceiptId: receipt!.id })).rejects.toMatchObject({ status: 404, code: 'ticket_unknown' });
+    expect(await w.c.db.select().from(outboundMessages)).toEqual([]);
+
+    const own = await w.addTicket('How do I reset my password?');
+    const refused = await reply(w, model, { ticketId: own.ticketId, classificationReceiptId: receipt!.id });
+    expect(refused).toMatchObject({ status: 'rejected', reasonCodes: ['support_escalation_required'] });
+    expect(await w.c.db.select().from(outboundMessages)).toEqual([]);
+  });
+
+  it('gets no reply through a channel or an account of another place', async () => {
+    const w = await seedSupportWorld();
+    const model = fakeModelRunner({});
+    const own = await w.addTicket('How do I reset my password?');
+    const { classificationReceiptId } = await classify(w, model, own.ticketId);
+    const product = await aProductOfSales(w);
+    const mail = { companyId: w.c.companyId, adapter: 'smtp' as const, purpose: 'transactional_support' as const, audience: 'direct' as const, status: 'active' as const, createdBy: w.c.ids.sam };
+    const [devChannel] = await w.c.db.insert(outboundChannels).values({ ...mail, departmentId: w.c.dev.id, name: 'Dev Mail' }).returning();
+    const [productChannel] = await w.c.db.insert(outboundChannels).values({ ...mail, departmentId: w.c.sales.id, productId: product.id, name: 'Deals Mail' }).returning();
+    const account = { companyId: w.c.companyId, senderDomain: 'acme.example', configEnc: w.account.configEnc, createdBy: w.c.ids.sam };
+    const [productAccount] = await w.c.db.insert(outboundAccounts).values({ ...account, departmentId: w.c.sales.id, productId: product.id, channelId: productChannel!.id, label: 'Deals' }).returning();
+    const [devAccount] = await w.c.db.insert(outboundAccounts).values({ ...account, departmentId: w.c.dev.id, channelId: devChannel!.id, label: 'Dev' }).returning();
+    const [secondOwn] = await w.c.db.insert(outboundChannels).values({ ...mail, departmentId: w.c.sales.id, name: 'Second Mail' }).returning();
+    const [otherChannelsAccount] = await w.c.db.insert(outboundAccounts).values({ ...account, departmentId: w.c.sales.id, channelId: secondOwn!.id, label: 'Second' }).returning();
+
+    const refused = { status: 404, code: 'outbound_unknown' };
+    await expect(reply(w, model, { ticketId: own.ticketId, classificationReceiptId, channelId: devChannel!.id, accountId: devAccount!.id })).rejects.toMatchObject(refused);
+    await expect(reply(w, model, { ticketId: own.ticketId, classificationReceiptId, channelId: productChannel!.id, accountId: productAccount!.id })).rejects.toMatchObject(refused);
+    await expect(reply(w, model, { ticketId: own.ticketId, classificationReceiptId, accountId: otherChannelsAccount!.id })).rejects.toMatchObject(refused);
+    expect(await w.c.db.select().from(outboundMessages)).toEqual([]);
+  });
+});
 
 describe('outbound support classification and reply gates (#447 T8-10, T8-15)', () => {
   it('classifies a ticket separately from drafting, deduplicates idempotently, and refuses key reuse across tickets', async () => {
@@ -593,6 +683,28 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     expect(withPromiseText.status).toBe('rejected');
     expect(withPromiseText.reasonCodes).toContain('support_intent_forbidden');
     expect(await w.c.db.select().from(outboundMessages)).toHaveLength(0);
+  });
+
+  it('reads a reply again that lost the word of its check, and then it goes', async () => {
+    const w = await seedSupportWorld();
+    const ticket = await w.addTicket('How do I reset my password?');
+    const model = fakeModelRunner({});
+    const { classificationReceiptId } = await classifySupportTicket(w.c.app.ctx, model, w.caller, { task: w.taskId, idempotencyKey: randomUUID(), ticketId: ticket.ticketId, ticketRevision: 1 }, NOW);
+    const document = { locale: 'en', templateId: w.enTemplate.entryId, templateRevision: 1, blocks: [{ kind: 'knowledge' as const, id: w.enKb.entryId, revision: 1 }, { kind: 'link' as const, id: w.enLink.entryId, revision: 1 }], variables: [] };
+    const { messageId, status } = await submitSupportReply(w.c.app.ctx, model, w.caller, { task: w.taskId, idempotencyKey: randomUUID(), channelId: w.channel.id, accountId: w.account.id, bindingGeneration: 1, scheduledAt: NOW.toISOString(), ticketId: ticket.ticketId, ticketRevision: 1, classificationReceiptId, document }, NOW);
+    expect(status).toBe('scheduled');
+    const reviews = model.calls.filter(call => call.kind === 'support_reply_review').length;
+    expect(reviews).toBe(1);
+
+    /* As after its check was certified again: a word given under the old one is no word now. */
+    await w.c.db.delete(outboundReviewReceipts).where(eq(outboundReviewReceipts.messageId, messageId));
+    expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toEqual({ kind: 'refused', reasonCodes: ['review_unavailable'] });
+    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'waiting_checks', reasonCodes: ['review_unavailable'] });
+
+    await outboundReviewRound(w.c.app.ctx, NOW, model);
+    expect(model.calls.filter(call => call.kind === 'support_reply_review')).toHaveLength(reviews + 1);
+    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toMatchObject({ kind: 'reserved' });
   });
 
   it('holds sampled replies in waiting_checks when review is unavailable and stops the channel through recordReview on block', async () => {
