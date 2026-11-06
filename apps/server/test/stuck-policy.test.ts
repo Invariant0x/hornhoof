@@ -5,7 +5,7 @@ import { agentEvents, agents, companies, departments, jobs, requestInternal, req
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { createTask, GOING_ON_TURNS } from '../src/modules/tasks/engine.js';
 import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
-import { as, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 const TOKEN = 'stuck-policy-tool-token-0123456789ab';
 
@@ -121,6 +121,7 @@ describe('internal stuck routing', () => {
 
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
     const [answering] = await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, kind: 'conversation', prompt: 'Resolve the stuck request.', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) }).returning();
+    await listen(c.app);
     const client = await mcp(c.app, TOKEN);
     const result = await client.callTool({ name: 'answer_request', arguments: { request: request!.id, answer: 'Split the work and continue.' } });
 
