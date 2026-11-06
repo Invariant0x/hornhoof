@@ -16,7 +16,7 @@ For `small: true`, there are no separate task gates: the executor runs only affe
 
 The turn ends with one review, one final check, then the release with the CEO's approval of the exact commit.
 
-- **Checks by stage (T3).** Developers write a failing test before the change, run only affected tests through `run_tests`, and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate; reviewers use those results. Use this same table everywhere:
+- **Checks by stage (T3).** Developers write a failing test before the change, run only affected tests through `run_tests` (`hh-run-checks`), and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate; reviewers use those results. Use this same table everywhere:
 
 | Stage | Checks |
 |---|---|
