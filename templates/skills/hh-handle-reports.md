@@ -5,7 +5,7 @@ description: { en: "Reads each member's report, checks the evidence and decides 
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
-For a completed task marked `small: true`, accept the line stating the change and commit SHA, and read its affected-test result. Do not request a separate report or metrics; those belong to the shared turn review and checks. Handle growing scope or blockers with the head through the normal path.
+For a completed task marked `small: true`, accept the line with the change and commit SHA and read its affected-test result. Reports and metrics belong to the shared turn review; growing scope or a blocker takes the normal path.
 
 For every report from a member:
 
