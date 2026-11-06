@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Case, CheckBinding, ModelCheckKind } from '@hornhoof/protocol';
+import type { Case, CheckBinding, CheckInput, CheckReceipt, ModelCheckKind } from '@hornhoof/protocol';
 import type { Party } from '../src/modules/model-checks/dataset.js';
+import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
+import type { RunModelCheck } from '../src/modules/model-checks/run.js';
 
 /* Examples made up for tests only, about nothing real. No company's data, and no suite anything may ship with. */
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -44,3 +46,19 @@ export function binding(more: Partial<CheckBinding> = {}): CheckBinding {
 }
 
 export const hashOf = sha;
+
+const subjectOf = (input: CheckInput) => input.subject.contentDigest;
+export const receipt = (given: CheckBinding, input: CheckInput, decision: 'allow' | 'block' | 'escalate', more: Partial<CheckReceipt> = {}): CheckReceipt => ({
+  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['uncertain'] }, ...more,
+});
+const expectedDecision = (row: Case) => ('decision' in row.expected ? row.expected.decision : 'allow');
+
+/* A model that answers each example the way the labeller did, except for the examples named as wrong. */
+export function modelFor(rows: Case[], wrong: Record<string, 'allow' | 'block' | 'escalate'> = {}): RunModelCheck {
+  const byDigest = new Map(rows.map(row => [row.input.subject.id, row]));
+  return async (given, input) => {
+    const row = byDigest.get(input.subject.id)!;
+    return receipt(given, input, wrong[row.id] ?? expectedDecision(row));
+  };
+}
+export const SET = () => [reviewCase(), mustBlock(), holdout(), holdout({ expected: { decision: 'block' }, mustBlock: true })];
