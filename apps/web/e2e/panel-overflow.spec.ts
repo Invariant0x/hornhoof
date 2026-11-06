@@ -98,6 +98,14 @@ for (const lang of ['en', 'ru'] as const) {
           }
           await remove.click();
           await expect.poll(() => removed.length).toBe(1);
+          const add = notebook.getByRole('button', { name: m.notebook.add, exact: true });
+          await add.focus();
+          await page.keyboard.press('Shift+Tab');
+          await page.keyboard.press('Tab');
+          await expect(add).toBeFocused();
+          await expect(add).toHaveCSS('clip-path', 'none');
+          await expect(add).toHaveCSS('outline-width', '2px');
+          await expect(add).toHaveCSS('outline-style', 'solid');
           expect(errors).toEqual([]);
         });
       }
