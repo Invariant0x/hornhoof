@@ -68,18 +68,14 @@ describe('terminal view stream', () => {
   });
 
   describe('rowsGone', () => {
-    const was = (size: number, width = 80, height = 24) => ({ size, limit: 1000, width, height });
+    const was = (size: number, width = 80) => ({ size, limit: 1000, width });
     it.each([
       ['takes what grew', was(10), was(25), 15],
       ['takes nothing when nothing moved', was(10), was(10), 0],
       ['takes nothing at a new width, whose rows are others', was(10), was(25, 40), 0],
       ['takes nothing when a history was cleared', was(500), was(3), 0],
-      ['takes nothing when rows went back on a taller screen', was(500), was(490), 0],
       ['counts what tmux dropped at the limit of a history', was(1000), was(901), 1],
       ['counts what came before tmux dropped', was(950), was(910), 60],
-      ['leaves to a terminal what it loses by getting lower', was(10), was(14, 80, 20), 0],
-      ['counts what scrolled while a terminal got lower', was(10), was(16, 80, 20), 2],
-      ['counts what scrolled while a terminal got taller', was(10), was(16, 80, 30), 6],
     ])('%s', (_name, before, now, rows) => {
       expect(rowsGone(before, now)).toBe(rows);
     });
@@ -206,6 +202,132 @@ describe('terminal view stream', () => {
       history.saw('anything');
       await vi.advanceTimersByTimeAsync(SYNC);
       expect(lines(given)).toEqual(['after']);
+    });
+
+    describe('after a change of height', () => {
+      const whole = says('old\nolder\n', '\n', 'top\nsecond\n', pane(2));
+
+      it('empties a terminal\'s history and gives it whole, with the screen\'s first rows, and has the screen drawn after them', async () => {
+        const { history, run, given, repaint } = viewHistory(says('', '', pane(5)), says(pane(2)), whole);
+        await history.open();
+        history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(run.mock.calls[2]![0].join(' ')).toContain('-S -5000 -E -1');
+        expect(given.at(-1)!.startsWith('\x1b[3J\x1b7')).toBe(true);
+        expect(lines(given)).toEqual(['old', 'older']);
+        expect(given.at(-1)).toContain('\x1b[1;1Htop\x1b[0m\x1b[2;1Hsecond\x1b[0m\x1b8\x1b[4;8H');
+        expect(repaint).toHaveBeenCalledTimes(1);
+      });
+
+      it('does so when only its pane changed height, as another window made the session taller', async () => {
+        const { history, given } = viewHistory(says('', '', pane(5)), says(pane(2, { height: 30 })), says('old\n', '\n', '\n', pane(2, { height: 30 })));
+        await history.open();
+        history.saw('anything');
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(given.at(-1)!.startsWith('\x1b[3J')).toBe(true);
+        expect(lines(given)).toEqual(['old']);
+      });
+
+      it('empties it alone when a pane has no history, for an empty history answers with the screen\'s first row', async () => {
+        const { history, given, repaint } = viewHistory(says('', '', pane(5)), says(pane(0)), says('first row\n', '\n', '\n', pane(0)));
+        await history.open();
+        history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(given.at(-1)).toBe('\x1b[3J');
+        expect(repaint).toHaveBeenCalledTimes(1);
+      });
+
+      it('waits for the last height of a drag, and gives it once', async () => {
+        const { history, run, given } = viewHistory(says('', '', pane(5)), says(pane(2)), whole);
+        await history.open();
+        for (let height = 0; height < 8; height++) {
+          history.resized();
+          await vi.advanceTimersByTimeAsync(SYNC - 50);
+        }
+        expect(run).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(50);
+        expect(run).toHaveBeenCalledTimes(3);
+        expect(given.filter(text => text.includes('\x1b[3J'))).toHaveLength(1);
+      });
+
+      it('goes on with what comes after, one row at a time', async () => {
+        const { history, given } = viewHistory(
+          says('', '', pane(5)),
+          says(pane(2)),
+          whole,
+          says(pane(3)),
+          says('\n', 'top\nsecond\n', 'new\n', pane(3)),
+        );
+        await history.open();
+        history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        history.saw('anything');
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(lines(given)).toEqual(['old', 'older', 'new']);
+        expect(given.at(-1)).not.toContain('\x1b[3J');
+      });
+
+      it('reads again when the history moved during the read', async () => {
+        const { history, given } = viewHistory(
+          says('', '', pane(5)),
+          says(pane(2)),
+          says('other\n', '\n', '\n', pane(3)),
+          says(pane(3)),
+          says('old\n', '\n', '\n', pane(3)),
+        );
+        await history.open();
+        history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(lines(given)).toEqual(['old']);
+      });
+
+      it('reads again when a height came during the read, for the terminal moved its rows again', async () => {
+        const reading = viewHistory(says('', '', pane(5)), says(pane(2)), args => {
+          reading.history.resized();
+          return says('old\n', '\n', '\n', pane(2))(args);
+        }, says(pane(2)), says('old\n', '\n', '\n', pane(2)));
+        await reading.history.open();
+        reading.history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(reading.given.filter(text => text.includes('\x1b[3J'))).toHaveLength(2);
+      });
+
+      it('gives what a normal screen keeps again, and no line of it when it reaches the history', async () => {
+        const { history, given } = viewHistory(
+          says('', 'left\n', pane(5, { alternate: true })),
+          says(pane(5, { alternate: true })),
+          says('old\n', 'left\n', 'top\n', pane(5, { alternate: true })),
+          says(pane(6)),
+          says('\n', 'top\n', 'left\n', pane(6)),
+        );
+        await history.open();
+        history.resized();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(given.at(-1)).toContain('old');
+        expect(given.at(-1)).toContain('left');
+        const before = given.length;
+        history.saw('anything');
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(given).toHaveLength(before);
+      });
+
+      it('leaves a terminal\'s history alone at a new width', async () => {
+        const { history, given } = viewHistory(says('', '', pane(5)), says(pane(30, { width: 40 })));
+        await history.open();
+        history.saw('anything');
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(given.join('')).not.toContain('\x1b[3J');
+      });
+
+      it('reads nothing more once stopped', async () => {
+        const { history, run } = viewHistory(says('', '', pane(5)));
+        await history.open();
+        history.resized();
+        history.stop();
+        await vi.advanceTimersByTimeAsync(SYNC);
+        expect(run).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('gives what a normal screen keeps when the program goes to another, and no line of it again when it comes back', async () => {

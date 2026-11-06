@@ -2866,8 +2866,18 @@ export class TerminalHost {
   async resize(m: Msg<'term.resize'>): Promise<void> {
     const wanted = this.wanted.get(m.termId);
     if (!wanted) return;
+    const height = m.rows !== wanted.size.rows;
     wanted.size = { cols: m.cols, rows: m.rows };
     await this.fit(wanted.key);
+    if (height) this.heightChanged(m.termId);
+  }
+
+  /* A terminal moved its own rows when its window changed height, also with the session's height as it was. */
+  private heightChanged(termId: string): void {
+    const view = this.views.get(termId);
+    if (!view) return;
+    this.eraseBelowSession(termId, view, view.shown);
+    view.history?.resized();
   }
 
   /* One session runs one program at one size. People watching it in windows of different sizes are tmux clients of
