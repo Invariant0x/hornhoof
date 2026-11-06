@@ -1,6 +1,6 @@
 # Root related-test runner565
 
-Status: BLOCKED on the original exact-event assertion restriction after the approved fixture correction. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
+Status: WORKING after head approved the exact-review expectation update. Final candidate and merge proof remain pending. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
 
 ## Change and API
 
@@ -36,7 +36,7 @@ Full native logs300/312/378 are on565; the JSON includes commands, stages and ha
 
 ## Remaining proof and ownership
 
-Source inspection traces the gate failure to460/c1944585a29cc27f94b2e7af22dc7250a49bc85b: repository review requires a provider independent of the author, while tasks-merge company() gives Bruno and Rita the same subscription.460's owner confirmed no active tasks-merge edit or prepared fix. Head approved the independent-review-plan patch929cdca5-6afe-4498-8270-abe9cdb72c99. It is applied as the separate commit a9adce4a255d425785682548c81a9c5a9a0fd320. The11 original test bodies remain byte-identical; production460 is unchanged. A separate regression in41191345 gives the reviewer a different Claude subscription from an Anthropic API author and expects403. Its GREEN remains pending.
+Source inspection traces the gate failure to460/c1944585a29cc27f94b2e7af22dc7250a49bc85b: repository review requires a provider independent of the author, while tasks-merge company() gives Bruno and Rita the same subscription.460's owner confirmed no active tasks-merge edit or prepared fix. Head approved the independent-review-plan patch929cdca5-6afe-4498-8270-abe9cdb72c99. It is applied as the separate commit a9adce4a255d425785682548c81a9c5a9a0fd320. At a9adce4a, the11 original test bodies remained byte-identical; production460 was unchanged. A separate regression in41191345 gives the reviewer a different Claude subscription from an Anthropic API author and expects403. Its same-vendor403 rejection passed486; the final updated expectation is pending.
 
 Independent work continues: two fast behavior pins cover the moved until helper's asynchronous readiness and deadline, with fake timers and unchanged helper body. The corrected coverage check adds those pins, existing six light consumers and auth/setup smoke coverage. The already isolated tasks-merge failures stay explicitly separate, not erased or relabeled GREEN. Run458 collected root script coverage separately and combined it with helper LCOV without altering counters. Old heavy helper functions with unchanged bodies are reported separately from newly moved and root logic; a baseline complexity failure remains a concern, not a lowered threshold.
 
@@ -70,6 +70,15 @@ The latest graph at this source is:
 |packages/protocol/src/link.ts|178/448|@hornhoof/protocol=1, @hornhoof/server=161, @hornhoof/web=16|
 |apps/node/src/redact.ts|104/448|@hornhoof/node=99, @hornhoof/node:no-proc=5|
 
-The head explicitly required the original11 checks unchanged. The approved929 fixture patch cannot repair this later payload expectation without changing an assertion. The concrete NOT_APPLIED proposal4b6dc349-2652-4106-82ea-23332e2405dd keeps the full final toEqual and the existing evidence/merged checks. It additionally validates the complete initial review shape, its source/author/SHA/quality/count fields and UUID, then requires the merged event to retain that exact review object. It does not use toMatchObject, discard the review field or edit the engine. Only head can extend the original assertion boundary. No further test run or turn-8 push is justified until that answer.
+The head explicitly required the original11 checks unchanged. The approved929 fixture patch cannot repair this later payload expectation without changing an assertion. The concrete NOT_APPLIED proposal4b6dc349-2652-4106-82ea-23332e2405dd keeps the full final toEqual and the existing evidence/merged checks. It additionally validates the complete initial review shape, its source/author/SHA/quality/count fields and UUID, then requires the merged event to retain that exact review object. It does not use toMatchObject, discard the review field or edit the engine. Only head can extend the original assertion boundary. That restriction was subsequently answered by head below; no turn-8 push has yet occurred.
 
 The stable collection API at57ce0474 remains available to566. The root runner is not declared a full565PASS; the original broader failed runs and the newly exposed expectation failure remain in the evidence.
+
+
+## Head-approved exact expectation and final command
+
+Head565 at2026-11-06T04:48:14.904Z approved4b6dc349: the extra review is a lawful460 addition and the stronger full toEqual keeps evidence and merged. Applied as separate2bbd71cc; the other10 original test bodies and every original deadline stay unchanged. The new initial-review shape assertion also verifies the pinned UUID/source/author/quality/count fields before requiring that same review object on merge. No production engine change is part of565.
+
+Head explicitly accepted the legacy helper CRAP110 exception while those bodies remain unchanged;473/458 retain the actual failed broad scans and numbers. No unrelated heavy helper is refactored and no threshold changes. Fresh turn-8=38247b5c9c8f12e89d7634acdd412327087c0862 merged cleanly into task-565. Its urgency/outbound features are upstream composition, not565 work.
+
+The task-specific targeted authorcheck recipe is2026-11-06-root-related-authorcheck.sh.txt. It uses the ordinary run_tests command-mode only and is reused on the exact candidate/merge sources: lock install, protocol+node preparation, root inventory/selection/CSS contracts, helper/API and merge-family coverage, representative actual related server/protocol/node callbacks, all existing no-proc variants, a real web Setup unit consumer, types/test-types/lint and changed-logic CRAP/dryer. It does not execute a full suite or silently waive a failed stage. The established head exception for the unchanged heavy functions is printed separately in scope metadata. New recipe invocation and updated expectation GREEN remain pending until the full native log is read.

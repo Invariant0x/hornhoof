@@ -1,6 +1,6 @@
 {
   "task": 565,
-  "status": "BLOCKED: one original exact assertion now reaches new460review metadata",
+  "status": "WORKING: approved exact review expectation applied, final candidate checks pending",
   "executedSource": "8c22964eb0c4f1d7f8665a56dd229440c9a50368",
   "redSource": "67891cce7c3a3ad6fe15be821a161562cc8c7060",
   "runs": {
@@ -2845,8 +2845,8 @@
     "fullTestCallbackCountsExecuted": false
   },
   "pending": [
-    "Head permission for proposed4b6dc349 full exact review-metadata expectation, original11 assertion-change restriction otherwise forbids the fix",
-    "Candidate GREEN and final turn-8 merge checks after that permitted update"
+    "Final candidate RED to GREEN after approved exact review expectation",
+    "Turn-8 merge, exact merge authorcheck and normal push"
   ],
   "fullSuite": false,
   "legacyHeavyFunctionHashesUnchangedFrom473": {
@@ -2858,12 +2858,14 @@
     "authorization": "Head565 comment after diagnostic378, test-only patch929cdca5",
     "patchCommit": "a9adce4a255d425785682548c81a9c5a9a0fd320",
     "sameVendorRegressionCommit": "41191345",
-    "old11TestBodiesByteIdentical": true,
+    "old11TestBodiesByteIdentical": false,
     "productionEngineChanged": false,
     "negativeCase": "Anthropic API author, distinct Claude provider/subscription reviewer must get403",
-    "status": "Six original gate refusals resolved;5 original cases fully GREEN, first reaches new exact-payload mismatch; same-vendor403 GREEN"
+    "status": "Six original gate refusals resolved;5 original cases fully GREEN, first reaches new exact-payload mismatch; same-vendor403 GREEN",
+    "expectationUpdateApproved": true,
+    "remaining10TestBodiesUnchanged": true
   },
-  "latestIntegrationBase": "59695b6c8c91ebd24aa71d96f8c1a891f422be92",
+  "latestIntegrationBase": "38247b5c9c8f12e89d7634acdd412327087c0862",
   "latestWidthSummary": [
     {
       "mode": "root-inventory",
@@ -2912,9 +2914,19 @@
   "newAssertionProposal": {
     "file": "tasks-merge-review-metadata.proposed.patch",
     "attachment": "4b6dc349-2652-4106-82ea-23332e2405dd",
-    "applied": false,
+    "applied": true,
     "keepsFullToEqual": true,
     "additionalChecks": "Full canonical review shape and UUID on initial submission, exact same review object on merged event",
-    "productionEngineChanged": false
-  }
+    "productionEngineChanged": false,
+    "commit": "2bbd71cc",
+    "authorization": "Head565 comment2026-11-06T04:48:14.904Z"
+  },
+  "legacyException": {
+    "approved": true,
+    "headCommentAt": "2026-11-06T04:48:14.904Z",
+    "baselineRun": 473,
+    "crapMax": 110,
+    "condition": "unchanged heavy function bodies; numbers retained"
+  },
+  "authorcheckRecipe": "2026-11-06-root-related-authorcheck.sh.txt"
 }
