@@ -433,6 +433,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           giveUpLease(dir, credHome, credUser);
           return signedInNow();
         });
+      case 'task.handoff.capture':
+      case 'task.handoff.offer':
+      case 'task.handoff.resume_source':
+      case 'task.handoff.release':
+        return;
       case 'login.start':
         if (!login) return emit({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.noLogin });
         return login.start(m.fresh);
