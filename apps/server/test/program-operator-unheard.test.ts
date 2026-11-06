@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, jobs, programInstances, tasks } from '../src/db/schema.js';
+import { agentEvents, jobs, tasks } from '../src/db/schema.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { expireOperatorCases } from '../src/modules/program-operator/cases.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
@@ -175,8 +175,7 @@ it('does not tell again a task closed since the turn went out', async () => {
 it('a program held until its owner passes it says on what it was told, and each task that went along, though going out set them to work', async () => {
   const c = await stuckPrograms();
   const { words, along, carrier } = await headTakesTaskAlong(c);
-  await c.db.update(programInstances).set({ active: false }).where(eq(programInstances.id, await c.instanceOf(c.head.id)));
-  await c.unrecorded(c.head.id, carrier.id);
+  await c.unrecordedIdle(c.head.id, carrier.id);
   await c.failedTurn(carrier.id);
   expect(await c.caseOf(carrier.id)).toMatchObject({ recoveryHold: true });
   expect(await resumeOperatorProcess(c.ctx, c.head.id, c.identity.nodeId)).toBe(true);
@@ -187,11 +186,21 @@ it('a program held until its owner passes it says on what it was told, and each 
   expect(await c.continuationsOf(along)).toHaveLength(1);
 });
 
+it('each task that went along is told again when a retry of the cut turn takes its own words on', async () => {
+  const c = await stuckPrograms();
+  const { along, carrier } = await headTakesTaskAlong(c);
+  await c.unrecordedIdle(c.head.id, carrier.id);
+  await c.failedTurn(carrier.id);
+  const retry = await insertTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: 'Once more.', createdBy: null, taskId: carrier.taskId ?? undefined, retryOf: carrier.id });
+  await resumeOperatorProcess(c.ctx, c.head.id, c.identity.nodeId);
+  expect(await c.caseOf(carrier.id)).toMatchObject({ recoveryHold: false, continuationJobId: retry });
+  expect(await c.continuationsOf(along)).toHaveLength(1);
+});
+
 it('a late receipt in a held program ends those too', async () => {
   const c = await stuckPrograms();
   const { along, carrier } = await headTakesTaskAlong(c);
-  await c.db.update(programInstances).set({ active: false }).where(eq(programInstances.id, await c.instanceOf(c.head.id)));
-  await c.unrecorded(c.head.id, carrier.id);
+  await c.unrecordedIdle(c.head.id, carrier.id);
   await c.failedTurn(carrier.id);
   await resumeOperatorProcess(c.ctx, c.head.id, c.identity.nodeId);
   const [repeat] = await c.continuationsOf(along);
@@ -292,8 +301,7 @@ describe('a receipt that comes late', () => {
   it('ends the repeat of a task that went along, though the task of the turn itself closed and has no repeat', async () => {
     const c = await stuckPrograms();
     const { one, along, carrier } = await headTakesTaskAlong(c);
-    await c.db.update(programInstances).set({ active: false }).where(eq(programInstances.id, await c.instanceOf(c.head.id)));
-    const { fact } = await c.unrecorded(c.head.id, carrier.id);
+    const { fact } = await c.unrecordedIdle(c.head.id, carrier.id);
     await c.failedTurn(carrier.id);
     expect(await c.caseOf(carrier.id)).toMatchObject({ recoveryHold: true });
     await c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, one.id));

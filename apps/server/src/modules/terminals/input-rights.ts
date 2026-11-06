@@ -8,20 +8,26 @@ const PASTE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/;
 /* Enter and the keys that erase write nothing into the program. In a paste, Enter is all that may stand among the words. */
 const STEERS = /[\x00-\x07\x09\x0b\x0c\x0e-\x1f\x80-\x9f]/;
 const STEERS_IN_PASTE = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
-/* Focus, the answers to a program's queries and the mouse are no keys a person typed. */
-const REPORT = /^\x1b\[(?:[IO]|[>?][0-9;]*c|[0-9;]*R|<[0-9]+;[0-9]+;[0-9]+[Mm])$/;
 /* How long a line counts as holding words with no key from anyone: a program may have taken them by then. */
 const LINE_MS = 30_000;
 
-export const isReport = (data: string): boolean => REPORT.test(data);
-
 const newLine = (key: string) => key === '\r' || key === '\n';
-const erases = (key: string) => key === '\b' || key === '\x7f';
+/* How much is surely on the line: never more than a program holds, so that no line counts as holding words once it may be empty.
+   Sure until an erase may take more than one key with it. */
+type Line = { length: number; sure: boolean };
+const EMPTY: Line = { length: 0, sure: true };
+
+/* Marks, joiners and whatever this Unicode does not know yet may be left out of a line by a program. */
+const SHOWS = /^[\p{L}\p{N}\p{P}\p{S}]$/u;
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
+const pieces = (text: string) => [...graphemes.segment(text)].length;
+/* A key no program takes for one character together with the key before or after it. */
+const standsAlone = (key: string) => /^[ -~]$/.test(key) || (pieces(`a${key}a`) === 3 && pieces(`${key}${key}`) === 2);
 
 /* The input line of one agent's program as its terminals made it, for all of them. It starts empty, and what cannot be known
    counts as empty: that is where / and ! are refused. */
 export class InputLine {
-  private length = 0;
+  private line = EMPTY;
   private blocked = false;
   private at = 0;
 
@@ -36,7 +42,7 @@ export class InputLine {
   }
 
   empty(): void {
-    this.length = 0;
+    this.line = EMPTY;
     this.blocked = false;
   }
 
@@ -48,9 +54,9 @@ export class InputLine {
   /* An owner's key that steers may do anything to the line. */
   private ofOwner(data: string): void {
     this.blocked = false;
-    const text = PASTE.exec(data)?.[1] ?? data;
-    if (STEERS.test(text)) this.length = 0;
-    else this.length = lengthAfter(this.length, text) ?? this.length + text.length;
+    const paste = PASTE.exec(data);
+    const text = paste?.[1] ?? data;
+    this.line = STEERS.test(text) ? EMPTY : lineAfter(this.line, text, Boolean(paste), false)!;
   }
 
   private ofMessage(data: string): InputRefusal | null {
@@ -58,13 +64,13 @@ export class InputLine {
     const text = paste?.[1] ?? data;
     if ((paste ? STEERS_IN_PASTE : STEERS).test(text)) return 'control';
     if (this.blocked) return this.afterCommand(text);
-    const length = lengthAfter(this.length, text);
-    if (length === null) {
+    const line = lineAfter(this.line, text, Boolean(paste), true);
+    if (line === null) {
       /* The rest of a command typed key by key is that command too, up to its Enter. */
-      this.blocked = this.length === 0 && /^\s*[/!]/.test(text) && !/[\r\n]/.test(text);
+      this.blocked = this.line.length === 0 && /^\s*[/!]/.test(text) && !/[\r\n]/.test(text);
       return 'control';
     }
-    this.length = length;
+    this.line = line;
     return null;
   }
 
@@ -75,15 +81,27 @@ export class InputLine {
   }
 }
 
-/* How long the line gets with these keys, or null when one of them starts a line with what runs a command. Spaces do not
-   start a line: a program may trim them before it looks for a command. */
-function lengthAfter(from: number, text: string): number | null {
-  let length = from;
-  for (const key of text) {
-    if (newLine(key)) length = 0;
-    else if (erases(key)) length = Math.max(0, length - 1);
-    else if (length === 0 && (key === '/' || key === '!')) return null;
-    else if (length > 0 || key.trim()) length++;
+/* An erase after several keys of one frame or a paste comes to the same: a program may have taken them for one. */
+const cleared = (whole: boolean): Line => ({ length: 0, sure: !whole });
+
+function withKey(line: Line, key: string): Line {
+  const counts = SHOWS.test(key) || (line.length > 0 && !key.trim());
+  return { length: line.length + (counts ? 1 : 0), sure: line.sure && standsAlone(key) };
+}
+
+/* The line after these keys, or null when one of them starts a line with what runs a command, for someone who may not. Spaces do
+   not start a line: a program may trim them before it looks for a command. Programs differ in what one erase takes: a letter with
+   its accent, a whole paste that shows as one, a word for the \b of Ctrl+Backspace. So only what stands alone and came key by key
+   is counted down; after anything else an erase leaves the line counted as empty. */
+function lineAfter(from: Line, text: string, pasted: boolean, refusing: boolean): Line | null {
+  const keys = [...text], whole = pasted || keys.length > 1;
+  let line = whole ? { ...from, sure: false } : from;
+  for (const key of keys) {
+    if (newLine(key)) line = cleared(whole);
+    else if (key === '\x7f' && line.sure) line = { ...line, length: Math.max(0, line.length - 1) };
+    else if (key === '\x7f' || key === '\b') line = cleared(whole);
+    else if (refusing && line.length === 0 && (key === '/' || key === '!')) return null;
+    else line = withKey(line, key);
   }
-  return length;
+  return line;
 }

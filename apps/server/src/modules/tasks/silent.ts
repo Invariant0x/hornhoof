@@ -52,10 +52,12 @@ export async function recordJobProgram(
   scope: SQL,
 ): Promise<void> {
   const [job] = await ctx.db
-    .select({ id: jobs.id, companyId: jobs.companyId, agentId: jobs.agentId })
+    .select({ id: jobs.id, companyId: jobs.companyId, agentId: jobs.agentId, sessionId: jobs.sessionId })
     .from(jobs)
     .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), scope));
   if (!job) return;
+  /* A node that restarts mid-turn cannot say so when the turn ends, and the turn goes on in this session. */
+  if (msg.session && msg.session !== job.sessionId) await ctx.db.update(jobs).set({ sessionId: msg.session }).where(eq(jobs.id, job.id));
   await replaceProgram(ctx, job, msg, now);
   ctx.bus.publish(job.companyId, { type: 'org' });
 }

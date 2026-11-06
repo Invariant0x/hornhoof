@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { parseNodeMessage, type ConnectionEnd, type NodeLoad, type NodeMessage, type ProgramInfo } from '@hornhoof/protocol';
-import { OperatorDeliveryMetadata, OperatorNodeMessage, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorScreen, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
+import { OperatorDeliveryMetadata, OperatorNodeMessage, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorRecoveryState, type OperatorScreen, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 
@@ -64,8 +64,8 @@ const isTerminalFrame = (msg: ProgramNodeMessage): msg is TerminalMessage =>
   msg.type === 'term.data' || msg.type === 'term.exit' || msg.type === 'term.program';
 
 /* What a node answers a program operator's request with. */
-export const isOperatorReply = (msg: ProgramNodeMessage): msg is OperatorScreen | OperatorKeyResult | OperatorKeyPrepared =>
-  msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared';
+export const isOperatorReply = (msg: ProgramNodeMessage): msg is OperatorScreen | OperatorKeyResult | OperatorKeyPrepared | OperatorRecoveryState =>
+  msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared' || msg.type === 'program.recovery_state';
 
 /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
 const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' || isOperatorReply(msg);

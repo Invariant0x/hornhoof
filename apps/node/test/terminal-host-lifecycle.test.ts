@@ -70,12 +70,19 @@ describe.skipIf(!hasTmux)('turn ends and signs from the program', () => {
     const running = host.run(codexJob('ids', 'HANG', { jobId: 'job-ids', signal: controller.signal }));
     await until(() => host['agents'].get('ids')?.took === true);
     const a = host['agents'].get('ids')!;
-    await host['hook']('ids', 'stop', { turn_id: 'unrelated', last_assistant_message: 'Wrong' });
-    expect(a.busy).toBe(true);
     const rollout = findRollout(a.home, a.workDir, 0, a.sessionId)!;
     const { readFileSync } = await import('node:fs');
     const start = readFileSync(rollout.file, 'utf8').split('\n').filter(Boolean).map(s => JSON.parse(s)).find(s => s.payload?.type === 'task_started');
-    await host['hook']('ids', 'stop', { turn_id: start.payload.turn_id, last_assistant_message: 'Right' });
+    const logged = (turn_id: string, last_agent_message: string) => {
+      appendFileSync(rollout.file, JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id, last_agent_message } }) + '\n');
+      host['drain'](a);
+    };
+    logged('unrelated', 'Wrong');
+    expect(a.busy).toBe(true);
+    /* Its Stop hook comes before the end of the turn in its log, so it ends nothing. */
+    await host['hook']('ids', 'stop', { turn_id: start.payload.turn_id, last_assistant_message: 'Early' });
+    expect(a.busy).toBe(true);
+    logged(start.payload.turn_id, 'Right');
     expect(await running).toMatchObject({ ok: true, result: 'Right' });
     for (let i = 0; i < 2; i++) await host['hook']('ids', 'stop', { turn_id: start.payload.turn_id, hook_event_name: 'StopFailure', error: 'overloaded' });
     expect(log.mock.calls.filter(([text]) => text.includes('disagree'))).toHaveLength(1);

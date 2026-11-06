@@ -12,7 +12,7 @@ import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, lea
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
-import { afterRestart } from './restarts.js';
+import { afterRestart, afterRestartOutsideTask } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
 import { afterFailure } from './failures.js';
 import { settle, tell } from './turns.js';
@@ -641,7 +641,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
     if (handled) await checkLiveness(ctx, jobId, await carriedTasks(ctx, taskTurn), { carriedOnly: true });
     else await afterTaskTurn(ctx, jobId, taskTurn);
-  }
+  } else if (!handled && job.error === 'machine_restarted') await afterRestartOutsideTask(ctx, jobId);
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);

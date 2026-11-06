@@ -12,22 +12,11 @@ describe('what the build runs', () => {
     for (const line of uses) expect(line).toMatch(/uses: [\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
   });
 
-  /* Every company updates to :latest, so a run started by hand from a branch would hand them all that branch. */
-  it('moves the latest and version tags only for a build of main, and a branch build pushes its commit tag alone', () => {
-    const lines = read('.github/workflows/images.yml').split('\n');
-    const start = lines.findIndex(l => /^\s+tags: \|$/.test(l));
-    expect(start).toBeGreaterThan(0);
-    const indent = lines[start + 1]!.search(/\S/);
-    const tags: string[] = [];
-    for (const line of lines.slice(start + 1)) {
-      if (line.search(/\S/) < indent) break;
-      tags.push(line.trim());
-    }
-    const moved = tags.filter(t => t.includes(':latest') || t.includes('steps.build.outputs.version'));
-    expect(moved).toHaveLength(2);
-    for (const tag of moved) expect(tag).toMatch(/^\$\{\{ github\.ref == 'refs\/heads\/main' && format\('ghcr\.io\/invariant0x\/\{0\}:[^']+', matrix\.name[^)]*\) \|\| '' \}\}$/);
-    expect(tags).toContain('ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}');
-    expect(tags).toHaveLength(3);
+  /* Every company updates to :latest, so no build, of main or of a branch, may move it: only the publish job does, after the
+     live check, and scripts/test/live-check-workflow.test.mjs holds that job to it. */
+  it('pushes a build under its commit tag alone', () => {
+    const tags = read('.github/workflows/images.yml').split('\n').filter(l => /^\s+tags: /.test(l)).map(l => l.trim());
+    expect(tags).toEqual(['tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}']);
   });
 
   /* A tag can point at another image tomorrow; a digest is the one image the build was checked with. */

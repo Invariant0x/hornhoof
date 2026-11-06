@@ -21,7 +21,7 @@ It goes through these steps:
 
 ## How do I update it?
 
-Run the same line again. It keeps the existing `.env`. The new server starts at once, and its nodes follow when what they run has finished; with `--urgent` after `server` they go along now, which stops what they run. [Updates](updates.md) says how Hornhoof offers a new version by itself.
+Run the same line again. It keeps the existing `.env`. It installs only a build that passed its [live check](updates.md), and leaves your server as it is otherwise. A version from before 0.7.0 has no check to show, so `HORNHOOF_VERSION=0.6.1` before `bash` still takes you back to it. The new server starts at once, and its nodes follow when what they run has finished; with `--urgent` after `server` they go along now, which stops what they run. [Updates](updates.md) says how Hornhoof offers a new version by itself.
 
 ## How much of my Mac does it take?
 

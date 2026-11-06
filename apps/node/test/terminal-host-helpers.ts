@@ -31,6 +31,12 @@ export const hasTmux = (() => {
   }
 })();
 
+/* Kimi Code's input box and footer as it draws them (fixtures/real-screens). */
+export const kimiScreen = (input: string) => {
+  const rows = input.split('\n').map((row, i) => `│ ${i ? ' ' : '>'} ${row}`.padEnd(70) + ' │');
+  return `Welcome to Kimi Code!\n╭${'─'.repeat(70)}╮\n${rows.join('\n')}\n╰${'─'.repeat(70)}╯\ncontext: 0% (0/256k)\n`;
+};
+
 export const until = async (check: () => boolean | Promise<boolean>, ms = 8000) => {
   for (const end = Date.now() + ms; Date.now() < end; await new Promise(r => setTimeout(r, 50))) if (await check()) return;
   throw new Error('timed out');

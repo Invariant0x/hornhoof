@@ -16,7 +16,9 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/CODEOWNERS'
       - '.github/pull_request_template.md'
-  # Pull requests run the tests only; images are built and pushed from main.
+  # Pull requests run the tests only. Images are built by hand, from any branch, under the tag of their commit alone: a real
+  # node of those images then goes through the live check of guide/updates.md. A push to main builds nothing: it moves the
+  # tags every machine reads onto exactly the images the check speaks of, or stops.
   pull_request:
   workflow_dispatch:
 
@@ -88,7 +90,7 @@ jobs:
       - name: Node
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: apps/node
-        run: npx vitest run --shard="$PART" --maxWorkers=2
+        run: npm test -- --shard="$PART" --maxWorkers=2
       - name: Web
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: apps/web
@@ -97,7 +99,7 @@ jobs:
   images:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -154,19 +156,63 @@ jobs:
             ${{ matrix.name == 'hornhoof-node' && 'SOURCE_DATE_EPOCH=315532800' || '' }}
           outputs: ${{ matrix.name == 'hornhoof-node' && 'type=registry,rewrite-timestamp=true' || '' }}
           provenance: ${{ matrix.name != 'hornhoof-node' }}
-          # Every company updates to latest, so only a build of main moves it and the version; a run started by hand from a
-          # branch pushes its commit's tag alone. The action skips the empty lines.
-          tags: |
-            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/invariant0x/{0}:latest', matrix.name) || '' }}
-            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/invariant0x/{0}:{1}', matrix.name, steps.build.outputs.version) || '' }}
-            ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}
+          # Every company updates to latest, so this job never moves it: the publish job does, after the live check.
+          tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+  # The one way a build reaches machines. It takes the images the live check ran on, as they are: a build made again would
+  # have other digests. A commit without its check stops here, the tags stay where they are, and running this job again
+  # once the check is published goes on. A merge commit is another commit: main takes a checked commit by fast-forward.
+  publish:
+    needs: [mark, test]
+    # Tests the mark left out count as passed here too.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build the door
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npm run build -w @hornhoof/protocol
+          npm run build -w @hornhoof/server
+      - id: checked
+        name: Ask for the live check of this exact build
+        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --outputs "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move the version and latest onto exactly those images
+        env:
+          APP: ${{ steps.checked.outputs.app }}
+          NODE: ${{ steps.checked.outputs.node }}
+          UPDATER: ${{ steps.checked.outputs.updater }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          move() { docker buildx imagetools create --tag "ghcr.io/invariant0x/$1:latest" --tag "ghcr.io/invariant0x/$1:$version" "ghcr.io/invariant0x/$1@$2"; }
+          # Servers read the app image first, so it moves once what it goes with is there.
+          move hornhoof-updater "$UPDATER"
+          move hornhoof-node "$NODE"
+          move hornhoof "$APP"
+      - name: Check that latest holds exactly those images
+        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --tag latest
+
   release:
-    needs: images
-    # Tests skipped further back would skip this job too, so it asks only that the images were built.
-    if: ${{ !cancelled() && needs.images.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: publish
+    # Tests skipped further back would skip this job too, so it asks only that the images went out.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
