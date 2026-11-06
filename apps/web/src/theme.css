@@ -1624,7 +1624,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
   /* One row, whatever the window has to offer: every button keeps its size and the title gives way, then the row scrolls. */
   .orch > .t-bar { flex-wrap: nowrap; gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .orch > .t-bar > button { flex: none; }
-  .orch > .t-bar > button:not(.btn) { width: 28px; }
+  .orch > .t-bar > button:not(.btn) { width: 28px; height: 28px; }
   .orch > .t-bar button.btn { padding: 0 6px; }
   .orch .agent-window-title { min-width: 0; padding-left: 4px; }
   .orch > .t-bar button.bar-word { padding: 0; width: 28px; justify-content: center; align-items: center; }
