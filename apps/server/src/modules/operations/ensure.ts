@@ -1,3 +1,4 @@
+import { defaultDepartmentWorkMode } from '@hornhoof/protocol';
 import { and, asc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -24,7 +25,7 @@ const operationsOf = async (tx: Tx, companyId: string) =>
 
 async function createOperations(tx: Tx, companyId: string) {
   const [last] = await tx.select({ n: max(departments.position) }).from(departments).where(eq(departments.companyId, companyId));
-  const [dept] = await tx.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS', position: (last?.n ?? -1) + 1 }).returning();
+  const [dept] = await tx.insert(departments).values({ companyId, templateKey: 'operations', workMode: defaultDepartmentWorkMode('operations'), roleCode: 'OPS', position: (last?.n ?? -1) + 1 }).returning();
   return dept!;
 }
 
