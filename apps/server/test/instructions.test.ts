@@ -216,9 +216,9 @@ describe('renderInstructions', () => {
     }
   });
 
-  it('delivers internal-first hh-questions inline across files=true and files=false for workers, heads and the orchestrator within byte budgets', () => {
+  it('delivers internal-first hh-questions with its Materials guidance inline across files=true and files=false for workers, heads and the orchestrator within byte budgets', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
-    for (const roleKey of ['DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'OPS-HEAD', 'OPS-WATCH'] as const) {
+    for (const roleKey of ['DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'DSN-UI', 'OPS-HEAD', 'OPS-WATCH'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const kind = role.kind === 'head' ? 'head' : 'worker';
       const skills = role.skills.filter(s => s.on).map(s => s.id);
@@ -229,6 +229,8 @@ describe('renderInstructions', () => {
         expect(target, roleKey).toContain('<!-- hh:skill hh-questions -->');
         expect(target, roleKey).toContain('ready_result');
         expect(target, roleKey).toContain('human_only_action');
+        expect(target, roleKey).toContain('- **Materials**:');
+        expect(target, roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
         expect(target, roleKey).not.toContain('after three a person steps in');
       }
     }
@@ -240,6 +242,7 @@ describe('renderInstructions', () => {
       expect(target).toContain('<!-- hh:skill hh-questions -->');
       expect(target).toContain('ready_result');
       expect(target).toContain('human_only_action');
+      expect(target).toContain('- **Materials**:');
     }
 
     const devHead = shipped.roles.get('DEV-HEAD')!;
@@ -365,5 +368,122 @@ describe('renderInstructions', () => {
     );
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-task-flow')).toBe(false);
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
+  });
+
+  it('delivers the strict mechanical finding category and Wake.mechanical boundary in loaded DEV-REV skill files and whole instructions', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const revRole = shipped.roles.get('DEV-REV')!;
+    const rendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+    expect(Buffer.byteLength(rendered.text)).toBeLessThan(24_000);
+    expect(rendered.text).toContain('\n- dev-review-diff: Reviewing a change.');
+    expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
+    const files = new Map(rendered.skills.map(s => [s.name, s.body]));
+    for (const id of ['dev-review-diff', 'dev-review-verdict'] as const) {
+      const body = files.get(id)!;
+      expect(Buffer.byteLength(body), id).toBeLessThan(22_000);
+      expect(body, id).toContain('mechanical');
+      expect(body, id).toContain('Wake.mechanical');
+      expect(body, id).toMatch(/provably cannot change[^.!?]*behaviour/i);
+      expect(body, id).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
+    }
+    expect(rendered.whole).toContain('Wake.mechanical');
+    expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
+  });
+
+  it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const steady = orchestratorSteady(shipped);
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
+    expect(steady.whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+    expect(steady.text).toMatch(/\n- orch-trouble: When work goes wrong\.[^\n]*external service failures/i);
+    const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
+    expect(troubleFile).toBeDefined();
+    expect(Buffer.byteLength(troubleFile!.body)).toBeLessThan(22_000);
+    for (const delivered of [troubleFile!.body, steady.whole]) {
+      expect(delivered).toContain('An external service failure is not grounds for a general hold lasting longer than the failure itself.');
+      expect(delivered).toContain("Decide any such hold or its lifting yourself and communicate it at once in one action to every affected holder, never through a department head's queue.");
+      expect(delivered).toContain('An agent needs no permission for an ordinary retry of a transient external failure.');
+      expect(delivered).toMatch(/force pushes[\s\S]*alternate refs[\s\S]*permission changes[\s\S]*irreversible actions[\s\S]*dangerous or non-idempotent actions/);
+    }
+
+    const canonicalLead = shipped.skills.get('hh-lead-tasks')!.body;
+    const headMarker = '<!-- hh:skill hh-lead-tasks -->';
+    for (const role of [...shipped.roles.values()].filter(r => r.kind === 'head')) {
+      const freshHead = renderInstructions(shipped, agent({ kind: 'head', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(freshHead.text, role.id).toContain('An external service failure never prolongs a general hold once the service recovers');
+      expect(freshHead.text.split(headMarker).length - 1, role.id).toBe(1);
+      const legacySavedSkills = ['hh-outside-is-data', 'hh-ask-dont-guess'];
+      const legacyHead = renderInstructions(
+        shipped,
+        agent({
+          kind: 'head',
+          roleKey: role.id,
+          skills: legacySavedSkills,
+          overrides: { skills: { 'hh-lead-tasks': 'Hold recovery in your queue and require permission for every retry.' } },
+          templateHashes: {},
+        }),
+        PLACE,
+      );
+      expect(legacySavedSkills).toEqual(['hh-outside-is-data', 'hh-ask-dont-guess']);
+      expect(legacyHead.text, `${role.id} legacy text`).toContain(canonicalLead);
+      expect(legacyHead.whole, `${role.id} legacy whole`).toContain(canonicalLead);
+      expect(legacyHead.text, `${role.id} legacy text`).not.toContain('Hold recovery in your queue');
+      expect(legacyHead.text.split(headMarker).length - 1, `${role.id} legacy once`).toBe(1);
+    }
+  });
+
+  it('delivers department-load, independentPart/independentNone and urgentOnly rules to heads and idle-fault rules to the watchdog across fresh and legacy saved skill lists', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const headPhrases = [
+      'whoever gives out the work answers for keeping the department loaded, not only for ordering tasks',
+      'Members standing free while work in the department can run are a fault, not a normal wait',
+      '`independentPart`',
+      '`independentNone`',
+      'Never assign ordinary or non-urgent work to members of an urgent-only team (`urgentOnly`): Hornhoof refuses the assignment and names free members in the same role.',
+    ];
+
+    const savedHeadList = ['hh-outside-is-data'];
+    const headVariants = [
+      ...([...shipped.roles.values()].filter(r => r.kind === 'head').map(r =>
+        agent({ kind: 'head', roleKey: r.id, skills: r.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      )),
+      agent({
+        kind: 'head',
+        roleKey: 'DEV-HEAD',
+        skills: savedHeadList,
+        overrides: { skills: { 'hh-lead-tasks': 'Only order tasks and wait while people stand free.' } },
+        templateHashes: {},
+      }),
+      agent({ kind: 'head', roleKey: null, skills: [], templateHashes: {} }),
+    ];
+
+    for (const candidate of headVariants) {
+      const packet = renderInstructions(shipped, candidate, PLACE);
+      expect(Buffer.byteLength(packet.text), candidate.roleKey ?? 'roleless').toBeLessThan(24_000);
+      for (const phrase of headPhrases) {
+        expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toContain(phrase);
+        expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toContain(phrase);
+      }
+      expect(packet.text).not.toContain('Only order tasks and wait while people stand free.');
+      const breakDownFile = packet.skills.find(s => s.name === 'hh-break-down');
+      expect(breakDownFile, candidate.roleKey ?? 'roleless').toBeDefined();
+      expect(breakDownFile!.body).toContain('`independentPart`');
+      expect(breakDownFile!.body).toContain('`independentNone`');
+      expect(breakDownFile!.body).toContain('`urgentOnly`');
+    }
+    expect(savedHeadList).toEqual(['hh-outside-is-data']);
+
+    const savedWatchList = ['ops-task-watch'];
+    for (const watchAgent of [
+      agent({ kind: 'worker', roleKey: 'OPS-WATCH', skills: shipped.roles.get('OPS-WATCH')!.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      agent({ kind: 'worker', roleKey: 'OPS-WATCH', skills: savedWatchList, templateHashes: {} }),
+    ]) {
+      const watchPacket = renderInstructions(shipped, watchAgent, PLACE);
+      expect(watchPacket.text).toContain('no one stands free while work waits');
+      const watchSkill = watchPacket.skills.find(s => s.name === 'ops-task-watch');
+      expect(watchSkill?.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+      expect(watchPacket.whole).toContain('People who stand free while work waits are a fault, not a normal wait');
+    }
+    expect(savedWatchList).toEqual(['ops-task-watch']);
   });
 });

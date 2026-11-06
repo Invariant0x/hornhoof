@@ -1,3 +1,4 @@
+import { WAIT_SOURCE_KINDS, WaitPlan } from '@hornhoof/protocol/waits';
 import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey, ruleOf } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, count, eq, gte, inArray } from 'drizzle-orm';
@@ -5,10 +6,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { orchestratorHeaders } from '../../auth/internal.js';
-import { approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
+import { isUniqueViolation } from '../../db/errors.js';
+import { agents, approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
+import { departmentWaitPolicies } from '../departments/wait-policy-routes.js';
 import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
@@ -16,6 +19,7 @@ import { decisionPerson } from '../tasks/decisions.js';
 import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { taskByRef } from '../tasks/views.js';
+import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from './job.js';
 
@@ -33,7 +37,16 @@ const readable = async (fn: () => Promise<ReturnType<typeof say>>) => {
   }
 };
 
-type Asked = { channel: ApprovalChannel; kind: string; amount?: number | undefined; text: string; link?: string | undefined };
+const GoalOn = z.enum(['task', 'turn']).default('task');
+
+/* The goal a report is about, by what it stands on rather than by its words. */
+function goalRefOf(task: Task, on: 'task' | 'turn'): GoalRef {
+  if (on === 'task') return { kind: 'task', id: task.id };
+  if (!task.turnId) throw refuse(400, 'task_invalid', `#${task.number} is in no turn.`);
+  return { kind: 'turn', id: task.turnId };
+}
+
+type Asked = { channel: ApprovalChannel; kind: string; amount?: number | undefined; text: string; link?: string | undefined; plan?: WaitPlan | undefined };
 
 /* The rule of a channel of the task's department; a task of no department asks every time. */
 async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChannel) {
@@ -89,7 +102,7 @@ async function requestApproval(ctx: Ctx, job: ToolJob, ref: number | string, ask
     await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.text}`)).wakes);
     return say(`No approval needed: ${why}. Go on with the work.`);
   }
-  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task' });
+  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task', ...(asked.plan ? { plan: asked.plan } : {}) });
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
 }
 
@@ -98,10 +111,37 @@ async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string
   const [dept] = await ctx.db.select().from(departments).where(and(eq(departments.id, department), eq(departments.companyId, job.companyId)));
   if (!dept) return say(`There is no department with id ${department}. Call company to see the current ids.`, true);
   const top = dept.parentId ?? dept.id;
-  return say(JSON.stringify({ department: top, owner: await departmentOwner(ctx, job.companyId, top), rules: await departmentRules(ctx.db, top) }));
+  return say(JSON.stringify({ department: top, owner: await departmentOwner(ctx, job.companyId, top), rules: await departmentRules(ctx.db, top), waitDates: await departmentWaitPolicies(ctx, top) }));
 }
 
 /* The tools every agent has for approvals: it reads how a department's go, and asks under them. */
+/* A goal in danger, as a head or the orchestrator says it: a new episode, or what this adds to the one that is open. */
+async function escalateGoal(ctx: Ctx, job: ToolJob, ref: number | string, said: { goal: string; why: string; impact: GoalImpact; on: 'task' | 'turn' }) {
+  const task = await heldTask(ctx, job, ref);
+  const goalRef = goalRefOf(task, said.on);
+  const open = await openGoal(ctx.db, task.companyId, goalRef);
+  if (open) return say(await reviseGoal(ctx, { agentId: job.agentId }, open, said.impact) ? 'The CEO is told it is now missed.' : `The CEO has this already, on the question in #${task.number}. Nothing changed.`);
+  try {
+    await askPerson(ctx, job, task, { kind: 'question', text: `${said.impact === 'missed' ? 'Missed goal' : 'Goal at risk'}: ${said.goal}. ${said.why}`, evenUnplanned: true, goal: { ref: goalRef, impact: said.impact } });
+  } catch (err) {
+    /* Another said it first: this one joins that episode. */
+    const first = isUniqueViolation(err) ? await openGoal(ctx.db, task.companyId, goalRef) : null;
+    if (!first) throw err;
+    await reviseGoal(ctx, { agentId: job.agentId }, first, said.impact);
+  }
+  return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
+}
+
+/* The head of the department or the orchestrator says the goal is out of danger. */
+async function endGoalRisk(ctx: Ctx, job: ToolJob, ref: number | string, why: string, on: 'task' | 'turn') {
+  const task = await taskByRef(ctx, job.companyId, ref);
+  if (!task) return say(`There is no task ${ref}. Call tasks for yours.`, true);
+  const [me] = await ctx.db.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
+  if (me?.kind !== 'orchestrator' && me?.departmentId !== task.departmentId) return say(`#${task.number} is not of your department.`, true);
+  await resolveGoal(ctx, { agentId: job.agentId }, job.companyId, goalRefOf(task, on), why);
+  return say('Recorded: the goal is out of danger.');
+}
+
 export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'approval_policy',
@@ -128,6 +168,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         amount: ApprovalAmount.optional(),
         text: z.string().trim().min(1).max(2000),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
+        plan: WaitPlan.optional().describe('Who answers by when, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the request.'),
       },
     },
     ({ task, ...asked }: Asked & { task: number | string }) => readable(() => requestApproval(ctx, job, task, asked)),
@@ -137,15 +178,19 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
   server.registerTool(
     'escalate_missed_goal',
     {
-      description: 'Puts before the CEO that the department is missing a goal or its plan (no customers, no deals, a release running late). The CEO comes for this, not for each approval, which go to the department\'s owner. The task waits for the answer. goal: the goal that is missed. why: what happened, with the numbers.',
-      inputSchema: { task: Ref, goal: z.string().trim().min(1).max(300), why: z.string().trim().min(1).max(1500) },
+      description: "Puts before the CEO that the department is missing a goal or its plan (no customers, no deals, a release running late), or is about to. The CEO comes for this, not for each approval, which go to the department's owner. The task waits for the answer. goal: the goal in danger. why: what happened, with the numbers. impact: missed, or at_risk while it can still be saved. on: task for a goal of this task, turn for one of its turn. Saying it again changes nothing unless at_risk became missed. An answer does not end it: resolve_goal_risk does.",
+      inputSchema: { task: Ref, goal: z.string().trim().min(1).max(300), why: z.string().trim().min(1).max(1500), impact: z.enum(['at_risk', 'missed']).default('missed'), on: GoalOn },
     },
-    ({ task: ref, goal, why }) =>
-      readable(async () => {
-        const task = await heldTask(ctx, job, ref);
-        await askPerson(ctx, job, task, { kind: 'question', text: `Missed goal: ${goal}. ${why}` });
-        return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
-      }),
+    ({ task, ...said }) => readable(() => escalateGoal(ctx, job, task, said)),
+  );
+
+  server.registerTool(
+    'resolve_goal_risk',
+    {
+      description: 'Records that a goal you or someone put before the CEO with escalate_missed_goal is out of danger. Only the head of the department or the orchestrator says so, with what shows it. An answer from the CEO alone does not. A later threat starts anew.',
+      inputSchema: { task: Ref, why: z.string().trim().min(1).max(1500), on: GoalOn },
+    },
+    ({ task, why, on }) => readable(() => endGoalRisk(ctx, job, task, why, on)),
   );
 }
 
@@ -181,5 +226,17 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
       inputSchema: { department: Department, channel: ApprovalChannel, mode: z.enum(APPROVAL_MODES), limit: ApprovalAmount.optional(), unit: z.string().trim().min(1).max(16).optional() },
     },
     ({ department, channel, mode, limit, unit }) => asPerson(`/api/departments/${department}/approval-policy/${channel}`, { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) }),
+  );
+
+  server.registerTool(
+    'set_wait_policy',
+    {
+      description:
+        'Sets how long a department gives a kind of wait: after, review, person, run or external, at a stage of a run or at all. ownerMs, headMs, decisionMs: when its owner, its head and then the department\'s owner are told, counted from when the wait began. reviewIntervalMs: how often the head looks at it again after that. ' +
+        'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. Write down only what the person said: there are no standard numbers. ' +
+        "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.",
+      inputSchema: { department: Department, kind: z.enum(WAIT_SOURCE_KINDS), stage: z.string().trim().max(40).optional(), ownerMs: z.number().int().positive(), headMs: z.number().int().positive(), decisionMs: z.number().int().positive(), reviewIntervalMs: z.number().int().positive() },
+    },
+    ({ department, kind, ...policy }) => asPerson(`/api/departments/${department}/wait-policy/${kind}`, policy),
   );
 }
