@@ -6,6 +6,7 @@ import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/pr
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
+import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -805,6 +806,61 @@ describe('templates', () => {
       );
     });
   });
+
+  describe('mechanical finding category and strict behavior-unchanged boundary', () => {
+    const pair = (): MechanicalSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+    });
+
+    it('matches the IssueInput category enum and mechanicalVerdict server aggregate in both readable review skills', () => {
+      const { diff, verdict } = pair();
+      const expected = ['security', 'data', 'spec', 'other', 'mechanical'];
+      expect(documentedCategories(verdict)).toEqual(expected);
+      expect(documentedCategories(diff)).toEqual(expected);
+      for (const category of expected) {
+        expect(IssueInput.safeParse({ category, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, category).toBe(true);
+      }
+      for (const invented of ['style', 'lint', 'medium']) {
+        expect(IssueInput.safeParse({ category: invented, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, invented).toBe(false);
+      }
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { diff, verdict })).toEqual([]);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)] })).toBe(true);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('other', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('spec', true)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)], unresolvedFindingIds: ['11111111-1111-4111-8111-111111111111'] })).toBe(false);
+    });
+
+    it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
+      const base = pair();
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, base)).toEqual([]);
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nClassify a public API rename as 'mechanical' when tests compile.` })).toContain(
+        'strict-behavior-unchanged-boundary',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nUse 'mechanical' when a fix may change behaviour only slightly.` })).toContain(
+        'strict-behavior-unchanged-boundary',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nWhen in doubt, mark the finding 'mechanical' so the fix finishes faster.` })).toContain(
+        'doubt-keeps-regular-category-and-full-base-level',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nClassify spec findings as 'mechanical' to run at medium.` })).toContain(
+        'doubt-keeps-regular-category-and-full-base-level',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nSet Wake.mechanical on mixed verdicts whenever one issue is mechanical.` })).toContain(
+        'server-aggregate-wake-mechanical-and-no-second-review',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nSwitch effort inside a running turn once a mechanical issue appears.` })).toContain(
+        'server-aggregate-wake-mechanical-and-no-second-review',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nOpen a second review for 'mechanical' findings after submission.` })).toContain(
+        'server-aggregate-wake-mechanical-and-no-second-review',
+      );
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nAdded for Hornhoof task #311 by David on 2026-11-06.` })).toContain(
+        'abstract-english-no-incident-or-company-leaks',
+      );
+    });
+  });
 });
 
 type ReviewSkills = { diff: string; verdict: string; security: string };
@@ -996,6 +1052,85 @@ const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): bool
 
 const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
   rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
+
+type MechanicalSkills = { diff: string; verdict: string };
+
+const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => re.test(text));
+
+const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
+
+const documentedCategories = (text: string): string[] => {
+  const clause = /category(?:\s*:\s*[^,)]+|\s*\([^)]+\))/.exec(text)![0];
+  return [...clause.matchAll(/['`]([a-z_]+)['`]/g)].map(m => m[1]!);
+};
+
+const sampleFinding = (category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking: boolean) => ({
+  taskId: '11111111-1111-4111-8111-111111111111',
+  findingId: '22222222-2222-4222-8222-222222222222',
+  revision: '33333333-3333-4333-8333-333333333333',
+  reviewedCommit: 'a'.repeat(40),
+  authorId: '44444444-4444-4444-8444-444444444444',
+  reviewerId: '55555555-5555-4555-8555-555555555555',
+  reviewerVendor: 'anthropic',
+  category,
+  blocking,
+  path: 'src/index.ts',
+  line: 10,
+  harm: 'Wrong behaviour.',
+});
+
+const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => boolean }[] = [
+  {
+    id: 'strict-behavior-unchanged-boundary',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bprovably cannot change\b[^.!?]*\bbehaviour\b/i,
+          /\bformatting\b[\s\S]*\blint\b[\s\S]*\bsafe local rename\b[\s\S]*\bmissing translation key\b/i,
+          /\bpublic API\b[\s\S]*\bsemantics\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:public API rename|semantic change)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?/i,
+        /\buse\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b['`]?mechanical['`]?\b[^.!?;,]*\bwhen\s+a\s+fix\s+may\s+change\s+behaviour\b/i,
+      ]),
+  },
+  {
+    id: 'doubt-keeps-regular-category-and-full-base-level',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bwhen in doubt\b[^.!?]*\bregular category\b[\s\S]*\bfull base level\b/i,
+          /\b(?:never|do not)\s+classify\b[^.!?]*\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b[\s\S]*\bmechanical\b[^.!?]*\bmedium\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bwhen in doubt\b[^.!?;,]*\bmark\w*\b[^.!?;,]*\b['`]?mechanical['`]?/i,
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:security|data|spec)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?\s+to\s+run\s+at\s+medium\b/i,
+      ]),
+  },
+  {
+    id: 'server-aggregate-wake-mechanical-and-no-second-review',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bWake\.mechanical\b/,
+          /\bevery\b[^.!?]*\bissue\b[\s\S]*\bfailing verdicts?\b[\s\S]*\bmechanical\b/i,
+          /\bmixed\b[^.!?]*\bunmarked\b/i,
+          /\b(?:never|does not)\s+set\w*\s+effort\b[\s\S]*\b(?:never|does not)\s+change\w*\s+effort\s+inside\s+a\s+running\s+turn\b[\s\S]*\b(?:never|does not)\s+open\w*\s+a\s+second\s+review\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bset\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bWake\.mechanical\b[^.!?;,]*\bmixed\s+verdicts?\b/i,
+        /\bswitch\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\beffort\s+inside\s+a\s+running\s+turn\b/i,
+        /\bopen\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-english-no-incident-or-company-leaks',
+    holds: s => !/\b(?:hornhoof|github|david|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
+  },
+];
 
 const themeDeclarations = (css: string, selector: string): Record<string, string> => {
   const start = css.indexOf('{', css.indexOf(selector)) + 1;
