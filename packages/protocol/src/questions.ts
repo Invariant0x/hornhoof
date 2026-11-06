@@ -30,3 +30,8 @@ export const HumanActionBinding = z.strictObject({
   kind: z.enum(['payment', 'owner_login', 'manual_machine_action', 'ceo_permission']), resourceId: ResourceReference,
 });
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
+
+/* Deliberately unavailable until the contract's positive RED cases are observed. */
+export const ClassificationInput = z.never();
+export const QuestionPurpose = z.never();
+export const QuestionAuthorityBinding = z.never();
