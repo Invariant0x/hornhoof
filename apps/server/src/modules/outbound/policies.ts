@@ -2,7 +2,7 @@ import { OutboundPolicyValue, type GateCode } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { modelChecks, outboundAttempts, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies, supportTickets } from '../../db/schema.js';
+import { modelChecks, outboundAttempts, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies, supportTickets, type StopReason } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import type { Tx } from '../tasks/engine.js';
@@ -15,6 +15,7 @@ type Sampling = OutboundPolicyValue['sampling'];
 type Attempt = typeof outboundAttempts.$inferSelect;
 type Message = typeof outboundMessages.$inferSelect;
 export type Channel = typeof outboundChannels.$inferSelect;
+export type { StopReason };
 
 const DAY_MS = 86_400_000;
 
@@ -85,7 +86,7 @@ export async function currentPolicy(db: Pick<Db, 'select'>, channelId: string): 
 }
 
 /* Nothing new is admitted after this commits. What already left cannot be called back. The caller holds the channel. */
-export async function stopChannel(tx: Tx, channelId: string, reason: GateCode, now: Date): Promise<void> {
+export async function stopChannel(tx: Tx, channelId: string, reason: StopReason, now: Date): Promise<void> {
   await tx.update(outboundChannels).set({ status: 'stopped', stoppedReason: reason, stoppedAt: now, generation: sql`${outboundChannels.generation} + 1` }).where(and(eq(outboundChannels.id, channelId), inArray(outboundChannels.status, ['new', 'active'])));
 }
 

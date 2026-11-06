@@ -186,6 +186,12 @@ async function scriptedBridge(s: Stand, frames: unknown[], ending: 'end' | 'dest
   return baseEnv(s, { HH_BRIDGE: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook/secret` });
 }
 
+async function answer(served: Served, body: unknown): Promise<unknown[]> {
+  const hook = served.env.HH_BRIDGE!.replace('/hook/', '/git/');
+  const response = await fetch(hook, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) });
+  return (await response.text()).trim().split('\n').map(line => JSON.parse(line) as unknown);
+}
+
 describe('hh-git as plain git', () => {
   it('passes any other command through with its output and exit code', async () => {
     const s = stand();
@@ -288,8 +294,6 @@ describe('which git calls are managed', () => {
     ['option', ['push', '--', 'origin', 'task-1']],
     ['option', ['fetch', '--depth=1', 'origin', 'main']],
     ['option', ['fetch', '--prune', 'origin', 'main']],
-    ['dynamic_refspec', ['fetch']],
-    ['dynamic_refspec', ['fetch', 'origin']],
     ['dynamic_refspec', ['fetch', 'origin', 'refs/heads/*:refs/remotes/origin/*']],
     ['dynamic_refspec', ['push', 'origin', 'refs/heads/*:refs/heads/*']],
     ['dynamic_refspec', ['fetch', 'origin', ':refs/heads/x']],
@@ -298,7 +302,7 @@ describe('which git calls are managed', () => {
   });
 
   it('lists every reason it can give, in plain words', () => {
-    for (const reason of ['no_bridge', 'nested', 'global_option', 'custom_environment', 'force', 'delete', 'multi_ref', 'dry_run', 'custom_transport', 'option', 'dynamic_refspec', 'url_remote', 'multi_target', 'configured_refspec', 'no_current_branch', 'no_upstream', 'ambiguous_default', 'unknown_source', 'other_ref', 'no_destination']) {
+    for (const reason of ['no_bridge', 'nested', 'global_option', 'custom_environment', 'force', 'delete', 'multi_ref', 'dry_run', 'custom_transport', 'option', 'dynamic_refspec', 'url_remote', 'multi_target', 'configured_refspec', 'no_current_branch', 'no_upstream', 'ambiguous_default', 'unknown_source', 'other_ref', 'no_destination', 'ambiguous_fetch']) {
       expect(shim.UNMANAGED[reason]?.length ?? 0).toBeGreaterThan(10);
     }
   });
@@ -307,6 +311,11 @@ describe('which git calls are managed', () => {
     expect(shim.routeGit(['-C', 'sub', 'push', '-u', '-q', 'origin', 'task-1'], env, '/work')).toEqual({ kind: 'push', cwd: '/work/sub', remote: 'origin', refspec: 'task-1', flags: ['--quiet'], setUpstream: true });
     expect(shim.routeGit(['push', '--verbose', '--no-progress', '--porcelain', '--no-verify'], env, '/work')).toEqual({ kind: 'push', cwd: '/work', remote: null, refspec: null, flags: ['--verbose', '--no-progress', '--porcelain', '--no-verify'], setUpstream: false });
     expect(shim.routeGit(['fetch', '-q', '--progress', '-n', 'origin', 'turn-8'], env, '/work')).toEqual({ kind: 'fetch', cwd: '/work', remote: 'origin', refspec: 'turn-8', flags: ['--quiet', '--progress', '--no-tags'] });
+  });
+
+  it('takes a fetch without a refspec as a fetch by the settings of the remote', () => {
+    expect(shim.routeGit(['fetch'], env, '/work')).toEqual({ kind: 'fetch_configured', cwd: '/work', remote: null, flags: [] });
+    expect(shim.routeGit(['fetch', '-q', 'origin'], env, '/work')).toEqual({ kind: 'fetch_configured', cwd: '/work', remote: 'origin', flags: ['--quiet'] });
   });
 
   it('allows the author and prompt settings of an ordinary turn', () => {
@@ -408,6 +417,31 @@ describe('the immutable intent of a push', () => {
     const s = stand();
     expect(resolve(s, 'fetch', '-q', 'origin', 'turn-8')).toEqual({ request: { kind: 'fetch', cwd: s.work, remote: 'origin', refspec: 'turn-8', flags: ['--quiet'] } });
     expect(resolve(s, 'fetch', 'origin', 'refs/heads/a:refs/remotes/origin/a')).toEqual({ request: { kind: 'fetch', cwd: s.work, remote: 'origin', refspec: 'refs/heads/a:refs/remotes/origin/a', flags: [] } });
+  });
+
+  it('names the remote git itself takes for a fetch without one', () => {
+    const s = stand();
+    const configured = (remote: string) => ({ request: { kind: 'fetch_configured', cwd: s.work, remote, flags: [] } });
+    expect(resolve(s, 'fetch')).toEqual(configured('origin'));
+    realGit(s.work, 'remote', 'rename', 'origin', 'up');
+    expect(resolve(s, 'fetch')).toEqual(configured('up'));
+    expect(resolve(s, 'fetch', 'up')).toEqual(configured('up'));
+    realGit(s.work, 'remote', 'add', 'other', s.url);
+    expect(resolve(s, 'fetch')).toEqual({ unmanaged: 'ambiguous_fetch' });
+    realGit(s.work, 'config', 'branch.task-1.remote', 'other');
+    expect(resolve(s, 'fetch')).toEqual(configured('other'));
+    realGit(s.work, 'checkout', '--quiet', '--detach');
+    expect(resolve(s, 'fetch')).toEqual({ unmanaged: 'ambiguous_fetch' });
+  });
+
+  it.each<[string, (s: Stand) => void, string[]]>([
+    ['url_remote', () => {}, ['fetch', 'nothing']],
+    ['url_remote', s => { realGit(s.work, 'config', 'branch.task-1.remote', '.'); }, ['fetch']],
+    ['multi_ref', s => { realGit(s.work, 'config', 'fetch.all', 'true'); }, ['fetch']],
+  ])('leaves %s of a fetch by settings to real git', (reason, prepare, argv) => {
+    const s = stand();
+    prepare(s);
+    expect(resolve(s, ...argv)).toEqual({ unmanaged: reason });
   });
 
   it('normalizes a fetch target without changing what it asks for', () => {
@@ -659,6 +693,364 @@ describe('an ordinary fetch through the node', () => {
     expect(ran.code).toBe(0);
     expect(port.registered[0]!.intent).toEqual({ kind: 'git_fetch', repositoryId: REPOSITORY, target: { kind: 'refspec', sourceRef: 'refs/heads/main', destinationRef: 'refs/remotes/mine/main' } });
     expect(port.recorded[0]!.observedHead).toBe(remoteRef(s, 'refs/heads/main'));
+  });
+});
+
+describe('a fetch by the settings of the remote', () => {
+  const GLOB = '+refs/heads/*:refs/remotes/origin/*';
+  const MAIN_ONLY = '+refs/heads/main:refs/remotes/origin/main';
+  const FEAT_ONLY = '+refs/heads/feat:refs/remotes/origin/feat';
+  const REFUSED = { do: 'say', stderr: 'fatal: unable to access: the requested URL returned error: 503\n', exit: 128 };
+  const DEFERRED: GitRecordReply = { accepted: true, state: 'deferred', nextAttemptAt: null };
+
+  type Prepare = (work: string) => void;
+  const tracking: Prepare = work => { realGit(work, 'checkout', '--quiet', '-b', 'feat', '--track', 'origin/feat'); };
+  const noUpstream: Prepare = work => { realGit(work, 'checkout', '--quiet', '--no-track', '-b', 'own', 'origin/feat'); };
+  const detached: Prepare = work => { realGit(work, 'checkout', '--quiet', '--detach', 'origin/feat'); };
+  const twoLiterals: Prepare = work => {
+    realGit(work, 'config', '--replace-all', 'remote.origin.fetch', MAIN_ONLY);
+    realGit(work, 'config', '--add', 'remote.origin.fetch', FEAT_ONLY);
+  };
+
+  const fetchHead = (work: string) => readFileSync(join(work, '.git', 'FETCH_HEAD'), 'utf8');
+  const refsOf = (work: string) => realGit(work, 'for-each-ref', '--format=%(refname) %(objectname)');
+  const withoutHornhoof = (text: string) => text.split('\n').filter(line => !line.startsWith('hornhoof-git:')).join('\n');
+
+  /* The clone of the agent and a clone left to plain git, side by side, and a way to move the remote behind both. */
+  function clones(s: Stand, prepare: Prepare = () => {}): { agent: string; plain: string; moveRemote: () => void } {
+    for (const branch of ['feat', 'zeta']) realGit(s.work, 'push', '--quiet', 'origin', `main:refs/heads/${branch}`);
+    const clone = (name: string) => {
+      const work = join(s.dir, name);
+      realGit(s.dir, 'clone', '--quiet', s.url, work);
+      prepare(work);
+      return work;
+    };
+    const moveRemote = () => {
+      for (const branch of ['main', 'feat', 'zeta']) {
+        realGit(s.work, 'checkout', '--quiet', '-B', branch, `origin/${branch}`);
+        commit(s.work, `more-${branch}`);
+        realGit(s.work, 'push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`);
+      }
+      realGit(s.work, 'tag', 'next');
+      realGit(s.work, 'push', '--quiet', 'origin', 'next');
+    };
+    return { agent: clone('agent'), plain: clone('plain'), moveRemote };
+  }
+
+  function plainFetch(s: Stand, work: string, args: string[]): Ran {
+    const done = spawnSync('/usr/bin/git', args, { cwd: work, encoding: 'utf8', env: { ...baseEnv(s), LC_ALL: 'C.UTF-8' } as NodeJS.ProcessEnv });
+    return { stdout: done.stdout, stderr: done.stderr, code: done.status };
+  }
+
+  function expectSameAsPlain(ran: Ran, plainRan: Ran, agent: string, plain: string): void {
+    expect(ran.code).toBe(plainRan.code);
+    expect(ran.stdout).toBe(plainRan.stdout);
+    expect(withoutHornhoof(ran.stderr)).toBe(plainRan.stderr);
+    expect(fetchHead(agent)).toBe(fetchHead(plain));
+    expect(refsOf(agent)).toBe(refsOf(plain));
+  }
+
+  /* The first attempt is refused and the command waits for the next one. */
+  async function refusedFirst(s: Stand, work: string, args: string[] = ['fetch', 'origin'], replies: GitRecordReply[] = [DEFERRED]) {
+    planFor(s, { fetch: [REFUSED] });
+    const port = new FakePort();
+    port.replies = [...replies];
+    const served = await serve(s, port);
+    const ran = runShim(args, work, served.env);
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); expect(ran.partial().stderr).toContain('keeps waiting'); }, { timeout: 5000 });
+    return { port, ran, ...served };
+  }
+
+  describe('gives what plain git gives', () => {
+    it.each<[string, string[], Prepare]>([
+      ['a branch with an upstream', ['fetch', 'origin'], tracking],
+      ['a branch with an upstream', ['fetch'], tracking],
+      ['a branch without an upstream', ['fetch', 'origin'], noUpstream],
+      ['a branch without an upstream', ['fetch'], noUpstream],
+      ['no branch', ['fetch', 'origin'], detached],
+      ['no branch', ['fetch'], detached],
+      ['two literal refspecs and no upstream', ['fetch', 'origin'], work => { twoLiterals(work); noUpstream(work); }],
+      ['two literal refspecs and an upstream', ['fetch', 'origin'], work => { twoLiterals(work); tracking(work); }],
+      ['the options it keeps', ['fetch', '--quiet', '--no-tags', 'origin'], tracking],
+      ['a verbose fetch', ['fetch', '--verbose', 'origin'], tracking],
+    ])('with %s: %j', async (_name, args, prepare) => {
+      const s = stand();
+      const { agent, plain, moveRemote } = clones(s, prepare);
+      moveRemote();
+      const plainRan = plainFetch(s, plain, args);
+      const port = new FakePort();
+      const { env } = await serve(s, port);
+      const ran = await runShim(args, agent, env);
+      expectSameAsPlain(ran, plainRan, agent, plain);
+      expect(port.registered).toHaveLength(1);
+      expect(calls(s, 'fetch')).toHaveLength(1);
+    });
+  });
+
+  it('freezes the refspecs, the branch and its merge refs in the intent', async () => {
+    const s = stand();
+    const { agent } = clones(s, work => { twoLiterals(work); tracking(work); });
+    const port = new FakePort();
+    const { env } = await serve(s, port);
+    expect((await runShim(['fetch', 'origin'], agent, env)).code).toBe(0);
+    expect(port.registered[0]!.intent).toEqual({
+      kind: 'git_fetch', repositoryId: REPOSITORY,
+      target: { kind: 'configured', refspecs: [MAIN_ONLY, FEAT_ONLY], merge: { branch: 'feat', refs: ['refs/heads/feat'] } },
+    });
+    const { operationId } = port.registered[0]!;
+    expect(calls(s, 'fetch')[0]!.argv).toEqual([
+      '-C', agent, '-c', `remote.hh-${operationId}.url=${s.url}`, '-c', `remote.hh-${operationId}.fetch=${MAIN_ONLY}`, '-c', `remote.hh-${operationId}.fetch=${FEAT_ONLY}`,
+      '-c', 'fetch.prune=false', '-c', 'fetch.pruneTags=false', '-c', `branch.feat.remote=hh-${operationId}`, 'fetch', `hh-${operationId}`,
+    ]);
+  });
+
+  it('names no branch and no merge refs when there is no branch', async () => {
+    const s = stand();
+    const { agent } = clones(s, detached);
+    const port = new FakePort();
+    const { env } = await serve(s, port);
+    expect((await runShim(['fetch', 'origin'], agent, env)).code).toBe(0);
+    expect(port.registered[0]!.intent).toMatchObject({ target: { kind: 'configured', refspecs: [GLOB], merge: { branch: null, refs: [] } } });
+    expect(calls(s, 'fetch')[0]!.argv.join(' ')).not.toContain('branch.');
+  });
+
+  it('carries no single commit of its own', async () => {
+    const s = stand();
+    const { agent, moveRemote } = clones(s, tracking);
+    moveRemote();
+    const port = new FakePort();
+    const { env } = await serve(s, port);
+    expect((await runShim(['fetch', 'origin'], agent, env)).code).toBe(0);
+    expect(port.recorded[0]).toMatchObject({ settled: true });
+    expect(port.recorded[0]).not.toHaveProperty('observedHead');
+  });
+
+  describe('when the first attempt fails', () => {
+    it('waits and goes on with the same snapshot, whatever the remote settings became', async () => {
+      const s = stand();
+      const { agent, plain, moveRemote } = clones(s, tracking);
+      moveRemote();
+      const plainRan = plainFetch(s, plain, ['fetch', 'origin']);
+      const { port, ran } = await refusedFirst(s, agent);
+      expect(ran.partial().stderr).not.toContain('503');
+      realGit(agent, 'config', '--replace-all', 'remote.origin.fetch', MAIN_ONLY);
+      port.release();
+      const ended = await ran;
+      expectSameAsPlain(ended, plainRan, agent, plain);
+      const [first, second] = calls(s, 'fetch');
+      expect(second!.argv).toEqual(first!.argv);
+      expect(second!.argv).toContain(`remote.hh-${port.registered[0]!.operationId}.fetch=${GLOB}`);
+      expect(port.registered).toHaveLength(1);
+    });
+
+    it('also goes on after a refspec was added and with a fetch without a remote', async () => {
+      const s = stand();
+      const { agent, plain, moveRemote } = clones(s, work => { twoLiterals(work); tracking(work); });
+      moveRemote();
+      const plainRan = plainFetch(s, plain, ['fetch']);
+      const { port, ran } = await refusedFirst(s, agent, ['fetch']);
+      realGit(agent, 'config', '--add', 'remote.origin.fetch', '+refs/heads/zeta:refs/remotes/origin/zeta');
+      port.release();
+      expectSameAsPlain(await ran, plainRan, agent, plain);
+      expect(realGit(agent, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/origin/zeta')).toBe(realGit(plain, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/origin/zeta'));
+    });
+
+    it('deletes nothing when pruning is switched on during the wait', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      const { port, ran } = await refusedFirst(s, agent);
+      realGit(agent, 'config', 'fetch.prune', 'true');
+      realGit(agent, 'config', 'fetch.pruneTags', 'true');
+      realGit(s.remote, 'update-ref', '-d', 'refs/heads/zeta');
+      port.release();
+      expect((await ran).code).toBe(0);
+      expect(refsOf(agent)).toContain('refs/remotes/origin/zeta');
+    });
+
+    it('shows the output and exit code of a permanent failure', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      planFor(s, { fetch: [REFUSED] });
+      const port = new FakePort();
+      port.replies = [{ accepted: true, state: 'failed_permanent' }];
+      const { env } = await serve(s, port);
+      const ended = await runShim(['fetch', 'origin'], agent, env);
+      expect(ended.code).toBe(128);
+      expect(ended.stderr).toContain('error: 503');
+      expect(ended.stderr).toMatch(OPERATION_LINE);
+    });
+
+    it('waits on an unknown outcome and tries again when the server allows it', async () => {
+      const s = stand();
+      const { agent, plain, moveRemote } = clones(s, tracking);
+      moveRemote();
+      const plainRan = plainFetch(s, plain, ['fetch', 'origin']);
+      const { port, ran } = await refusedFirst(s, agent, ['fetch', 'origin'], [{ accepted: true, state: 'outcome_unknown' }]);
+      expect(ran.partial().stderr).toContain('the result of this fetch is not known yet');
+      expect(ran.partial().stderr).not.toContain('push');
+      port.release();
+      expectSameAsPlain(await ran, plainRan, agent, plain);
+      expect(calls(s, 'fetch')).toHaveLength(2);
+      for (const recorded of port.recorded) expect(recorded).not.toHaveProperty('observedHead');
+    });
+  });
+
+  describe('stops without another fetch', () => {
+    const stoppedBy = async (s: Stand, ran: ReturnType<typeof runShim>, port: FakePort, words: string, attempts: number) => {
+      port.release();
+      const ended = await ran;
+      expect(ended.code).toBe(128);
+      expect(ended.stderr).toContain(words);
+      expect(calls(s, 'fetch')).toHaveLength(attempts);
+      expect(port.cancelled).toHaveLength(1);
+      expect(port.recorded).toHaveLength(attempts);
+    };
+    const SETTINGS = 'fatal: the settings of this branch changed while this git command was waiting';
+    const REMOTE = 'fatal: the remote changed while this git command was waiting';
+
+    it.each<[string, Prepare, Prepare]>([
+      ['the merge refs of the branch changed', tracking, work => { realGit(work, 'config', 'branch.feat.merge', 'refs/heads/zeta'); }],
+      ['a merge ref was added', tracking, work => { realGit(work, 'config', '--add', 'branch.feat.merge', 'refs/heads/zeta'); }],
+      ['the merge refs of the branch went away', tracking, work => { realGit(work, 'config', '--unset', 'branch.feat.merge'); }],
+      ['another branch with an upstream is out', tracking, work => { realGit(work, 'checkout', '--quiet', '-b', 'zeta', '--track', 'origin/zeta'); }],
+      ['another branch without one is out', noUpstream, work => { realGit(work, 'checkout', '--quiet', '--no-track', '-b', 'own-2', 'origin/feat'); }],
+      ['a branch is out after none', detached, work => { realGit(work, 'checkout', '--quiet', '--no-track', '-b', 'own-2', 'origin/feat'); }],
+      ['no branch is out after one', noUpstream, work => { realGit(work, 'checkout', '--quiet', '--detach'); }],
+      ['a merge ref came to a branch without one', noUpstream, work => { realGit(work, 'config', 'branch.own.remote', 'origin'); realGit(work, 'config', 'branch.own.merge', 'refs/heads/zeta'); }],
+    ])('when %s', async (_name, prepare, change) => {
+      const s = stand();
+      const { agent } = clones(s, prepare);
+      const { port, ran } = await refusedFirst(s, agent);
+      change(agent);
+      await stoppedBy(s, ran, port, SETTINGS, 1);
+    });
+
+    it.each<[string, (alias: string) => [string, string]]>([
+      ['a fetch value', alias => [`remote.${alias}.fetch`, '+refs/heads/zeta:refs/remotes/stolen/zeta']],
+      ['an address', alias => [`remote.${alias}.url`, 'file:///nowhere']],
+      ['any other setting', alias => [`remote.${alias}.tagOpt`, '--tags']],
+      ['a group', alias => [`remotes.${alias}`, 'origin']],
+    ])('when the service remote inherits %s', async (_name, setting) => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      const { port, ran } = await refusedFirst(s, agent);
+      realGit(agent, 'config', ...setting(`hh-${port.registered[0]!.operationId}`));
+      await stoppedBy(s, ran, port, SETTINGS, 1);
+      expect(refsOf(agent)).not.toContain('stolen');
+    });
+
+    it('and says the turn ended when that stops a read of the settings', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      planFor(s, { 'symbolic-ref': [{ do: 'real' }, { do: 'hang' }] });
+      const port = new FakePort();
+      const { env, adapter } = await serve(s, port);
+      const ran = runShim(['fetch', 'origin'], agent, env);
+      await vi.waitFor(() => { expect(calls(s, 'symbolic-ref')).toHaveLength(2); }, { timeout: 5000 });
+      adapter.unbind(KEY);
+      const ended = await ran;
+      expect(ended.code).toBe(128);
+      expect(ended.stderr).toContain('the turn ended');
+      expect(ended.stderr).not.toContain('settings');
+      expect(calls(s, 'fetch')).toEqual([]);
+    });
+
+    it('when the address of the remote changed', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      const { port, ran } = await refusedFirst(s, agent);
+      realGit(agent, 'config', 'remote.origin.url', 'file:///nowhere');
+      await stoppedBy(s, ran, port, REMOTE, 1);
+    });
+
+    it('when a rewrite rule now sends the address elsewhere', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      const { port, ran } = await refusedFirst(s, agent);
+      realGit(agent, 'config', 'url.file:///nowhere/.insteadOf', s.url);
+      await stoppedBy(s, ran, port, REMOTE, 1);
+    });
+
+    it.each<[string, (s: Stand, agent: string) => void, string]>([
+      ['the settings changed', (_s, agent) => { realGit(agent, 'config', 'branch.feat.merge', 'refs/heads/zeta'); }, SETTINGS],
+      ['the address changed', (_s, agent) => { realGit(agent, 'config', 'remote.origin.url', 'file:///nowhere'); }, REMOTE],
+    ])('when %s before the first attempt was allowed', async (_name, change, words) => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      const port = new FakePort();
+      port.registration = { disposition: 'wait', attemptId: null, nextAttemptAt: null };
+      const { env } = await serve(s, port);
+      const ran = runShim(['fetch', 'origin'], agent, env);
+      await vi.waitFor(() => { expect(ran.partial().stderr).toContain('keeps waiting'); }, { timeout: 5000 });
+      change(s, agent);
+      await stoppedBy(s, ran, port, words, 0);
+    });
+  });
+
+  describe('stays plain git', () => {
+    const asked = (work: string) => ({ kind: 'fetch_configured', cwd: work, remote: 'origin', flags: [] });
+
+    it.each<[string, string, (s: Stand, work: string) => void]>([
+      ['git_version', 'git 2.48', s => { planFor(s, { '--version': [{ do: 'say', stdout: 'git version 2.48.0\n', exit: 0 }] }); }],
+      ['git_version', 'a later git', s => { planFor(s, { '--version': [{ do: 'say', stdout: 'git version 3.0.0\n', exit: 0 }] }); }],
+      ['git_version', 'a version it cannot read', s => { planFor(s, { '--version': [{ do: 'say', stdout: 'some other program\n', exit: 0 }] }); }],
+      ['git_version', 'a version git would not tell', s => { planFor(s, { '--version': [{ do: 'say', exit: 1 }] }); }],
+      ['remote_settings', 'remote.origin.prune', (_s, work) => { realGit(work, 'config', 'remote.origin.prune', 'true'); }],
+      ['remote_settings', 'remote.origin.pruneTags', (_s, work) => { realGit(work, 'config', 'remote.origin.pruneTags', 'true'); }],
+      ['remote_settings', 'remote.origin.tagOpt', (_s, work) => { realGit(work, 'config', 'remote.origin.tagOpt', '--no-tags'); }],
+      ['remote_settings', 'remote.origin.mirror', (_s, work) => { realGit(work, 'config', 'remote.origin.mirror', 'true'); }],
+      ['remote_settings', 'remote.origin.uploadpack', (_s, work) => { realGit(work, 'config', 'remote.origin.uploadpack', 'x'); }],
+      ['remote_settings', 'remote.origin.proxy', (_s, work) => { realGit(work, 'config', 'remote.origin.proxy', 'http://x'); }],
+      ['remote_settings', 'remote.origin.promisor', (_s, work) => { realGit(work, 'config', 'remote.origin.promisor', 'true'); }],
+      ['remote_settings', 'a group with the name of the remote', (_s, work) => { realGit(work, 'config', 'remotes.origin', 'origin'); }],
+      ['remote_settings', 'no fetch setting', (_s, work) => { realGit(work, 'config', '--unset-all', 'remote.origin.fetch'); }],
+      ['remote_settings', 'a negative refspec', (_s, work) => { realGit(work, 'config', '--add', 'remote.origin.fetch', '^refs/heads/zeta'); }],
+      ['remote_settings', 'a destination outside refs/remotes', (_s, work) => { realGit(work, 'config', '--replace-all', 'remote.origin.fetch', '+refs/heads/*:refs/heads/*'); }],
+      ['remote_settings', 'a refspec without a destination', (_s, work) => { realGit(work, 'config', '--replace-all', 'remote.origin.fetch', 'refs/heads/main'); }],
+      ['remote_settings', 'an address changed by a rewrite rule', (s, work) => { realGit(work, 'config', 'remote.origin.url', 'file:///short'); realGit(work, 'config', `url.${s.url}.insteadOf`, 'file:///short'); }],
+      ['prune_settings', 'fetch.prune', (_s, work) => { realGit(work, 'config', 'fetch.prune', 'yes'); }],
+      ['prune_settings', 'fetch.pruneTags', (_s, work) => { realGit(work, 'config', 'fetch.pruneTags', 'true'); }],
+      ['branch_settings', 'an upstream of another remote', (_s, work) => { realGit(work, 'remote', 'add', 'other', 'file:///other'); realGit(work, 'config', 'branch.feat.remote', 'other'); }],
+      ['branch_settings', 'an upstream in this repository', (_s, work) => { realGit(work, 'config', 'branch.feat.remote', '.'); }],
+      ['branch_settings', 'a merge ref without a remote', (_s, work) => { realGit(work, 'config', '--unset', 'branch.feat.remote'); }],
+      ['branch_settings', 'another remote without a merge ref', (_s, work) => { realGit(work, 'config', '--unset', 'branch.feat.merge'); realGit(work, 'config', 'branch.feat.remote', 'other'); }],
+      ['branch_settings', 'a branch name git options cannot carry', (_s, work) => { realGit(work, 'checkout', '--quiet', '--no-track', '-b', 'a=b', 'origin/feat'); }],
+    ])('answers %s for %s', async (reason, _name, prepare) => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      prepare(s, agent);
+      const port = new FakePort();
+      const served = await serve(s, port);
+      expect(await answer(served, asked(agent))).toEqual([{ type: 'unmanaged', reason }]);
+      expect(port.registered).toEqual([]);
+      expect(calls(s, 'fetch')).toEqual([]);
+    });
+
+    it('runs plain git with its own output when the node turns it down', async () => {
+      const s = stand();
+      const { agent, plain, moveRemote } = clones(s, work => { tracking(work); realGit(work, 'config', 'remote.origin.tagOpt', '--no-tags'); });
+      moveRemote();
+      const plainRan = plainFetch(s, plain, ['fetch', 'origin']);
+      const port = new FakePort();
+      const { env } = await serve(s, port);
+      const ran = await runShim(['fetch', 'origin'], agent, env);
+      expectSameAsPlain(ran, plainRan, agent, plain);
+      expect(port.registered).toEqual([]);
+      expect(calls(s, 'fetch').map(call => call.argv)).toEqual([['fetch', 'origin']]);
+    });
+
+    it('takes the last git before the change and settings that do not touch a fetch', async () => {
+      const s = stand();
+      const { agent } = clones(s, tracking);
+      planFor(s, { '--version': [{ do: 'say', stdout: 'git version 2.47.9\n', exit: 0 }] });
+      realGit(agent, 'config', 'remote.origin.pushurl', s.url);
+      realGit(agent, 'config', 'remote.origin.push', 'refs/heads/feat');
+      realGit(agent, 'config', 'remote.origin.gh-resolved', 'base');
+      const port = new FakePort();
+      const { env } = await serve(s, port);
+      expect((await runShim(['fetch', 'origin'], agent, env)).code).toBe(0);
+      expect(port.registered).toHaveLength(1);
+    });
   });
 });
 
@@ -1007,12 +1399,6 @@ describe('a permanent refusal', () => {
 
 describe('what stays unmanaged at the node', () => {
   const pushed = (s: Stand) => ({ kind: 'push', cwd: s.work, remote: 'origin', sourceSha: head(s), destinationRef: 'refs/heads/task-1', upstreamBranch: null, flags: [] });
-
-  async function answer(served: Served, body: unknown): Promise<unknown[]> {
-    const hook = served.env.HH_BRIDGE!.replace('/hook/', '/git/');
-    const response = await fetch(hook, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) });
-    return (await response.text()).trim().split('\n').map(line => JSON.parse(line) as unknown);
-  }
 
   it('answers adapter_off while the wire is off and real git still works', async () => {
     const s = stand();

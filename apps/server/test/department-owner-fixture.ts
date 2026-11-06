@@ -2,12 +2,13 @@ import { eq } from 'drizzle-orm';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import type { Deps } from '../src/app.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 /* A company with Development and Sales, each with a worker on a task, and Dana listed for Development, Sam for Sales and Tia
    for a team of Development only. */
-export async function company(env: NodeJS.ProcessEnv = {}) {
-  const { app, db } = await testApp(env);
+export async function company(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']) {
+  const { app, db } = await testApp(env, logger);
   await listen(app);
   const ceoToken = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
