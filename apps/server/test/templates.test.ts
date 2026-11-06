@@ -1223,3 +1223,57 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
+
+describe('outbound and support gateway templates', () => {
+  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', async () => {
+    const loaded = await loadTemplates();
+    const sal = loaded.skills.get('sal-outbound-approval')?.body ?? '';
+    const mkt = loaded.skills.get('mkt-publish-approval')?.body ?? '';
+    const sup = loaded.skills.get('sup-support-policy')?.body ?? '';
+
+    for (const [id, body] of [
+      ['sal-outbound-approval', sal],
+      ['mkt-publish-approval', mkt],
+      ['sup-support-policy', sup],
+    ] as const) {
+      expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
+      expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
+    }
+
+    expect(sal).toMatch(/"outbound_submit"/);
+    expect(sal).toMatch(/"outbound_status"/);
+    expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
+    expect(mkt).toMatch(/"outbound_submit"/);
+    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(sup).toMatch(/"support_classify"/);
+    expect(sup).toMatch(/"support_submit"/);
+    expect(sup).toMatch(/\buntrusted data\b/i);
+    expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
+  });
+
+  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', async () => {
+    const loaded = await loadTemplates();
+    const supportDept = loaded.departments.get('support');
+    expect(supportDept).toBeDefined();
+    const byId = new Map(supportDept!.roles.map(r => [r.id, r]));
+
+    expect(byId.get('SUP-T2')?.effort).toBe('high');
+    for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
+      const role = byId.get(id)!;
+      expect(role, id).toBeDefined();
+      expect(role.body.length, id).toBeLessThanOrEqual(600);
+      expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+    }
+
+    expect(byId.get('SUP-T1')!.body).toMatch(/"support_classify"/);
+    expect(byId.get('SUP-T1')!.body).toMatch(/"support_submit"/);
+    expect(byId.get('SUP-T2')!.body).toMatch(/"support_classify"/);
+    expect(byId.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(byId.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
+    expect(byId.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+  });
+});
