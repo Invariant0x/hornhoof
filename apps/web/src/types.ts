@@ -419,7 +419,11 @@ export type Improvement = {
   parts?: ImprovementParts | null;
 };
 
-export type MaterialStampView = Partial<Pick<MaterialManifest, 'materialRevision' | 'materialDigest'>> & { hasMaterials?: boolean };
+export type MaterialStampView = {
+  materialRevision?: MaterialManifest['materialRevision'] | null;
+  materialDigest?: MaterialManifest['materialDigest'] | null;
+  hasMaterials?: boolean;
+};
 
 export type WaitingRequest = MaterialStampView & {
   id: string;
