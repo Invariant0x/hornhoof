@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agents, companies, jobs, machines, nodes, people, programDeliveries, programInstances, subscriptions } from '../src/db/schema.js';
 import { cancelUnattemptedLive, cancelUnsentDelivery, reserveDelivery } from '../src/modules/program-operator/deliveries.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb } from './helpers-db.js';
 
 async function fixture() {
   const db = await createTestDb();
