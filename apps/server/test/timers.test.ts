@@ -18,7 +18,8 @@ async function company() {
   const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+  /* Timer tests need a ready modern sender; conversation tests cover the legacy instruction limit. */
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Wanda heads the Operations it starts with; the others rest, so each test's rounds are its own. */
   const [wanda] = await db.update(agents).set({ name: 'Wanda' }).where(eq(agents.kind, 'head')).returning();
