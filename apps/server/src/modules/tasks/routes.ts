@@ -1,5 +1,5 @@
 import { turnCounts } from './turn-progress.js';
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from './long-text.js';
