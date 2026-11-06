@@ -144,12 +144,18 @@ describe('canonical private question storage', () => {
     await client.exec(`UPDATE computer_access_intents SET status='apply_unknown',
       apply_operation_id='00000000-0000-4000-8000-000000000031',apply_revision=3,apply_route_revision=2,
       apply_control_revision=0,apply_target_until='2026-11-07T00:00:00Z' WHERE id='${intent}'`);
-    for (const fields of ['apply_control_revision=-1', 'apply_revision=0', 'apply_route_revision=0', 'apply_target_until=null', 'applied_at=now()']) {
+    for (const fields of ['apply_control_revision=-1', 'apply_revision=0', 'apply_route_revision=0', 'apply_target_until=null', 'applied_at=now()', "status='open'", "status='resolved_internal'"]) {
       await expect(client.exec(`UPDATE computer_access_intents SET ${fields} WHERE id='${intent}'`)).rejects.toThrow(/check constraint/);
     }
     expect((await client.query('SELECT status,apply_revision,apply_route_revision,apply_control_revision,applied_at FROM computer_access_intents')).rows).toEqual([
       { status: 'apply_unknown', apply_revision: 3, apply_route_revision: 2, apply_control_revision: 0, applied_at: null },
     ]);
+    for (const status of ['declined', 'withdrawn']) {
+      await client.exec(`UPDATE computer_access_intents SET status='${status}' WHERE id='${intent}'`);
+      expect((await client.query('SELECT status,apply_operation_id FROM computer_access_intents')).rows).toEqual([
+        { status, apply_operation_id: '00000000-0000-4000-8000-000000000031' },
+      ]);
+    }
     await client.exec(`UPDATE computer_access_intents SET status='granted',applied_at='2026-11-06T12:00:00Z' WHERE id='${intent}'`);
     expect((await client.query('SELECT status FROM computer_access_intents')).rows).toEqual([{ status: 'granted' }]);
     // A synthetic database row is not a native access/file grant or a readback proof.
