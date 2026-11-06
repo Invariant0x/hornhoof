@@ -86,5 +86,36 @@ export const QuestionAuthorityBinding = z.strictObject({
 }).refine(materialMetadataFits, 'Oversized authority metadata.');
 export type QuestionAuthorityBinding = z.infer<typeof QuestionAuthorityBinding>;
 
-/* No sealing or authority producer is supplied by this parser checkpoint. */
-export const QuestionClassificationSnapshot = z.never();
+const TaskAssignmentCapture = z.strictObject({
+  taskId: z.uuid(), taskVersion: z.number().int().nonnegative(),
+  assigneeAgentId: z.uuid().nullable(), executorAgentId: z.uuid().nullable(), stage: z.number().int().nonnegative(),
+});
+const SourceBinding = z.strictObject({
+  companyId: z.uuid(), authorAgentId: z.uuid(), sourceJobId: z.uuid().nullable(), sourceSequence: z.number().int().nonnegative().nullable(),
+  taskAssignment: TaskAssignmentCapture.nullable(),
+});
+const snapshotShape = z.strictObject({
+  classificationId: z.uuid(), source: SourceRef, revision: Revision, routeRevision: Revision, sourceBinding: SourceBinding,
+  digest: Digest, classification: Classification, humanEnvelope: HumanEnvelope, authority: QuestionAuthorityBinding,
+  materialRevision: Revision.nullable(), materialDigest: Digest.nullable(),
+});
+type Snapshot = z.infer<typeof snapshotShape>;
+function snapshotMaterialsFit(value: Snapshot): boolean {
+  return (value.materialRevision === null) === (value.materialDigest === null)
+    && (value.classification.kind !== 'ready_result' || value.materialRevision !== null);
+}
+function snapshotPurposeFits(value: Snapshot): boolean {
+  const purpose = value.authority.purpose;
+  if (value.classification.kind === 'ready_result') return purpose.kind === 'decision';
+  return purpose.kind !== 'decision' && purpose.kind === value.classification.actionBinding.kind
+    && purpose.resourceId === value.classification.actionBinding.resourceId;
+}
+/* PRIVATE consistency metadata only. B seals the digest, verifies actual source
+   and resource rights in its tx, and compares current bindings on every use.
+   A parsed digest/task capture is never proof of a current assignment or grant. */
+export const QuestionClassificationSnapshot = snapshotShape
+  .refine(value => (value.source.kind === 'task_request') === (value.sourceBinding.taskAssignment !== null), 'Only task requests capture a real task assignment.')
+  .refine(snapshotMaterialsFit, 'Keep a complete material stamp; ready results require one.')
+  .refine(snapshotPurposeFits, 'Bind the exact classification action and purpose.')
+  .refine(materialMetadataFits, 'Oversized classification snapshot.');
+export type QuestionClassificationSnapshot = z.infer<typeof QuestionClassificationSnapshot>;
