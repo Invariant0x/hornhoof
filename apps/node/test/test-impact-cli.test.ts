@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ImpactEnvironment } from '../src/test-impact.js';
 import { runImpactReplay, replayExitCode, type ImpactReplayRequest } from '../src/test-impact-replay-cli.js';
@@ -52,5 +53,16 @@ describe('standalone replay reporting with real Git and Python AST', () => {
     const output = await run({ comparator: { commit: git('rev-parse', 'HEAD'), run: 50, part: 1, status: 'failed', inventory: environment.inventory, failedUnits: [environment.inventory[0]!] } });
     expect(output.status).toBe(2);
     expect(output.report.status).toBe('observed-misses');
+  });
+  it.each(['cancelled', 'timed_out', 'unknown', undefined])('keeps incomplete JSON comparator status %s unavailable', status => {
+    const { root, git, environment } = project();
+    const request = join(root, 'request.json');
+    writeFileSync(request, JSON.stringify({ environment, projectSuites: {}, comparator: {
+      commit: git('rev-parse', 'HEAD'), run: 50, part: 1, status, inventory: environment.inventory, failedUnits: [environment.inventory[1]],
+    } }));
+    const output = spawnSync(process.execPath, [fileURLToPath(new URL('../../../scripts/test/replay-impact.mjs', import.meta.url)), request], { cwd: root, encoding: 'utf8', timeout: 15000 });
+    expect(output.status, output.stderr).toBe(0);
+    const report = JSON.parse(output.stdout);
+    expect(report.rows[0].comparison).toEqual({ status: 'unavailable', reason: 'full_comparator_invalid' });
   });
 });

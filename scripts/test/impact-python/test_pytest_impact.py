@@ -179,3 +179,48 @@ def test_cli_emits_json_without_importing_repository_modules(tmp_path: Path) -> 
         "tests/test_prices.py",
         "tests/test_report.py",
     ]
+
+
+def test_test_package_initializer_reaches_import_free_tests(tmp_path: Path) -> None:
+    files = project(
+        tmp_path,
+        {
+            "tests/__init__.py": "value = 1\n",
+            "tests/test_labels.py": "def test_label():\n    assert True\n",
+        },
+    )
+    result = select_tests(
+        tmp_path, files, inventory_tests(files), ["tests/__init__.py"]
+    )
+    assert result["selected"] == [
+        "tests/test_labels.py",
+        "tests/test_prices.py",
+        "tests/test_report.py",
+    ]
+
+
+def test_string_declared_pytest_plugin_is_unavailable(tmp_path: Path) -> None:
+    files = project(
+        tmp_path,
+        {
+            "support.py": "value = 7\n",
+            "tests/test_labels.py": "pytest_plugins = ['support']\n",
+        },
+    )
+    result = select_tests(tmp_path, files, inventory_tests(files), ["support.py"])
+    assert result["status"] == "unavailable"
+    assert result["selected"] == []
+
+
+@pytest.mark.parametrize("alias", ["builtins", "runtime"])
+def test_dynamic_builtin_attributes_are_unavailable(tmp_path: Path, alias: str) -> None:
+    files = project(
+        tmp_path,
+        {
+            "tests/test_labels.py": f"import builtins as {alias}\n"
+            f"module = {alias}.__import__('prices')\n",
+        },
+    )
+    result = select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])
+    assert result["status"] == "unavailable"
+    assert result["selected"] == []

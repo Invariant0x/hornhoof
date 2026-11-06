@@ -59,6 +59,16 @@ describe('explicit Vitest collection adapter', () => {
     const { input, collection } = setup(); input.changed.push('other.ts');
     expect(await collectVitestImpact(input, async file => file === 'other.ts' ? { ...collection, all: collection.all.slice(1) } : collection)).toEqual(unavailable);
   });
+  it('rejects missing project and mapping together instead of ignoring its canonical suite', async () => {
+    const { input, collection } = setup(); input.requiredSuiteIds = ['node', 'server'];
+    delete input.projectSuites.server; collection.projects = ['node']; collection.all.pop();
+    expect(await collectVitestImpact(input, async () => collection)).toEqual(unavailable);
+  });
+  it('keeps explicitly declared non-Vitest inventory outside the adapter boundary', async () => {
+    const { input, collection } = setup(); input.requiredSuiteIds = ['node', 'server'];
+    input.inventory.push(unit('python', 'python/test_a.py'));
+    expect(await collectVitestImpact(input, async () => collection)).toMatchObject({ status: 'ready', units: [unit('node', 'apps/node/test/a.test.ts')] });
+  });
 });
 
 describe('pytest collection adapter', () => {

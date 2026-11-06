@@ -111,14 +111,16 @@ describe('pure commit impact selection', () => {
   it('runs the complete package for an unsupported language', () => {
     const input = fixture(); input.changes = [{ path: 'native/main.go', kind: 'modified' }];
     const result = selectAffectedTests(input);
-    expect(files(result)).toEqual(['native/unit_test.go']); expect(mode(result, 'native')).toBe('whole-package');
+    expect(result.units).toHaveLength(7); expect(mode(result, 'native')).toBe('whole-package');
+    expect(result.packages.every(pkg => pkg.mode === 'whole-package')).toBe(true);
   });
 
   it.each(['constructor', 'toString', '__proto__'])('uses whole-package fallback for unregistered language %s', language => {
     const input = fixture(); input.environment.packages[3]!.language = language;
     input.changes = [{ path: 'native/main.go', kind: 'modified' }];
     const result = selectAffectedTests(input);
-    expect(files(result)).toEqual(['native/unit_test.go']); expect(mode(result, 'native')).toBe('whole-package');
+    expect(result.units).toHaveLength(7); expect(mode(result, 'native')).toBe('whole-package');
+    expect(result.packages.every(pkg => pkg.mode === 'whole-package')).toBe(true);
   });
 
   it('runs the complete package for an unsupported source type', () => {
@@ -132,12 +134,13 @@ describe('pure commit impact selection', () => {
     else if (state === 'unavailable') input.graphs[0]!.status = 'unavailable';
     else input.graphs.push(structuredClone(input.graphs[0]!));
     const result = selectAffectedTests(input);
-    expect(files(result)).toEqual(nodeFiles); expect(mode(result, 'node')).toBe('whole-package');
+    expect(result.units).toHaveLength(7); expect(mode(result, 'node')).toBe('whole-package');
+    expect(result.packages.every(pkg => pkg.mode === 'whole-package')).toBe(true);
   });
 
   it('refuses narrow graph evidence that names a unit outside inventory', () => {
     const input = fixture(); input.graphs[0]!.units = [unit('node', 'apps/node/test/unknown.test.ts')];
-    expect(files(selectAffectedTests(input))).toEqual(nodeFiles);
+    expect(selectAffectedTests(input).units).toHaveLength(7);
   });
 
   it('uses the pytest adapter graph for Python without executing TypeScript graph rows', () => {
@@ -194,5 +197,40 @@ describe('pure commit impact selection', () => {
     const result = selectAffectedTests(input);
     expect(result.status).toBe('blocked'); expect(result.problems).toContainEqual({ code: 'migration_check_unsupported' });
     expect(result.migrationChecks).toEqual([]); expect(files(result)).toEqual(nodeFiles);
+  });
+
+  it.each(['src/schema.ts', 'vitest.config.ts', 'migrations/001.sql'])('keeps the global shared-package rule for %s', path => {
+    const input = fixture(); input.environment.packages.push({ id: 'shared', root: 'packages/shared', language: 'typescript', suiteIds: ['shared'] });
+    input.environment.inventory.push(unit('shared', 'packages/shared/test/a.test.ts'));
+    input.changes = [{ path: 'packages/shared/' + path, kind: 'modified' }];
+    const result = selectAffectedTests(input);
+    expect(result.units).toHaveLength(8); expect(result.packages.every(pkg => pkg.mode === 'whole-package')).toBe(true);
+    if (path.startsWith('migrations/')) expect(result.migrationChecks.map(check => check.direction)).toEqual(['up', 'down']);
+  });
+  it.each(['schema', 'deleted', 'unavailable'] as const)('retains complete consumer packages for %s changes', cause => {
+    const input = fixture(); input.environment.inventory.push(unit('server', 'apps/server/test/d.test.ts'));
+    input.graphs[0]!.units.push(unit('server', 'apps/server/test/c.test.ts'));
+    if (cause === 'schema') input.changes[0]!.path = 'apps/node/src/schema.ts';
+    if (cause === 'deleted') input.changes[0]!.kind = 'deleted';
+    if (cause === 'unavailable') input.graphs[0]!.status = 'unavailable';
+    const result = selectAffectedTests(input);
+    expect(mode(result, 'node')).toBe('whole-package'); expect(mode(result, 'server')).toBe('whole-package');
+    expect(files(result)).toContain('apps/server/test/d.test.ts');
+    expect(result.units).toHaveLength(cause === 'unavailable' ? 8 : 5);
+  });
+  it.each(['graph', 'new-test'] as const)('keeps a whole-package canonical selectionUnit together for %s', cause => {
+    const input = fixture(); input.environment.inventory = input.environment.inventory.map(value => value.suiteId === 'node' ? { ...value, selectionUnit: 'apps/node' } : value);
+    input.graphs[0]!.units = [{ ...unit('node', 'apps/node/test/a.test.ts'), selectionUnit: 'apps/node' }];
+    if (cause === 'new-test') { input.changes = [{ path: 'apps/node/test/new.test.ts', kind: 'added' }]; input.graphs[0]!.units = []; }
+    expect(files(selectAffectedTests(input))).toEqual(nodeFiles);
+  });
+  it.each(['apps/node/src/config/defaults.ts', 'apps/node/src/env/defaults.ts', 'apps/node/src/environments/dev.ts', 'apps/node/src/strings.ts'])('widens conventional non-graph path %s even with an empty graph', path => {
+    const input = fixture(); input.changes = [{ path, kind: 'modified' }]; input.graphs[0]!.units = [];
+    expect(files(selectAffectedTests(input))).toEqual(nodeFiles);
+  });
+  it('blocks an inventory suite missing from package mappings', () => {
+    const input = fixture(); input.environment.packages[1]!.suiteIds = [];
+    input.changes = [{ path: 'templates/a.md', kind: 'modified' }];
+    expect(selectAffectedTests(input)).toMatchObject({ status: 'blocked', problems: [{ code: 'impact_environment_invalid' }] });
   });
 });
