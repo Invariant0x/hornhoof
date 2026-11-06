@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { modelsFor } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
@@ -140,7 +141,8 @@ describe('an agent moved to another plan', () => {
     await setup.db.update(agents).set({ subscriptionId: plan, nodeId: joined.nodeId }).where(eq(agents.id, setup.bruno.id));
     const onHers = await pastTurn(setup, last, { subscriptionId: plan, nodeId: joined.nodeId, createdAt: new Date(Date.now() + 1000) });
     const [person] = await setup.db.select().from(people).where(eq(people.email, 'maria@acme.com'));
-    expect((await setup.app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { access: { departments: [] } }, ...as(setup.ceo) })).statusCode).toBe(200);
+    const [elsewhere] = await setup.db.insert(departments).values({ companyId: setup.bruno.companyId, templateKey: 'marketing', roleCode: 'MKT' }).returning();
+    expect((await setup.app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { access: { departments: [elsewhere!.id] } }, ...as(setup.ceo) })).statusCode).toBe(200);
     expect(await nextOf(hers, 'agent.release')).toEqual({ type: 'agent.release', agentKey: setup.bruno.id, jobId: onHers });
   });
 
@@ -169,7 +171,7 @@ describe('an agent moved to another plan', () => {
   it('stays quiet for another model on the same plan', async () => {
     const setup = await twoPlans();
     await oneTurn(setup);
-    expect((await setup.app.inject({ method: 'PATCH', url: `/api/agents/${setup.bruno.id}`, payload: { model: 'claude-opus-5-5' }, ...as(setup.ceo) })).statusCode).toBe(200);
+    expect((await setup.app.inject({ method: 'PATCH', url: `/api/agents/${setup.bruno.id}`, payload: { model: modelsFor('claude', null)[0]!.id }, ...as(setup.ceo) })).statusCode).toBe(200);
     expect(await arrived(setup.a, 'agent.release')).toEqual([]);
   });
 

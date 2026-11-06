@@ -89,7 +89,7 @@ describe.skipIf(!hasTmux)('the program of a plan its agent left', () => {
     await start();
     const key = randomUUID();
     const jobId = randomUUID();
-    await host.run(job(key, 'EXIT now', { jobId }));
+    await expect(host.run(job(key, 'EXIT', { jobId }))).resolves.toMatchObject({ ok: false, error: 'agent_failed' });
     await until(async () => !(await tmux.alive(nameOf(key))));
     expect(await tmux.has(nameOf(key))).toBe(true);
     await host.release(key, jobId);
@@ -330,8 +330,13 @@ describe.skipIf(!hasTmux)('retiring the idle program of a workspace', () => {
     const retiring = host.retireIdleWorkspace(request);
     await until(() => sent.some(m => m.type === 'agent.input_left'));
     const turn = host.run(job(key, 'next', { jobId: randomUUID(), sessionId }));
-    host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: sent.find((m): m is Left => m.type === 'agent.input_left')!.ref });
+    const left = () => sent.filter((m): m is Left => m.type === 'agent.input_left');
+    const toRetire = left()[0]!.ref;
+    host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: toRetire });
     await expect(retiring).resolves.toMatchObject({ status: 'busy', instanceGone: false });
+    /* The turn keeps these words under its own name before it takes them from the input. */
+    await until(() => left().some(m => m.ref !== toRetire));
+    host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: left().at(-1)!.ref });
     await expect(turn).resolves.toMatchObject({ ok: true });
     expect(host.instanceOf(key)).toBe(request.expectedInstance);
   }, 30_000);
