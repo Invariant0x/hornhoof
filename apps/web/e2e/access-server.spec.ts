@@ -1,6 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { connect } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { expect, test as base, type Browser, type Page } from '@playwright/test';
@@ -23,9 +25,17 @@ type Boot = {
 
 type Server = Boot & { child: ChildProcessWithoutNullStreams; pages: Page[]; control(command: string): Promise<void>; closePages(): Promise<void>; stop(): Promise<void> };
 
-async function startServer(): Promise<Server> {
+/* The real server serves the built app, so a worker builds what this checkout holds, in a folder of its own. */
+function builtWebApp(): string {
+  const folder = mkdtempSync(join(tmpdir(), 'hh-access-web-'));
+  execFileSync('npx', ['--no-install', 'vite', 'build', '--logLevel', 'warn', '--outDir', folder, '--emptyOutDir'], { cwd: resolve(HERE, '..'), stdio: 'inherit' });
+  return folder;
+}
+
+async function startServer(webDist: string): Promise<Server> {
   const child = spawn(process.execPath, ['--import', 'tsx', 'test/access-server-support.ts'], {
     cwd: resolve(HERE, '../../server'),
+    env: { ...process.env, WEB_DIST: webDist },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const pages: Page[] = [];
@@ -80,11 +90,13 @@ async function startServer(): Promise<Server> {
 
 const test = base.extend<{}, { server: Server }>({
   server: [async ({}, use, info) => {
-    const server = await startServer();
+    const webDist = builtWebApp();
+    const server = await startServer(webDist);
     console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'start', worker: info.workerIndex, pid: server.child.pid, prepared: Boolean(process.env.HH_PGLITE_TEMPLATE) }));
     try { await use(server); }
     finally {
       await server.stop();
+      rmSync(webDist, { recursive: true, force: true });
       console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'stop', worker: info.workerIndex, pid: server.child.pid }));
     }
   }, { scope: 'worker' }],
