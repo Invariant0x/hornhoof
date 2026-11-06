@@ -1145,6 +1145,7 @@ export const ru: Messages = {
     },
     evidence: 'Доказательства',
     comment: 'Комментарий',
+    actions: 'Действия',
     addComment: 'Добавить комментарий',
     cancelAsk: n => `Отменить #${n} и ее открытые подзадачи?`,
     yesCancel: 'Да, отменить',

@@ -331,7 +331,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
     <>
       <form className="tp-comment" onSubmit={comment}>
         <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} onChange={e => setText(e.target.value)} />}</Field>
-        <div className="form-foot" role="group" aria-label={t.tasks.addComment}>
+        <div className="form-foot" role="group" aria-label={t.tasks.actions}>
           <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.tasks.addComment}</button>
         </div>
       </form>
