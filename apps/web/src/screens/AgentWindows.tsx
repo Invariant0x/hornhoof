@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Me, Org, WaitingRequest } from '../types';
+import { AgentAccess } from '../ui/AgentAccess';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
 
 const ORCHESTRATOR = 'orchestrator';
@@ -41,17 +42,18 @@ export function AgentWindows({ windows, onOpen, me, org, staff, requests, onRequ
     <>
       {org &&
         windows.ids.map(id => (
-          <AgentWindow
-            key={id}
-            me={me}
-            org={org}
-            agentId={id}
-            place={{ minimized: windows.shown !== id, dock, onMinimize: () => windows.minimize(id), onRestore: () => onOpen(id) }}
-            requests={requests}
-            onRequestsChanged={onRequestsChanged}
-            staff={id === ORCHESTRATOR ? staff : null}
-            onClose={() => windows.close(id)}
-          />
+          <AgentAccess key={id} agentId={id} org={org} onClose={() => windows.close(id)}>
+            <AgentWindow
+              me={me}
+              org={org}
+              agentId={id}
+              place={{ minimized: windows.shown !== id, dock, onMinimize: () => windows.minimize(id), onRestore: () => onOpen(id) }}
+              requests={requests}
+              onRequestsChanged={onRequestsChanged}
+              staff={id === ORCHESTRATOR ? staff : null}
+              onClose={() => windows.close(id)}
+            />
+          </AgentAccess>
         ))}
       <div ref={setDock} className="agent-strips" />
     </>
