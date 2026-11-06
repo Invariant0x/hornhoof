@@ -13,9 +13,9 @@ import { createTestDb } from './helpers.js';
 const PRIVATE = ['workspace_repositories', 'task_workspaces', 'author_workspace_slots', 'task_area_locks', 'task_workspace_operations', 'task_workspace_submissions', 'task_workspace_sessions', 'task_workspace_merge_receipts'].sort();
 
 async function legacyRows(client: PGlite): Promise<void> {
-  for (const name of ['First legacy company', 'Second legacy company']) {
+  for (const [singleton, name] of [[true, 'First legacy company'], [false, 'Second legacy company']] as const) {
     const [company, person, subscription, agent, task, job] = Array.from({ length: 6 }, () => randomUUID());
-    await client.query('INSERT INTO companies(id,name) VALUES($1,$2)', [company, name]);
+    await client.query('INSERT INTO companies(id,name,singleton) VALUES($1,$2,$3)', [company, name, singleton]);
     await client.query("INSERT INTO people(id,company_id,name,email,status,scope_kind) VALUES($1,$2,'Legacy owner',$3,'active','company')", [person, company, `${person}@example.test`]);
     await client.query("INSERT INTO subscriptions(id,company_id,provider,kind,label,owner_person_id,status) VALUES($1,$2,'claude','personal','Legacy plan',$3,'ready')", [subscription, company, person]);
     await client.query("INSERT INTO agents(id,company_id,kind,name,model) VALUES($1,$2,'worker','Legacy worker','')", [agent, company]);
