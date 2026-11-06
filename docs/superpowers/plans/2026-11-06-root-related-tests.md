@@ -28,15 +28,15 @@
 
 ### Task1: Root projects, source aliases and reproducible evidence
 
-**Files:** vitest.config.ts; scripts/test/root-vitest.test.mjs and related-probe.mjs; scripts/test/workspace-cwd.mjs; root package.json; node no-proc config/script if needed.
+**Files:** vitest.config.mjs; scripts/test/root-vitest.test.mjs and related-probe.mjs; scripts/test/workspace-cwd.mjs; root package.json; root MJS lint scope. MJS uses the existing root lint path without adding a second TypeScript program for app configs.
 
 **Interfaces:** `vitest related <repo-relative files> --run` from root. Public API `createVitest({root,watch:false,related:files})`, `getRelevantTestSpecifications()` returns moduleId/project.name; `globTestSpecifications()` inventories files; always close(). The probe emits HH_RELATED_WIDTH with full selected file sets and does not execute tests.
 
-- [ ] Write Node integration contracts for five project identities, exact preservation of workspace file inventories, real server/protocol/node selection and a negative unrelated DB selection.
-- [ ] Remote RED on the unchanged config after npmci/protocol preparation; save full before inventories and widths. Missing project/alias/light separation is the expected failure, not an installation error.
+- [x] Write Node integration contracts for five project identities, exact preservation of workspace file inventories, real server/protocol/node selection and a negative unrelated DB selection.
+- [x] Remote RED on the unchanged config after npmci/protocol preparation; save full before inventories and widths. Run300 at67891cce: five expected failures, install/build/lint0. Normal workspace files201+125+73+17=416; the unconfigured root discovers476, including unrelated runner inputs.
 - [ ] Add the root config, test-only aliases and cwd setup; connect the existing no-proc variant under a unique name.
 - [ ] Remote GREEN of contracts plus narrow actual root related executions for server/protocol/node and a cwd-sensitive web test. No full test callbacks run.
-- [ ] Publish exact SHA/API to566 early and record the actual recipient/result.
+- [x] Publish early test-only67891cce/API in566 and direct70032; both tools accepted.70032 reports455 as its active task, so this is a recorded handoff, not proof that566 consumed it.
 
 ### Task2: Separate light helpers and verify the selection reduction
 
