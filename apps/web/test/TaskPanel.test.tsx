@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { MaterialManifest } from '@hornhoof/protocol/request-materials';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
@@ -381,6 +382,66 @@ describe('a task', () => {
     expect(within(panel).getByRole('region', { name: heading })).toHaveTextContent('The same author owns every file.');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('#13');
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('Bruno');
+  });
+
+  it('opens versioned materials without answering and sends their stamps only with the explicit answer', async () => {
+    const user = userEvent.setup();
+    const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const fileId = '11111111-1111-4111-8111-111111111111';
+    const linkId = '22222222-2222-4222-8222-222222222222';
+    const materialDigest = 'a'.repeat(64);
+    const materialRoot = `/api/requests/${requestId}/materials`;
+    const manifest = {
+      materialRevision: 1,
+      materialDigest,
+      common: [
+        {
+          id: fileId,
+          name: 'Release notes.txt',
+          kind: 'file',
+          state: 'available',
+          contentUrl: `${materialRoot}/${fileId}/content`,
+          downloadUrl: `${materialRoot}/${fileId}/download`,
+          size: 128,
+          sha256: 'b'.repeat(64),
+          mediaType: 'text/plain',
+        },
+        { id: linkId, name: 'Approved preview', kind: 'link', state: 'available', url: 'https://preview.example.com/result' },
+      ],
+      options: [],
+    } satisfies MaterialManifest;
+    const asked: import('../src/types').WaitingRequest = {
+      ...REQUESTS[0]!,
+      id: requestId,
+      task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
+      materialRevision: 1,
+      materialDigest,
+      hasMaterials: true,
+    };
+    const calls = shell({
+      'GET /api/requests': [200, decisions([asked])],
+      [`GET ${materialRoot}`]: [200, manifest],
+      [`POST /api/requests/${requestId}`]: [200, { request: { id: requestId, status: 'answered' } }],
+    });
+    const panel = await openTask(user);
+    const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
+    await user.click(await within(waiting).findByRole('button', { name: /Release notes\.txt/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Release notes.txt' });
+    const download = within(dialog).getByRole('link', { name: 'Download file' });
+    download.addEventListener('click', event => event.preventDefault(), { once: true });
+    await user.click(download);
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('dialog', { name: 'Approved preview' })).toBeInTheDocument();
+    const external = within(dialog).getByRole('link', { name: 'Open link' });
+    expect(external).toHaveAttribute('href', 'https://preview.example.com/result');
+    expect(external).toHaveAttribute('target', '_blank');
+    external.addEventListener('click', event => event.preventDefault(), { once: true });
+    await user.click(external);
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+    await user.type(within(waiting).getByLabelText('Your answer'), 'The result is ready.');
+    await user.click(within(waiting).getByRole('button', { name: 'Send answer' }));
+    expect(calls.find(call => call.method === 'POST')?.body).toEqual({ materialRevision: 1, materialDigest, answer: 'The result is ready.' });
   });
 
   it('closes with its cross and with Escape', async () => {
