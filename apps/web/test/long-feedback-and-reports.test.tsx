@@ -490,7 +490,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     /* TASK_DETAIL has no files, so Files section stays hidden. */
     expect(within(panel).queryByRole('region', { name: 'Файлы' })).not.toBeInTheDocument();
 
-    const box = within(panel).getByLabelText('Комментарий') as HTMLTextAreaElement;
+    const box = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.click(box);
     await user.paste(comment12k);
     expect(box.value.length).toBe(12_000);
@@ -639,7 +639,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     expect(fileAlert).toHaveTextContent('Файл недоступен.');
     expect(fileAlert.textContent).not.toMatch(/картин/i);
 
-    const commentBox = within(panel).getByLabelText('Комментарий') as HTMLTextAreaElement;
+    const commentBox = within(panel).getByRole('textbox', { name: 'Комментарий' }) as HTMLTextAreaElement;
     await user.type(commentBox, 'Очень большой текст');
     await user.click(within(panel).getByRole('button', { name: 'Добавить комментарий' }));
     const commentAlerts = await within(panel).findAllByRole('alert');
