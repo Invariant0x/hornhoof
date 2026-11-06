@@ -6,7 +6,7 @@ import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, 
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { as, testApp } from './helpers.js';
-import { aclCompany, type AclCompany } from './agent-view-company.js';
+import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
 vi.mock('fastify', async importOriginal => {
@@ -60,6 +60,7 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
   { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
   { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
+  { route: 'GET /api/tasks/:id/waits', of: aTask('GET', '/waits') },
   { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
   { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
   { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
@@ -91,6 +92,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK },
   { route: 'GET /api/tasks', url: () => '/api/tasks?status=all', statuses: ALL_OK },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
+  { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
   { route: 'GET /api/turns', url: () => '/api/turns', statuses: ALL_OK },
   { route: 'GET /api/turns/current', url: () => '/api/turns/current', statuses: ALL_OK },
   { route: 'GET /api/subscriptions', url: () => '/api/subscriptions', statuses: ALL_OK },
@@ -108,11 +110,15 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
   { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/wait-policy', url: c => `/api/departments/${c.dev.id}/wait-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: ALL_OK },
 ];
 
 /* Elsewhere, with the reason it is not a row above. */
 const ELSEWHERE: Record<string, string> = {
+  'PUT /api/departments/:id/wait-policy/:kind': 'agent-view-waits.test.ts: only this department owner, CEO or delegate; every role checked',
+  'POST /api/waits/:id/replan': 'agent-view-waits.test.ts: visible task and responsible wait owner/decider, CEO or delegate',
+  'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
@@ -198,7 +204,7 @@ describe('one thing of one agent', () => {
       const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
       if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(403);
       else expect(res.statusCode, `${route}, ${name}`).not.toBe(403);
-      if (closed) expect(res.body, `${route}, ${name}`).not.toContain(c.crew[agent].name);
+      if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);
     }
     lines.push(`| ${route} | ${got.join('; ')} |`);
   });
@@ -216,8 +222,8 @@ describe('every list', () => {
       if (!seen) continue;
       const hidden = (Object.keys(c.crew) as Crew[]).filter(k => !seen.includes(k));
       for (const key of hidden) {
-        const words = [c.crew[key].id, c.crew[key].name, c.tasksOf[key].id, c.tasksOf[key].title];
-        for (const word of words) expect(res.body, `${route} for ${viewer}: ${word}`).not.toContain(word);
+        const hiddenWork = [c.crew[key], { id: c.tasksOf[key].id, name: c.tasksOf[key].title }];
+        expect(leaks(res, hiddenWork), `${route} for ${viewer}: ${key}`).toEqual([]);
       }
       expect(res.body, `${route} for ${viewer}`).not.toContain('Secret words');
       expect(res.body, `${route} for ${viewer}`).not.toContain(c.orchestrator.id);

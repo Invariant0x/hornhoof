@@ -10,8 +10,8 @@ import { operatorCompany } from './program-operator-company.js';
 
 type Run = { type: string; jobId: string; prompt: string; operatorDelivery?: { id: string; ordinal: number }; operatorSourceDelivery?: { id: string; ordinal: number } };
 
-/* A company whose programs have worked before and now stop taking words, as on 5 November: a program with earlier activity
-   keeps no recovery hold, so each turn fails and the next one goes out. */
+/* A company whose programs work on and do not record the words they are given: one that did something since these words keeps
+   no recovery hold, so each turn fails and the next one goes out. One that did nothing since them waits on a hold instead. */
 export async function stuckPrograms(withOperator = false) {
   const c = await operatorCompany(withOperator);
   await c.db.update(jobs).set({ status: 'done', result: 'Earlier work.', finishedAt: new Date(0) }).where(eq(jobs.id, c.job.id));
@@ -39,13 +39,17 @@ export async function stuckPrograms(withOperator = false) {
     return { fact, delivery, instance };
   }
 
-  /* What the node reports of a turn whose words stay unrecorded for a minute. */
-  async function unrecorded(agentId: string, jobId: string, at = new Date(), check?: OperatorCheck) {
+  /* What the node reports of a turn whose words stay unrecorded for a minute, from a program that did nothing since them. */
+  async function unrecordedIdle(agentId: string, jobId: string, at = new Date(), check?: OperatorCheck, worked = false) {
     const { fact, delivery, instance } = await deliveryFact(agentId, jobId);
     await record(fact, at);
+    if (worked) await record({ ...fact, phase: 'activity', elapsedMs: 100 } as typeof fact, at);
     await record({ type: 'program.operator_needed', agentKey: agentId, jobId, instance, evidenceId: randomUUID(), ordinal: 0, reason: 'assignment_unrecorded', deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null, ...(check ? { check } : {}) }, at);
     return { fact, delivery };
   }
+
+  /* The same from a program that did something since them. */
+  const unrecorded = (agentId: string, jobId: string, at = new Date(), check?: OperatorCheck) => unrecordedIdle(agentId, jobId, at, check, true);
 
   const caseOf = async (jobId: string) => (await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.jobId, jobId)))[0]!;
   const casesOf = (agentId: string) => c.db.select().from(programOperatorCases).where(eq(programOperatorCases.agentId, agentId)).orderBy(asc(programOperatorCases.openedAt));
@@ -83,5 +87,5 @@ export async function stuckPrograms(withOperator = false) {
   const peopleTold = async (agentId: string) => (await c.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'operatorEscalation' is not null`)));
   const continuationsOf = (jobId: string) => c.db.select().from(jobs).where(eq(jobs.continueOf, jobId));
 
-  return { ...c, orchestrator: orchestrator!, opsHead, record, deliveryFact, runs, runOf, runningOf, unrecorded, caseOf, casesOf, failedTurn, heard, retryDue, failsOnce, peopleTold, continuationsOf, instanceOf };
+  return { ...c, orchestrator: orchestrator!, opsHead, record, deliveryFact, runs, runOf, runningOf, unrecorded, unrecordedIdle, caseOf, casesOf, failedTurn, heard, retryDue, failsOnce, peopleTold, continuationsOf, instanceOf };
 }

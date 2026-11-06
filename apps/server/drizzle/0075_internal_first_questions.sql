@@ -106,7 +106,8 @@ ALTER TABLE "requests" ADD CONSTRAINT "requests_classification_bound" CHECK (jso
 ALTER TABLE "requests" ADD CONSTRAINT "requests_internal_not_person_answer" CHECK ("requests"."status" <> 'resolved_internal' OR
       num_nonnulls("requests"."answered_by", "requests"."answered_by_agent_id", "requests"."answer_job_id", "requests"."answer_source_seq", "requests"."answered_at") = 0);--> statement-breakpoint
 -- Keep source identity and every historical decision. No original job is inferred from a later answer.
-UPDATE "requests" SET "audience" = CASE WHEN "status" = 'open' THEN 'internal' ELSE 'legacy' END,
+-- An open stuck note names no head or orchestrator who could answer it, so it stays with the people it asked.
+UPDATE "requests" SET "audience" = CASE WHEN "status" = 'open' AND "kind" = 'stuck' THEN 'human' WHEN "status" = 'open' THEN 'internal' ELSE 'legacy' END,
   "source_key" = 'legacy:task_request:' || "id"::text;--> statement-breakpoint
 UPDATE "proposals" SET "audience" = CASE WHEN "status" = 'pending' THEN 'internal' ELSE 'legacy' END,
   "source_key" = 'legacy:proposal:' || "id"::text, "source_job_id" = "job_id";--> statement-breakpoint

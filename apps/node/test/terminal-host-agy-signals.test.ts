@@ -84,7 +84,7 @@ describe('Antigravity execution boundaries', () => {
     vi.useFakeTimers();
     c.agent.took = false;
     c.agent.typing = 'Queued review reminder';
-    c.agent.turn!.observed = c.host['observeProgram']('job');
+    c.agent.turn!.observed = c.host['observeProgram'](c.agent, 'job');
     const busy = readFileSync(new URL('./fixtures/agy-tui/screen-busy.ansi', import.meta.url), 'utf8');
     vi.spyOn(c.tmux, 'alive').mockResolvedValue(true);
     vi.spyOn(c.tmux, 'screen').mockResolvedValue(busy);

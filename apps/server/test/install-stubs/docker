@@ -19,24 +19,40 @@ id_of() {
 }
 case "$1" in
   info) echo "Server Version: 28.0.0" ;;
-  pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+  # STUB_PULL: "fail" for every image, "node" for the node's alone, "digest" for one named by its digest.
+  pull) case "${STUB_PULL:-ok}:$2" in fail:* | node:*hornhoof-node* | digest:*@sha256:*) echo "pull access denied" >&2; exit 1 ;; esac ;;
+  # STUB_NODE_LOGS: what a node said since it started. It reached its server unless told otherwise.
+  logs) printf '%s\n' "${STUB_NODE_LOGS-Connected to Hornhoof.}" ;;
+  # STUB_VOLUMES words are "name=server=id", the volume of a node and what its settings say.
+  volume) case " ${STUB_VOLUMES:-} " in *" ${!#}="*) ;; *) exit 1 ;; esac ;;
   create) echo cid-app ;;
   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
+      # STUB_IMAGE_VERSION and STUB_IMAGE_COMMIT: the labels of an image; its version goes by its tag without them.
+      image=${!#}
+      case "${4:-}" in
+        *image.version*) echo "${STUB_IMAGE_VERSION:-${image##*:}}"; exit 0 ;;
+        *image.revision*) echo "${STUB_IMAGE_COMMIT:-$image}"; exit 0 ;;
+        *RepoDigests*) echo "${image%%:*}@sha256:feed"; exit 0 ;;
+      esac
       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
       id_of "${!#}"
     else
-      [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1
+      # STUB_IMAGE_LOCAL: "1" for every image on this computer, "app" for the app's alone.
+      case "${STUB_IMAGE_LOCAL:-0}:${!#}" in 1:* | app:*/hornhoof:*) ;; *) exit 1 ;; esac
     fi ;;
   # STUB_STOPPED words are containers that exist and do not run.
   inspect)
     if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
+    # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
+    if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
     [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
     case "$*" in
+      *' pull') case "${STUB_PULL:-ok}" in fail | node) echo "pull access denied" >&2; exit 1 ;; esac ;;
       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
@@ -46,6 +62,25 @@ case "$1" in
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
+    WORD=/data/node.json; if has "$@"; then
+      for v in ${STUB_VOLUMES:-}; do
+        WORD="${v%%=*}:/data:ro"
+        if has "$@"; then rest=${v#*=}; printf '{\n  "server": "%s",\n  "subscriptionId": "%s"\n}\n' "${rest%=*}" "${rest#*=}"; exit 0; fi
+      done
+      exit 1
+    fi
+    # STUB_LIVE_CHECK: "no" as the door of a build says it, "warned" with Docker's words first, "unread" as it says of a registry
+    # it could not read, "no answer" as a build from before it has none.
+    WORD=apps/server/dist/live-check-gate.js
+    if has "$@"; then
+      case "${STUB_LIVE_CHECK:-ok}" in
+        ok) exit 0 ;;
+        no) echo 'This build has no live check of Claude, Codex, Kimi and Antigravity. (missing)' >&2; exit 1 ;;
+        warned) printf "WARNING: The requested image's platform does not match the host\nThis build has no live check of Claude, Codex, Kimi and Antigravity. (missing)\n" >&2; exit 1 ;;
+        unread) printf 'Error: The registry answered 429 for /token.\nCould not read the live check of this build from the registry. (unread)\n' >&2; exit 1 ;;
+        *) printf "node:internal/modules/cjs/loader:1228\n  Error: Cannot find module '/app/apps/server/dist/live-check-gate.js'\n" >&2; exit 1 ;;
+      esac
+    fi
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
   exec)

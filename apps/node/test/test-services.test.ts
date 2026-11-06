@@ -407,9 +407,10 @@ describe('manifest argv selection', () => {
     const files = JSON.parse(readFileSync(inventory, 'utf8')) as { file: string }[];
     expect(files.map(file => file.file)).toEqual([join(checkout, expected)]);
     if (id === 'node') {
-      const reportFile = join(root, 'selected-run.json');
-      const args = run.args.flatMap(arg => arg === 'run' ? ['run', '--reporter=json', `--outputFile=${reportFile}`] : [arg]);
-      await promisify(execFile)(run.program, [...args, selected], { cwd: join(checkout, run.cwd), timeout: 18000 });
+      const reportFile = join(root, 'selected-run.json'), filesFile = join(root, 'selected-files.json');
+      writeFileSync(filesFile, JSON.stringify([`./${expected}`]));
+      const args = run.args.flatMap(arg => arg === 'run' ? ['run', '--reporter=json', `--outputFile=${reportFile}`, '--shard=1/1'] : [arg]);
+      await promisify(execFile)(run.program, [...args, selected], { cwd: join(checkout, run.cwd), timeout: 18000, env: { ...process.env, HH_TEST_FILES: filesFile } });
       const report = JSON.parse(readFileSync(reportFile, 'utf8')) as { numTotalTests: number; testResults: { name: string }[] };
       expect(report.testResults.map(file => file.name)).toEqual([join(checkout, expected)]);
       expect(report.numTotalTests).toBeGreaterThan(0);
