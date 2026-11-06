@@ -1,0 +1,48 @@
+# One authorized remote compatibility probe. No system packages, root, daemon or image change.
+set -euo pipefail
+node --input-type=module <<'PROBE'
+import { spawn, execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { platform, arch, hostname, availableParallelism, loadavg, freemem } from 'node:os';
+import { resolve } from 'node:path';
+
+const read = path => { try { return readFileSync(path, 'utf8').trim(); } catch { return null; } };
+function facts(stage, point) {
+  console.log('HH_AUTHOR_FACT ' + JSON.stringify({ stage, point, at: new Date().toISOString(), node: process.version,
+    os: platform(), arch: arch(), host: hostname(), uid: process.getuid(), cpus: availableParallelism(), load: loadavg(), free: freemem(),
+    dockerMarker: existsSync('/.dockerenv'), cpuMax: read('/sys/fs/cgroup/cpu.max'), cpuset: read('/sys/fs/cgroup/cpuset.cpus.effective'),
+    memoryMax: read('/sys/fs/cgroup/memory.max'), memoryCurrent: read('/sys/fs/cgroup/memory.current') }));
+}
+const env = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: resolve('.cache/task-535-probe-browsers') };
+async function step(stage, args) {
+  facts(stage, 'before');
+  const start = performance.now(), child = spawn(args[0], args.slice(1), { stdio: 'inherit', env });
+  let error;
+  child.once('error', value => { error = value.message; });
+  const timer = setInterval(() => facts(stage, 'during'), 10_000);
+  const end = await new Promise(resolve => child.once('close', (code, signal) => resolve({ code: code ?? 1, signal })));
+  clearInterval(timer); facts(stage, 'after');
+  console.log('HH_AUTHOR_STAGE ' + JSON.stringify({ stage, args, ...end, error, ms: Math.round(performance.now() - start) }));
+  return end.code;
+}
+facts('precondition', 'before');
+if (platform() !== 'linux' || process.getuid() === 0) throw new Error('NOT_RUN: this probe requires an ordinary non-root Linux runner');
+console.log('HH_PROBE_SCOPE ' + JSON.stringify({ task: 535, sourceSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  fullSuite: false, screenCount: 1, profiles: 1, engines: ['chromium', 'firefox', 'webkit'],
+  browserCache: env.PLAYWRIGHT_BROWSERS_PATH, systemPackages: false, imageDigest: null }));
+let code = await step('npm-ci', ['npm', 'ci', '--prefer-offline', '--no-audit', '--no-fund']);
+if (!code) code = await step('protocol-build', ['npm', 'run', 'build', '-w', '@hornhoof/protocol']);
+if (!code) code = await step('web-build', ['npm', 'run', 'build', '-w', '@hornhoof/web']);
+if (!code) code = await step('probe-syntax', ['node', '--check', 'apps/web/e2e/geometry-live-probe.mjs']);
+if (!code) code = await step('probe-eslint', ['npx', '--no-install', 'eslint', 'apps/web/e2e/geometry-live-probe.mjs',
+  '--rule', 'no-undef:error', '--rule', 'no-unused-vars:error', '--global', 'process', '--global', 'console',
+  '--global', 'localStorage', '--global', 'document', '--global', 'getComputedStyle', '--global', 'innerWidth',
+  '--global', 'innerHeight', '--global', 'devicePixelRatio']);
+if (!code) {
+  code |= await step('browser-binaries-only', ['npx', '--no-install', 'playwright', 'install', 'chromium', 'firefox', 'webkit']);
+  /* Preserve individual launch errors even if installation left only some engines available. No retry or dependency installation. */
+  code |= await step('one-real-notebook-per-engine', ['node', '--import', 'tsx', 'apps/web/e2e/geometry-live-probe.mjs']);
+}
+console.log('HH_PROBE_COMMAND_RESULT ' + JSON.stringify({ exitCode: code, acceptedGeometryResult: false }));
+process.exitCode = code;
+PROBE
