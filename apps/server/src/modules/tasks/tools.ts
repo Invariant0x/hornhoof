@@ -481,7 +481,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit.',
+        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
       async ({ task: ref, summary, evidence, review }) =>
