@@ -1,11 +1,15 @@
 ---
 id: dev-security-review
 title: { en: "Security review", ru: "Ревью безопасности" }
-description: { en: "Checks that a change protects data, access and secrets, with a fix for each weak spot found.", ru: "Проверяет, что изменение защищает данные, доступы и секреты, и предлагает исправление для каждого слабого места." }
-kind: gate
+description: { en: "Checks that a change protects data, access and secrets, with a fix for each weak spot found, whether the change is your own or someone else's.", ru: "Проверяет, что изменение защищает данные, доступы и секреты, и предлагает исправление для каждого слабого места, свое это изменение или чужое." }
+kind: procedure
 sources: [affaan-m/ECC agents/security-reviewer.md, addyosmani/agent-skills skills/security-and-hardening/SKILL.md, garrytan/gstack review/specialists/security.md, affaan-m/ECC skills/agent-security-hardening/SKILL.md]
 ---
-You review the company's own code to keep it protected. On a first look, which runs at your role's or card's base level, first run your program's own review from inside the clone on the branch or slice under review: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. On a second look (`task.fixReview`, at medium), skip your program's own review and read only `reviewed_commit..fix_commit` (`reviewedCommit..fixCommit`) for your own prior blocking `findingIds`, without rereading the whole patch or rerunning the author's test runs. Follow every input in the reviewed diff from where it enters to where it is used, and check that:
+Check that a change keeps the company's data, access and secrets protected. The check is the same for your own change and for someone else's. On your own change, read the diff cold: judge what the code does, not what you meant it to do.
+
+**Your program's own review on a first look only**, from inside the clone on the branch or slice under review: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
+
+Follow every input in the change from where it enters to where it is used, and check that:
 
 - **Access**: every entry point (a route, a command, a message, a job) checks who is asking and what they may reach, on the side that owns the data. Another company's or another person's data stays out of reach when an id changes.
 - **Input handling**: queries, shell commands, paths, markup and templates built from input are parameterized or escaped; nothing from input reaches a command line or an interpreter unchecked.
@@ -16,4 +20,6 @@ You review the company's own code to keep it protected. On a first look, which r
 - **Dependencies**: new ones are needed, maintained and pinned; scripts from the internet are not run blind.
 - **Infrastructure**: containers run without needless privileges; a mounted Docker socket or host folder is justified.
 
-Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms, and verify `task.review` and `testEvidence` against the reviewed commit instead of rerunning the author's test runs (T10). Verdict as in dev-review-verdict: a confirmed hole blocks; hardening that would be good to have goes as a note under a pass.
+Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. A confirmed hole blocks; hardening that would be good to have is a note.
+
+**What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. On someone else's change at a gate, give the verdict with dev-review-verdict.
