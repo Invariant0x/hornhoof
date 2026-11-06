@@ -223,10 +223,32 @@ for (const lang of ['en', 'ru'] as const) {
         expect(inviteBox.x + inviteBox.width, 'the page action is not left-aligned').toBe(headerBox.x + headerBox.width);
         await capture(page, info, `people-${look}`);
         const cells = row.locator('td');
-        for (const [index, column] of (['name', 'title', 'access', 'status', 'actions'] as const).entries()) {
-          await expect(cells.nth(index)).toHaveAttribute('data-label', m.people.columns[column]);
+        const nameCell = cells.first();
+        await expect(nameCell).toHaveClass('pname-cell');
+        await expect(nameCell).not.toHaveAttribute('data-label');
+        await expect(actions).not.toHaveAttribute('data-label');
+        const rowBox = (await row.boundingBox())!;
+        const nameCellBox = (await nameCell.boundingBox())!;
+        expect(nameCellBox.width, 'the name is the full-width record heading').toBe(rowBox.width);
+        const status = cells.nth(3).locator('.status');
+        await expect(status).toHaveCSS('display', 'inline-block');
+        await expect(status).toHaveCSS('max-inline-size', '100%');
+        const statusBox = (await status.boundingBox())!;
+        expect(statusBox.width, 'the status frame hugs its word').toBeLessThan(rowBox.width);
+        for (const [index, column] of (['title', 'access', 'status'] as const).entries()) {
+          const cell = cells.nth(index + 1);
+          await expect(cell).toHaveAttribute('data-label', m.people.columns[column]);
+          await expect(cell).toHaveCSS('align-items', 'baseline');
+          const pseudo = await cell.evaluate(el => {
+            const style = getComputedStyle(el, '::before');
+            return { content: style.content, size: style.fontSize, weight: style.fontWeight, color: style.color };
+          });
+          expect(pseudo.content).toBe(`"${m.people.columns[column]}"`);
+          expect(pseudo.size, 'record label size is width-independent').toBe('12px');
+          expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
+          expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
-        if (width === 375) expect(await cells.first().evaluate(el => getComputedStyle(el, '::before').content)).toBe(`"${m.people.columns.name}"`);
+        await expect(actions).toHaveCSS('padding-block-start', '8px');
         await expectWrappedText(name);
         await expectInside(row, [name, actions]);
         await expectInside(actions, [edit]);

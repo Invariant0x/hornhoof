@@ -85,3 +85,13 @@ it('styles notebook fields and standalone panel controls with full touch geometr
   expect(decl('.version-mark', 'display', '(max-width: 760px)')).toBe('block');
   expect(decl('.version-mark', 'text-align', '(max-width: 760px)')).toBe('end');
 });
+
+it('keeps people record status and labels compact and consistent', () => {
+  expect(decl('.status', 'display')).toBe('inline-block');
+  expect(decl('.status', 'max-inline-size')).toBe('100%');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]', 'align-items')).toBe('baseline');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'font-size')).toBe('12px');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'font-weight')).toBe('400');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'color')).toBe('var(--muted)');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions', 'padding-block-start')).toBe('8px');
+});
