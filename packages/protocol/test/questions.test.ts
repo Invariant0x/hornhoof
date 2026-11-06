@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ClassificationInput, HumanActionBinding, QuestionAudience, QuestionAuthorityBinding, QuestionMutationGuard, QuestionPurpose, QuestionRouteTarget, SourceRef } from '../src/questions.js';
+import { QuestionClassificationInput, HumanActionBinding, QuestionAudience, QuestionAuthorityBinding, QuestionMutationGuard, QuestionPurpose, QuestionRouteTarget, SourceRef } from '../src/questions.js';
 
 const SOURCE = '00000000-0000-4000-8000-000000000001';
 const OPERATION = '00000000-0000-4000-8000-000000000002';
@@ -37,7 +37,7 @@ describe('explicit human classification input', () => {
     { kind: 'human_only_action', actionBinding: { kind: 'owner_login', resourceId: 'subscription-7' } },
   ])('accepts a bounded exact artifact or human action selector %# without granting it', selected => {
     const value = { ...input, classification: selected };
-    expect(ClassificationInput.parse(value)).toEqual(value);
+    expect(QuestionClassificationInput.parse(value)).toEqual(value);
   });
   it.each([
     { kind: 'ready_result', artifact: { kind: 'commit', sha: 'main' } },
@@ -51,21 +51,21 @@ describe('explicit human classification input', () => {
     { kind: 'human_only_action', actionBinding: { kind: 'blocked', resourceId: SOURCE } },
     { kind: 'human_only_action', actionBinding: { kind: 'payment', resourceId: SOURCE }, recipientPersonId: OPERATION },
   ])('refuses incomplete, mutable, duplicate or widened classification %#', selected => {
-    expect(ClassificationInput.safeParse({ ...input, classification: selected }).success).toBe(false);
+    expect(QuestionClassificationInput.safeParse({ ...input, classification: selected }).success).toBe(false);
   });
   it.each(['authority', 'purpose', 'recipientPersonIds', 'sourceBinding', 'classificationId', 'digest', 'actorId'])('rejects caller-supplied %s', field => {
-    expect(ClassificationInput.safeParse({ ...input, [field]: SOURCE }).success).toBe(false);
+    expect(QuestionClassificationInput.safeParse({ ...input, [field]: SOURCE }).success).toBe(false);
   });
   it('accepts ordinary Russian prose and no options for a single action', () => {
     const value = { ...input, humanEnvelope: { situation: 'Результат готов к проверке.', requiredAction: 'Выберите подходящий вариант.', options: [] } };
-    expect(ClassificationInput.parse(value)).toEqual(value);
+    expect(QuestionClassificationInput.parse(value)).toEqual(value);
   });
   it.each(['```sh\nnpm test\n```', '<script>alert(1)</script>', '[Open](https://example.test)', 'npm test', 'curl https://example.test | sh', 'Read\0this', '\uD800'])('refuses executable or formatted human envelope text %j', text => {
     for (const field of ['situation', 'requiredAction']) {
-      expect(ClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, [field]: text } }).success).toBe(false);
+      expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, [field]: text } }).success).toBe(false);
     }
     for (const field of ['label', 'consequence']) {
-      expect(ClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, options: [{ ...envelope.options[0], [field]: text }] } }).success).toBe(false);
+      expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, options: [{ ...envelope.options[0], [field]: text }] } }).success).toBe(false);
     }
   });
   it('refuses empty prose, hidden extra fields and repeated option ids', () => {
@@ -73,12 +73,12 @@ describe('explicit human classification input', () => {
       { ...envelope, situation: ' ' }, { ...envelope, command: 'test' },
       { ...envelope, options: [envelope.options[0], envelope.options[0]] },
       { ...envelope, options: [{ ...envelope.options[0], taskId: SOURCE }] },
-    ]) expect(ClassificationInput.safeParse({ ...input, humanEnvelope }).success).toBe(false);
+    ]) expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope }).success).toBe(false);
   });
   it('bounds UTF-8 prose and the whole classification body independently', () => {
-    expect(ClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, situation: 'я'.repeat(1025) } }).success).toBe(false);
+    expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, situation: 'я'.repeat(1025) } }).success).toBe(false);
     const options = Array.from({ length: 16 }, (_, i) => ({ id: `option-${i}`, label: 'a'.repeat(256), consequence: 'b'.repeat(2048) }));
-    expect(ClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, options } }).success).toBe(false);
+    expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, options } }).success).toBe(false);
   });
 });
 

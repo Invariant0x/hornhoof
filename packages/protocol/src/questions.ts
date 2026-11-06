@@ -32,6 +32,6 @@ export const HumanActionBinding = z.strictObject({
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
 
 /* Deliberately unavailable until the contract's positive RED cases are observed. */
-export const ClassificationInput = z.never();
+export const QuestionClassificationInput = z.never();
 export const QuestionPurpose = z.never();
 export const QuestionAuthorityBinding = z.never();
