@@ -29,7 +29,7 @@ const holdText = (row: Case, name: string, to: Agent) =>
   `The program did not take them, and Hornhoof could not go on by itself: it is not at an empty prompt, or this is its second try. ` +
   (to.kind === 'orchestrator'
     ? `Only the reliability engineer or the head of Operations can release it, with program_recovery_release, and neither can take this now: they are off, without a plan or on a hold of their own. Bring one back; Hornhoof calls them as soon as one can take it, and the words stay saved until then.`
-    : `If it is ready, release the hold with program_recovery_release, this case and your reason: that delivers the saved words once. It refuses while the program asks something, runs a tool or holds other words, and those stay with its owner.`);
+    : `If it is ready, release the hold with program_recovery_release, this case and your reason: that delivers the saved words once. It refuses while the program asks something, runs a tool or holds other words, and those stay with its owner. Never free a hold any other way.`);
 
 const watchDue = (row: Case, now: Date) => Boolean(row.escalatedAt) && +now - +row.escalatedAt! > HOLD_WATCH_MS && !row.resolution?.holdCall?.operations;
 

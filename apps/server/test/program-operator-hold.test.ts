@@ -283,6 +283,7 @@ it('calls the reliability engineer once for a hold of more than five minutes', a
   const calls = await turnsWith(c, rob.id, c.incident.id);
   expect(calls).toHaveLength(1);
   expect(calls[0]!.prompt).toContain('program_recovery_release');
+  expect(calls[0]!.prompt).toContain('Never free a hold any other way');
   expect((await c.row()).recoveryHold).toBe(true);
 });
 
