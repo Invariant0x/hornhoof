@@ -12,22 +12,19 @@ import { failureCompany } from './failure-company.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
-import { shortReason } from '../src/modules/tasks/failures.js';
-import * as failurePolicy from '../src/modules/tasks/failures.js';
+import { failureRetryDelayMs, shortReason } from '../src/modules/tasks/failures.js';
 import { originalPromptOf } from '../src/modules/conversation/requested-prompt.js';
 
 const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, retryable, text: 'The provider said no this time.' });
 const MIN = 60_000;
 
 describe('shared failure retry delays', () => {
-  const delay = (failurePolicy as unknown as { failureRetryDelayMs?: (attempt: number) => number }).failureRetryDelayMs;
-
   it.each([[1, 60000], [2, 120000], [3, 300000], [4, 600000], [5, 600000], [20, 600000]] as const)('keeps attempt %i at %i milliseconds without a second schedule', (attempt, expected) => {
-    expect(delay?.(attempt)).toBe(expected);
+    expect(failureRetryDelayMs(attempt)).toBe(expected);
   });
 
   it.each([0, -1, 1.5, NaN, Infinity])('refuses an invalid persisted attempt %s', attempt => {
-    expect(() => delay?.(attempt)).toThrow(RangeError);
+    expect(() => failureRetryDelayMs(attempt)).toThrow(RangeError);
   });
 });
 

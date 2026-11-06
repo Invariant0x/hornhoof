@@ -14,6 +14,14 @@ import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
 
 const RETRY_MINUTES = [1, 2, 5, 10];
+
+/* One delay sequence for the existing driver. Program retry limits stay with
+   their consumer; ongoing waits keep the last delay without a second timer. */
+export function failureRetryDelayMs(attempt: number): number {
+  if (!Number.isSafeInteger(attempt) || attempt < 1) throw new RangeError('A failure attempt must be a positive integer.');
+  return RETRY_MINUTES[Math.min(attempt, RETRY_MINUTES.length) - 1]! * 60_000;
+}
+
 type Job = typeof jobs.$inferSelect;
 type TaskTurn = Parameters<typeof turnAgain>[1];
 export type LastFailure = { kind: Failure['kind']; text: string; at: number; tail: string };
@@ -171,8 +179,7 @@ async function retryUnheardWords(ctx: Ctx, job: Job, failure: Failure): Promise<
   const unheard = await unheardWords(ctx, job);
   if (!unheard) return false;
   const attempt = await passingAttempts(ctx, job, undefined, f => !passing(f));
-  const minutes = RETRY_MINUTES[Math.min(attempt, RETRY_MINUTES.length) - 1]!;
-  const at = new Date(+(job.finishedAt ?? new Date()) + minutes * 60_000);
+  const at = new Date(+(job.finishedAt ?? new Date()) + failureRetryDelayMs(attempt));
   const why = failedWhy(job);
   const kept = { operatorDelivery: { id: unheard.delivery.id, ordinal: unheard.delivery.ordinal }, operatorRecovery: unheard.incident.id };
   const said = await originalPromptOf(ctx, job);
@@ -222,7 +229,7 @@ async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Pro
   const attempt = await passingAttempts(ctx, job);
   const minutes = RETRY_MINUTES[attempt - 1];
   if (minutes !== undefined) {
-    const at = new Date(+(job.finishedAt ?? new Date()) + minutes * 60_000);
+    const at = new Date(+(job.finishedAt ?? new Date()) + failureRetryDelayMs(attempt));
     return retryTurn(ctx, job, at, `Retry ${attempt} of 4 waits until ${at.toISOString()}, in the same session.`, taskTurn);
   }
   await logTurnFact(ctx, job, `The turn failed (${job.failure!.kind}): ${job.failure!.text}. All 4 retries were used. The task stays where it is. Ask Operations to find the cause.`);
