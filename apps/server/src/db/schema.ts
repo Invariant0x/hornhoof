@@ -1,14 +1,73 @@
-import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
+import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
+import type { BindingPart } from '../modules/model-checks/lifecycle.js';
+import type { IntegrationTarget, NodeRef, WorkspaceProblemCode } from '@hornhoof/protocol';
+import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, doublePrecision, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
+
+/* Legacy rows keep null metadata. A versioned public stamp is always complete. */
+const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
+  (${revision} IS NULL AND ${digest} IS NULL) OR
+  (${revision} IS NOT NULL AND ${digest} IS NOT NULL AND ${revision} > 0
+   AND ${revision} <= 9007199254740991 AND ${digest} ~ '^[0-9a-f]{64}$')`;
+/* JSON bytes remain private/bounded; the sealing service validates the history
+   structure and append-only semantics before persisting it. */
+const materialHistoryBound = (history: AnyPgColumn) => sql`
+  ${history} IS NULL OR (jsonb_typeof(${history}) = 'object' AND octet_length(${history}::text) <= 1048576)`;
+
+/* Source metadata is private server state, not classification or route authority. Unknown legacy provenance stays null. */
+const questionColumns = () => ({
+  audience: text('audience').$type<QuestionAudience>().notNull().default('internal'),
+  questionRevision: bigint('question_revision', { mode: 'number' }).notNull().default(1),
+  sourceKey: text('source_key'),
+  sourceJobId: uuid('source_job_id').references(() => jobs.id),
+  sourceSequence: bigint('source_sequence', { mode: 'number' }),
+  triageAgentId: uuid('triage_agent_id').references(() => agents.id),
+  routeRevision: bigint('route_revision', { mode: 'number' }).notNull().default(1),
+  classification: jsonb('classification').$type<QuestionClassificationSnapshot>(),
+});
+type QuestionColumns = { [K in keyof ReturnType<typeof questionColumns>]: AnyPgColumn } & { companyId: AnyPgColumn };
+const safeRevision = (column: AnyPgColumn) => sql`${column} BETWEEN 1 AND 9007199254740991`;
+const safeSequence = (column: AnyPgColumn) => sql`${column} BETWEEN 0 AND 9007199254740991`;
+const questionObjectBound = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'object' AND octet_length(${column}::text) <= 32768`;
+const questionChecks = (name: string, t: QuestionColumns) => [
+  check(`${name}_question_audience`, sql`${t.audience} IN ('internal', 'human', 'legacy')`),
+  check(`${name}_question_revision`, safeRevision(t.questionRevision)),
+  check(`${name}_route_revision`, safeRevision(t.routeRevision)),
+  check(`${name}_source_sequence`, safeSequence(t.sourceSequence)),
+  check(`${name}_source_key`, sql`length(btrim(${t.sourceKey})) BETWEEN 1 AND 512 AND ${t.sourceKey} !~ '[[:cntrl:]]'`),
+  check(`${name}_classification_bound`, questionObjectBound(t.classification)),
+  unique(`${name}_source_episode`).on(t.companyId, t.sourceKey),
+];
+export type QuestionRecoveryIntent = {
+  sourceKey: string;
+  reason: 'internal_route_unavailable' | 'plan_unavailable';
+  recordedAt: string;
+};
+const internalResolutionColumns = () => ({
+  executorInstruction: text('executor_instruction'),
+  resolvedByAgentId: uuid('resolved_by_agent_id').references(() => agents.id),
+  resolvedByJobId: uuid('resolved_by_job_id').references(() => jobs.id),
+  resolvedSourceSequence: bigint('resolved_source_sequence', { mode: 'number' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  recoveryIntent: jsonb('recovery_intent').$type<QuestionRecoveryIntent>(),
+});
+type ResolutionColumns = { [K in keyof ReturnType<typeof internalResolutionColumns>]: AnyPgColumn };
+const resolutionChecks = (name: string, t: ResolutionColumns) => [
+  check(`${name}_resolver_whole`, sql`num_nonnulls(${t.resolvedByAgentId}, ${t.resolvedByJobId}, ${t.resolvedAt}) IN (0, 3)
+    AND (${t.resolvedSourceSequence} IS NULL OR ${t.resolvedAt} IS NOT NULL)`),
+  check(`${name}_resolver_sequence`, safeSequence(t.resolvedSourceSequence)),
+  check(`${name}_recovery_bound`, questionObjectBound(t.recoveryIntent)),
+];
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -76,6 +135,8 @@ export const departments = pgTable('departments', {
   companyId: companyId(),
   name: text('name'),
   templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
+  /* New departments receive their template's mode through their creation path. */
+  workMode: text('work_mode', { enum: ['turns', 'continuous'] }).notNull().default('turns'),
   parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
   about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
@@ -84,6 +145,8 @@ export const departments = pgTable('departments', {
   repoUrl: text('repo_url'),
   repoBranch: text('repo_branch'),
   repoTokenEnc: text('repo_token_enc'),
+  /* Server-only credential scope; every token write or clear advances it. */
+  repoTokenRevision: integer('repo_token_revision').notNull().default(1),
   repoTokenLast4: text('repo_token_last4'),
   /* Who the agents' commits are by; without one each agent's program sets its own. */
   repoAuthorName: text('repo_author_name'),
@@ -96,7 +159,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [index('departments_owner_person_id').on(t.ownerPersonId)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
@@ -125,6 +188,8 @@ export const teams = pgTable('teams', {
   about: text('about').notNull().default(''),
   stage: integer('stage').notNull().default(0),
   gate: boolean('gate').notNull().default(false),
+  /* Its members take urgent work only. */
+  urgentOnly: boolean('urgent_only').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -419,6 +484,9 @@ export const jobs = pgTable(
     createdBy: uuid('created_by').references(() => people.id),
     /* The task a turn works on, when a task woke the agent. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
+    workspaceId: uuid('workspace_id').references((): AnyPgColumn => taskWorkspaces.id),
+    workspaceSpecVersion: integer('workspace_spec_version'),
     /* The turn this one runs once more, after a node restart cut it off. */
     retryOf: uuid('retry_of').references((): AnyPgColumn => jobs.id),
     interruption: jsonb('interruption').$type<Interruption>(),
@@ -431,7 +499,11 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    check('jobs_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
+    check('jobs_workspace_pair', sql`(${t.workspaceId} IS NULL AND ${t.workspaceSpecVersion} IS NULL) OR (${t.workspaceId} IS NOT NULL AND ${t.workspaceSpecVersion} IS NOT NULL AND ${t.workspaceSpecVersion} > 0)`),
+    index('jobs_workspace_id').on(t.workspaceId),
+  ],
 );
 
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
@@ -474,7 +546,12 @@ export const proposals = pgTable('proposals', {
   companyId: companyId(),
   agentId: uuid('agent_id').notNull().references(() => agents.id),
   jobId: uuid('job_id').references(() => jobs.id),
+  ...questionColumns(),
   brief: text('brief').notNull().default(''),
+  materialRevision: bigint('material_revision', { mode: 'number' }),
+  materialDigest: text('material_digest'),
+  /* Private sealed versions, never serialized as a public proposal. */
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
   items: jsonb('items').notNull(),
   /* structure: departments for the company; staff: employees for one department. */
   kind: text('kind', { enum: ['structure', 'staff'] }).notNull().default('structure'),
@@ -483,7 +560,11 @@ export const proposals = pgTable('proposals', {
   appliedBy: uuid('applied_by').references(() => people.id),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
-});
+}, t => [
+  ...questionChecks('proposals', t),
+  check('proposals_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+  check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
@@ -512,7 +593,7 @@ export const turns = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
-  t => [unique('turns_company_number').on(t.companyId, t.number), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
+  t => [unique('turns_company_number').on(t.companyId, t.number), unique('turns_company_id').on(t.companyId, t.id), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
 );
 
 /* A turn's pipeline facts: kept as it closed, or rebuilt from its events for a turn that closed before this was kept. */
@@ -552,6 +633,7 @@ export const tasks = pgTable(
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
     /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
     gates: jsonb('gates').$type<string[]>().notNull().default([]),
     /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
     panel: jsonb('panel').$type<string[]>().notNull().default([]),
@@ -568,6 +650,10 @@ export const tasks = pgTable(
     /* What kind of work it is and what a mistake in it would cost, as whoever gave it out named them. */
     workKind: text('work_kind', { enum: WORK_KINDS }),
     riskClass: text('risk_class', { enum: RISK_CLASSES }),
+    /* Said by the CEO, never read from its words; work under a task is as urgent as it is. */
+    urgent: boolean('urgent').notNull().default(false),
+    /* Marked by whoever gives the work out for the short path. */
+    small: boolean('small').notNull().default(false),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -588,6 +674,7 @@ export const tasks = pgTable(
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
     check('tasks_counts', sql`${t.stage} >= 0 AND ${t.bounces} >= 0 AND ${t.silent} >= 0`),
+    check('tasks_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
     check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
@@ -596,7 +683,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -672,7 +759,7 @@ export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as cons
    person, the rest only to the CEO. */
 export const DECISION_TOPICS = ['task', 'employee', 'people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release'] as const;
 export type DecisionTopic = (typeof DECISION_TOPICS)[number];
-export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
+export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn', 'resolved_internal'] as const;
 
 /* One of the ways a person can pick from, with the picture that shows it. */
 export type RequestOption = { label: string; image: string | null };
@@ -687,8 +774,12 @@ export const requests = pgTable(
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
+    ...questionColumns(),
     text: text('text').notNull(),
     commit: text('commit'),
+    /* Null together on legacy sources; no private file/disclosure metadata here. */
+    materialRevision: bigint('material_revision', { mode: 'number' }),
+    materialDigest: text('material_digest'),
     options: jsonb('options').$type<RequestOption[]>().notNull().default([]),
     link: text('link'),
     picked: integer('picked'),
@@ -708,15 +799,76 @@ export const requests = pgTable(
     approvalChannel: text('approval_channel', { enum: APPROVAL_CHANNELS }),
     approvalKind: text('approval_kind'),
     approvalAmount: doublePrecision('approval_amount'),
+    /* A goal in danger, as whoever may say so said it: which goal, which episode of it, how bad and whether it is over. An
+       answer to the question does not end the episode, and neither a text nor a date ever opens one. */
+    goalRefKind: text('goal_ref_kind', { enum: ['task', 'turn'] }),
+    goalRefId: uuid('goal_ref_id'),
+    goalEpisodeId: uuid('goal_episode_id'),
+    goalImpact: text('goal_impact', { enum: ['at_risk', 'missed'] }),
+    goalRevision: integer('goal_revision'),
+    goalState: text('goal_state', { enum: ['open', 'resolved'] }),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
+    ...questionChecks('requests', t),
+    check('requests_internal_not_person_answer', sql`${t.status} <> 'resolved_internal' OR
+      num_nonnulls(${t.answeredBy}, ${t.answeredByAgentId}, ${t.answerJobId}, ${t.answerSourceSeq}, ${t.answeredAt}) = 0`),
+    check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+    check('requests_goal_whole', sql`num_nonnulls(${t.goalRefKind}, ${t.goalRefId}, ${t.goalEpisodeId}, ${t.goalImpact}, ${t.goalRevision}, ${t.goalState}) IN (0, 6)`),
+    uniqueIndex('requests_one_open_goal').on(t.companyId, t.goalRefKind, t.goalRefId).where(sql`${t.goalState} = 'open'`),
+    unique('requests_company_id').on(t.companyId, t.id),
     index('requests_task_id').on(t.taskId),
     index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
     check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL OR ${t.approvalChannel} IS NOT NULL`),
   ],
 );
+
+/* Private content and actual internal resolver provenance, without a second lifecycle. */
+export const requestInternal = pgTable('request_internal', {
+  requestId: uuid('request_id').primaryKey().references(() => requests.id),
+  companyId: companyId(),
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
+  technicalText: text('technical_text'),
+  ...internalResolutionColumns(),
+}, t => [
+  ...resolutionChecks('request_internal', t),
+  foreignKey({ columns: [t.companyId, t.requestId], foreignColumns: [requests.companyId, requests.id], name: 'request_internal_company_request' }),
+  index('request_internal_company_id').on(t.companyId),
+  check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
+
+/* The ASK source only. computer.json remains authoritative for native access and control revision. */
+export const computerAccessIntents = pgTable('computer_access_intents', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  ...questionColumns(),
+  technicalText: text('technical_text').notNull(),
+  ...internalResolutionColumns(),
+  status: text('status', { enum: ['open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown'] }).notNull().default('open'),
+  applyOperationId: uuid('apply_operation_id'),
+  applyRevision: bigint('apply_revision', { mode: 'number' }),
+  applyRouteRevision: bigint('apply_route_revision', { mode: 'number' }),
+  applyControlRevision: bigint('apply_control_revision', { mode: 'number' }),
+  applyTargetUntil: timestamp('apply_target_until', { withTimezone: true }),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  ...questionChecks('computer_access_intents', t),
+  ...resolutionChecks('computer_access_intents', t),
+  check('computer_access_intents_status', sql`${t.status} IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')`),
+  check('computer_access_intents_apply_whole', sql`num_nonnulls(${t.applyOperationId}, ${t.applyRevision}, ${t.applyRouteRevision}, ${t.applyControlRevision}, ${t.applyTargetUntil}) IN (0, 5)`),
+  check('computer_access_intents_apply_started', sql`${t.applyOperationId} IS NULL OR ${t.status} IN ('apply_unknown', 'granted', 'declined', 'withdrawn')`),
+  check('computer_access_intents_apply_revision', safeRevision(t.applyRevision)),
+  check('computer_access_intents_apply_route_revision', safeRevision(t.applyRouteRevision)),
+  check('computer_access_intents_apply_control_revision', safeSequence(t.applyControlRevision)),
+  check('computer_access_intents_apply_outcome', sql`
+    (${t.status} NOT IN ('apply_unknown', 'granted') OR ${t.applyOperationId} IS NOT NULL)
+    AND (${t.status} <> 'granted' OR ${t.appliedAt} IS NOT NULL)
+    AND (${t.appliedAt} IS NULL OR ${t.status} = 'granted')`),
+]);
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
    an agent on a task put on it, of any kind, which every agent of the company downloads by its name. */
@@ -846,6 +998,13 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
+export type TestEnvironmentRequest = {
+  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string;
+  requestId: string | null; nodeId: string | null; builtin: boolean;
+  sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
+};
+export type TestEnvironmentSelection = { selection: TestExecution['selection']; after: number[] };
+
 export const testRuns = pgTable(
   'test_runs',
   {
@@ -866,6 +1025,11 @@ export const testRuns = pgTable(
        work, or on a run from before commits were pinned. */
     commitSha: text('commit_sha'),
     command: text('command').notNull(),
+    /* Original manifest evidence and the chosen profile; old manual runs retain null evidence. */
+    environmentSnapshot: jsonb('environment_snapshot').$type<EnvironmentSnapshot>(),
+    environmentHash: text('environment_hash'),
+    /* The assigned authenticated metadata request, persisted without a repository credential. */
+    environmentRequest: jsonb('environment_request').$type<TestEnvironmentRequest>(),
     /* The task's files a part of work takes in, by name. */
     files: jsonb('files').$type<string[]>().notNull().default([]),
     /* The free memory a part of work needs; tests need what their repository says. */
@@ -881,7 +1045,7 @@ export const testRuns = pgTable(
     createdAt: createdAt(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId)],
+  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId), index('test_runs_environment_request').on(sql`(${t.environmentRequest}->>'requestId')`).where(sql`${t.environmentRequest} is not null and ${t.environmentSnapshot} is null and ${t.status} = 'running'`)],
 );
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
@@ -896,6 +1060,8 @@ export const testParts = pgTable(
     companyId: companyId(),
     runId: uuid('run_id').notNull().references(() => testRuns.id),
     part: integer('part').notNull(),
+    environmentSelection: jsonb('environment_selection').$type<TestEnvironmentSelection>(),
+    environmentReceipt: jsonb('environment_receipt').$type<TestEnvironmentReceipt>(),
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
     nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
@@ -1017,7 +1183,9 @@ export const publicLinks = pgTable('public_links', {
 export const waitNotices = pgTable('wait_notices', {
   id: id(),
   companyId: companyId(),
-  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  /* Who it is for: an employee, who gets it as a turn, or a person, who keeps it as a card until they say they saw it. */
+  agentId: uuid('agent_id').references(() => agents.id),
+  personId: uuid('person_id').references(() => people.id),
   dedupKey: text('dedup_key').notNull(),
   message: jsonb('message').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeMessage>().notNull(),
   guard: jsonb('guard').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeGuard>().notNull(),
@@ -1026,7 +1194,1047 @@ export const waitNotices = pgTable('wait_notices', {
   leaseUntil: timestamp('lease_until', { withTimezone: true }),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  /* The accountable wait a notice speaks for, at the generation and route it was written for: a later one makes it stale. */
+  waitId: uuid('wait_id').references(() => taskWaits.id),
+  generation: integer('generation'),
+  level: integer('level'),
+  purpose: text('purpose'),
+  routeRevision: integer('route_revision'),
+  /* A person saw the card. It decides nothing: the question it speaks of stays as it is. */
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  acknowledgedByPersonId: uuid('acknowledged_by_person_id').references(() => people.id),
 }, t => [
   unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
+  check('wait_notices_one_recipient', sql`(${t.agentId} IS NULL) <> (${t.personId} IS NULL)`),
+  index('wait_notices_cards').on(t.personId, t.createdAt).where(sql`${t.personId} IS NOT NULL AND ${t.acknowledgedAt} IS NULL`),
   index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+  uniqueIndex('wait_notices_one_per_level').on(t.waitId, t.generation, t.level, t.purpose, t.routeRevision).where(sql`${t.waitId} IS NOT NULL`),
+  check('wait_notices_wait_whole', sql`${t.waitId} IS NULL OR (${t.generation} IS NOT NULL AND ${t.level} IS NOT NULL AND ${t.purpose} IS NOT NULL AND ${t.routeRevision} IS NOT NULL)`),
+]);
+
+/* One record for each source a task waits on, with who answers for it and until when. Its source is what ends it: a date
+   passing proves nothing. Both SQL roles stay out (HIDDEN): the record names private work, and one written by hand could
+   move a promise or quiet an alarm. */
+export const taskWaits = pgTable('task_waits', {
+  id: id(),
+  companyId: companyId(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  kind: text('kind', { enum: WAIT_SOURCE_KINDS }).notNull(),
+  /* Stable across restarts, never made up by a sweep; for an external wait, the id of its operation. */
+  sourceKey: text('source_key').notNull(),
+  /* The source's own count of its changes. A task's version moves with any comment and has no part in it. */
+  sourceRevision: integer('source_revision').notNull(),
+  /* Grows when the owner or the plan changes, which makes what was written for the one before stale. */
+  generation: integer('generation').notNull().default(1),
+  state: text('state', { enum: WAIT_STATES }).notNull(),
+  ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+  ownerPersonId: uuid('owner_person_id').references(() => people.id),
+  plan: jsonb('plan').$type<WaitPlan>(),
+  ownerDueAt: timestamp('owner_due_at', { withTimezone: true }),
+  headDueAt: timestamp('head_due_at', { withTimezone: true }),
+  decisionDueAt: timestamp('decision_due_at', { withTimezone: true }),
+  level: integer('level').notNull().default(0),
+  nextActionAt: timestamp('next_action_at', { withTimezone: true }),
+  reviewOrdinal: integer('review_ordinal').notNull().default(0),
+  nextReviewAt: timestamp('next_review_at', { withTimezone: true }),
+  attentionAgentId: uuid('attention_agent_id').references(() => agents.id),
+  attentionPersonId: uuid('attention_person_id').references(() => people.id),
+  /* Who decides in the end: the department's named owner, and the CEO without one. Kept as authority; no alarm follows from it. */
+  finalDecisionPersonId: uuid('final_decision_person_id').references(() => people.id),
+  fallbackToCeo: boolean('fallback_to_ceo').notNull().default(false),
+  routeRevision: integer('route_revision').notNull().default(0),
+  sourceState: jsonb('source_state').$type<WaitSourceState>().notNull().default({}),
+  outcome: text('outcome', { enum: WAIT_OUTCOMES }),
+  proofRef: text('proof_ref'),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('task_waits_open_source').on(t.companyId, t.taskId, t.kind, t.sourceKey).where(sql`${t.state} IN ('active', 'legacy_needs_plan')`),
+  index('task_waits_task').on(t.taskId),
+  index('task_waits_next_action').on(t.nextActionAt).where(sql`${t.state} = 'active'`),
+  check('task_waits_kind', sql`${t.kind} IN ('after', 'review', 'person', 'run', 'external')`),
+  check('task_waits_state', sql`${t.state} IN ('active', 'resolved', 'cancelled', 'superseded', 'legacy_needs_plan')`),
+  check('task_waits_counts', sql`${t.sourceRevision} >= 0 AND ${t.generation} >= 1 AND ${t.reviewOrdinal} >= 0 AND ${t.routeRevision} >= 0 AND ${t.level} BETWEEN 0 AND 3`),
+  check('task_waits_one_owner', sql`${t.ownerAgentId} IS NULL OR ${t.ownerPersonId} IS NULL`),
+  check('task_waits_one_attention', sql`${t.attentionAgentId} IS NULL OR ${t.attentionPersonId} IS NULL`),
+  check('task_waits_active_is_whole', sql`${t.state} <> 'active' OR (
+    (${t.ownerAgentId} IS NULL) <> (${t.ownerPersonId} IS NULL) AND ${t.plan} IS NOT NULL AND ${t.ownerDueAt} IS NOT NULL AND ${t.headDueAt} IS NOT NULL
+    AND ${t.decisionDueAt} IS NOT NULL AND ${t.nextActionAt} IS NOT NULL)`),
+  /* A review goes on until its source ends. Only an external operation, whose one signal has gone, has none left. */
+  check('task_waits_reviews_go_on', sql`${t.state} <> 'active' OR ${t.nextReviewAt} IS NOT NULL OR (${t.reviewOrdinal} >= 1 AND ${t.kind} = 'external' AND ${t.sourceKey} LIKE 'operation:%')`),
+  check('task_waits_legacy_has_no_dates', sql`${t.state} <> 'legacy_needs_plan' OR (${t.plan} IS NULL AND ${t.ownerDueAt} IS NULL AND ${t.headDueAt} IS NULL AND ${t.decisionDueAt} IS NULL AND ${t.nextActionAt} IS NULL AND ${t.nextReviewAt} IS NULL)`),
+  check('task_waits_ended', sql`(${t.state} IN ('active', 'legacy_needs_plan')) = (${t.endedAt} IS NULL AND ${t.outcome} IS NULL AND ${t.proofRef} IS NULL)`),
+]);
+
+/* A version of how long a department gives a kind of wait, at a stage or at all. No company starts with one, and a plan made
+   from one keeps its dates when a later version comes. */
+export const waitPolicies = pgTable('wait_policies', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull().references(() => departments.id),
+  kind: text('kind', { enum: WAIT_SOURCE_KINDS }).notNull(),
+  stage: text('stage').notNull().default(''),
+  version: integer('version').notNull(),
+  ownerMs: bigint('owner_ms', { mode: 'number' }).notNull(),
+  headMs: bigint('head_ms', { mode: 'number' }).notNull(),
+  decisionMs: bigint('decision_ms', { mode: 'number' }).notNull(),
+  reviewIntervalMs: bigint('review_interval_ms', { mode: 'number' }).notNull(),
+  createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+  createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('wait_policies_version').on(t.companyId, t.departmentId, t.kind, t.stage, t.version),
+  check('wait_policies_order', sql`${t.ownerMs} > 0 AND ${t.ownerMs} <= ${t.headMs} AND ${t.headMs} <= ${t.decisionMs} AND ${t.reviewIntervalMs} > 0 AND ${t.version} >= 1`),
+  check('wait_policies_kind', sql`${t.kind} IN ('after', 'review', 'person', 'run', 'external')`),
+  check('wait_policies_one_author', sql`(${t.createdByPersonId} IS NULL) <> (${t.createdByAgentId} IS NULL)`),
+]);
+
+/* Checks made by a model. Both SQL roles stay out (HIDDEN): the examples hold private words, the held-out part must not
+   reach whoever tunes a prompt, and a status written by hand could turn a check on. */
+const MODEL_CHECK_PARTIES = ['person', 'agent'] as const;
+
+export const modelChecks = pgTable('model_checks', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+  productId: uuid('product_id').references(() => departments.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: MODEL_CHECK_KINDS }).notNull(),
+  /* Off until a run of this very binding passes, and off again when its week ends or a part of it changes. */
+  status: text('status', { enum: ['off', 'on'] }).notNull().default('off'),
+  offReason: text('off_reason', { enum: INVALIDATION_CODES }),
+  bindingDigest: text('binding_digest'),
+  validUntil: timestamp('valid_until', { withTimezone: true }),
+  /* Set by the owner of the department, not by whoever wrote the check. */
+  thresholds: jsonb('thresholds').$type<Thresholds>(),
+  thresholdsBy: uuid('thresholds_by').references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_checks_place').on(t.departmentId, t.productId, t.kind).nullsNotDistinct(),
+  index('model_checks_company_id').on(t.companyId),
+  check('model_checks_status', sql`${t.status} IN ('off', 'on')`),
+  check('model_checks_on_is_bound', sql`${t.status} = 'off' OR (${t.bindingDigest} IS NOT NULL AND ${t.validUntil} IS NOT NULL AND ${t.thresholds} IS NOT NULL AND ${t.offReason} IS NULL)`),
+]);
+
+/* A definition of a check, never changed: the next change is the next version. */
+export const modelCheckRevisions = pgTable('model_check_revisions', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  definitionVersion: integer('definition_version').notNull(),
+  checkerCodeHash: text('checker_code_hash').notNull(),
+  promptHash: text('prompt_hash').notNull(),
+  outputSchemaHash: text('output_schema_hash').notNull(),
+  sourceListHash: text('source_list_hash').notNull(),
+  taxonomyHash: text('taxonomy_hash'),
+  model: jsonb('model').$type<ModelIdentity>().notNull(),
+  authorKind: text('author_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
+  authorId: uuid('author_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_revisions_version').on(t.checkId, t.definitionVersion),
+  check('model_check_revisions_author', sql`${t.authorKind} IN ('person', 'agent')`),
+]);
+
+/* A set of examples, never changed: its id is the datasetVersion of a binding. Its lines stay sealed, with the counts beside them. */
+export const modelCheckDatasets = pgTable('model_check_datasets', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  hash: text('hash').notNull(),
+  jsonlEnc: text('jsonl_enc').notNull(),
+  cases: integer('cases').notNull(),
+  holdoutCases: integer('holdout_cases').notNull(),
+  mustBlockCases: integer('must_block_cases').notNull(),
+  addedByKind: text('added_by_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
+  addedById: uuid('added_by_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_datasets_version').on(t.checkId, t.version),
+  check('model_check_datasets_added_by', sql`${t.addedByKind} IN ('person', 'agent')`),
+  check('model_check_datasets_counts', sql`${t.cases} > 0 AND ${t.holdoutCases} >= 0 AND ${t.mustBlockCases} >= 0 AND ${t.holdoutCases} <= ${t.cases} AND ${t.mustBlockCases} <= ${t.cases}`),
+]);
+
+/* One run over one binding: its id is the reportId. The dedup key makes one change or one week a single run, however many
+   rounds see it. A pass cannot be written for a run that was cut short, had an error or missed what it must block. */
+export const modelCheckEvaluations = pgTable('model_check_evaluations', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  revisionId: uuid('revision_id').notNull().references(() => modelCheckRevisions.id, { onDelete: 'cascade' }),
+  datasetId: uuid('dataset_id').notNull().references(() => modelCheckDatasets.id, { onDelete: 'cascade' }),
+  /* The binding it ran, whole: the next change compares against it, and a report says what it was about. */
+  binding: jsonb('binding').$type<CheckBinding>().notNull(),
+  bindingDigest: text('binding_digest').notNull(),
+  trigger: text('trigger', { enum: ['change', 'weekly'] }).notNull(),
+  parts: jsonb('parts').$type<BindingPart[]>().notNull().default([]),
+  dedupKey: text('dedup_key').notNull(),
+  status: text('status', { enum: ['queued', 'running', 'passed', 'failed', 'incomplete'] }).notNull().default('queued'),
+  complete: boolean('complete').notNull().default(false),
+  infraErrors: integer('infra_errors').notNull().default(0),
+  mustBlockMisses: integer('must_block_misses').notNull().default(0),
+  metrics: jsonb('metrics').$type<EvaluationCounts>(),
+  holdoutMetrics: jsonb('holdout_metrics').$type<EvaluationCounts>(),
+  problems: jsonb('problems').$type<RunProblem[]>().notNull().default([]),
+  /* Ids of missed examples of the part authors may see. Held-out ones are never named. */
+  missedDevCases: jsonb('missed_dev_cases').$type<string[]>().notNull().default([]),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_evaluations_dedup').on(t.checkId, t.dedupKey),
+  index('model_check_evaluations_pending').on(t.createdAt).where(sql`${t.status} IN ('queued', 'running')`),
+  index('model_check_evaluations_finished').on(t.checkId, t.finishedAt),
+  check('model_check_evaluations_trigger', sql`${t.trigger} IN ('change', 'weekly')`),
+  check('model_check_evaluations_status', sql`${t.status} IN ('queued', 'running', 'passed', 'failed', 'incomplete')`),
+  check('model_check_evaluations_ended', sql`(${t.status} IN ('queued', 'running')) = (${t.finishedAt} IS NULL)`),
+  check('model_check_evaluations_clean_pass', sql`${t.status} <> 'passed' OR (${t.complete} AND ${t.infraErrors} = 0 AND ${t.mustBlockMisses} = 0 AND ${t.metrics} IS NOT NULL AND ${t.holdoutMetrics} IS NOT NULL)`),
+]);
+
+/* A row of the outbound gateway points only at rows of its own company, whatever a bug or a forged id asks. */
+type Owned = { companyId: AnyPgColumn; id: AnyPgColumn };
+const sameCompany = (name: string, company: AnyPgColumn, column: AnyPgColumn, parent: Owned) => foreignKey({ name, columns: [company, column], foreignColumns: [parent.companyId, parent.id] });
+const inPlace = (table: string, t: { companyId: AnyPgColumn; departmentId: AnyPgColumn; productId: AnyPgColumn }) => [
+  sameCompany(`${table}_department`, t.companyId, t.departmentId, departments),
+  sameCompany(`${table}_product`, t.companyId, t.productId, departments),
+];
+const isDigest = (name: string, column: AnyPgColumn) => check(name, sql`${column} ~ '^[0-9a-f]{64}$'`);
+const placeColumns = () => ({ companyId: companyId(), departmentId: uuid('department_id').notNull(), productId: uuid('product_id') });
+const at = (name: string) => timestamp(name, { withTimezone: true });
+
+/* A way out of the company: one adapter, one purpose, direct to contacts or public. A stop holds a reason and only a
+   person's decision ends it; each stop or reopening is a new generation, so what was admitted under an older one is stale. */
+export type StopReason = GateCode | 'complaint_threshold' | 'refusal_threshold' | 'bounce_threshold';
+export const outboundChannels = pgTable('outbound_channels', {
+  id: id(),
+  ...placeColumns(),
+  name: text('name').notNull(),
+  adapter: text('adapter', { enum: ['smtp', 'webhook'] }).notNull(),
+  purpose: text('purpose').notNull(),
+  audience: text('audience', { enum: ['direct', 'public'] }).notNull(),
+  status: text('status', { enum: ['new', 'active', 'stopped'] }).notNull().default('new'),
+  generation: integer('generation').notNull().default(1),
+  stoppedReason: text('stopped_reason').$type<StopReason>(),
+  stoppedAt: at('stopped_at'),
+  createdBy: uuid('created_by').notNull().references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_channels_company_id').on(t.companyId, t.id),
+  unique('outbound_channels_place').on(t.departmentId, t.productId, t.name).nullsNotDistinct(),
+  ...inPlace('outbound_channels', t),
+  check('outbound_channels_adapter', sql`${t.adapter} IN ('smtp', 'webhook')`),
+  check('outbound_channels_audience', sql`${t.audience} IN ('direct', 'public')`),
+  check('outbound_channels_status', sql`${t.status} IN ('new', 'active', 'stopped')`),
+  check('outbound_channels_generation', sql`${t.generation} > 0`),
+  check('outbound_channels_stop', sql`(${t.status} = 'stopped') = (${t.stoppedAt} IS NOT NULL) AND (${t.status} = 'stopped') = (${t.stoppedReason} IS NOT NULL)`),
+]);
+
+/* An owner's limits of a channel. Never changed: the next change is the next revision, with its own digest. */
+export const outboundPolicies = pgTable('outbound_policies', {
+  id: id(),
+  companyId: companyId(),
+  channelId: uuid('channel_id').notNull(),
+  revision: integer('revision').notNull(),
+  digest: text('digest').notNull(),
+  value: jsonb('value').$type<OutboundPolicyValue>().notNull(),
+  createdBy: uuid('created_by').notNull().references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_policies_company_id').on(t.companyId, t.id),
+  unique('outbound_policies_revision').on(t.channelId, t.revision),
+  sameCompany('outbound_policies_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_policies_positive', sql`${t.revision} > 0`),
+  isDigest('outbound_policies_digest', t.digest),
+]);
+
+/* The sender's account. Its settings stay sealed and only the trusted sender opens them; a new secret is a new generation,
+   so what was queued under the old one is stale. Its domain has one spelling, so that a limit counts it once. */
+export const outboundAccounts = pgTable('outbound_accounts', {
+  id: id(),
+  ...placeColumns(),
+  channelId: uuid('channel_id').notNull(),
+  senderDomain: text('sender_domain').notNull(),
+  label: text('label').notNull(),
+  configEnc: text('config_enc').notNull(),
+  configGeneration: integer('config_generation').notNull().default(1),
+  status: text('status', { enum: ['active', 'invalid', 'revoked'] }).notNull().default('active'),
+  createdBy: uuid('created_by').notNull().references(() => people.id),
+  createdAt: createdAt(),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+}, t => [
+  unique('outbound_accounts_company_id').on(t.companyId, t.id),
+  unique('outbound_accounts_label').on(t.channelId, t.label),
+  ...inPlace('outbound_accounts', t),
+  sameCompany('outbound_accounts_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_accounts_domain', sql`${t.senderDomain} = lower(${t.senderDomain}) AND ${t.senderDomain} <> ''`),
+  check('outbound_accounts_status', sql`${t.status} IN ('active', 'invalid', 'revoked')`),
+  check('outbound_accounts_generation', sql`${t.configGeneration} > 0`),
+]);
+
+/* Who writes from an account. Persistent, not a lease: one account to one author and one author to one account at a time.
+   A transfer is a new row with the next generation, and what was queued under the old one never moves to the new author. */
+export const outboundBindings = pgTable('outbound_bindings', {
+  id: id(),
+  companyId: companyId(),
+  accountId: uuid('account_id').notNull(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  generation: integer('generation').notNull(),
+  status: text('status', { enum: ['active', 'released'] }).notNull().default('active'),
+  createdBy: uuid('created_by').notNull().references(() => people.id),
+  createdAt: createdAt(),
+  releasedAt: at('released_at'),
+}, t => [
+  unique('outbound_bindings_generation').on(t.accountId, t.generation),
+  uniqueIndex('outbound_bindings_one_author').on(t.companyId, t.accountId).where(sql`${t.status} = 'active'`),
+  uniqueIndex('outbound_bindings_one_account').on(t.companyId, t.agentId).where(sql`${t.status} = 'active'`),
+  sameCompany('outbound_bindings_account', t.companyId, t.accountId, outboundAccounts),
+  check('outbound_bindings_status', sql`${t.status} IN ('active', 'released')`),
+  check('outbound_bindings_positive', sql`${t.generation} > 0`),
+  check('outbound_bindings_release', sql`(${t.status} = 'released') = (${t.releasedAt} IS NOT NULL)`),
+]);
+
+/* Everything a message may say: prices, links, claims, templates, lists. A revision is never changed, only published by a
+   person and later revoked. A model can propose one, and the publisher's column holds people only. */
+export const outboundCatalogRevisions = pgTable('outbound_catalog_revisions', {
+  id: id(),
+  ...placeColumns(),
+  channelId: uuid('channel_id'),
+  entryId: uuid('entry_id').notNull(),
+  revision: integer('revision').notNull(),
+  kind: text('kind', { enum: CATALOG_KINDS }).notNull(),
+  locale: text('locale'),
+  value: jsonb('value').$type<CatalogValue>().notNull(),
+  digest: text('digest').notNull(),
+  status: text('status', { enum: ['proposed', 'published', 'revoked'] }).notNull().default('proposed'),
+  validFrom: at('valid_from').notNull().defaultNow(),
+  validUntil: at('valid_until'),
+  createdByKind: text('created_by_kind', { enum: ['person', 'agent'] }).notNull(),
+  createdById: uuid('created_by_id').notNull(),
+  publishedBy: uuid('published_by').references(() => people.id),
+  publishedAt: at('published_at'),
+  revokedAt: at('revoked_at'),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_catalog_company_id').on(t.companyId, t.id),
+  unique('outbound_catalog_revision').on(t.companyId, t.entryId, t.revision),
+  ...inPlace('outbound_catalog', t),
+  sameCompany('outbound_catalog_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_catalog_positive', sql`${t.revision} > 0`),
+  check('outbound_catalog_kind', sql`${t.value} ->> 'kind' = ${t.kind}`),
+  check('outbound_catalog_status', sql`${t.status} IN ('proposed', 'published', 'revoked')`),
+  check('outbound_catalog_author', sql`${t.createdByKind} IN ('person', 'agent')`),
+  check('outbound_catalog_published', sql`(${t.status} = 'proposed') = (${t.publishedBy} IS NULL) AND (${t.publishedBy} IS NULL) = (${t.publishedAt} IS NULL)`),
+  check('outbound_catalog_revoked', sql`(${t.status} = 'revoked') = (${t.revokedAt} IS NOT NULL)`),
+  check('outbound_catalog_validity', sql`${t.validUntil} IS NULL OR ${t.validUntil} > ${t.validFrom}`),
+  isDigest('outbound_catalog_digest', t.digest),
+]);
+
+/* One row for one address in one company, whichever department met it, so that no copy escapes a refusal. Departments reach
+   it through permissions of their channels. Its address stays sealed. A refusal is for good. */
+export const outboundContacts = pgTable('outbound_contacts', {
+  id: id(),
+  companyId: companyId(),
+  kind: text('kind', { enum: ['email', 'direct'] }).notNull(),
+  addressEnc: text('address_enc').notNull(),
+  addressHash: text('address_hash').notNull(),
+  doNotContact: boolean('do_not_contact').notNull().default(false),
+  suppressedAt: at('suppressed_at'),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_contacts_company_id').on(t.companyId, t.id),
+  unique('outbound_contacts_address').on(t.companyId, t.kind, t.addressHash),
+  check('outbound_contacts_kind', sql`${t.kind} IN ('email', 'direct')`),
+  check('outbound_contacts_suppressed', sql`${t.doNotContact} = (${t.suppressedAt} IS NOT NULL)`),
+  isDigest('outbound_contacts_hash', t.addressHash),
+]);
+
+/* A contact's permission for one purpose on one channel. Once taken away it does not come back: a new grant is a new row. */
+export const outboundPermissions = pgTable('outbound_permissions', {
+  id: id(),
+  companyId: companyId(),
+  contactId: uuid('contact_id').notNull(),
+  channelId: uuid('channel_id').notNull(),
+  purpose: text('purpose').notNull(),
+  status: text('status', { enum: ['granted', 'revoked'] }).notNull().default('granted'),
+  source: text('source').notNull(),
+  evidenceDigest: text('evidence_digest').notNull(),
+  grantedAt: at('granted_at').notNull().defaultNow(),
+  revokedAt: at('revoked_at'),
+}, t => [
+  unique('outbound_permissions_company_id').on(t.companyId, t.id),
+  uniqueIndex('outbound_permissions_active').on(t.contactId, t.channelId, t.purpose).where(sql`${t.status} = 'granted'`),
+  sameCompany('outbound_permissions_contact', t.companyId, t.contactId, outboundContacts),
+  sameCompany('outbound_permissions_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_permissions_status', sql`${t.status} IN ('granted', 'revoked')`),
+  check('outbound_permissions_revoked', sql`(${t.status} = 'revoked') = (${t.revokedAt} IS NOT NULL)`),
+  isDigest('outbound_permissions_evidence', t.evidenceDigest),
+]);
+
+/* What happened to a contact's permissions, in order and never rewritten. One event counts once. */
+export const outboundContactEvents = pgTable('outbound_contact_events', {
+  id: id(),
+  companyId: companyId(),
+  contactId: uuid('contact_id').notNull(),
+  kind: text('kind', { enum: ['consent_granted', 'consent_revoked', 'unsubscribed', 'suppressed'] }).notNull(),
+  dedupKey: text('dedup_key').notNull(),
+  evidenceDigest: text('evidence_digest').notNull(),
+  occurredAt: at('occurred_at').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_contact_events_dedup').on(t.companyId, t.dedupKey),
+  sameCompany('outbound_contact_events_contact', t.companyId, t.contactId, outboundContacts),
+  check('outbound_contact_events_kind', sql`${t.kind} IN ('consent_granted', 'consent_revoked', 'unsubscribed', 'suppressed')`),
+  isDigest('outbound_contact_events_evidence', t.evidenceDigest),
+]);
+
+/* A support question as it came in. Each change is the next revision, so a receipt names exactly what it was about. */
+export const supportTickets = pgTable('support_tickets', {
+  id: id(),
+  ...placeColumns(),
+  ticketId: uuid('ticket_id').notNull(),
+  revision: integer('revision').notNull(),
+  contactId: uuid('contact_id').notNull(),
+  textEnc: text('text_enc').notNull(),
+  digest: text('digest').notNull(),
+  status: text('status', { enum: ['open', 'escalated', 'closed'] }).notNull().default('open'),
+  externalRef: text('external_ref'),
+  createdAt: createdAt(),
+}, t => [
+  unique('support_tickets_revision').on(t.companyId, t.ticketId, t.revision),
+  ...inPlace('support_tickets', t),
+  sameCompany('support_tickets_contact', t.companyId, t.contactId, outboundContacts),
+  check('support_tickets_positive', sql`${t.revision} > 0`),
+  check('support_tickets_status', sql`${t.status} IN ('open', 'escalated', 'closed')`),
+  isDigest('support_tickets_digest', t.digest),
+]);
+
+/* A receipt of the server's classifier: its id is the classificationReceiptId. Only the server decides it, once. */
+export const supportClassifications = pgTable('support_classifications', {
+  id: id(),
+  companyId: companyId(),
+  ticketId: uuid('ticket_id').notNull(),
+  ticketRevision: integer('ticket_revision').notNull(),
+  ticketDigest: text('ticket_digest').notNull(),
+  bindingDigest: text('binding_digest').notNull(),
+  idempotencyKey: uuid('idempotency_key').notNull(),
+  status: text('status', { enum: ['pending', 'ready', 'unavailable'] }).notNull().default('pending'),
+  classId: text('class_id'),
+  requiresHuman: boolean('requires_human'),
+  reasonCodes: jsonb('reason_codes').$type<ReasonCode[]>().notNull().default([]),
+  reviewer: jsonb('reviewer').$type<ModelIdentity>(),
+  decidedAt: at('decided_at'),
+  createdAt: createdAt(),
+}, t => [
+  unique('support_classifications_company_id').on(t.companyId, t.id),
+  unique('support_classifications_once').on(t.companyId, t.ticketId, t.ticketRevision, t.bindingDigest),
+  unique('support_classifications_idempotency').on(t.companyId, t.idempotencyKey),
+  foreignKey({ name: 'support_classifications_ticket', columns: [t.companyId, t.ticketId, t.ticketRevision], foreignColumns: [supportTickets.companyId, supportTickets.ticketId, supportTickets.revision] }),
+  check('support_classifications_status', sql`${t.status} IN ('pending', 'ready', 'unavailable')`),
+  check('support_classifications_decision', sql`CASE ${t.status}
+    WHEN 'pending' THEN ${t.classId} IS NULL AND ${t.requiresHuman} IS NULL AND ${t.reviewer} IS NULL AND ${t.decidedAt} IS NULL
+    WHEN 'ready' THEN ${t.classId} IS NOT NULL AND ${t.requiresHuman} IS NOT NULL AND ${t.reviewer} IS NOT NULL AND ${t.decidedAt} IS NOT NULL
+    ELSE ${t.classId} IS NULL AND ${t.requiresHuman} IS NULL AND ${t.decidedAt} IS NOT NULL END`),
+  isDigest('support_classifications_ticket_digest', t.ticketDigest),
+  isDigest('support_classifications_binding_digest', t.bindingDigest),
+]);
+
+/* One message of one author: to whom, from which account, and how far it got. Its bytes are in its revisions. What decided
+   its admission never changes; a retry with the same key finds this row. Its sampling numbers stay with it when it is
+   cancelled, so that nobody fishes for a number that is not reviewed. */
+export const outboundMessages = pgTable('outbound_messages', {
+  id: id(),
+  ...placeColumns(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  authorAgentId: uuid('author_agent_id').notNull().references(() => agents.id),
+  authorJobId: uuid('author_job_id').references(() => jobs.id),
+  idempotencyKey: uuid('idempotency_key').notNull(),
+  requestDigest: text('request_digest').notNull(),
+  channelId: uuid('channel_id').notNull(),
+  accountId: uuid('account_id').notNull(),
+  bindingGeneration: integer('binding_generation').notNull(),
+  targetKind: text('target_kind', { enum: ['contact', 'audience', 'ticket'] }).notNull(),
+  contactId: uuid('contact_id'),
+  audienceEntryId: uuid('audience_entry_id'),
+  ticketId: uuid('ticket_id'),
+  ticketRevision: integer('ticket_revision'),
+  classificationId: uuid('classification_id'),
+  segmentId: uuid('segment_id'),
+  samplingOrdinals: jsonb('sampling_ordinals').$type<Record<string, number>>().notNull().default({}),
+  revision: integer('revision').notNull().default(1),
+  status: text('status', { enum: MESSAGE_STATUSES }).notNull(),
+  reasonCodes: jsonb('reason_codes').$type<GateCode[]>().notNull().default([]),
+  scheduledAt: at('scheduled_at').notNull(),
+  createdAt: createdAt(),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+}, t => [
+  unique('outbound_messages_company_id').on(t.companyId, t.id),
+  unique('outbound_messages_idempotency').on(t.companyId, t.authorAgentId, t.idempotencyKey),
+  index('outbound_messages_due').on(t.scheduledAt).where(sql`${t.status} = 'scheduled'`),
+  index('outbound_messages_task').on(t.taskId),
+  ...inPlace('outbound_messages', t),
+  sameCompany('outbound_messages_channel', t.companyId, t.channelId, outboundChannels),
+  sameCompany('outbound_messages_account', t.companyId, t.accountId, outboundAccounts),
+  sameCompany('outbound_messages_contact', t.companyId, t.contactId, outboundContacts),
+  sameCompany('outbound_messages_classification', t.companyId, t.classificationId, supportClassifications),
+  foreignKey({ name: 'outbound_messages_binding', columns: [t.accountId, t.bindingGeneration], foreignColumns: [outboundBindings.accountId, outboundBindings.generation] }),
+  foreignKey({ name: 'outbound_messages_ticket', columns: [t.companyId, t.ticketId, t.ticketRevision], foreignColumns: [supportTickets.companyId, supportTickets.ticketId, supportTickets.revision] }),
+  check('outbound_messages_positive', sql`${t.revision} > 0`),
+  check('outbound_messages_status', sql`${t.status} IN ('scheduled', 'waiting_checks', 'waiting_approval', 'rejected', 'reserved', 'sending', 'sent', 'definitely_failed', 'unknown', 'cancelled')`),
+  check('outbound_messages_target', sql`CASE ${t.targetKind}
+    WHEN 'contact' THEN ${t.contactId} IS NOT NULL AND ${t.segmentId} IS NOT NULL AND ${t.audienceEntryId} IS NULL AND ${t.ticketId} IS NULL AND ${t.ticketRevision} IS NULL AND ${t.classificationId} IS NULL
+    WHEN 'audience' THEN ${t.audienceEntryId} IS NOT NULL AND ${t.segmentId} IS NOT NULL AND ${t.contactId} IS NULL AND ${t.ticketId} IS NULL AND ${t.ticketRevision} IS NULL AND ${t.classificationId} IS NULL
+    WHEN 'ticket' THEN ${t.contactId} IS NOT NULL AND ${t.ticketId} IS NOT NULL AND ${t.ticketRevision} IS NOT NULL AND ${t.classificationId} IS NOT NULL AND ${t.segmentId} IS NULL AND ${t.audienceEntryId} IS NULL
+    ELSE false END`),
+  check('outbound_messages_rejected', sql`${t.status} <> 'rejected' OR jsonb_array_length(${t.reasonCodes}) > 0`),
+  isDigest('outbound_messages_request', t.requestDigest),
+]);
+
+/* The exact bytes of one revision of a message, sealed, and what they were built from. Never changed: new bytes are the
+   next revision, and an approval or an attempt of the old one stays about the old one. */
+export const outboundMessageRevisions = pgTable('outbound_message_revisions', {
+  id: id(),
+  companyId: companyId(),
+  messageId: uuid('message_id').notNull(),
+  revision: integer('revision').notNull(),
+  document: jsonb('document').$type<MessageDocument>().notNull(),
+  contentDigest: text('content_digest').notNull(),
+  sealedEnc: text('sealed_enc').notNull(),
+  sourceRevisionsDigest: text('source_revisions_digest').notNull(),
+  policyId: uuid('policy_id').notNull(),
+  policyDigest: text('policy_digest').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_message_revisions_number').on(t.messageId, t.revision),
+  sameCompany('outbound_message_revisions_message', t.companyId, t.messageId, outboundMessages),
+  sameCompany('outbound_message_revisions_policy', t.companyId, t.policyId, outboundPolicies),
+  check('outbound_message_revisions_positive', sql`${t.revision} > 0`),
+  isDigest('outbound_message_revisions_content', t.contentDigest),
+  isDigest('outbound_message_revisions_sources', t.sourceRevisionsDigest),
+  isDigest('outbound_message_revisions_policy_digest', t.policyDigest),
+]);
+
+/* What a person's answer is an answer to: exact bytes, or an exact approach. A plain request with a matching kind in its
+   words is never enough, and a request that has no row here approves nothing. */
+export const outboundApprovals = pgTable('outbound_approvals', {
+  id: id(),
+  companyId: companyId(),
+  requestId: uuid('request_id').notNull(),
+  kind: text('kind', { enum: ['message', 'approach'] }).notNull(),
+  messageId: uuid('message_id'),
+  messageRevision: integer('message_revision'),
+  contentDigest: text('content_digest'),
+  accountId: uuid('account_id'),
+  bindingGeneration: integer('binding_generation'),
+  channelId: uuid('channel_id'),
+  templateId: uuid('template_id'),
+  templateRevision: integer('template_revision'),
+  segmentId: uuid('segment_id'),
+  locale: text('locale'),
+  policyDigest: text('policy_digest').notNull(),
+  sourceRevisionsDigest: text('source_revisions_digest').notNull(),
+  authorityFingerprint: text('authority_fingerprint').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_approvals_request').on(t.requestId),
+  sameCompany('outbound_approvals_of_request', t.companyId, t.requestId, requests),
+  sameCompany('outbound_approvals_message', t.companyId, t.messageId, outboundMessages),
+  sameCompany('outbound_approvals_account', t.companyId, t.accountId, outboundAccounts),
+  sameCompany('outbound_approvals_channel', t.companyId, t.channelId, outboundChannels),
+  foreignKey({ name: 'outbound_approvals_revision', columns: [t.messageId, t.messageRevision], foreignColumns: [outboundMessageRevisions.messageId, outboundMessageRevisions.revision] }),
+  check('outbound_approvals_kind', sql`CASE ${t.kind}
+    WHEN 'message' THEN ${t.messageId} IS NOT NULL AND ${t.messageRevision} IS NOT NULL AND ${t.contentDigest} IS NOT NULL AND ${t.accountId} IS NOT NULL AND ${t.bindingGeneration} IS NOT NULL AND ${t.channelId} IS NULL AND ${t.templateId} IS NULL AND ${t.templateRevision} IS NULL AND ${t.segmentId} IS NULL AND ${t.locale} IS NULL
+    WHEN 'approach' THEN ${t.channelId} IS NOT NULL AND ${t.templateId} IS NOT NULL AND ${t.templateRevision} IS NOT NULL AND ${t.segmentId} IS NOT NULL AND ${t.locale} IS NOT NULL AND ${t.messageId} IS NULL AND ${t.messageRevision} IS NULL AND ${t.contentDigest} IS NULL AND ${t.accountId} IS NULL AND ${t.bindingGeneration} IS NULL
+    ELSE false END`),
+  isDigest('outbound_approvals_content', t.contentDigest),
+  isDigest('outbound_approvals_policy', t.policyDigest),
+  isDigest('outbound_approvals_sources', t.sourceRevisionsDigest),
+  isDigest('outbound_approvals_authority', t.authorityFingerprint),
+]);
+
+/* What a fresh model said of one revision, built by the server from the call it really made. */
+export const outboundReviewReceipts = pgTable('outbound_review_receipts', {
+  id: id(),
+  companyId: companyId(),
+  messageId: uuid('message_id').notNull(),
+  messageRevision: integer('message_revision').notNull(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id),
+  bindingDigest: text('binding_digest').notNull(),
+  subjectDigest: text('subject_digest').notNull(),
+  reviewer: jsonb('reviewer').$type<ModelIdentity>().notNull(),
+  result: jsonb('result').$type<CheckResult>().notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_review_receipts_once').on(t.messageId, t.messageRevision, t.bindingDigest),
+  sameCompany('outbound_review_receipts_message', t.companyId, t.messageId, outboundMessages),
+  foreignKey({ name: 'outbound_review_receipts_revision', columns: [t.messageId, t.messageRevision], foreignColumns: [outboundMessageRevisions.messageId, outboundMessageRevisions.revision] }),
+  isDigest('outbound_review_receipts_binding', t.bindingDigest),
+  isDigest('outbound_review_receipts_subject', t.subjectDigest),
+]);
+
+/* A day's count of one account or sender domain. Removing it would reset a limit, so it stays. */
+export const outboundDailyUsage = pgTable('outbound_daily_usage', {
+  id: id(),
+  companyId: companyId(),
+  scope: text('scope', { enum: ['account', 'domain'] }).notNull(),
+  scopeKey: text('scope_key').notNull(),
+  day: date('day', { mode: 'string' }).notNull(),
+  timezone: text('timezone').notNull(),
+  limitVersion: integer('limit_version').notNull(),
+  reserved: integer('reserved').notNull().default(0),
+  accepted: integer('accepted').notNull().default(0),
+  unknown: integer('unknown').notNull().default(0),
+  definitelyFailed: integer('definitely_failed').notNull().default(0),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_daily_usage_company_id').on(t.companyId, t.id),
+  unique('outbound_daily_usage_bucket').on(t.companyId, t.scope, t.scopeKey, t.day, t.timezone, t.limitVersion),
+  check('outbound_daily_usage_scope', sql`${t.scope} IN ('account', 'domain')`),
+  check('outbound_daily_usage_counts', sql`${t.reserved} >= 0 AND ${t.accepted} >= 0 AND ${t.unknown} >= 0 AND ${t.definitelyFailed} >= 0`),
+]);
+
+/* One try at sending one revision, tied to all the generations it was admitted under. While it may have had an effect there
+   is no other of its message, and nothing else leaves its account: an unknown outcome keeps both closed until it is settled. */
+export const outboundAttempts = pgTable('outbound_attempts', {
+  id: id(),
+  companyId: companyId(),
+  messageId: uuid('message_id').notNull(),
+  messageRevision: integer('message_revision').notNull(),
+  accountId: uuid('account_id').notNull(),
+  bindingGeneration: integer('binding_generation').notNull(),
+  configGeneration: integer('config_generation').notNull(),
+  channelGeneration: integer('channel_generation').notNull(),
+  accountBucketId: uuid('account_bucket_id').notNull(),
+  domainBucketId: uuid('domain_bucket_id').notNull(),
+  status: text('status', { enum: ['reserved', 'sending', 'accepted', 'definitely_not_accepted', 'unknown'] }).notNull(),
+  providerReceipt: text('provider_receipt'),
+  safeCode: text('safe_code'),
+  leaseId: uuid('lease_id'),
+  leaseUntil: at('lease_until'),
+  startedAt: at('started_at'),
+  endedAt: at('ended_at'),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_attempts_company_id').on(t.companyId, t.id),
+  uniqueIndex('outbound_attempts_one_of_message').on(t.messageId).where(sql`${t.status} <> 'definitely_not_accepted'`),
+  uniqueIndex('outbound_attempts_one_of_account').on(t.companyId, t.accountId).where(sql`${t.status} IN ('sending', 'unknown')`),
+  sameCompany('outbound_attempts_message', t.companyId, t.messageId, outboundMessages),
+  sameCompany('outbound_attempts_account', t.companyId, t.accountId, outboundAccounts),
+  sameCompany('outbound_attempts_account_bucket', t.companyId, t.accountBucketId, outboundDailyUsage),
+  sameCompany('outbound_attempts_domain_bucket', t.companyId, t.domainBucketId, outboundDailyUsage),
+  foreignKey({ name: 'outbound_attempts_revision', columns: [t.messageId, t.messageRevision], foreignColumns: [outboundMessageRevisions.messageId, outboundMessageRevisions.revision] }),
+  foreignKey({ name: 'outbound_attempts_binding', columns: [t.accountId, t.bindingGeneration], foreignColumns: [outboundBindings.accountId, outboundBindings.generation] }),
+  check('outbound_attempts_status', sql`${t.status} IN ('reserved', 'sending', 'accepted', 'definitely_not_accepted', 'unknown')`),
+  check('outbound_attempts_outcome', sql`CASE ${t.status}
+    WHEN 'accepted' THEN ${t.providerReceipt} IS NOT NULL AND ${t.safeCode} IS NULL AND ${t.endedAt} IS NOT NULL
+    WHEN 'definitely_not_accepted' THEN ${t.safeCode} IS NOT NULL AND ${t.providerReceipt} IS NULL AND ${t.endedAt} IS NOT NULL
+    WHEN 'unknown' THEN ${t.safeCode} IS NOT NULL AND ${t.providerReceipt} IS NULL AND ${t.endedAt} IS NOT NULL
+    ELSE ${t.safeCode} IS NULL AND ${t.providerReceipt} IS NULL AND ${t.endedAt} IS NULL END`),
+]);
+
+/* What a provider said later: delivered, bounced, refused, complained. One event of one source counts once. */
+export const outboundEvents = pgTable('outbound_events', {
+  id: id(),
+  companyId: companyId(),
+  attemptId: uuid('attempt_id'),
+  kind: text('kind', { enum: ['delivered', 'bounce', 'refusal', 'complaint'] }).notNull(),
+  source: text('source').notNull(),
+  providerEventId: text('provider_event_id').notNull(),
+  occurredAt: at('occurred_at').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_events_once').on(t.companyId, t.source, t.providerEventId),
+  sameCompany('outbound_events_attempt', t.companyId, t.attemptId, outboundAttempts),
+  check('outbound_events_kind', sql`${t.kind} IN ('delivered', 'bounce', 'refusal', 'complaint')`),
+]);
+
+/* The numbers sampling goes by: one counter of a channel, of a segment or of an author. It only goes on, whatever is
+   retried or cancelled, so that a number nobody reviews cannot be fished for. */
+export const outboundSamplingCounters = pgTable('outbound_sampling_counters', {
+  id: id(),
+  companyId: companyId(),
+  channelId: uuid('channel_id').notNull(),
+  scope: text('scope', { enum: ['channel', 'segment', 'author'] }).notNull(),
+  scopeKey: text('scope_key').notNull(),
+  next: integer('next').notNull().default(1),
+  cleanOutcomes: integer('clean_outcomes').notNull().default(0),
+  createdAt: createdAt(),
+}, t => [
+  unique('outbound_sampling_counters_scope').on(t.companyId, t.channelId, t.scope, t.scopeKey),
+  sameCompany('outbound_sampling_counters_channel', t.companyId, t.channelId, outboundChannels),
+  check('outbound_sampling_counters_kind', sql`${t.scope} IN ('channel', 'segment', 'author')`),
+  check('outbound_sampling_counters_values', sql`${t.next} > 0 AND ${t.cleanOutcomes} >= 0`),
+]);
+
+/* A binding proved by a finished run. At most one is active for a check, and once it ended it stays ended. */
+export const modelCheckCertificates = pgTable('model_check_certificates', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  bindingDigest: text('binding_digest').notNull(),
+  reportId: uuid('report_id').notNull(),
+  evaluatedAt: at('evaluated_at').notNull(),
+  validUntil: at('valid_until').notNull(),
+  status: text('status', { enum: ['active', 'invalidated'] }).notNull().default('active'),
+  invalidatedReason: text('invalidated_reason', { enum: INVALIDATION_CODES }),
+  invalidatedAt: at('invalidated_at'),
+  createdAt: createdAt(),
+}, t => [
+  uniqueIndex('model_check_certificates_one_active').on(t.checkId).where(sql`${t.status} = 'active'`),
+  foreignKey({ name: 'model_check_certificates_report', columns: [t.reportId], foreignColumns: [modelCheckEvaluations.id] }).onDelete('cascade'),
+  check('model_check_certificates_status', sql`${t.status} IN ('active', 'invalidated')`),
+  check('model_check_certificates_validity', sql`${t.validUntil} > ${t.evaluatedAt}`),
+  check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
+  isDigest('model_check_certificates_binding', t.bindingDigest),
+]);
+
+/* Server-only coordination beside canonical jobs and test parts. A live scope
+   has one episode; closing it permits a later outage with a new identity. */
+export const externalRecoveryCases = pgTable('external_recovery_cases', {
+  id: id(),
+  companyId: companyId(),
+  scopeDigest: text('scope_digest').notNull(),
+  adapter: text('adapter', { enum: ['git'] }).notNull(),
+  endpointDigest: text('endpoint_digest').notNull(),
+  credentialRevision: integer('credential_revision').notNull(),
+  failureFamily: text('failure_family', { enum: ['transport', 'temporary', 'rate_limit'] }).notNull(),
+  generation: integer('generation').notNull().default(1),
+  firstFailureAt: timestamp('first_failure_at', { withTimezone: true }).notNull().defaultNow(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+  opsDeadlineAt: timestamp('ops_deadline_at', { withTimezone: true }).notNull(),
+  policyRevision: integer('policy_revision').notNull(),
+  ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+  claimOperationId: uuid('claim_operation_id'),
+  claimUntil: timestamp('claim_until', { withTimezone: true }),
+  releaseRevision: integer('release_revision').notNull().default(0),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('external_cases_company_identity').on(t.id, t.companyId),
+  uniqueIndex('external_cases_open_scope').on(t.companyId, t.scopeDigest).where(sql`${t.resolvedAt} IS NULL`),
+  index('external_cases_due').on(t.nextAttemptAt).where(sql`${t.resolvedAt} IS NULL`),
+  index('external_cases_ops_due').on(t.opsDeadlineAt).where(sql`${t.resolvedAt} IS NULL`),
+  check('external_cases_scope', sql`${t.scopeDigest} ~ '^[a-f0-9]{64}$' AND ${t.endpointDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_cases_adapter', sql`${t.adapter} = 'git'`),
+  check('external_cases_family', sql`${t.failureFamily} IN ('transport','temporary','rate_limit')`),
+  check('external_cases_revisions', sql`${t.credentialRevision} > 0 AND ${t.policyRevision} > 0 AND ${t.generation} > 0 AND ${t.releaseRevision} >= 0`),
+  check('external_cases_deadline', sql`${t.opsDeadlineAt} >= ${t.firstFailureAt}`),
+  check('external_cases_claim_pair', sql`(${t.claimOperationId} IS NULL) = (${t.claimUntil} IS NULL)`),
+]);
+
+/* Intent/consumer data is sealed by the authenticated producer, never copied
+   from a public task event or a command's stdout marker. */
+export const externalOperations = pgTable('external_operations', {
+  id: id(),
+  companyId: companyId(),
+  intentDigest: text('intent_digest').notNull(),
+  intent: jsonb('intent').$type<ExternalGitIntent>().notNull(),
+  consumer: jsonb('consumer').$type<ExternalConsumer>().notNull(),
+  state: text('state', { enum: ['ready', 'executing', 'deferred', 'outcome_unknown', 'satisfied', 'failed_permanent', 'cancelled'] }).notNull().default('ready'),
+  generation: integer('generation').notNull().default(1),
+  currentAttemptId: uuid('current_attempt_id'),
+  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
+  postconditionSha: text('postcondition_sha'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('external_operations_company_identity').on(t.id, t.companyId),
+  index('external_operations_state').on(t.companyId, t.state),
+  check('external_operations_digest', sql`${t.intentDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_operations_generation', sql`${t.generation} > 0`),
+  check('external_operations_state', sql`${t.state} IN ('ready','executing','deferred','outcome_unknown','satisfied','failed_permanent','cancelled')`),
+  check('external_operations_intent_bound', sql`jsonb_typeof(${t.intent}) = 'object' AND octet_length(${t.intent}::text) <= 16384`),
+  check('external_operations_consumer_bound', sql`jsonb_typeof(${t.consumer}) = 'object' AND octet_length(${t.consumer}::text) <= 4096`),
+  check('external_operations_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
+  check('external_operations_postcondition', sql`${t.postconditionSha} IS NULL OR ${t.postconditionSha} ~ '^[a-f0-9]{40}$'`),
+]);
+
+export const externalRecoveryMembers = pgTable('external_recovery_members', {
+  companyId: companyId(),
+  caseId: uuid('case_id').notNull(),
+  operationId: uuid('operation_id').notNull(),
+  releaseRevision: integer('release_revision').notNull().default(0),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [
+  primaryKey({ columns: [t.caseId, t.operationId] }),
+  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
+  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
+  index('external_members_operation').on(t.operationId),
+  check('external_members_release_revision', sql`${t.releaseRevision} >= 0`),
+]);
+
+/* Attempts retain old identities and receipts after replacement. A new fence
+   alone is never evidence that the previous remote child stopped. */
+export const externalRecoveryAttempts = pgTable('external_recovery_attempts', {
+  id: id(),
+  companyId: companyId(),
+  operationId: uuid('operation_id').notNull(),
+  generation: integer('generation').notNull(),
+  producerNodeId: uuid('producer_node_id').references(() => nodes.id),
+  producerLinkId: uuid('producer_link_id'),
+  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
+  settlement: jsonb('settlement').$type<ExternalPreparationSettlement>(),
+  receiptDigest: text('receipt_digest'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
+  unique('external_attempts_generation').on(t.operationId, t.generation),
+  check('external_attempts_generation_positive', sql`${t.generation} > 0`),
+  check('external_attempts_receipt', sql`${t.receiptDigest} IS NULL OR ${t.receiptDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_attempts_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
+  check('external_attempts_settlement_bound', sql`${t.settlement} IS NULL OR (jsonb_typeof(${t.settlement}) = 'object' AND octet_length(${t.settlement}::text) <= 4096)`),
+]);
+
+/* The coordinator reserves and enqueues the same logical notification in one
+   transaction. No delivery or release is inferred from a reservation alone. */
+export const externalRecoveryNotices = pgTable('external_recovery_notices', {
+  id: id(),
+  companyId: companyId(),
+  caseId: uuid('case_id').notNull(),
+  noticeKind: text('notice_kind', { enum: ['operations'] }).notNull(),
+  notificationId: uuid('notification_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
+  unique('external_notices_one_logical_signal').on(t.companyId, t.caseId, t.noticeKind),
+  check('external_notices_kind', sql`${t.noticeKind} = 'operations'`),
+]);
+
+/* Private repository guard rows carry identity only, never a Git credential. */
+export const workspaceRepositories = pgTable('workspace_repositories', {
+  id: id(), companyId: companyId(), canonicalUrl: text('canonical_url').notNull(), createdAt: createdAt(),
+}, t => [
+  unique('workspace_repositories_company_identity').on(t.companyId, t.canonicalUrl),
+  unique('workspace_repositories_company_id').on(t.companyId, t.id),
+  check('workspace_repositories_https', sql`${t.canonicalUrl} ~ '^https://[^/@?#[:space:]]+/[^?#[:space:]]+$'`),
+]);
+
+const workspaceCount = (column: AnyPgColumn, minimum: 0 | 1 = 0) => sql`${column} BETWEEN ${sql.raw(String(minimum))} AND 9007199254740991`;
+const workspaceSha = (column: AnyPgColumn) => sql`${column} ~ '^[0-9a-f]{40}$'`;
+const workspaceList = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'array' AND jsonb_array_length(${column}) > 0 AND octet_length(${column}::text) <= 65536`;
+export const WORKSPACE_PHASES = ['reserved', 'preparing', 'work', 'submitting', 'submission_waiting', 'review', 'merge_pending', 'merged', 'cleanup_pending', 'removed', 'return_pending', 'pausing_other', 'paused', 'retained', 'problem'] as const;
+
+/* A planned task without an integration plan has no row here and owns no slot or area. */
+export const taskWorkspaces = pgTable('task_workspaces', {
+  id: id(), companyId: companyId(),
+  repositoryId: uuid('repository_id').notNull(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  nodeId: uuid('node_id').references(() => nodes.id), builtin: boolean('builtin').notNull(),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), baseSha: text('base_sha').notNull(), baseRef: text('base_ref').notNull(),
+  specVersion: integer('spec_version').notNull().default(1),
+  areas: jsonb('areas').$type<string[]>().notNull(),
+  requiredIntegrations: jsonb('required_integrations').$type<IntegrationTarget[]>().notNull(),
+  phase: text('phase', { enum: WORKSPACE_PHASES }).notNull().default('reserved'),
+  isCurrent: boolean('is_current').notNull().default(true),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull().default(0),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  problem: text('problem').$type<WorkspaceProblemCode>(),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'task_workspaces_company_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  unique('task_workspaces_binding_identity').on(t.companyId, t.id, t.bindingVersion),
+  uniqueIndex('task_workspaces_current_assignment').on(t.companyId, t.taskId, t.assignmentEpoch).where(sql`${t.isCurrent}`),
+  index('task_workspaces_author_phase').on(t.companyId, t.agentId, t.phase),
+  check('task_workspaces_node', sql`(${t.builtin} AND ${t.nodeId} IS NULL) OR (NOT ${t.builtin} AND ${t.nodeId} IS NOT NULL)`),
+  check('task_workspaces_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.bindingVersion, 1)} AND ${workspaceCount(t.submissionRevision)} AND ${workspaceCount(t.switchGeneration)}`),
+  check('task_workspaces_pin', sql`${workspaceSha(t.baseSha)} AND ${t.specVersion} = 1 AND length(${t.taskBranch}) BETWEEN 1 AND 240 AND length(${t.baseRef}) BETWEEN 1 AND 240`),
+  check('task_workspaces_policy', sql`${workspaceList(t.areas)} AND ${workspaceList(t.requiredIntegrations)}`),
+  check('task_workspaces_phase', sql`${t.phase} IN ('reserved','preparing','work','submitting','submission_waiting','review','merge_pending','merged','cleanup_pending','removed','return_pending','pausing_other','paused','retained','problem')`),
+]);
+
+/* Durable capacity is not reconstructed from task workflow status or reviewer panel membership. */
+export const authorWorkspaceSlots = pgTable('author_workspace_slots', {
+  companyId: companyId(), agentId: uuid('agent_id').notNull().references(() => agents.id),
+  heldTaskIds: uuid('held_task_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  executionTaskId: uuid('execution_task_id').references(() => tasks.id),
+  executionJobId: uuid('execution_job_id').references(() => jobs.id),
+  reviewTaskId: uuid('review_task_id').references(() => tasks.id),
+  pausedTaskId: uuid('paused_task_id').references(() => tasks.id),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.companyId, t.agentId] }),
+  check('author_workspace_slots_held', sql`cardinality(${t.heldTaskIds}) <= 2 AND array_position(${t.heldTaskIds}, NULL) IS NULL AND (cardinality(${t.heldTaskIds}) < 2 OR ${t.heldTaskIds}[1] <> ${t.heldTaskIds}[2])`),
+  check('author_workspace_slots_execution', sql`(${t.executionTaskId} IS NULL OR ${t.executionTaskId} = ANY(${t.heldTaskIds})) AND (${t.executionJobId} IS NULL OR ${t.executionTaskId} IS NOT NULL)`),
+  check('author_workspace_slots_review', sql`${t.reviewTaskId} IS NULL OR ${t.reviewTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_paused', sql`${t.pausedTaskId} IS NULL OR ${t.pausedTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_counts', sql`${workspaceCount(t.switchGeneration)} AND ${workspaceCount(t.version)}`),
+]);
+
+const workspaceLink = () => ({
+  companyId: companyId(), workspaceId: uuid('workspace_id').notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+});
+const workspaceForeignKey = (name: string, columns: { companyId: AnyPgColumn; workspaceId: AnyPgColumn; bindingVersion: AnyPgColumn }) =>
+  foreignKey({ name, columns: [columns.companyId, columns.workspaceId, columns.bindingVersion], foreignColumns: [taskWorkspaces.companyId, taskWorkspaces.id, taskWorkspaces.bindingVersion] });
+
+export const taskAreaLocks = pgTable('task_area_locks', {
+  id: id(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  area: text('area').notNull(), areaKey: text('area_key').notNull(),
+  createdAt: createdAt(), releasedAt: timestamp('released_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_area_locks_binding_fk', t),
+  foreignKey({ name: 'task_area_locks_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  uniqueIndex('task_area_locks_active_claim').on(t.companyId, t.workspaceId, t.areaKey).where(sql`${t.releasedAt} IS NULL`),
+  index('task_area_locks_repository').on(t.companyId, t.repositoryId),
+  check('task_area_locks_nonempty', sql`length(${t.area}) BETWEEN 1 AND 4096 AND length(${t.areaKey}) BETWEEN 1 AND 4096`),
+]);
+
+/* Pending plan metadata has no physical workspace. Other records are private durable outbox intents. */
+export const taskWorkspaceOperations = pgTable('task_workspace_operations', {
+  id: id(), companyId: companyId(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  jobId: uuid('job_id').references(() => jobs.id), workspaceId: uuid('workspace_id'),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }),
+  sourceNode: jsonb('source_node').$type<NodeRef>(),
+  kind: text('kind').notNull(), phase: text('phase').notNull(), idempotencyKey: text('idempotency_key').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), sentAt: timestamp('sent_at', { withTimezone: true }),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_operations_binding_fk', t),
+  unique('task_workspace_operations_idempotent').on(t.companyId, t.idempotencyKey),
+  index('task_workspace_operations_outbox').on(t.companyId, t.phase, t.createdAt),
+  check('task_workspace_operations_pending', sql`${t.phase} <> 'pending_integration_plan' OR (${t.workspaceId} IS NULL AND ${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_binding_pair', sql`(${t.workspaceId} IS NULL) = (${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.version)} AND (${t.bindingVersion} IS NULL OR ${workspaceCount(t.bindingVersion, 1)})`),
+  check('task_workspace_operations_payload', sql`jsonb_typeof(${t.payload}) = 'object' AND octet_length(${t.payload}::text) <= 1048576`),
+]);
+
+export const taskWorkspaceSubmissions = pgTable('task_workspace_submissions', {
+  id: id(), ...workspaceLink(), revision: bigint('revision', { mode: 'number' }).notNull(),
+  headSha: text('head_sha').notNull(), publicationReceiptId: uuid('publication_receipt_id'),
+  publication: jsonb('publication').$type<Record<string, unknown>>(),
+  sourceOperationId: uuid('source_operation_id').references(() => taskWorkspaceOperations.id),
+  phase: text('phase').notNull(), createdAt: createdAt(), sealedAt: timestamp('sealed_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_submissions_binding_fk', t),
+  unique('task_workspace_submissions_revision').on(t.companyId, t.workspaceId, t.bindingVersion, t.revision),
+  check('task_workspace_submissions_revision_positive', workspaceCount(t.revision, 1)),
+  check('task_workspace_submissions_pin', workspaceSha(t.headSha)),
+  check('task_workspace_submissions_publication_pair', sql`(${t.publicationReceiptId} IS NULL) = (${t.publication} IS NULL)`),
+]);
+
+export const taskWorkspaceSessions = pgTable('task_workspace_sessions', {
+  id: id(), ...workspaceLink(), provider: text('provider').notNull(),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  model: text('model'), instructionsHash: text('instructions_hash').notNull(),
+  nativeSessionId: text('native_session_id'), lastJobId: uuid('last_job_id').references(() => jobs.id),
+  createdAt: createdAt(), endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_sessions_binding_fk', t),
+  index('task_workspace_sessions_lookup').on(t.companyId, t.workspaceId, t.bindingVersion, t.provider),
+  check('task_workspace_sessions_instructions', sql`${t.instructionsHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
+/* Only the registered integration producer supplies this exact H -> M receipt and confirmation time. */
+export const taskWorkspaceMergeReceipts = pgTable('task_workspace_merge_receipts', {
+  id: uuid('id').primaryKey(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), submittedHeadSha: text('submitted_head_sha').notNull(),
+  publicationReceiptId: uuid('publication_receipt_id').notNull(),
+  integrationKind: text('integration_kind', { enum: ['turn', 'main'] }).notNull(), integrationRef: text('integration_ref').notNull(),
+  integrationCommitSha: text('integration_commit_sha').notNull(), batchOrReleaseId: text('batch_or_release_id').notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+}, t => [
+  workspaceForeignKey('task_workspace_merge_receipts_binding_fk', t),
+  foreignKey({ name: 'workspace_receipts_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  foreignKey({ name: 'workspace_receipts_submission_fk', columns: [t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision], foreignColumns: [taskWorkspaceSubmissions.companyId, taskWorkspaceSubmissions.workspaceId, taskWorkspaceSubmissions.bindingVersion, taskWorkspaceSubmissions.revision] }),
+  unique('task_workspace_receipts_target').on(t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision, t.integrationKind, t.integrationRef),
+  check('task_workspace_receipts_pins', sql`${workspaceSha(t.submittedHeadSha)} AND ${workspaceSha(t.integrationCommitSha)}`),
+  check('task_workspace_receipts_target_kind', sql`${t.integrationKind} IN ('turn','main')`),
+]);
+
+/* Registered staging metadata stays private; a row alone is not native health or publication evidence. */
+export const stagingPlans = pgTable('staging_plans', {
+  id: id(), companyId: companyId(), repositoryId: uuid('repository_id').notNull(),
+  turnId: uuid('turn_id').notNull(), generation: bigint('generation', { mode: 'number' }).notNull(),
+  baseRef: text('base_ref').notNull(), baseSha: text('base_sha').notNull(),
+  requiredIntegrations: jsonb('required_integrations').$type<IntegrationTarget[]>().notNull(),
+  healthRunId: uuid('health_run_id').references(() => testRuns.id),
+  isCurrent: boolean('is_current').notNull().default(true),
+  enabled: boolean('enabled').notNull().default(false),
+  maxBatchSize: integer('max_batch_size').notNull().default(4),
+  maxWaitMs: bigint('max_wait_ms', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'staging_plans_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  foreignKey({ name: 'staging_plans_turn_fk', columns: [t.companyId, t.turnId], foreignColumns: [turns.companyId, turns.id] }),
+  unique('staging_plans_generation').on(t.companyId, t.id, t.generation),
+  uniqueIndex('staging_plans_current_root').on(t.companyId, t.repositoryId, t.turnId).where(sql`${t.isCurrent}`),
+  check('staging_plans_counts', sql`${workspaceCount(t.generation, 1)} AND ${workspaceCount(t.maxBatchSize, 1)} AND ${workspaceCount(t.maxWaitMs)}`),
+  check('staging_plans_pin', sql`${workspaceSha(t.baseSha)} AND length(${t.baseRef}) BETWEEN 1 AND 240`),
+  check('staging_plans_targets', workspaceList(t.requiredIntegrations)),
+]);
+
+export const stagingBatches = pgTable('staging_batches', {
+  id: id(), companyId: companyId(), planId: uuid('plan_id').notNull(),
+  planGeneration: bigint('plan_generation', { mode: 'number' }).notNull(), baseSha: text('base_sha').notNull(),
+  submissionIds: uuid('submission_ids').array().notNull(),
+  sourceSnapshot: jsonb('source_snapshot').$type<Record<string, unknown>[]>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  phase: text('phase').notNull().default('preparing'), version: bigint('version', { mode: 'number' }).notNull().default(0),
+  result: jsonb('result').$type<Record<string, unknown>>(),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ name: 'staging_batches_plan_fk', columns: [t.companyId, t.planId, t.planGeneration], foreignColumns: [stagingPlans.companyId, stagingPlans.id, stagingPlans.generation] }),
+  unique('staging_batches_company_id').on(t.companyId, t.id),
+  unique('staging_batches_idempotent').on(t.companyId, t.idempotencyKey),
+  index('staging_batches_plan_phase').on(t.companyId, t.planId, t.phase),
+  check('staging_batches_counts', sql`${workspaceCount(t.version)} AND ${workspaceCount(t.planGeneration, 1)}`),
+  check('staging_batches_members', sql`cardinality(${t.submissionIds}) > 0 AND array_position(${t.submissionIds}, NULL) IS NULL`),
+  check('staging_batches_snapshot', workspaceList(t.sourceSnapshot)),
+  check('staging_batches_pin', workspaceSha(t.baseSha)),
+  check('staging_batches_key', sql`length(${t.idempotencyKey}) BETWEEN 1 AND 512`),
+  check('staging_batches_phase', sql`${t.phase} IN ('preparing','checking','splitting','ready','publishing','published','blocked','cancelled')`),
+]);
+
+export const stagingTrials = pgTable('staging_trials', {
+  id: id(), companyId: companyId(), batchId: uuid('batch_id').notNull(), ordinal: integer('ordinal').notNull(),
+  submissionIds: uuid('submission_ids').array().notNull(),
+  candidateSha: text('candidate_sha'), candidateRef: text('candidate_ref'), treeSha: text('tree_sha'),
+  testRunId: uuid('test_run_id').references(() => testRuns.id),
+  partIds: uuid('part_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  failure: jsonb('failure').$type<{ suiteId: string; file: string; test: string }>(),
+  phase: text('phase').notNull().default('preparing'), version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'staging_trials_batch_fk', columns: [t.companyId, t.batchId], foreignColumns: [stagingBatches.companyId, stagingBatches.id] }),
+  unique('staging_trials_batch_identity').on(t.companyId, t.batchId, t.id),
+  unique('staging_trials_ordinal').on(t.companyId, t.batchId, t.ordinal),
+  check('staging_trials_counts', sql`${workspaceCount(t.ordinal, 1)} AND ${workspaceCount(t.version)}`),
+  check('staging_trials_members', sql`cardinality(${t.submissionIds}) > 0 AND array_position(${t.submissionIds}, NULL) IS NULL`),
+  check('staging_trials_pins', sql`${workspaceSha(t.candidateSha)} AND ${workspaceSha(t.treeSha)}`),
+  check('staging_trials_phase', sql`${t.phase} IN ('preparing','prepared','checking','passed','failed','unattributed','conflict','publishing','published','stale','cancelled')`),
+  check('staging_trials_checked', sql`${t.phase} NOT IN ('passed','failed','unattributed','publishing','published') OR (${t.candidateSha} IS NOT NULL AND ${t.testRunId} IS NOT NULL AND cardinality(${t.partIds}) > 0)`),
+]);
+
+/* Intents use the existing node transport. No worker, command or credential channel is created by this outbox. */
+export const stagingOperations = pgTable('staging_operations', {
+  id: id(), companyId: companyId(), batchId: uuid('batch_id').notNull(), trialId: uuid('trial_id').notNull(),
+  kind: text('kind').notNull(), phase: text('phase').notNull().default('queued'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  expectedRef: text('expected_ref'), expectedBeforeSha: text('expected_before_sha'), expectedAfterSha: text('expected_after_sha'),
+  runId: uuid('run_id').references(() => testRuns.id), sourceNode: jsonb('source_node').$type<NodeRef>(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(), result: jsonb('result').$type<Record<string, unknown>>(),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), sentAt: timestamp('sent_at', { withTimezone: true }), settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ name: 'staging_operations_trial_fk', columns: [t.companyId, t.batchId, t.trialId], foreignColumns: [stagingTrials.companyId, stagingTrials.batchId, stagingTrials.id] }),
+  unique('staging_operations_idempotent').on(t.companyId, t.idempotencyKey),
+  index('staging_operations_pending').on(t.companyId, t.phase, t.createdAt),
+  check('staging_operations_kind', sql`${t.kind} IN ('prepare','publish_trial','publish_staging','publish_turn')`),
+  check('staging_operations_phase', sql`${t.phase} IN ('queued','sent','confirmed','conflict','unavailable','cancelled')`),
+  check('staging_operations_version', workspaceCount(t.version)),
+  check('staging_operations_key', sql`length(${t.idempotencyKey}) BETWEEN 1 AND 512`),
+  check('staging_operations_pins', sql`${workspaceSha(t.expectedBeforeSha)} AND ${workspaceSha(t.expectedAfterSha)}`),
+  check('staging_operations_payload', sql`jsonb_typeof(${t.payload}) = 'object' AND octet_length(${t.payload}::text) <= 1048576`),
+  check('staging_operations_confirmed', sql`${t.phase} <> 'confirmed' OR (${t.result} IS NOT NULL AND ${t.settledAt} IS NOT NULL)`),
 ]);

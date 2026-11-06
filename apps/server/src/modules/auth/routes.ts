@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Deps } from '../../app.js';
+import type { Ctx } from '../../app.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -21,7 +21,7 @@ const fallbackHash = () => (dummyHash ??= hashPassword('hornhoof-no-such-person'
 
 const wrongPassword = () => new ApiError(401, 'unauthorized', 'Wrong email or password.', 'wrong_password');
 
-export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
+export function authRoutes(app: FastifyInstance, { db, config, bus }: Ctx): void {
   /* Counted per email and address, so whoever knows the owner's email cannot lock the owner out from elsewhere; and per
      email from anywhere, more softly, so many addresses cannot guess one password freely. */
   const attempts = limiter();
@@ -43,7 +43,10 @@ export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
+    const me = await requirePerson(req, db).catch(() => null);
     await endSession(req, reply, db);
+    /* What the person still has open closes now, not at its next look. */
+    if (me) bus.accessChanged(me.companyId);
     reply.code(204).send();
   });
 

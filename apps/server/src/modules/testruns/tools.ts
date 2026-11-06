@@ -3,6 +3,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
+import { endOwnWait } from '../tasks/external-wait.js';
+import { taskByRef } from '../tasks/views.js';
+import { refuse } from '../tasks/engine.js';
 import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
 import { startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
@@ -34,15 +37,17 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
+        "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation. With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
-        "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, any wait_for of yours on the task ends and you are woken on it " +
-        `with the result: passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
+        "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
+        `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
         'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
         "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
       inputSchema: {
-        command: z.string().trim().min(1).max(4000).describe('What runs the suite in the fresh clone, for example installing and then testing.'),
+        command: z.string().trim().min(1).max(4000).optional().describe('Manual command, including installation. Omit it for the pinned product environment.'),
+        suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
+        profile: z.string().min(1).max(64).optional().describe('Product profile ID; defaults to defaultProfile in the pinned manifest.'),
         task: TaskRef('whose branch it tests'),
         branch: Branch.optional().describe("By default the task's own: task-<number>, or the only branch that starts with task-<number>-."),
         parts: Parts,
@@ -57,6 +62,19 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run))),
   );
   server.registerTool(
+    'end_wait',
+    {
+      description: "Ends your own wait_for on a task you hold, when what it waited for is over: when a run's result reached you and the wait did not name that run, say. Nobody is woken; you go on in this turn.",
+      inputSchema: { task: z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.') },
+    },
+    async ({ task: ref }) => answer(async () => {
+      const task = await taskByRef(ctx, job.companyId, ref);
+      if (!task) throw refuse(404, 'task_unknown', `There is no task ${ref} you can act on.`);
+      const { reason } = await endOwnWait(ctx, job.agentId, task.id);
+      return `The wait for "${reason}" on #${task.number} is over. Go on with the task.`;
+    }),
+  );
+  server.registerTool(
     'stop_tests',
     { description: 'Stops a test run: every part of it that waits or runs. Whoever started it hears of it when that was someone else.', inputSchema: { run: Run } },
     async ({ run }) => answer(() => stopRun(ctx, job, run)),
@@ -68,7 +86,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         "Runs any command for a task on whichever machine of the company is free now, not on yours, and returns at once with the run's number: a build, a render, a data job, a long " +
         'check, whatever the task needs done away from your own machine. The command runs in a fresh empty folder, or in a fresh clone of branch when you name one. ' +
         `The task's files you name in files are put in the folder first ($HH_IN holds them; beside a clone it is a folder of its own). Every plain file the command leaves in $HH_OUT goes on ` +
-        `the task as work-<run>-<part>-<name>, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and each part's log as work-<run>-<part>.log. When every part has ended, however it ended, any wait_for of yours on the task ends and you are woken on ` +
+        `the task as work-<run>-<part>-<name>, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and each part's log as work-<run>-<part>.log. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. You hear of ` +
         "it with the result. parts splits it into up to " +
         `${MAX_TEST_PARTS} parts on several machines at once: the command says which part with {part} and how many with {parts}, and HH_PART and HH_PARTS hold them too. ` +
         'A machine whose processors are busy takes no new part. A part whose machine restarts runs again on another one, at most twice. A part whose machine goes offline may ' +

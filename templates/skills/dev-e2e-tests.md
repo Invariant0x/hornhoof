@@ -11,4 +11,4 @@ sources: [affaan-m/ECC skills/e2e-testing/SKILL.md, openai/skills skills/.curate
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - A test that fails sometimes is a bug in the test or the product; find which before retrying it.
-- Run them in CI on every change to the main line and before every release.
+- Developers write the failing regression and run only affected tests through `run_tests`. The test engineer or QA owns the shared end-to-end, browser-engine and live checks once per turn on the final candidate through `run_tests` (`hh-run-checks`); authors do not repeat those final checks for each task.

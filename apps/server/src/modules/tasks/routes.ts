@@ -1,5 +1,7 @@
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { turnCounts } from './turn-progress.js';
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
@@ -7,13 +9,14 @@ import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, tasks, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import type { DecidedBy } from '../../auth/decisions.js';
@@ -23,11 +26,15 @@ import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
 import { detailFor, factsFor, linesFor, seesTask } from './sight.js';
+import { acknowledgeCard, waitCards } from './wait-cards.js';
+import { replanWait } from './wait-state.js';
+import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
+  urgent: z.boolean().optional(),
   title: z.string().trim().min(1).max(120),
   brief: z.string().max(600).default(''),
   body: z.string().max(20000).default(''),
@@ -35,7 +42,17 @@ const NewTaskBody = z.object({
   product: z.uuid().optional(),
   /* Tasks of the turn, by number, that must be done first. */
   after: z.array(z.number().int().positive()).max(10).optional(),
+  /* A promise of dates for an edge, where someone made one; without it the department's dates stand. */
+  afterPlans: z.array(z.strictObject({ task: z.number().int().positive(), plan: WaitPlan })).max(10).optional(),
+  independentPart: z.strictObject({ title: z.string().trim().min(1).max(120), brief: z.string().max(600), body: z.string().trim().min(1).max(20000), executor: z.uuid() }).optional(),
+  independentNone: z.string().trim().min(1).max(2000).optional(),
 });
+/* A promise of dates named by the task's number: one for a task it does not come after is refused with the rest of the change. */
+const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
+  given ? Object.fromEntries(given.map(({ task, plan }) => [after.find(t => t.number === task)?.id ?? String(task), plan])) : undefined;
+
+const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positive(), ownerBinding: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) });
+const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
 const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
@@ -130,17 +147,6 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
   };
 }
 
-/* How many tasks of a turn are there and done, of those this person sees. */
-async function turnCounts(db: Db, turn: Turn, viewer: AgentViewer) {
-  if (viewer.full) {
-    const [all] = await db.select({ n: count() }).from(tasks).where(eq(tasks.turnId, turn.id));
-    const [done] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.turnId, turn.id), eq(tasks.status, 'done')));
-    return { total: Number(all?.n ?? 0), done: Number(done?.n ?? 0) };
-  }
-  const seen = (await db.select().from(tasks).where(eq(tasks.turnId, turn.id))).filter(t => seesTask(viewer, t));
-  return { total: seen.length, done: seen.filter(t => t.status === 'done').length };
-}
-
 /* The task a turn's work hangs under, for someone who sees it. */
 async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string | null> {
   if (viewer.full || !turn.taskId) return turn.taskId;
@@ -230,9 +236,57 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* A page of a list of waits: how much of it, and from where. */
+  function waitsPage(req: { query: unknown }): { limit: number; before: WaitPlace | null } {
+    const { limit, before } = WaitsQuery.parse(req.query);
+    const place = before === undefined ? null : placeOf(before);
+    if (before !== undefined && !place) throw refuse(400, 'task_invalid', 'This names no place in the list.');
+    return { limit, before: place };
+  }
+
+  /* The whole record of the waits on a task, a page at a time. */
+  app.get('/api/tasks/:id/waits', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const place = waitsPage(req);
+    const task = await shown(me, id);
+    const viewer = await viewerOf(db, me);
+    const page = await waitHistory(db, task, t => seesTask(viewer, t), place);
+    return { ...page, waits: maskWaits(viewer, page.waits) };
+  });
+
+  /* Someone who answers for a wait gives it a new owner or new dates, or a wait no one planned its first ones. */
+  app.post('/api/waits/:id/replan', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const body = ReplanBody.parse(req.body);
+    const [seen] = await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
+    if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
+    const task = await shown(me, seen.taskId);
+    const viewer = await viewerOf(db, me);
+    const wait = await db.transaction(tx => replanWait(tx, { waitId: id, ...body, actor: actorOf(me) }));
+    ctx.bus.publish(me.companyId, { type: 'task', id: task.id, spot: taskSpot(task) });
+    return { wait: maskWaits(viewer, [waitView(wait)])[0] };
+  });
+
+  /* The cards kept for this person about waits past their dates. */
+  app.get('/api/wait-cards', async req => {
+    const me = await requirePerson(req, db);
+    return waitCards(ctx, await viewerOf(db, me), waitsPage(req));
+  });
+
+  /* This person saw their card. It decides nothing. */
+  app.post('/api/wait-cards/:id/ack', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    if (!(await acknowledgeCard(ctx, me.id, id))) throw refuse(404, 'task_unknown', 'This card is not yours or does not exist.');
+    ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null, parentId: null } });
+    return { ok: true };
   });
 
   app.post('/api/tasks/:id/comments', async (req, reply) => {
@@ -242,6 +296,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await comment(ctx, actorOf(me), (await shown(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* Only the CEO or the CEO delegate says so, as the engine checks. */
+  app.put('/api/tasks/:id/urgent', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { urgent } = z.object({ urgent: z.boolean() }).strict().parse(req.body);
+    const moved = await setUrgent(ctx, actorOf(me), (await shown(me, id)).id, urgent);
+    return { task: await detail(me, moved.task) };
   });
 
   app.post('/api/tasks/:id/cancel', async req => {
@@ -294,6 +357,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       addressed: shown.filter(r => !r.known).map(r => addressedView(r, pictures.get(r.request.id) ?? [], places)),
       proposals: cards.map(c => proposalView(c, names, places)),
       computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
+      machinesAway: decisions.machines
+        .filter(card => !person || person === me.id || person === card.owner?.id)
+        .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null })),
       counts: decisions.counts,
     };
   });

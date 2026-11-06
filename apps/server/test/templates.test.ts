@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/pr
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
+import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -14,6 +15,41 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it.each(roles.filter(role => role.kind === 'head'))('gives $id the marked small-task fast path', role => {
+    expect(role.body).toMatch(/small: true/);
+    expect(role.body).toMatch(/fast path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('defines the complete small-task path in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
+    expect(body).toMatch(/change and (its|the) check/);
+    expect(body).toMatch(/without splitting or separate gates/);
+    expect(body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
+    expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
+    expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('keeps small work in the developer context in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/already working in that area[\s\S]*context/);
+    expect(body).toMatch(/do not search for a free developer or start a new chain/);
+    expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
+    expect(body).toMatch(/several tasks ahead[\s\S]*free developer/);
+    expect(body).toMatch(/separate small commit[\s\S]*return to their own work/);
+  });
+
+  it.each([
+    'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
+    'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
+    'dev-work-pipeline', 'dev-gates', 'dev-review-diff', 'dev-review-verdict',
+  ])('keeps %s from restoring per-task overhead for marked small work', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/shared turn/);
+  });
+
   it('teaches every department head not to repeat a task report in a separate message', () => {
     for (const role of roles.filter(r => r.kind === 'head')) {
       const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
@@ -87,10 +123,12 @@ describe('templates', () => {
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
-    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     const steady = orchestratorSteady(templates);
-    /* His core rule stays whole in his instructions; the others are files his program reads when a step needs one. */
+    /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
+    expect(steady.text).toContain('<!-- hh:skill hh-run-checks -->');
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
@@ -326,6 +364,8 @@ describe('templates', () => {
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
     expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
+    expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
+    expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
@@ -337,15 +377,17 @@ describe('templates', () => {
       expect(rules).toContain(words);
     }
     expect(rules).not.toContain('Push to the main line at the end.');
-    expect(rules).toContain('crapper and dryer are installed on your machine');
+    expect(rules).not.toContain('crapper and dryer are installed on your machine');
+    expect(rules).toMatch(/crapper[\s\S]*dryer[\s\S]*run_tests/);
     expect(rules).toContain('Push your branch, not the main line');
     /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
     const changed = 'git diff --name-only --diff-filter=d';
     for (const id of ['dev-engineering-rules', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
-    /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
+    /* Shared final metrics keep their gates, but authors do not run them before submitting. */
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).not.toMatch(/developer runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/test engineer or QA[\s\S]*shared final check/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
@@ -367,7 +409,7 @@ describe('templates', () => {
   it('keeps test selection, release mutation testing and evidence rules consistent', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const policy = body('dev-engineering-rules');
-    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per release or phase', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
+    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per turn on the final candidate', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
       expect(policy, words).toContain(words);
     }
     const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
@@ -395,13 +437,14 @@ describe('templates', () => {
     }
   });
 
-  it('pins legacy characterization, requirement evidence and the assigned release reviewer', () => {
+  it('pins legacy characterization, requirement evidence and tester-owned final mutation checks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
     for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
     for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/one reviewer named by the head/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/test engineer or QA/);
+    expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
     expect(body('dev-review-diff')).toMatch(/T4/);
     expect(body('dev-review-diff')).toMatch(/repository root/);
     expect(body('dev-review-diff')).toMatch(/selection and its reason/);
@@ -567,7 +610,8 @@ describe('templates', () => {
     expect(test.gate).toBeNull();
     expect(test.body).toMatch(/never a gate on a task/);
     const gates = body('dev-gates');
-    expect(gates).toMatch(/to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer/);
+    expect(gates).toMatch(/head assigns a test engineer or QA[\s\S]*once per turn[\s\S]*final pinned commit/);
+    expect(gates).not.toMatch(/or runs run_tests itself when there is neither/);
     expect(gates).toMatch(/only what failed and the tests around it/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
   });
@@ -671,29 +715,359 @@ describe('templates', () => {
     });
 
     it('satisfies every differential review, T6/T10 evidence, slice and provenance rule in the shipped skills', () => {
-      expect(reviewSkillViolations(current())).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, current())).toEqual([]);
       for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(templates.skills.get(id)!.body, id).not.toMatch(/hornhoof/i);
     });
 
     it('rejects broken-meaning skills even when required substrings remain present', () => {
       const base = current();
-      expect(reviewSkillViolations(base)).toEqual([]);
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, base)).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(reviewSkillViolations({ ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
         'no-self-or-role-rule-main-release-approval',
       );
+    });
+  });
+
+  describe('mandatory UI panel wrapping, parallel non-visual work and dynamic language checks', () => {
+    const uiBody = () => templates.skills.get('dev-frontend-ui')!.body;
+
+    it('enables dev-frontend-ui by default on DEV-ENG and DEV-FE and satisfies every generic UI wrapping and language rule', () => {
+      for (const roleId of ['DEV-ENG', 'DEV-FE'] as const) {
+        expect(templates.roles.get(roleId)!.skills.find(s => s.id === 'dev-frontend-ui')?.on, roleId).toBe(true);
+      }
+      expect(failedRuleIds(FRONTEND_UI_RULES, uiBody())).toEqual([]);
+      const browserCheck = templates.skills.get('dev-browser-check')!.body;
+      expect(browserCheck).toMatch(/longest[\s\S]*shortest[\s\S]*shipped/i);
+      expect(browserCheck).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
+      const agentsDoc = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
+      const contributingDoc = readFileSync(join(DIR, '../CONTRIBUTING.md'), 'utf8');
+      for (const doc of [agentsDoc, contributingDoc]) {
+        expect(doc).toContain('templates/skills/dev-frontend-ui.md');
+        expect(doc).toContain('(docs/style-book.md)');
+        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
+        expect(doc).toMatch(/whole group|one group/i);
+        expect(doc).toMatch(/explicit[\s\S]*browser default/i);
+        expect(doc).toMatch(/scrollbar space/i);
+        expect(doc).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
+        expect(doc).not.toMatch(/Add screenshots in English and Russian/);
+      }
+      expect(agentsDoc).toContain('CONTRIBUTING.md#interface-panels-and-language-checks');
+      expect(contributingDoc).toContain('### Interface panels and language checks');
+    });
+
+    it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', () => {
+      const root = join(DIR, '..');
+      const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
+      const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(styleBook).toContain('Version 1.1, approved by the head of Design on 2026-11-06.');
+      expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
+      for (const heading of [
+        '## 1. Colours',
+        '## 2. Type',
+        '## 3. Spacing and sizes',
+        '## 4. Components',
+        '### Materials of a question',
+        '## 5. Languages',
+        '## 6. Text wrap and action groups',
+        '## 7. Site and marketing',
+        '## 8. Using and changing this book',
+        '## 9. Browsers',
+      ]) {
+        expect(styleBook).toContain(heading);
+      }
+      const materialsSection = styleBook.slice(styleBook.indexOf('### Materials of a question'), styleBook.indexOf('### Tables'));
+      expect(materialsSection).toContain('A material and an answer are never nested and never look alike.');
+      expect(materialsSection).toContain('Opening, zooming, paging, closing and downloading choose nothing and send nothing.');
+      expect(materialsSection).toContain('a picture takes the whole width of the option');
+      expect(materialsSection).toContain('The viewer covers the window, follows the theme and keeps its close button on screen. A document reads to its end');
+      expect(materialsSection).toContain('A refused or failed material keeps its name and says why in words.');
+      expect(materialsSection).toContain('A download mark appears only on what can be downloaded.');
+      expect(materialsSection).toContain('a field not in the code yet is marked as proposed.');
+      expect(styleBook).toContain('| 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |');
+      expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/Close button of a panel[\s\S]*Reviewed by 2027-02-05/);
+      const light = themeDeclarations(themeCss, ':root {');
+      const dark = themeDeclarations(themeCss, ':root[data-theme="dark"]');
+      const colourSection = styleBook.slice(styleBook.indexOf('## 1. Colours'), styleBook.indexOf('### Contrast of text'));
+      const bookColours = Object.fromEntries(
+        [...colourSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, [m[2]!, m[3]!]]),
+      );
+      expect(Object.keys(bookColours).length).toBeGreaterThanOrEqual(27);
+      const actualColours = Object.fromEntries(Object.keys(bookColours).map(k => [k, [light[k], dark[k]]]));
+      expect(actualColours).toEqual(bookColours);
+      const typeSection = styleBook.slice(styleBook.indexOf('## 2. Type'), styleBook.indexOf('Fonts are imported'));
+      const bookFonts = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
+      expect(Object.keys(bookFonts)).toEqual(['--f-display', '--f-body', '--f-mono']);
+      expect(Object.fromEntries(Object.keys(bookFonts).map(k => [k, light[k]]))).toEqual(bookFonts);
+      const sources = [...new Set(styleBookSources(styleBook))];
+      expect(sources.length).toBeGreaterThanOrEqual(46);
+      expect(sources.filter(rel => !existsSync(join(root, rel)))).toEqual([]);
+    });
+
+    it('rejects UI skill text that allows clipping, hiding button groups, blocking non-visual work or fixed/pseudo locales', () => {
+      const base = uiBody();
+      expect(failedRuleIds(FRONTEND_UI_RULES, base)).toEqual([]);
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen a narrow panel overflows, truncate text with ellipsis to prevent horizontal scroll.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen space runs short, hide secondary action buttons behind clipped overflow.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWrap action buttons one by one onto separate lines with custom per-row spacing.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWait on the design mockup before starting API, state logic or temporary skeleton work.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhile waiting on Design, invent custom spacing tokens for visual polish.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a pseudo-locale or demo string as a shipped language during UI checks.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAlways check a fixed two-language pair forever instead of measuring shipped translations.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nFollow Hornhoof's .notebook and theme.css rules in every company.`)).toContain(
+        'project-reference-without-company-lockin',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nRely on browser default geometry and padding for icon buttons.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAssume overlay scrollbars instead of reserving scrollbar space in scrollable panels.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a single browser engine run as cross-engine verification.`)).toContain(
+        'three-browser-engines-check',
+      );
+    });
+  });
+
+  describe('hh-questions shared skill and materials rule', () => {
+    it('loads hh-questions as a core skill with an abstract English rule to attach materials via the question tool rather than prose paths', () => {
+      const skill = templates.skills.get('hh-questions');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      expect(skill!.body).toContain('- **Materials**:');
+      expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
+      expect(skill!.body).toMatch(/inspect[\s\S]*in full[\s\S]*before answering/i);
+      const materialsLine = skill!.body.split('\n').find(line => line.startsWith('- **Materials**:')) ?? '';
+      expect(materialsLine).not.toMatch(/hornhoof|david|ivan|#\d+|202\d-/i);
+    });
+  });
+
+  describe('shared remote check route, reconciled skill sources and head operational hold rules', () => {
+    const runChecksBody = () => templates.skills.get('hh-run-checks')!.body;
+    const leadTasksBody = () => templates.skills.get('hh-lead-tasks')!.body;
+    const checkSources = (): ReconciledCheckSkills => ({
+      tdd: templates.skills.get('dev-tdd')!.body,
+      gates: templates.skills.get('dev-gates')!.body,
+      engineering: templates.skills.get('dev-engineering-rules')!.body,
+      language: templates.skills.get('dev-language-rules')!.body,
+      implement: templates.skills.get('dev-implement')!.body,
+      browser: templates.skills.get('dev-browser-check')!.body,
+      e2e: templates.skills.get('dev-e2e-tests')!.body,
+      reviewDiff: templates.skills.get('dev-review-diff')!.body,
+      ciRelease: templates.skills.get('dev-ci-release')!.body,
+    });
+
+    it('locks abstract hh-run-checks on for every role and the orchestrator with zero extra grants or incident facts', () => {
+      expect(CORE_SKILLS).toContain('hh-run-checks');
+      expect(ORCHESTRATOR_SKILLS).toContain('hh-run-checks');
+      const skill = templates.skills.get('hh-run-checks');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, runChecksBody())).toEqual([]);
+      for (const r of roles) {
+        expect(r.skills.find(s => s.id === 'hh-run-checks'), r.id).toEqual({ id: 'hh-run-checks', on: true, locked: true });
+      }
+      expect(orchestratorSteady(templates).text).toContain(runChecksBody());
+    });
+
+    it('rejects broken-meaning hh-run-checks text even when required keywords remain present', () => {
+      const base = runChecksBody();
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nRun two test files or a directory locally during RED.`)).toContain('single-regular-file-local-red-green');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nAllow npm install locally when adding a feature dependency.`)).toContain('deny-local-installers-keep-manifest-edits');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nCount a run_work dependency step as T2 check evidence.`)).toContain('noncheck-run-work-separate-from-mixed-checks');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nWhen run_tests is unavailable, fall back to running heavy checks locally.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nTreat a command refusal as PASS once logged.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nPatch Hornhoof task #530 for David on 2026-11-06.`)).toContain('abstract-english-no-incident-facts');
+    });
+
+    it('reconciles the nine development check skills with run_tests while preserving project commands and screenshot rules', () => {
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, checkSources())).toEqual([]);
+    });
+
+    it('rejects contradictory local bulk-check instructions reintroduced into reconciled skills', () => {
+      const base = checkSources();
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, ciRelease: `${base.ciRelease}\nReproduce it locally with the same command.` })).toContain(
+        'no-contradictory-local-heavy-directions',
+      );
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, engineering: `${base.engineering}\ncrapper and dryer are installed on your machine.` })).toContain(
+        'no-contradictory-local-heavy-directions',
+      );
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, browser: `${base.browser}\nTreat every Chromium screenshot capture as a full browser test suite.` })).toContain(
+        'browser-suite-remote-light-screenshot-distinct',
+      );
+    });
+
+    it('teaches every department head abstract external-outage hold recovery and orchestrator-authority forwarding', () => {
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, leadTasksBody())).toEqual([]);
+      for (const role of roles.filter(r => r.kind === 'head')) {
+        const rendered = renderInstructions(
+          templates,
+          { id: 'h', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1],
+          { company: 'Acme', department: 'Work', product: null },
+        );
+        expect(Buffer.byteLength(rendered.text), role.id).toBeLessThan(24_000);
+        expect(rendered.text, role.id).toContain(leadTasksBody());
+      }
+    });
+
+    it('rejects head instructions that prolong holds after recovery, freeze unrelated work or leak incident history', () => {
+      const base = leadTasksBody();
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, base)).toEqual([]);
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nKeep a general hold active after the external service recovers until each task asks again.`)).toContain(
+        'outage-does-not-prolong-hold-and-lifts-at-once',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nFreeze all unrelated tasks across the department when one task hits a repeated local error.`)).toContain(
+        'local-error-isolated-and-orchestrator-decisions-forwarded',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nHold orchestrator-level decisions in your own queue until the end of the turn.`)).toContain(
+        'local-error-isolated-and-orchestrator-decisions-forwarded',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nRemember the GitHub push outage from David on #551 on 2026-11-06.`)).toContain(
+        'abstract-head-rule-preserves-gates-and-dependencies',
+      );
+    });
+
+    it('teaches the orchestrator abstract external-outage hold, one-action unhold and ordinary-retry rules while preserving safety rules', () => {
+      const trouble = templates.skills.get('orch-trouble')!;
+      expect(trouble.kind).toBe('procedure');
+      expect(trouble.description.en).toMatch(/external service failures/i);
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, trouble.body)).toEqual([]);
+      expect(leadTasksBody().split('External outages and holds:').length - 1).toBe(1);
+      expect(templates.skills.get('ops-api-connector')!.body).toContain('Never retry a payment or a send without first checking it did not already happen.');
+      expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('change permissions');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('Anything irreversible or public waits for the approval');
+      expect(templates.skills.get('dev-ci-release')!.body).toContain('never skip, mute or retry a check to get green');
+      expect(templates.skills.get('dev-engineering-rules')!.body).toContain('without retries or quarantine');
+      expect(templates.skills.get('ops-task-watch')!.body).toContain('Never retry it unchanged.');
+      for (const s of skills) {
+        expect(s.body, s.id).not.toMatch(/\bexactly one attempt\b|\bno retries\b|\bdo not declare recovery\b/i);
+      }
+    });
+
+    it('rejects orchestrator outage instructions that prolong holds, serialize recovery through a head queue, demand permission for ordinary retries, promise unshipped automation or leak incident history', () => {
+      const base = templates.skills.get('orch-trouble')!.body;
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nKeep a general hold active after the external service recovers.`)).toContain(
+        'outage-not-grounds-for-longer-general-hold',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nSend hold-lifting decisions one by one through a department head's queue.`)).toContain(
+        'orchestrator-decides-and-communicates-in-one-action',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRequire permission before any ordinary retry, allow at most one attempt with no retries, and do not declare recovery.`)).toContain(
+        'ordinary-retry-needs-no-permission-or-diagnosis-chain',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRemember the GitHub outage from Ivan on #551 on 05.11.`)).toContain(
+        'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nThe server automatically retries git push in the background and blocks task creation in SQL.`)).toContain(
+        'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+      );
+    });
+
+    it('teaches department heads abstract department-load ownership, independent after-chain slices and urgent-only team boundaries while keeping watchdog idle-fault rules intact', () => {
+      const leadSkill = templates.skills.get('hh-lead-tasks')!;
+      const breakDownSkill = templates.skills.get('hh-break-down')!;
+      expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
+      expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
+      expect(templates.roles.get('OPS-WATCH')!.body).toContain('no one stands free while work waits');
+      expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+    });
+
+    it('rejects head breakdown instructions that treat idle capacity as normal, omit independentPart/independentNone, assign ordinary work to urgent-only teams or leak incident names', () => {
+      const base: HeadLoadSkills = {
+        lead: leadTasksBody(),
+        breakDown: templates.skills.get('hh-break-down')!.body,
+      };
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, base)).toEqual([]);
+      const cases: [keyof HeadLoadSkills, string, string][] = [
+        ['lead', 'Members standing free while work waits is a normal wait, and the head only orders tasks.', 'free-members-with-runnable-work-is-fault-and-head-owns-load'],
+        ['breakDown', 'Leave after tasks without independentPart or independentNone, and send independentNone tasks out early.', 'after-chains-require-independent-part-or-none-preserving-boundaries'],
+        ['lead', 'Assign ordinary non-urgent work to an urgentOnly team whenever peers are busy.', 'urgent-only-team-refuses-non-urgent-and-names-free-peers'],
+        ['lead', 'Never give Tiger Team or Simon ordinary work on #348 after 2026-11-06.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+        ['breakDown', 'Hornhoof wakes you automatically whenever two members stand free.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+      ];
+      for (const [key, badLine, ruleId] of cases) {
+        expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { ...base, [key]: `${base[key]}\n${badLine}` }), badLine).toContain(ruleId);
+      }
+    });
+  });
+
+  describe('mechanical finding category and strict behavior-unchanged boundary', () => {
+    const pair = (): MechanicalSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+    });
+
+    it('matches the IssueInput category enum and mechanicalVerdict server aggregate in both readable review skills', () => {
+      const { diff, verdict } = pair();
+      const expected = ['security', 'data', 'spec', 'other', 'mechanical'];
+      expect(documentedCategories(verdict)).toEqual(expected);
+      expect(documentedCategories(diff)).toEqual(expected);
+      for (const category of expected) {
+        expect(IssueInput.safeParse({ category, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, category).toBe(true);
+      }
+      for (const invented of ['style', 'lint', 'medium']) {
+        expect(IssueInput.safeParse({ category: invented, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, invented).toBe(false);
+      }
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { diff, verdict })).toEqual([]);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)] })).toBe(true);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('other', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('spec', true)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)], unresolvedFindingIds: ['11111111-1111-4111-8111-111111111111'] })).toBe(false);
+    });
+
+    it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
+      const base = pair();
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, base)).toEqual([]);
+      const violations: [keyof MechanicalSkills, string, string][] = [
+        ['verdict', "Classify a public API rename as 'mechanical' when tests compile.", 'strict-behavior-unchanged-boundary'],
+        ['diff', "Use 'mechanical' when a fix may change behaviour only slightly.", 'strict-behavior-unchanged-boundary'],
+        ['verdict', "When in doubt, mark the finding 'mechanical' so the fix finishes faster.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['diff', "Classify spec findings as 'mechanical' to run at medium.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
+      ];
+      for (const [target, extra, expectedRule] of violations) {
+        expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+      }
     });
   });
 });
@@ -824,7 +1198,556 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
   },
 ];
 
+const FRONTEND_UI_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'panel-wrap-and-whole-button-group',
+    holds: text =>
+      /\b(?:panels?|rows?|cards?)\b[\s\S]*\bfull text\b[\s\S]*\bactions\b/i.test(text) &&
+      /\blong words\b[\s\S]*\bURLs?\b[\s\S]*\bwrap\b/i.test(text) &&
+      /\b(?:whole group|together as one group)\b[\s\S]*\b(?:one|single) even row\b/i.test(text) &&
+      /\b(?:same|shared|consistent) edge\b[\s\S]*\bspacing\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\b(?:hide|clip|truncate|ellipsis)\b/i.test(text) &&
+      forbids(text, /\b(?:truncate|clip)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|words|buttons|actions|overflow|ellipsis)\b/i) &&
+      forbids(text, /\bhide\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|action|buttons?|controls?|group|overflow)\b/i) &&
+      forbids(text, /\bwrap\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbuttons?\s+one by one\b/i),
+  },
+  {
+    id: 'parallel-nonvisual-visual-only-waits',
+    holds: text =>
+      /\bnon-visual\b[\s\S]*\bdata\b[\s\S]*\bAPI\b[\s\S]*\blogic\b[\s\S]*\bstates\b[\s\S]*\bskeleton\b[\s\S]*\bin parallel\b/i.test(text) &&
+      /\bonly\b[^.!?]*\bvisual\b[^.!?]*\bwaits?\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\binvent\b[^.!?]*\b(?:tokens?|spacing)\b/i.test(text) &&
+      forbids(text, /\bwait\w*\b(?:(?!\b(?:without|instead of|only)\b)[^.!?;,])*\bdesign mockup\b[^.!?;,]*\bbefore\b[^.!?;,]*\b(?:API|state|logic|skeleton)\b/i) &&
+      forbids(text, /\binvent\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:tokens?|spacing)\b/i),
+  },
+  {
+    id: 'multilang-and-dynamic-shipped-locales',
+    holds: text =>
+      /\b20\s*(?:to|-)\s*30\s+languages\b/i.test(text) &&
+      /\b1\.5x?\b[\s\S]*\b2x?\b/i.test(text) &&
+      /\bCJK\b[\s\S]*\bDevanagari\b[\s\S]*\bline-height\b/i.test(text) &&
+      /\bRTL\b[\s\S]*\bmirror\w*\b/i.test(text) &&
+      /\blongest\b[\s\S]*\bshortest\b[\s\S]*\b(?:actually )?(?:shipped|supported)\b[\s\S]*\breal\b/i.test(text) &&
+      /\bRTL\b[^.!?]*\b(?:when|once)\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\bpseudo-locale\b/i.test(text) &&
+      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:pseudo-locale|demo string)\b[^.!?;,]*\bas a (?:real |shipped |supported )?language\b/i) &&
+      forbids(text, /\b(?:always )?check\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bfixed two-language pair\b/i),
+  },
+  {
+    id: 'project-reference-without-company-lockin',
+    holds: text =>
+      /\brepository\b[\s\S]*\b(?:style book|design reference|UI reference)\b/i.test(text) &&
+      !/hornhoof|\.notebook|\.side-panel|theme\.css|\b(?:Russian|English)\b/i.test(text),
+  },
+  {
+    id: 'explicit-component-geometry-and-scrollbar-space',
+    holds: text =>
+      /\breset\b[\s\S]*\bexplicit\b[\s\S]*\bbrowser default\b/i.test(text) &&
+      /\bscrollbar space\b[\s\S]*\bscrollable panels?\b[\s\S]*\boverlay\b/i.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\bbrowser default\b/i.test(text) &&
+      forbids(text, /\brely\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbrowser default\b/i) &&
+      forbids(text, /\bassum\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\boverlay scrollbars?\b/i),
+  },
+  {
+    id: 'three-browser-engines-check',
+    holds: text =>
+      /\bChromium\b[\s\S]*\bFirefox\b[\s\S]*\bWebKit\b/.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\b(?:single|one) browser engine\b/i.test(text) &&
+      forbids(text, /\b(?:claim|count)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:single|one) browser engine\b[^.!?;,]*\bas\b[^.!?;,]*\bcross-engine\b/i),
+  },
+];
+
+type ReconciledCheckSkills = {
+  tdd: string;
+  gates: string;
+  engineering: string;
+  language: string;
+  implement: string;
+  browser: string;
+  e2e: string;
+  reviewDiff: string;
+  ciRelease: string;
+};
+
+const INCIDENT_OR_BRAND_LEAK_RE = /\b(?:hornhoof|github|david|ivan|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b/i;
+
+const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => re.test(text));
+
+const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
+
+const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'single-regular-file-local-red-green',
+    holds: text =>
+      matchesAll(text, [/\bat most one\b[\s\S]*\bregular test file\b/i, /\btracked\b[\s\S]*\buntracked\b/i, /\bRED\b[\s\S]*\bGREEN\b/]) &&
+      forbids(text, /\brun\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:two test files|a directory)\s+locally\b/i),
+  },
+  {
+    id: 'heavy-stages-through-run-tests',
+    holds: text =>
+      matchesAll(text, [
+        /"run_tests"/,
+        /\bfree compatible machine\b/i,
+        /\bbuilds?\b[\s\S]*\btype checks?\b[\s\S]*\blinters?\b/i,
+        /\bbrowser suites?\b[\s\S]*\bcoverage\b[\s\S]*\bcrapper\b[\s\S]*\bdryer\b[\s\S]*\bmutation\b/i,
+      ]),
+  },
+  {
+    id: 'deny-local-installers-keep-manifest-edits',
+    holds: text =>
+      matchesAll(text, [
+        /\b(?:never|do not)\b[^.!?]*\b(?:dependency install|install, add)\b[^.!?]*\blocally\b/i,
+        /\bfeature dependency\b/i,
+        /\bmanifest\b[\s\S]*\blockfile\b[\s\S]*\bordinary work\b/i,
+      ]) && forbids(text, /\ballow\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bnpm install\s+locally\b/i),
+  },
+  {
+    id: 'noncheck-run-work-separate-from-mixed-checks',
+    holds: text =>
+      matchesAll(text, [/"run_work"/, /\bnever counts as\b[^.!?]*"run_tests"[^.!?]*\bT2\b/i, /\bmix\w*\b[^.!?]*\bthrough "run_tests"/i]) &&
+      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brun_work\b[^.!?;,]*\bas\s+T2\b/i),
+  },
+  {
+    id: 'unavailable-route-blocks-and-refusal-never-pass',
+    holds: text =>
+      matchesAll(text, [/"blocked"/, /\b(?:never|do not)\s+fall back\b[^.!?]*\blocally\b/i, /\brefus\w*\b[^.!?]*\bnever\b[^.!?]*\bPASS\b/]) &&
+      forbidsAll(text, [/\bfall\s+back\s+to\s+running\s+heavy\s+checks\s+locally\b/i, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brefusal\s+as\s+PASS\b/i]),
+  },
+  {
+    id: 'final-stage-full-suite-and-light-screenshot',
+    holds: text =>
+      matchesAll(text, [/\bwhole test suite\b[^.!?]*\bfinal stage\b/i, /\blightweight\b[^.!?]*\bscreenshot\b/i, /\bbrowser executable name alone\b/i]),
+  },
+  {
+    id: 'abstract-english-no-incident-facts',
+    holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text),
+  },
+];
+
+const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
+  {
+    id: 'all-nine-sources-reference-remote-route',
+    holds: s =>
+      forEvery(
+        [s.tdd, s.gates, s.engineering, s.language, s.implement, s.browser, s.e2e, s.reviewDiff, s.ciRelease],
+        text => matchesAll(text, [/\brun_tests\b/, /\bhh-run-checks\b/]),
+      ),
+  },
+  {
+    id: 'no-contradictory-local-heavy-directions',
+    holds: s => {
+      const joined = Object.values(s).join('\n');
+      return (
+        !/Reproduce it locally with the same command|\bcrapper and dryer are installed on your machine/i.test(joined) &&
+        /\bsame pinned commit and command through `run_tests`/i.test(s.ciRelease)
+      );
+    },
+  },
+  {
+    id: 'browser-suite-remote-light-screenshot-distinct',
+    holds: s =>
+      matchesAll(s.browser, [/\blightweight screenshot capture\b/i, /\bbrowser binary name alone\b/i]) &&
+      forbids(s.browser, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bscreenshot capture as a full browser test suite\b/i),
+  },
+];
+
+const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'outage-does-not-prolong-hold-and-lifts-at-once',
+    holds: text =>
+      matchesAll(text, [
+        /\bexternal service failure\b[^.!?]*\bnever prolongs a general hold once the service recovers\b/i,
+        /\bhold is lifted\b[^.!?]*\bat once in one pass to every affected holder\b/i,
+      ]) && forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
+  },
+  {
+    id: 'local-error-isolated-and-orchestrator-decisions-forwarded',
+    holds: text =>
+      matchesAll(text, [
+        /\brepeated local error\b[^.!?]*\bnever freezes unrelated work\b/i,
+        /\borchestrator's authority promptly\b[^.!?]*"tell_orchestrator"[^.!?]*\binstead of holding them in your own queue\b/i,
+      ]) && forbidsAll(text, [/\bfreeze\w*\s+all\s+unrelated\s+tasks\b/i, /\bhold\w*\s+orchestrator-level\s+decisions\s+in\s+your\s+own\s+queue\b/i]),
+  },
+  {
+    id: 'abstract-head-rule-preserves-gates-and-dependencies',
+    holds: text => {
+      const section = text.slice(text.indexOf('External outages and holds:'));
+      return (
+        matchesAll(section, [/^External outages and holds:/, /\bdependencies\b[\s\S]*\bprotected actions\b[\s\S]*\baccess boundaries\b[\s\S]*\brelease gates\b/i]) &&
+        !INCIDENT_OR_BRAND_LEAK_RE.test(section)
+      );
+    },
+  },
+];
+
+const UNSHIPPED_EXTERNAL_AUTOMATION_RE = /\b(?:automatically retries|intercepts git push|blocks task creation|waits for GitHub)\b/i;
+
+type HeadLoadSkills = { lead: string; breakDown: string };
+
+const HEAD_LOAD_LEAK_RE = /\b(?:tiger team|simon|david|ivan|github|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b/i;
+const UNSHIPPED_IDLE_WAKE_RE = /\bhornhoof\s+(?:automatically\s+)?wakes\s+you[^.!?]*\b(?:free|idle)\b/i;
+
+const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => boolean }[] = [
+  {
+    id: 'free-members-with-runnable-work-is-fault-and-head-owns-load',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /\bwhoever gives out the work answers for keeping the department loaded,\s*not only for ordering tasks\b/i,
+          /\bmembers standing free while\b[^.!?]*\bare a fault,\s*not a normal wait\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bstanding free\b[^.!?;,]*\bis a normal wait\b/i,
+        /\bonly orders tasks\b/i,
+      ]),
+  },
+  {
+    id: 'after-chains-require-independent-part-or-none-preserving-boundaries',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /`independentPart`/,
+          /`independentNone`/,
+          /\bsingle file ownership\b[\s\S]*\bgenuine dependenc(?:y|ies)\b[\s\S]*\brelease boundar(?:y|ies)\b/i,
+          /\bpass neither when `after` is empty\b/i,
+        ]),
+      ) &&
+      matchesAll(s.lead, [
+        /\bwaits on `after` as before\b/i,
+        /\bMembers standing free while department tasks wait on `after`:[\s\S]*"update_task"[\s\S]*`independentPart`[\s\S]*"create_task"/,
+      ]) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bleave\w*\s+after\s+tasks\s+without\s+independentPart\s+or\s+independentNone\b/i,
+        /\bsend\w*\s+independentNone\s+tasks\s+out\s+early\b/i,
+      ]),
+  },
+  {
+    id: 'urgent-only-team-refuses-non-urgent-and-names-free-peers',
+    holds: s =>
+      matchesAll(s.lead, [
+        /\bNever assign ordinary or non-urgent work to members of an urgent-only team\s*\(`urgentOnly`\)/,
+        /\brefuses the assignment and names free members in the same role\b/i,
+      ]) &&
+      /\bnever assign non-urgent work to an urgent-only team\s*\(`urgentOnly`\)/i.test(s.breakDown) &&
+      forbids(`${s.lead}\n${s.breakDown}`, /\bassign\w*\s+(?:ordinary\s+(?:or\s+)?)?non-urgent\s+work\s+to\s+(?:members\s+of\s+)?an\s+urgent(?:-only|Only)\s+team\b/i),
+  },
+  {
+    id: 'abstract-no-incident-names-or-unshipped-idle-wake',
+    holds: s => {
+      const joined = `${s.lead}\n${s.breakDown}`;
+      return !HEAD_LOAD_LEAK_RE.test(joined) && !UNSHIPPED_IDLE_WAKE_RE.test(joined) && s.lead.split('External outages and holds:').length - 1 === 1;
+    },
+  },
+];
+
+const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'outage-not-grounds-for-longer-general-hold',
+    holds: text =>
+      matchesAll(text, [/\bexternal service failure\b[^.!?]*\bnot grounds for a general hold lasting longer than the failure itself\b/i]) &&
+      forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
+  },
+  {
+    id: 'orchestrator-decides-and-communicates-in-one-action',
+    holds: text =>
+      matchesAll(text, [
+        /\bdecide\b[^.!?]*\byourself\b[^.!?]*\bcommunicate\b[^.!?]*\bat once in one action to every affected holder\b/i,
+        /\bnever\b[^.!?]*\bdepartment head's queue\b/i,
+      ]) && forbids(text, /\bsend\w*[^.!?;,]*\bthrough a department head's queue\b/i),
+  },
+  {
+    id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
+    holds: text =>
+      matchesAll(text, [
+        /\bsame internal fix fails a second time\b/i,
+        /\btransient external service failure\b[^.!?]*\bneeds no diagnosis task\b/i,
+        /\bagent needs no permission for an ordinary retry of a transient external failure\b/i,
+      ]) &&
+      forbidsAll(text, [
+        /\brequire\w*\s+permission\s+before\s+any\s+ordinary\s+retry\b/i,
+        /\bone attempt\b/i,
+        /\bno retries\b/i,
+        /\bdeclare recovery\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+    holds: text => {
+      const idx = text.indexOf('External outages and holds:');
+      if (idx === -1) return false;
+      const section = text.slice(idx);
+      return (
+        matchesAll(section, [
+          /^External outages and holds:/,
+          /\bforce pushes\b[\s\S]*\balternate refs\b[\s\S]*\bpermission changes\b[\s\S]*\birreversible actions\b[\s\S]*\bdangerous or non-idempotent actions\b/i,
+        ]) &&
+        !INCIDENT_OR_BRAND_LEAK_RE.test(section) &&
+        !/\b\d{1,2}\.\d{1,2}\b/.test(section) &&
+        !UNSHIPPED_EXTERNAL_AUTOMATION_RE.test(text)
+      );
+    },
+  },
+];
+
 const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): boolean => items.every(predicate);
 
-const reviewSkillViolations = (skillsInput: ReviewSkills): string[] =>
-  REVIEW_CONTRACT_RULES.filter(rule => !rule.holds(skillsInput)).map(rule => rule.id);
+const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
+  rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
+
+type MechanicalSkills = { diff: string; verdict: string };
+
+const documentedCategories = (text: string): string[] => {
+  const clause = /category(?:\s*:\s*[^,)]+|\s*\([^)]+\))/.exec(text)![0];
+  return [...clause.matchAll(/['`]([a-z_]+)['`]/g)].map(m => m[1]!);
+};
+
+const sampleFinding = (category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking: boolean) => ({
+  taskId: '11111111-1111-4111-8111-111111111111',
+  findingId: '22222222-2222-4222-8222-222222222222',
+  revision: '33333333-3333-4333-8333-333333333333',
+  reviewedCommit: 'a'.repeat(40),
+  authorId: '44444444-4444-4444-8444-444444444444',
+  reviewerId: '55555555-5555-4555-8555-555555555555',
+  reviewerVendor: 'anthropic',
+  category,
+  blocking,
+  path: 'src/index.ts',
+  line: 10,
+  harm: 'Wrong behaviour.',
+});
+
+const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => boolean }[] = [
+  {
+    id: 'strict-behavior-unchanged-boundary',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bprovably cannot change\b[^.!?]*\bbehaviour\b/i,
+          /\bformatting\b[\s\S]*\blint\b[\s\S]*\bsafe local rename\b[\s\S]*\bmissing translation key\b/i,
+          /\bpublic API\b[\s\S]*\bsemantics\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:public API rename|semantic change)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?/i,
+        /\buse\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b['`]?mechanical['`]?\b[^.!?;,]*\bwhen\s+a\s+fix\s+may\s+change\s+behaviour\b/i,
+      ]),
+  },
+  {
+    id: 'doubt-keeps-regular-category-and-full-base-level',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bwhen in doubt\b[^.!?]*\bregular category\b[\s\S]*\bfull base level\b/i,
+          /\b(?:never|do not)\s+classify\b[^.!?]*\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b[\s\S]*\bmechanical\b[^.!?]*\bmedium\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bwhen in doubt,\s*(?:mark|classify|use)\w*\b[^.!?]*\b['`]?mechanical['`]?/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:security|data|spec)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?\s+to\s+run\s+at\s+medium\b/i,
+      ]),
+  },
+  {
+    id: 'server-aggregate-wake-mechanical-and-no-second-review',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bWake\.mechanical\b/,
+          /\bevery\b[^.!?]*\bissue\b[\s\S]*\bfailing verdicts?\b[\s\S]*\bmechanical\b/i,
+          /\bmixed\b[^.!?]*\bunmarked\b/i,
+          /\b(?:never|does not)\s+set\w*\s+effort\b[\s\S]*\b(?:never|does not)\s+change\w*\s+effort\s+inside\s+a\s+running\s+turn\b[\s\S]*\b(?:never|does not)\s+open\w*\s+a\s+second\s+review\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bset\w*\s+['`]?Wake\.mechanical['`]?\s+on\s+mixed\s+verdicts?\b/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bswitch\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\beffort\s+inside\s+a\s+running\s+turn\b/i,
+        /\bopen\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-english-no-incident-or-company-leaks',
+    holds: s => !/\b(?:hornhoof|github|david|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
+  },
+];
+
+const themeDeclarations = (css: string, selector: string): Record<string, string> => {
+  const start = css.indexOf('{', css.indexOf(selector)) + 1;
+  const block = css.slice(start, css.indexOf('}', start));
+  return Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim().replace(/\s+/g, ' ')]));
+};
+
+const styleBookSources = (book: string): string[] => [
+  ...[...book.matchAll(/`((?:ui|screens)\/[\w./-]+\.tsx?)`/g)].map(m => `apps/web/src/${m[1]!}`),
+  ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
+  ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
+];
+
+describe('outbound and support gateway templates', () => {
+  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', () => {
+    const sal = templates.skills.get('sal-outbound-approval')?.body ?? '';
+    const mkt = templates.skills.get('mkt-publish-approval')?.body ?? '';
+    const sup = templates.skills.get('sup-support-policy')?.body ?? '';
+
+    for (const [id, body] of [
+      ['sal-outbound-approval', sal],
+      ['mkt-publish-approval', mkt],
+      ['sup-support-policy', sup],
+    ] as const) {
+      expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
+      expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
+    }
+
+    expect(sal).toMatch(/"outbound_submit"/);
+    expect(sal).toMatch(/"outbound_status"/);
+    expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
+    expect(mkt).toMatch(/"outbound_submit"/);
+    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(sup).toMatch(/"support_classify"/);
+    expect(sup).toMatch(/"support_submit"/);
+    expect(sup).toMatch(/\buntrusted data\b/i);
+    expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
+  });
+
+  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', () => {
+    expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
+    for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
+      const role = templates.roles.get(id)!;
+      expect(role, id).toBeDefined();
+      expect(role.body.length, id).toBeLessThanOrEqual(600);
+      expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+    }
+
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_submit"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
+    expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+  });
+});
+
+type ImpactSelectionSkills = { implement: string; gates: string; engineering: string };
+
+const inHornhoofSection = (engineering: string): string => {
+  const start = engineering.indexOf('### In Hornhoof');
+  if (start === -1) return '';
+  const rest = engineering.slice(start);
+  const next = rest.indexOf('\n### ', 4);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) => boolean }[] = [
+  {
+    id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
+    holds: s =>
+      forEvery([s.implement, s.gates, s.engineering], text =>
+        matchesAll(text, [
+          /\brun_tests\b/,
+          /\b(?:dependent|selected|affected)\s+tests?\b/i,
+          /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
+        ]),
+      ) &&
+      matchesAll(s.implement, [
+        /\bselector input\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reasons?\b/i,
+        /\brun\b[\s\S]*\bpart\b[\s\S]*\bcommit\b/i,
+      ]) &&
+      forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+        /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
+      ]),
+  },
+  {
+    id: 'outside-graph-uncertain-whole-package-and-migrations-up-down',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /\bmigrations\b[\s\S]*\bschema\b[\s\S]*\bconfiguration\b[\s\S]*\benvironment\b[\s\S]*\broutes\b[\s\S]*\bfixtures\b[\s\S]*\bstring tables\b[\s\S]*\bscripts\b[\s\S]*\binstallation\b[\s\S]*\bupdates\b[\s\S]*\bshared packages\b[\s\S]*\bAPI contracts\b[\s\S]*\btemplates\b/i,
+          /\bup and down\b/i,
+          /\bunsupported\b[^.!?]*\breport\b/i,
+        ]) &&
+        forEvery([s.implement, s.gates, hh], text =>
+          matchesAll(text, [
+            /\b(?:outside\s+(?:the\s+)?import\s+graphs?|outside\s+import\s+graphs?)\b/i,
+            /\b(?:complete\s+affected\s+packages?|whole\s+package)\b/i,
+            /\bup and down\b/i,
+          ]),
+        ) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\btreat\w*\s+an\s+unavailable\s+adapter\s+as\s+an\s+empty\s+selection\b/i,
+          /\brun\w*\s+migrations?\s+up\s+only\s+without\s+reporting\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'explicit-selector-commands-no-auto-promise-and-execution-distinct',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /scripts\/test\/impact-README\.md/,
+          /scripts\/test\/related-probe\.mjs/,
+          /scripts\/test\/impact-python\/pytest_impact\.py/,
+          /scripts\/test\/replay-impact\.mjs/,
+          /\bNOT_RUN\b/,
+        ]) &&
+        matchesAll(s.implement, [/scripts\/test/, /\bNOT_RUN\b/]) &&
+        matchesAll(s.gates, [
+          /scripts\/test/,
+          /\bcollected graph\b[\s\S]*\bcompleted\b[^.!?]*\breceipts?\b/i,
+          /\bunavailable\b[^.!?]*\bnot\s+zero\s+misses\b/i,
+          /\btest engineer\b/i,
+        ]) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
+          /\btreat\w*\s+a\s+collected\s+graph\s+as\s+completed\s+test\s+execution\b/i,
+          /\btreat\w*\s+missing\s+comparator\s+evidence\s+as\s+zero\s+misses\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'abstract-english-no-dates-names-or-numbers',
+    holds: s => {
+      const combined = `${s.implement}\n${s.gates}\n${inHornhoofSection(s.engineering)}`;
+      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(combined);
+    },
+  },
+];
+
+describe('T2 impact-selection rules across dev-implement, dev-gates and In Hornhoof', () => {
+  const impactSkills = (): ImpactSelectionSkills => ({
+    implement: templates.skills.get('dev-implement')!.body,
+    gates: templates.skills.get('dev-gates')!.body,
+    engineering: templates.skills.get('dev-engineering-rules')!.body,
+  });
+
+  it('teaches explicit impact selection, whole-package fallbacks, bidirectional migrations, execution vs collection evidence, and explicit scripts/test commands without promising unshipped runner wiring', () => {
+    const current = impactSkills();
+    expect(inHornhoofSection(current.engineering).length).toBeGreaterThan(200);
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, current)).toEqual([]);
+  });
+
+  it('rejects skill text that promises unshipped automatic runner selection, conflates graph collection with execution, skips new tests, or leaks dates, names or task numbers', () => {
+    const base = impactSkills();
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, base)).toEqual([]);
+    const cases: [keyof ImpactSelectionSkills, string, string][] = [
+      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-via-run-tests-and-new-tests-always'],
+      ['engineering', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
+      ['gates', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['gates', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['implement', 'Added by David on 2026-11-06 for #309 against turn 7.', 'abstract-english-no-dates-names-or-numbers'],
+    ];
+    for (const [target, extra, expectedRule] of cases) {
+      expect(failedRuleIds(IMPACT_SELECTION_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+    }
+  });
+});

@@ -31,7 +31,7 @@ function fixture(kind: Kind | null = 'claude') {
   const tmux = new Tmux({ env: { HOME: home }, recordingsDir: join(home, 'recordings') });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: message => sent.push(message), secrets: () => [], log: () => {} });
   const agent = host['agent']('branches');
-  Object.assign(agent, { home, workDir, sessionId: 'old', program: kind === null ? null : programs[kind] });
+  Object.assign(agent, { home, workDir, contextDir: workDir, sessionId: 'old', program: kind === null ? null : programs[kind] });
   agent.turn = { jobId: 'job', typed: false, seq: 0, words: new TurnWords(), onEvent: event => events.push(event) };
   agent.busy = agent.took = true;
   agent.ends.started('current');

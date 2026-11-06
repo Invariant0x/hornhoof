@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, taskWaits, teams, turns, waitPolicies } from '../src/db/schema.js';
 import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
@@ -18,14 +18,15 @@ async function company({ repository = true, reviewers = true, productRepository 
   const [ceo] = await db.select().from(people);
   const [claude] = await db.select().from(subscriptions);
   const [codex] = await db.insert(subscriptions).values({ companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+  const [authorPlan] = await db.insert(subscriptions).values({ companyId, provider: 'kimi', kind: 'personal', label: 'Authors', ownerPersonId: ceo!.id, status: 'ready' }).returning();
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: repository && !productRepository ? 'https://github.com/acme/shop.git' : null }).returning();
   /* A product of the department, when only the product has the repository. */
   const [product] = productRepository ? await db.insert(departments).values({ companyId, parentId: dev!.id, name: 'Shop', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning() : [];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, sub: string | null = claude!.id) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
-  const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const kai = await hire('Kai', 'worker', 'DEV-FE');
+  const bruno = await hire('Bruno', 'worker', 'DEV-BE', authorPlan!.id);
+  const kai = await hire('Kai', 'worker', 'DEV-FE', authorPlan!.id);
   const rita = reviewers ? await hire('Rita', 'worker', 'DEV-REV') : null;
   const rex = reviewers ? await hire('Rex', 'worker', 'DEV-REV', codex!.id) : null;
   const sid = reviewers ? await hire('Sid', 'worker', 'DEV-SEC', sidPlan ? claude!.id : null) : null;
@@ -54,6 +55,32 @@ async function company({ repository = true, reviewers = true, productRepository 
 const woken = (r: Moved) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('the review of a turn', () => {
+  it('waits for each of its reviewers from the moment it opens, under the dates the department set, and each verdict ends that one', async () => {
+    const { ctx, db, companyId, ceo, dev, bruno, member, merged, reviews } = await company();
+    await db.insert(waitPolicies).values({ companyId, departmentId: dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: ceo.id });
+    const api = await member(bruno.id, 'Checkout API');
+    await merged(bruno.id, api.id);
+    const [review] = await reviews();
+    const waits = () => db.select().from(taskWaits).where(eq(taskWaits.taskId, review!.id));
+    expect((await waits()).map(w => [w.kind, w.ownerAgentId, w.state]).sort()).toEqual(review!.panel.map(id => ['review', id, 'active']).sort());
+    const first = review!.panel[0]!;
+    await verdict(ctx, first, review!.id, { pass: true, comment: 'Fine.' });
+    expect((await waits()).find(w => w.ownerAgentId === first)).toMatchObject({ state: 'resolved', proofRef: expect.stringMatching(/^verdict:\d+$/) as string });
+    expect((await waits()).filter(w => w.state === 'active')).toHaveLength(review!.panel.length - 1);
+  });
+
+  it('opens in a department that set dates and none for reviews: nothing that stops the turn, and no date made up', async () => {
+    const { db, companyId, ceo, dev, bruno, member, merged, reviews } = await company();
+    await db.insert(waitPolicies).values({ companyId, departmentId: dev.id, kind: 'external', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: ceo.id });
+    const api = await member(bruno.id, 'Checkout API');
+    await merged(bruno.id, api.id);
+    const [review] = await reviews();
+    expect(review).toBeDefined();
+    const waits = await db.select().from(taskWaits).where(eq(taskWaits.taskId, review!.id));
+    expect(waits.map(w => w.state).every(state => state === 'legacy_needs_plan')).toBe(true);
+    expect(waits).toHaveLength(review!.panel.length);
+  });
+
   it('gives code in a repository no gate of its own: it merges into the turn branch as it is handed in', async () => {
     const { db, head, bruno, rita, parent, tools } = await company();
     const made = await (await tools(head)).callTool({ name: 'create_task', arguments: { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id, parent: parent.number } });
@@ -292,10 +319,10 @@ describe('the review of a turn', () => {
 
     const events = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, review!.id), eq(taskEvents.kind, 'verdict')));
     const byAgent = new Map(events.map(e => [e.agentId, e.data]));
-    expect(byAgent.get(rita!.id)).toEqual({ pass: false, stage: 1, round: 0, findings: 2 });
-    expect(byAgent.get(rex!.id)).toEqual({ pass: true, stage: 1, round: 0 });
+    expect(byAgent.get(rita!.id)).toMatchObject({ pass: false, stage: 1, round: 0, findings: 2 });
+    expect(byAgent.get(rex!.id)).toMatchObject({ pass: true, stage: 1, round: 0 });
     expect('findings' in byAgent.get(rex!.id)!).toBe(false);
-    expect(byAgent.get(sid!.id)).toEqual({ pass: true, stage: 1, round: 0, findings: 0 });
+    expect(byAgent.get(sid!.id)).toMatchObject({ pass: true, stage: 1, round: 0, findings: 0 });
   });
 
   it('never puts a sub-unit employee into a task gate, the review of a turn, or the final check even when its role fits', async () => {

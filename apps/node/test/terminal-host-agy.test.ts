@@ -24,13 +24,25 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     const log = vi.fn();
     await setUp({ log, plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
     const running = host.run(agyJob('live-refusal', 'HANG', { jobId: 'agy-live' }));
-    await until(() => sent.some(m => m.type === 'job.program' && m.jobId === 'agy-live' && m.state === 'thinking'));
+    /* Its turn counts as under way from when the prompt is on its way; here it works on it. */
+    await until(() => host['agents'].get('live-refusal')?.took === true);
     const paste = vi.spyOn(tmux, 'paste');
     try {
       expect(await host.say('live-refusal', 'Private live words.')).toBe(false);
       expect(paste).not.toHaveBeenCalled();
       expect(log.mock.calls).toEqual([['Agent live-refusal (antigravity): live words were not delivered: this program takes live words as a separate turn.']]);
     } finally { await host.stop(); await running; }
+  });
+
+  it('takes a program gone between two looks at it for gone, and does not fail on its screen', async () => {
+    await setUp({ plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 20 });
+    const running = host.run(agyJob('gone-look', 'HANG', { jobId: 'agy-gone-look' }));
+    await until(() => host['agents'].get('gone-look')?.took === true);
+    const looks = vi.spyOn(tmux, 'screen').mockRejectedValue(new Error('no server running'));
+    await until(() => looks.mock.calls.length > 1);
+    looks.mockRestore();
+    await host.stop();
+    expect(await running).toMatchObject({ ok: false });
   });
 
   it('takes a Hornhoof turn through invocation 0, follows its session, and reads the feed and answer from its transcript', async () => {

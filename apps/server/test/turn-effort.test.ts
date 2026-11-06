@@ -19,6 +19,20 @@ describe('how hard a turn thinks', () => {
     expect(turnEffort('high', LEVELS, [merge])).toBe('medium');
   });
 
+  it('takes medium for fixes the server marked as mechanical, and for nothing that only sounds like them', () => {
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }])).toBe('medium');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes' }])).toBe('xhigh');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: false }])).toBe('xhigh');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'assigned', mechanical: true }])).toBe('xhigh');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'review', mechanical: true }])).toBe('xhigh');
+  });
+
+  it('keeps the base when mechanical fixes come with anything else', () => {
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, { why: 'changes' }])).toBe('xhigh');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, null])).toBe('xhigh');
+    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, relook])).toBe('medium');
+  });
+
   it('holds a level from the card as the base of a first look and takes medium for the look again', () => {
     expect(turnEffort('max', LEVELS, [{ why: 'review' }])).toBe('max');
     expect(turnEffort('max', LEVELS, [relook])).toBe('medium');

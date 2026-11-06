@@ -1,5 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { box, serveApi } from './api';
+import { LANGUAGES, type Language } from '../src/i18n';
+import { en, type Messages } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import { box, detail, serveApi, TASKS } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its width and place, the panel runs to the bottom of the
    window, scrolls by itself and leaves the page scrolled where it was. */
@@ -160,3 +163,50 @@ test.describe('scrolling', () => {
     expect(await pageScroll(page)).toBe(scrolled);
   });
 });
+
+const MESSAGES: Record<Language, Messages> = { en, ru };
+const CHECKED_LOCALES = [...LANGUAGES]
+  .map(entry => ({ id: entry.id, score: MESSAGES[entry.id].tasks.independentPart.length }))
+  .sort((a, b) => b.score - a.score)
+  .filter((entry, index, all) => index === 0 || index === all.length - 1)
+  .map(entry => entry.id);
+const LONG_PART = `contract/${'x'.repeat(180)}`;
+
+for (const lang of CHECKED_LOCALES) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [375, 1440]) {
+      test(`independent part wraps without sideways scroll: ${lang}/${theme}/${width}`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme: theme });
+        await page.addInitScript(language => localStorage.setItem('hh-lang', language), lang);
+        await serveApi(page);
+        const base = TASKS[0]!;
+        await page.route('**/api/tasks/t1', route => route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            task: {
+              ...detail(base),
+              independentPart: {
+                title: 'Contract tests', brief: 'Test first.', body: LONG_PART,
+                executor: { id: 'b1', name: 'Bruno', kind: 'worker', role: null },
+                task: { id: 't31', number: 31, title: 'Contract tests', status: 'open' },
+              },
+            },
+          }),
+        }));
+        await page.goto('/');
+        await page.getByRole('button', { name: lang === 'ru' ? 'Задачи' : 'Tasks', exact: true }).click();
+        await page.getByRole('button', { name: /^#1 Checkout step 1/ }).click();
+        const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
+        const part = panel.getByRole('region', { name: MESSAGES[lang].tasks.independentPart });
+        await expect(part).toBeVisible();
+        await expect(part.getByText(LONG_PART)).toBeVisible();
+        for (const element of [panel, part]) {
+          const dimensions = await element.evaluate(el => ({ client: el.clientWidth, scroll: el.scrollWidth }));
+          expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client + 1);
+        }
+        await page.screenshot({ path: info.outputPath(`independent-part-${lang}-${theme}-${width}.png`), fullPage: true });
+      });
+    }
+  }
+}

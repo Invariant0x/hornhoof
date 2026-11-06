@@ -5,6 +5,7 @@ import { seesAgentId, type AgentViewer } from '../../auth/agent-view.js';
 import { tasks } from '../../db/schema.js';
 import { taskSpot, type Task } from './engine.js';
 import type { TreeFacts } from './tree.js';
+import { maskWaits } from './wait-views.js';
 import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, type TaskLine } from './views.js';
 
 /* What a person reads of tasks by who they see (auth/agent-view.ts): the work of the agents they see in a place they
@@ -30,8 +31,13 @@ function shownWait(viewer: AgentViewer, line: TaskLine): TaskLine['externalWait'
   return rest;
 }
 
+function shownIndependent(viewer: AgentViewer, part: TaskLine['independentPart']): TaskLine['independentPart'] {
+  if (!part || 'reason' in part) return part;
+  return shownRef(viewer, part.executor) ? part : null;
+}
+
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line) };
+  return { ...line, waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
 }
 
 /* Task lines as this person reads them. */
@@ -90,6 +96,7 @@ export function factsFor(viewer: AgentViewer, facts: TreeFacts): TreeFacts {
   const sees = (id: string | null | undefined) => seesAgentId(viewer, id);
   return {
     ...facts,
+    tasks: facts.tasks.map(t => (t.waits ? { ...t, waits: maskWaits(viewer, t.waits) } : t)),
     agents: facts.agents.filter(a => sees(a.id)),
     events: facts.events.map(e => (sees(e.agentId) ? e : { ...e, text: '' })),
     requests: facts.requests.filter(r => sees(r.agentId)),

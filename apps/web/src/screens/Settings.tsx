@@ -74,9 +74,11 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
                 </div>
                 {mode === 'remove' ? (
                   <div className="settings-actions">
-                    <span>{t.settings.removeAsk(link.url)}</span>
-                    <button className="btn small" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
-                    <button className="btn small ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
+                    <span className="entry-main">{t.settings.removeAsk(link.url)}</span>
+                    <div className="entry-actions" role="group" aria-label={t.settings.removeAsk(link.url)}>
+                      <button className="btn" type="button" disabled={busy} onClick={() => void remove()}>{t.settings.yesRemove}</button>
+                      <button className="btn ghost" type="button" onClick={() => setMode('view')}>{t.settings.keep}</button>
+                    </div>
                   </div>
                 ) : (
                   <div className="settings-actions">

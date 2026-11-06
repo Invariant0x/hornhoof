@@ -12,8 +12,8 @@ const AgentParams = z.object({ id: z.union([z.literal('orchestrator'), z.uuid()]
 
 export type AgentRow = typeof agents.$inferSelect;
 
-/* The agent a request names by id, or "orchestrator", for a person who sees it. Removed employees are gone. */
-export async function agentFor(ctx: Ctx, req: FastifyRequest): Promise<{ me: Person; agent: AgentRow }> {
+/* The agent a request names by id, or "orchestrator", whoever asks. Removed employees are gone. */
+export async function namedAgent(ctx: Ctx, req: FastifyRequest): Promise<{ me: Person; agent: AgentRow }> {
   const me = await requirePerson(req, ctx.db);
   const { id } = AgentParams.parse(req.params);
   const agent =
@@ -21,6 +21,12 @@ export async function agentFor(ctx: Ctx, req: FastifyRequest): Promise<{ me: Per
       ? await orchestratorOf(ctx, me.companyId)
       : (await ctx.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.companyId, me.companyId), isNull(agents.removedAt))))[0];
   if (!agent) throw new ApiError(404, 'not_found', id === 'orchestrator' ? 'This company has no orchestrator.' : 'This employee does not exist.', 'agent_unknown');
-  await requireAgentView(ctx.db, me, agent);
   return { me, agent };
+}
+
+/* The same, for a person who sees it. */
+export async function agentFor(ctx: Ctx, req: FastifyRequest): Promise<{ me: Person; agent: AgentRow }> {
+  const found = await namedAgent(ctx, req);
+  await requireAgentView(ctx.db, found.me, found.agent);
+  return found;
 }

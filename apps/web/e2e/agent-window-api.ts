@@ -59,7 +59,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
     live.connections++;
     ws.onMessage(message => { live.sent?.push(String(message)); });
-    ws.send(JSON.stringify({ type: 'ready', write: live.canType ?? true }));
+    ws.send(JSON.stringify({ type: 'ready', write: live.canType ?? true, message: true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'Bruno is checking the checkout.\r\n> ' }));
   });

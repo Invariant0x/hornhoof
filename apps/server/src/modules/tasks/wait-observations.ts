@@ -18,7 +18,7 @@ export async function waitCycles(ctx: Ctx, now: Date) {
   return waitingCycles(edges);
 }
 
-async function departmentScope(ctx: Ctx, companyId: string, root: string): Promise<string[]> {
+export async function departmentScope(ctx: Pick<Ctx, 'db'>, companyId: string, root: string): Promise<string[]> {
   const rows = await ctx.db.select().from(departments).where(eq(departments.companyId, companyId));
   const scope = new Set([root]);
   let previous = 0;
@@ -29,14 +29,11 @@ async function departmentScope(ctx: Ctx, companyId: string, root: string): Promi
   return [...scope];
 }
 
-async function waitReasons(ctx: Ctx, rows: Task[], now: Date): Promise<string[] | null> {
-  const reasons: string[] = [];
-  for (const task of rows) {
-    const reason = await taskWaitReason(ctx, task, now);
-    if (!reason) return null;
-    reasons.push(`#${task.number}: ${reason}`);
-  }
-  return reasons;
+/* Work nothing explains: no one is on it and it waits for nothing known. */
+async function unexplained(ctx: Ctx, rows: Task[], now: Date): Promise<Task[]> {
+  const silent: Task[] = [];
+  for (const task of rows) if (!(await taskWaitReason(ctx, task, now))) silent.push(task);
+  return silent;
 }
 
 async function taskWaitReason(ctx: Ctx, task: Task, now: Date): Promise<string | null> {
@@ -58,6 +55,14 @@ async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
   return test ? 'waiting for a test run' : null;
 }
 
+/* The last thing that says the department was at work. */
+const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[]): Date => new Date(Math.max(
+  (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
+  ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
+  /* A wait that ran out explained the work until then: the silence starts there. */
+  ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
+));
+
 export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: string, now: Date) {
   const [turn] = await ctx.db.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
   if (!turn) return null;
@@ -67,10 +72,11 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const employees = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
   const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));
   if (conversations.some(job => job.status === 'running')) return null;
-  const reasons = await waitReasons(ctx, work, now);
-  if (!reasons) return null;
-  const since = new Date(Math.max((turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()), ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : [])));
+  /* A department where all of it waits for something known, in time, has nothing to say. */
+  const silent = await unexplained(ctx, work, now);
+  if (!silent.length) return null;
+  const since = silentSince(turn, work, conversations);
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
-  return { companyId: turn.companyId, work, reasons, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };
+  return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };
 }

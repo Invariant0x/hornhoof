@@ -31,7 +31,7 @@ function claudeFailure(raw: Record<string, unknown>): Failure {
 }
 
 const CODEX: Record<string, FailureKind> = {
-  server_overloaded: 'overloaded', rate_limit_exceeded: 'rate_limited', usage_limit_exceeded: 'usage_limit', unauthorized: 'auth',
+  server_overloaded: 'overloaded', model_access_denied: 'model_access_denied', rate_limit_exceeded: 'rate_limited', usage_limit_exceeded: 'usage_limit', unauthorized: 'auth',
   response_stream_connection_failed: 'network', response_stream_disconnected: 'cut',
   cyber_policy: 'refused', bio_policy: 'refused', misalignment_policy_violation: 'refused', context_window_exceeded: 'too_big', session_budget_exceeded: 'too_big',
 };

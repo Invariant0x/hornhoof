@@ -6,7 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { TaskPlace, WaitingRequest } from '../src/types';
-import { Requests, wordsAnswer } from '../src/ui/Requests';
+import { Requests, clearRequestDraftsForTests, wordsAnswer } from '../src/ui/Requests';
 import { mockApi, REQUESTS } from './api-mock';
 import { decl } from './css';
 
@@ -46,8 +46,44 @@ function makeProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}) {
   };
 }
 
+function jsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function stubDeferredFetch() {
+  const pending: { url: string; resolve: (res: Response) => void }[] = [];
+  const posted: { url: string; body: unknown }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      posted.push({ url, body: init?.body ? (JSON.parse(String(init.body)) as unknown) : null });
+      return new Promise<Response>(resolve => {
+        pending.push({ url, resolve });
+      });
+    }),
+  );
+  return {
+    posted,
+    answerNext(status: number, payload: unknown) {
+      const next = pending.shift();
+      if (!next) throw new Error('No pending request');
+      next.resolve(jsonResponse(status, payload));
+    },
+    answerUrl(url: string, status: number, payload: unknown) {
+      const idx = pending.findIndex(p => p.url === url);
+      if (idx === -1) throw new Error(`No pending request for ${url}`);
+      pending.splice(idx, 1)[0]!.resolve(jsonResponse(status, payload));
+    },
+  };
+}
+
 describe('choice request free-form feedback and option picking', () => {
   afterEach(() => {
+    clearRequestDraftsForTests();
     localStorage.removeItem('hh-lang');
     vi.restoreAllMocks();
   });
@@ -65,7 +101,7 @@ describe('choice request free-form feedback and option picking', () => {
 
     const feedback = 'Neither option fits yet.\nPut progress inside the existing department chips.';
     await user.type(box, `  ${feedback}  `);
-    const send = within(card).getByRole('button', { name: 'Send' });
+    const send = within(card).getByRole('button', { name: 'Send without choosing' });
     expect(send).toBeEnabled();
     await user.click(send);
 
@@ -81,7 +117,7 @@ describe('choice request free-form feedback and option picking', () => {
     expect(props.onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('sends multi-line feedback without picking an option in Russian via visible Отправить button', async () => {
+  it('sends multi-line feedback without picking an option in Russian via visible Отправить без выбора button', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered', picked: null } }] });
     const props = makeProps();
     const user = userEvent.setup();
@@ -93,7 +129,7 @@ describe('choice request free-form feedback and option picking', () => {
 
     const feedback = 'Ни один вариант пока не подходит.\nСделайте синие квадратики прямо внутри плашек отделов.';
     await user.type(box, feedback);
-    await user.click(within(card).getByRole('button', { name: 'Отправить' }));
+    await user.click(within(card).getByRole('button', { name: 'Отправить без выбора' }));
 
     expect(calls).toEqual([
       {
@@ -112,24 +148,25 @@ describe('choice request free-form feedback and option picking', () => {
     const { unmount } = renderIn('en', <Requests {...makeProps()} />);
 
     await user.type(screen.getByLabelText('Comment or feedback'), '  Keep Argon, soften the glow  ');
-    await user.click(screen.getByRole('button', { name: /Option A \(Argon\)/ }));
+    await user.click(screen.getByRole('button', { name: 'Choose option 1' }));
     expect(calls[0]?.body).toEqual({ pick: 0, answer: 'Keep Argon, soften the glow' });
     unmount();
+    clearRequestDraftsForTests();
 
     renderIn('en', <Requests {...makeProps()} />);
     await user.type(screen.getByLabelText('Comment or feedback'), '   \n  ');
-    await user.click(screen.getByRole('button', { name: /Option A \(Argon\)/ }));
+    await user.click(screen.getByRole('button', { name: 'Choose option 1' }));
     expect(calls[1]?.body).toEqual({ pick: 0 });
     expect('answer' in (calls[1]!.body as Record<string, unknown>)).toBe(false);
   });
 
-  it('disables Send and refuses submission when feedback is empty or whitespace only', async () => {
+  it('disables Send without choosing and refuses submission when feedback is empty or whitespace only', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered' } }] });
     const props = makeProps();
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
     expect(send).toBeDisabled();
 
     const box = screen.getByLabelText('Comment or feedback');
@@ -158,13 +195,13 @@ describe('choice request free-form feedback and option picking', () => {
     const feedback = 'Первая строка замечаний.\nВторая строка: не закрывать запрос выдуманным выбором.';
     const box = screen.getByLabelText('Комментарий или замечания');
     await user.type(box, feedback);
-    const send = screen.getByRole('button', { name: 'Отправить' });
+    const send = screen.getByRole('button', { name: 'Отправить без выбора' });
     await user.click(send);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(ru.errors.codes.unavailable);
     expect(box).toHaveValue(feedback);
     expect(send).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Option A/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Выбрать вариант 1' })).toBeEnabled();
     expect(props.onChanged).not.toHaveBeenCalled();
 
     fail = false;
@@ -190,8 +227,8 @@ describe('choice request free-form feedback and option picking', () => {
 
     const box = screen.getByLabelText('Comment or feedback');
     await user.type(box, 'Hold this feedback');
-    const send = screen.getByRole('button', { name: 'Send' });
-    const optA = screen.getByRole('button', { name: /Option A/ });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
+    const optA = screen.getByRole('button', { name: 'Choose option 1' });
 
     fireEvent.click(send);
     fireEvent.click(send);
@@ -212,27 +249,164 @@ describe('choice request free-form feedback and option picking', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps read-only view strict when canAnswer is false, without options buttons or Send', () => {
-    renderIn('ru', <Requests {...makeProps({ requests: [{ ...CHOICE, canAnswer: false }] })} />);
-    expect(screen.getAllByRole('listitem').map(li => li.textContent)).toEqual([
+  it('keeps read-only view strict when canAnswer is false, without options buttons or Send without choosing', () => {
+    const plainReadOnly: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-choice-plain-ro',
+      canAnswer: false,
+      images: [],
+      link: null,
+      options: CHOICE.options.map(o => ({ label: o.label, image: null })),
+      task: { id: 't405', number: 405, title: 'Plain turn progress options', department: DEV },
+    };
+    renderIn('ru', <Requests {...makeProps({ requests: [{ ...CHOICE, canAnswer: false }, plainReadOnly] })} />);
+    const card = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(card).getByText('Option A (Argon): compact row below the circle')).toBeInTheDocument();
+    expect(within(card).getByText('Option B (Neon): wide strip with counters')).toBeInTheDocument();
+    expect(card.querySelectorAll('ol.opts button.mat.mat-large')).toHaveLength(2);
+    expect(within(card).getByText(ru.tasks.decidedByCeo)).toBeInTheDocument();
+    expect(within(card).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Отправить без выбора' })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: /Выбрать вариант/ })).not.toBeInTheDocument();
+
+    const plainCard = screen.getByRole('article', { name: '#405 Plain turn progress options' });
+    expect(within(plainCard).getAllByRole('listitem').map(li => li.textContent)).toEqual([
       'Option A (Argon): compact row below the circle',
       'Option B (Neon): wide strip with counters',
     ]);
-    expect(screen.getByText(ru.tasks.decidedByCeo)).toBeInTheDocument();
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Отправить' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Option A/ })).not.toBeInTheDocument();
+    expect(within(plainCard).queryByRole('button', { name: /Option A/ })).not.toBeInTheDocument();
+  });
+
+  it('distinguishes in-flight sending from server failure, keeps the full draft, and sends once on retry', async () => {
+    const net = stubDeferredFetch();
+    const props = makeProps();
+    const user = userEvent.setup();
+    renderIn('ru', <Requests {...props} />);
+
+    const card = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+
+    const feedback = 'Первая строка замечаний.\nВторая строка: сохранить весь черновик при сбое.';
+    const box = within(card).getByLabelText('Комментарий или замечания');
+    await user.type(box, feedback);
+    const send = within(card).getByRole('button', { name: 'Отправить без выбора' });
+    const optA = within(card).getByRole('button', { name: 'Выбрать вариант 1' });
+
+    await user.click(send);
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(within(card).getByRole('status')).toHaveTextContent('Отправка');
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(send).toBeDisabled();
+    expect(optA).toBeDisabled();
+    expect(box).toHaveValue(feedback);
+
+    fireEvent.click(send);
+    fireEvent.click(optA);
+    fireEvent.submit(box.closest('form')!);
+    expect(net.posted).toHaveLength(1);
+
+    net.answerNext(503, { error: { code: 'unavailable' } });
+
+    expect(await within(card).findByRole('alert')).toHaveTextContent(ru.errors.codes.unavailable);
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(box).toHaveValue(feedback);
+    expect(send).toBeEnabled();
+    expect(optA).toBeEnabled();
+    expect(props.onChanged).not.toHaveBeenCalled();
+
+    await user.click(send);
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(within(card).getByRole('status')).toHaveTextContent('Отправка');
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(net.posted).toHaveLength(2);
+    expect(net.posted[1]).toEqual({ url: '/api/requests/r-choice', body: { answer: feedback } });
+
+    net.answerNext(200, { request: { id: 'r-choice', status: 'answered', picked: null } });
+    await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledTimes(1));
+    expect(send).toBeDisabled();
+  });
+
+  it('tracks independent sending and error states on approval and stuck cards without extra confirmation steps', async () => {
+    const net = stubDeferredFetch();
+    const approval: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-approval',
+      kind: 'approval',
+      commit: 'c'.repeat(40),
+      commitUrl: 'https://github.com/acme/repo/commit/' + 'c'.repeat(40),
+      options: [],
+      images: [],
+      link: null,
+      task: { id: 't403', number: 403, title: 'Release budget approval', department: DEV },
+    };
+    const stuck: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-stuck-ind',
+      kind: 'stuck',
+      options: [],
+      images: [],
+      link: null,
+      task: { id: 't404', number: 404, title: 'Stuck worker recovery', department: DEV },
+    };
+    const props = makeProps({ requests: [approval, stuck] });
+    const user = userEvent.setup();
+    renderIn('en', <Requests {...props} />);
+
+    const approvalCard = screen.getByRole('article', { name: '#403 Release budget approval' });
+    const stuckCard = screen.getByRole('article', { name: '#404 Stuck worker recovery' });
+
+    const noteBox = within(approvalCard).getByLabelText(en.tasks.note);
+    await user.type(noteBox, 'Within Q4 limit');
+    await user.click(within(approvalCard).getByRole('button', { name: en.tasks.approve }));
+
+    expect(net.posted).toEqual([{ url: '/api/requests/r-approval', body: { approve: true, answer: 'Within Q4 limit' } }]);
+    expect(approvalCard).toHaveAttribute('aria-busy', 'true');
+    expect(within(approvalCard).getByRole('status')).toHaveTextContent('Sending');
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.approve })).toBeDisabled();
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.decline })).toBeDisabled();
+    expect(stuckCard).toHaveAttribute('aria-busy', 'false');
+    expect(within(stuckCard).queryByRole('status')).not.toBeInTheDocument();
+
+    net.answerUrl('/api/requests/r-approval', 409, { error: { code: 'conflict', reason: 'task_changed' } });
+
+    expect(await within(approvalCard).findByRole('alert')).toHaveTextContent(en.errors.task_changed);
+    expect(approvalCard).toHaveAttribute('aria-busy', 'false');
+    expect(within(approvalCard).queryByRole('status')).not.toBeInTheDocument();
+    expect(noteBox).toHaveValue('Within Q4 limit');
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.decline })).toBeEnabled();
+
+    await user.click(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask }));
+    expect(net.posted.at(-1)).toEqual({ url: '/api/tasks/t404/cancel', body: {} });
+    expect(stuckCard).toHaveAttribute('aria-busy', 'true');
+    expect(within(stuckCard).getByRole('status')).toHaveTextContent('Sending');
+    expect(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask })).toBeDisabled();
+
+    net.answerUrl('/api/tasks/t404/cancel', 200, {});
+    await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledTimes(1));
   });
 
   it('supports full keyboard navigation for both multi-line feedback submit and option pick', async () => {
-    const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered' } }] });
+    const plainChoice: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-plain-choice',
+      images: [],
+      link: null,
+      options: CHOICE.options.map(o => ({ label: o.label, image: null })),
+    };
+    const calls = mockApi({ 'POST /api/requests/r-plain-choice': [200, { request: { id: 'r-plain-choice', status: 'answered' } }] });
     const user = userEvent.setup();
-    renderIn('en', <Requests {...makeProps()} />);
+    renderIn('en', <Requests {...makeProps({ requests: [plainChoice] })} />);
 
     const optA = screen.getByRole('button', { name: /Option A/ });
     const optB = screen.getByRole('button', { name: /Option B/ });
     const box = screen.getByLabelText('Comment or feedback');
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
 
     optA.focus();
     expect(optA).toHaveFocus();
@@ -249,7 +423,7 @@ describe('choice request free-form feedback and option picking', () => {
     await user.keyboard('{Enter}');
 
     expect(calls).toEqual([
-      { method: 'POST', path: '/api/requests/r-choice', body: { answer: 'Line 1\nLine 2' } },
+      { method: 'POST', path: '/api/requests/r-plain-choice', body: { answer: 'Line 1\nLine 2' } },
     ]);
   });
 

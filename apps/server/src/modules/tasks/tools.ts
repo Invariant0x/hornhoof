@@ -1,17 +1,23 @@
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
+import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { setUrgent } from './urgency.js';
+import { answersCeoOrDelegate } from '../conversation/decision-context.js';
+import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -20,6 +26,10 @@ import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
+import { reviewContext, ReviewSha, ReviewSubmission } from './review-context.js';
+import { pipelineFindings, reviewDetails } from './review-details.js';
+import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
+import { bindReviewEvidence } from './review-verdict.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -37,7 +47,7 @@ const json = (value: unknown) => say(JSON.stringify(value, english));
 export const TASK_ANSWER = 40_000;
 
 /* A task as an agent reads it: when it is too long, its oldest log lines are left out and counted. */
-function fitted(detail: TaskDetail): string {
+function fitted<T extends TaskDetail>(detail: T): string {
   const whole = JSON.stringify(detail, english);
   if (whole.length <= TASK_ANSWER) return whole;
   const sizes = detail.log.map(l => JSON.stringify(l, english).length + 1);
@@ -55,6 +65,10 @@ const After = z
   .array(Ref)
   .max(10)
   .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
+const AfterPlans = z.array(z.strictObject({ task: Ref, plan: WaitPlan })).max(10).describe('Who answers by when for a task in after, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the task.');
+const AskPlan = WaitPlan.optional().describe('Who answers by when, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the question.');
+const IndependentPart = z.strictObject({ title: Title, brief: Brief, body: Body, executor: z.uuid() }).describe('The part that can start before the tasks in after finish, and who does it.');
+const IndependentNone = z.string().trim().min(1).max(2000).describe('Why no independent part exists: one file author, a genuine dependency, or a release boundary.');
 const WorkKind = z.enum(WORK_KINDS).describe('What kind of work it is: a bug, known behavior to build, an unknown path, or old code. The pipeline report counts by it.');
 const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost: money, access, security, data, or none.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
@@ -146,6 +160,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return ids;
   }
 
+  /* Promises of dates for tasks another comes after, by the id the engine knows them by. One for a task it does not come after
+     is refused with the rest of the change. */
+  async function afterPlansOf(given: { task: number | string; plan: WaitPlan }[] | undefined) {
+    if (!given) return undefined;
+    const ids = await afterIds(given.map(g => g.task));
+    return Object.fromEntries(given.map((g, i) => [ids[i]!, g.plan]));
+  }
+
   /* What a task still waits for, as a sentence for the tool's answer. */
   async function waiting(t: Task): Promise<string> {
     const open = await openAfter(db, t);
@@ -182,12 +204,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     {
       description:
         'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
-        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence.",
+        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence. review pins an immutable candidate and author receipts; review.quality is structured producer evidence or unavailable; gateCounts is labeled review-lifecycle. reviewPlan assigns task areas/common contracts and an integration reviewer. fixReview limits a repeat to its own original finding IDs and exact range. reviewFindings contains explicit confirmations and vendor provenance.",
       inputSchema: { task: Ref },
     },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ agent, task }) => say(fitted(await taskDetail(ctx, task, t => sees(agent, t)))),
+        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), ...await reviewDetails(db, task.id, agent.id) })),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );
@@ -224,6 +246,21 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   server.registerTool(
+    'replan_wait',
+    {
+      description:
+        'Gives a wait on a task (its id in waits, from task) a new owner or new dates, for someone who answers for it: its owner, its head or the orchestrator. Also the way to give a wait with no plan its first dates. Dates moved stay on record. Say whose promise they are in plan.provenance, and only dates someone really promised.',
+      inputSchema: { wait: z.uuid(), expectedGeneration: z.number().int().positive(), owner: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) },
+    },
+    async ({ wait, expectedGeneration, owner, plan, reason }) =>
+      run(async () => {
+        const kept = await db.transaction(tx => replanWait(tx, { waitId: wait, expectedGeneration, ...(owner ? { ownerBinding: owner } : {}), ...(plan ? { plan } : {}), reason, actor: { agentId: job.agentId } }));
+        const { task } = await find(kept.taskId);
+        return { text: `The wait on #${task.number} is at generation ${kept.generation}, due ${kept.nextActionAt?.toISOString() ?? 'with no date'}.`, moved: { task, wakes: [] } };
+      }),
+  );
+
+  server.registerTool(
     'ask_person',
     {
       description:
@@ -239,6 +276,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         images: z.array(z.uuid()).max(6).optional(),
         options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
+        plan: AskPlan,
         topic: z
           .enum(DECISION_TOPICS)
           .optional()
@@ -247,7 +285,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           ),
       },
     },
-    async ({ task: ref, question, commit, images, options, link, topic }) =>
+    async ({ task: ref, question, commit, images, options, link, topic, plan }) =>
       run(async () => {
         const { task } = await find(ref);
         plain(task, question);
@@ -259,14 +297,21 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const { text, told } = await questionWords(db, task, question, commit);
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
         await recordQuestion(ctx, job, task, { kind, text, topic });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
       }),
   );
 
   if (job.agentKind === 'orchestrator') {
-    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional() });
+    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+    /* The orchestrator says work is urgent only for the CEO or the CEO delegate the turn answers. */
+    const forCeoAlone = async () => {
+      if (!(await answersCeoOrDelegate(db, job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+    };
+    const urgentFromCeo = async (items: { urgent?: boolean | undefined }[]) => {
+      if (items.some(item => item.urgent)) await forCeoAlone();
+    };
     const Turn = z.number().int().positive().describe('The turn number, like 2.');
     const Words = z
       .number()
@@ -294,7 +339,11 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           'Each number comes with the previous turn and the baseline turn and its change in percent. By default the running turn, else the last that ran. A department with described false has no description to take its own numbers from.',
         inputSchema: { turn: Turn.optional() },
       },
-      async ({ turn }) => run(async () => ({ text: JSON.stringify(await pipelineReport(db, job.companyId, turn), english) })),
+      async ({ turn }) => run(async () => {
+        const report = await pipelineReport(db, job.companyId, turn);
+        const reviewFindings = await pipelineFindings(db, job.companyId, report);
+        return { text: JSON.stringify({ ...report, reviewFindings }, english) };
+      }),
     );
     server.registerTool(
       'plan_turn',
@@ -308,6 +357,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
           return { text: moved.text, moved };
         }),
@@ -323,8 +373,24 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
           return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'set_urgent',
+      {
+        description:
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO or the CEO delegate says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+        inputSchema: { task: Ref, urgent: z.boolean() },
+      },
+      async ({ task: ref, urgent }) =>
+        run(async () => {
+          await forCeoAlone();
+          const { agent, task } = await find(ref);
+          const moved = await setUrgent(ctx, { agentId: agent.id }, task.id, urgent);
+          return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),
     );
     server.registerTool(
@@ -358,14 +424,15 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+          "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves. after needs independentPart or independentNone.",
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         run(async () => {
           const agent = await me();
           await underCap(agent);
           const executor = await member(agent, input.executor);
+          if (input.independentPart) await member(agent, input.independentPart.executor);
           if (input.product) {
             const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, input.product), eq(departments.parentId, agent.departmentId!)));
             if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of your department.`);
@@ -376,7 +443,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
           const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
@@ -391,9 +458,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
             'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
-      async ({ task: ref, executor, gates, after, ...text }) =>
+      async ({ task: ref, executor, gates, after, afterPlans, ...text }) =>
         run(async () => {
           const { agent, task } = await find(ref);
           if (!boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
@@ -401,8 +468,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const head = boss ? { ...agent, departmentId: task.departmentId } : agent;
           if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
           const next = executor !== undefined ? (await member(head, executor)).id : undefined;
+          if (text.independentPart) await member(head, text.independentPart.executor);
           const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
-          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after) } : {}) });
+          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after), afterPlans: await afterPlansOf(afterPlans) } : {}) });
           return { text: `Updated. ${await where(moved.task)}`, moved };
         }),
     );
@@ -441,14 +509,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check.',
-        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1) },
+        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
-      async ({ task: ref, summary, evidence }) =>
+      async ({ task: ref, summary, evidence, review }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, summary, evidence);
-          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence });
+          const moved = await submitWithAuthorCheck(ctx, job, task.id, { summary, evidence, review });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
     );
@@ -466,17 +534,27 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'verdict',
       {
         description:
-          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. Its log keeps the test runs it stood on, with the commits they pinned.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional() },
+          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. reviewedCommit names the pinned candidate. issues records category/blocking/path/line/harm and taskId for a vertical area. Only original blocking security/data/spec findings get a same-reviewer fix look; repeats add no new issues. Legacy findings is not a confirmed count. Its log retains run/commit provenance.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional(), issues: z.array(IssueInput).max(99).optional() },
       },
-      async ({ task: ref, pass, comment: why, findings }) =>
+      async ({ task: ref, pass, comment: why, findings, reviewedCommit, issues }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
-          const evidence = await taskEvidence(ctx, task);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, evidence: keptEvidence(evidence) });
+          const review = await reviewContext(ctx.db, task.id);
+          const evidence = bindReviewEvidence(await taskEvidence(ctx, task), review?.commit ?? null);
+          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
+    );
+    server.registerTool(
+      'confirm_finding',
+      { description: 'The actual area author or its head explicitly confirms or rejects a structured finding. Read its findingId and revision from task.reviewFindings. An author must name its current exact fixCommit; a head may confirm existence before a fix. This records existence only; it never passes a gate or removes a blocking finding. History and vendor counts retain provenance.', inputSchema: { task: Ref, ...ConfirmationInput.shape } },
+      async ({ task: ref, ...input }) => run(async () => {
+        const { task } = await find(ref);
+        await confirmFinding(ctx, job.agentId, task, input);
+        return { text: 'The finding confirmation is recorded; its gate and fix status are unchanged.' };
+      }),
     );
   }
 

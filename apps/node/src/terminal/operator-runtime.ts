@@ -145,8 +145,12 @@ export class OperatorRuntime {
 
   recorded(key: string): boolean { return this.targets.get(key)?.recorded ?? false; }
 
+  sourceRecorded(metadata: OperatorDelivery | undefined): boolean {
+    return Boolean(metadata && this.observer.recordedSource(metadata.id));
+  }
+
   inheritSource(key: string, metadata: OperatorDelivery | undefined): boolean {
-    if (!metadata || !this.observer.recordedSource(metadata.id)) return false;
+    if (!this.sourceRecorded(metadata)) return false;
     const target = this.targets.get(key); if (!target) return false;
     target.recorded = true;
     if (target.assignment) this.observer.finalize(target.assignment.id, 'cancelled');

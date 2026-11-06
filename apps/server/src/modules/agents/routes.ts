@@ -22,6 +22,7 @@ import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
+import { releaseLeftProgram } from './left-programs.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -259,20 +260,29 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { agent, next, changed } = await changing(found, agent => patched(me, agent, body));
     if (changed) {
       ctx.bus.publish(agent.companyId, { type: 'org' });
-      /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
-      if (next.subscriptionId !== agent.subscriptionId) {
-        if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
-        await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
-        await tryPlaceOperator(ctx, agent.companyId);
-      }
-      /* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
-         once no turn of it runs. */
-      if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, actorOf(me), agent.id);
-      if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
+      /* Who sees it goes by its plan and its place, and those who watch its terminal hear at once. */
+      if (next.subscriptionId !== agent.subscriptionId || next.teamId !== agent.teamId) ctx.bus.accessChanged(agent.companyId);
+      if (next.subscriptionId !== agent.subscriptionId) await afterPlanMove(agent, next);
+      await afterSwitch(me, agent, next);
       await afterTeamMove(ctx, me, agent, next);
     }
     return card(next, me);
   });
+
+  /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
+  async function afterPlanMove(agent: AgentRow, next: AgentRow): Promise<void> {
+    if (agent.subscriptionId) await releaseLeftProgram(ctx, agent.id, agent.subscriptionId);
+    if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
+    await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
+    await tryPlaceOperator(ctx, agent.companyId);
+  }
+
+  /* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
+     once no turn of it runs. */
+  async function afterSwitch(me: Person, agent: AgentRow, next: AgentRow): Promise<void> {
+    if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, actorOf(me), agent.id);
+    if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
+  }
 
   /* Applies a card change to the agent as it is now and records each changed field. */
   async function patched(me: Person, agent: AgentRow, body: z.infer<typeof AgentPatch>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {

@@ -1,12 +1,16 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join } from 'node:path';
-import { COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { dirname, join } from 'node:path';
+import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser } from './browser.js';
-import { ensurePasswd, FIRST_UID, prepareFolder, type JobUser } from './isolation.js';
+import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
+import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, stat as fsStat } from 'node:fs/promises';
+import { fileDigest, privateCacheRoot, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
+import { EnvironmentFailure, buildTestInvocation, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { checkoutCommit } from './test-mirror.js';
 import { gitEnv } from './workspace.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -372,7 +376,9 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
    comes into a fresh folder, a part of work gets the task's files it names, the command runs within the time with a home
    and a temporary folder of its own, what a part of work leaves in its output folder goes on the task, and the folder
    goes, whatever happened. */
-export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) }: Options): Promise<TestsDone> {
+export async function runTests(msg: TestRun, options: Options): Promise<TestsDone> {
+  if (msg.environment) return runProductPart(msg, options);
+  const { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) } = options;
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
   const parts = partsFolder(dir);
@@ -383,7 +389,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   const outbox = join(root, 'out');
   const out = new Output();
   /* Ends a wait on Hornhoof when the part is stopped or this moment passes. */
-  const until = (end: number) => AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(Math.max(0, end - Date.now()))]);
+  const until = (end: number) => productSignal(signal, end);
   let commit: string | null = null;
   let exitCode: number | null = null;
   let error: TestError | null = null;
@@ -413,7 +419,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     }
     if (source) {
       const checkout: Checkout = { msg, url: source.url, git, stoppedBy, root, repo, out };
-      error = await (msg.commitSha ? fetchCommit(checkout, msg.commitSha) : cloneBranch(checkout));
+      error = await checkoutForPart(checkout, { dir, user, signal, deadline });
     }
     if (!error && source) {
       const head = new Output();
@@ -462,7 +468,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     out.line(err instanceof Error ? err.message : String(err));
     error ??= 'failed';
   } finally {
-    if (user) killUser(user.uid, proc);
+    if (user) await stopTestUser(user, proc);
     /* Only a user of the node's own, never the node's or a person's. */
     if (user && user.uid >= FIRST_UID) clearShared(user.uid, SHARED);
     try {
@@ -478,4 +484,226 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   }
   const secrets = [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
   return { type: 'tests.done', partId: msg.partId, ok: error === null && exitCode === 0, exitCode, error, commit, log: redact(stripEscapes(out.text()), secrets) };
+}
+
+async function checkoutForPart(checkout: Checkout, options: { dir: string; user: JobUser | null; signal?: AbortSignal; deadline: number }): Promise<TestError | null> {
+  const { msg } = checkout;
+  if (!msg.repositoryScope || !msg.commitSha || msg.commitSha.length !== 40) return msg.commitSha ? fetchCommit(checkout, msg.commitSha) : cloneBranch(checkout);
+  remove(checkout.repo);
+  await checkoutCommit(msg.repo!, msg.repositoryScope, msg.commitSha, checkout.repo, { cacheRoot: join(options.dir, 'cache'), deadline: options.deadline, signal: options.signal ?? new AbortController().signal, log: line => checkout.out.line(line) });
+  prepareFolder(checkout.repo, options.user); return null;
+}
+
+const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+type ProductState = {
+  root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
+  base: Record<string, string>; options: Options; receipt: TestEnvironmentReceipt; exitCode: number | null;
+};
+type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
+function environmentError(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail: `${code}: ${detail}` }); }
+function productUser(user: JobUser | null): { user: JobUser; nodeOwner: JobUser } {
+  const uid = process.getuid?.(), gid = process.getgid?.();
+  if (!user || uid === undefined || gid === undefined || user.uid === 0 || user.uid === uid) environmentError('isolation_missing', 'Product preparation requires a distinct isolated job user.');
+  return { user, nodeOwner: { uid, gid } };
+}
+async function timedPhase<T>(receipt: TestEnvironmentReceipt, phase: keyof TestEnvironmentReceipt['phases'], run: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  try { return await run(); } finally { receipt.phases[phase] += performance.now() - start; }
+}
+async function stopTestUser(user: JobUser, proc = '/proc'): Promise<void> {
+  killUser(user.uid, proc);
+  while (productUserAlive(user.uid, proc)) {
+    killUser(user.uid, proc);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+const statusUser = (status: string): string | undefined => /^Uid:\s+(\d+)/m.exec(status)?.[1];
+const liveUserStatus = (status: string, uid: number): boolean => statusUser(status) === String(uid) && !/^State:\s+Z/m.test(status);
+function liveUserProcess(path: string, uid: number): boolean {
+  try { return liveUserStatus(readFileSync(path, 'utf8'), uid); }
+  catch { return false; }
+}
+function productUserAlive(uid: number, proc: string): boolean {
+  return readdirSync(proc).some(name => /^\d+$/.test(name) && liveUserProcess(join(proc, name, 'status'), uid));
+}
+function giveCheckout(state: ProductState, path: string, user: JobUser): void {
+  // Force a complete handoff after restoring node-owned files into an existing job checkout.
+  chownSync(path, state.nodeOwner.uid, state.nodeOwner.gid); prepareFolder(path, user);
+}
+async function productCommand(state: ProductState, checkout: string, user: JobUser, command: Command, env: Record<string, string>): Promise<void> {
+  state.signal.throwIfAborted();
+  if (Date.now() >= state.deadline) throw new DOMException('The product command deadline expired.', 'TimeoutError');
+  state.out.line(`$ ${JSON.stringify([command.program, ...command.args])}`);
+  const ended = await runIn(command.program, command.args, { cwd: await safeCheckoutPath(checkout, command.cwd), env, user, deadline: state.deadline, signal: state.signal, out: state.out });
+  if (ended.stopped) throw new DOMException(`The product command was ${ended.stopped}.`, ended.stopped === 'timeout' ? 'TimeoutError' : 'AbortError');
+  if (ended.code !== 0) throw new ProductCommandFailure(ended.code, ended.signal);
+}
+async function builderInputs(inputs: InputDigest[], source: string, target: string, context: CacheContext): Promise<void> {
+  for (const input of inputs) {
+    if (input.digest === null) continue;
+    const full = await safeCheckoutPath(source, input.path);
+    if (!(await fsStat(full)).isFile() || await fileDigest(full, context) !== input.digest) environmentError('description_mismatch', 'A preparation input changed before its isolated build.');
+    const destination = join(target, input.path); await fsMkdir(dirname(destination), { recursive: true });
+    await fsCopyFile(full, destination);
+  }
+}
+async function productBuilder(state: ProductState, inputs: InputDigest[], dependencies: CacheEntry | null, context: CacheContext): Promise<PreparationBuilder> {
+  const user = userFor(state.options.dir, 'product-test-builder');
+  if (!user || user.uid === state.user.uid || user.uid === state.nodeOwner.uid || user.uid === 0) environmentError('isolation_missing', 'A distinct preparation builder user is unavailable.');
+  const builders = join(state.root, 'builders'); await fsMkdir(builders, { recursive: true, mode: 0o755 });
+  const root = await fsMkdtemp(join(builders, 'unit-'));
+  const quiesce = () => stopTestUser(user, state.options.proc);
+  try {
+    await builderInputs(inputs, state.repo, root, context);
+    if (dependencies) await restoreCache(dependencies, root, context);
+    for (const path of [root, join(root, '.home'), join(root, '.tmp')]) prepareFolder(path, user);
+    ensurePasswd(user, partsFolder(state.options.dir));
+    const env = { ...state.base, HOME: join(root, '.home'), TMPDIR: join(root, '.tmp'), CI: 'true' };
+    return { root, user, env, run: (command, extra = {}) => productCommand(state, root, user, command, { ...env, ...extra }), quiesce, close: () => closeBuilder(user, root, state.options.proc) };
+  } catch (error) { await closeBuilder(user, root, state.options.proc); throw error; }
+}
+async function closeBuilder(user: JobUser, root: string, proc = '/proc'): Promise<void> {
+  await stopTestUser(user, proc);
+  if (user.uid >= FIRST_UID) clearShared(user.uid, SHARED);
+  remove(root);
+}
+function preparationContext(state: ProductState, profile: string, hidden: string[]): PreparationContext {
+  const context: PreparationContext = {
+    cacheRoot: join(state.options.dir, 'cache'), checkout: state.repo, profile, attemptRoot: state.root, nodeOwner: state.nodeOwner, jobUser: state.user,
+    deadline: state.deadline, signal: state.signal, env: state.base, log: line => state.out.line(line), registerSecrets: values => { hidden.push(...values); },
+    builder: (inputs, dependencies) => productBuilder(state, inputs, dependencies, context),
+    run: async (command, extra = {}) => { giveCheckout(state, state.repo, state.user); await productCommand(state, state.repo, state.user, command, { ...state.base, ...extra, CI: 'true' }); },
+    quiesce: () => stopTestUser(state.user, state.options.proc),
+  };
+  return context;
+}
+function receiptFor(execution: TestExecution): TestEnvironmentReceipt {
+  const { description } = execution.snapshot, { selection } = execution;
+  const common = { commitSha: description.commitSha, manifestHash: description.manifestHash, runtimes: [], dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } };
+  if (!('version' in selection)) return { ...common, version: 1, ...selection };
+  return { ...common, version: 2, profile: execution.snapshot.profile, selection, outcomes: productOperations(execution).map((_, index) => ({ index, status: 'not-run', exitCode: null })) };
+}
+function productOperations(execution: TestExecution): ProductOperation[] {
+  const { selection, snapshot } = execution;
+  if (selection.kind === 'batch') return selection.selections;
+  if (selection.kind !== 'prepare') return [];
+  const preparation = snapshot.description.manifest.execution!.oncePreparation!;
+  const suites: ProductOperation[] = preparation.suiteIds.map(suiteId => ({ kind: 'suite', suiteId, files: snapshot.description.inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) }));
+  return [...suites, ...preparation.commands.map(command => ({ kind: 'command' as const, command }))];
+}
+async function productCheckout(msg: TestRun, state: ProductState, context: PreparationContext): Promise<EnvironmentDescription> {
+  const expected = await productDescription(msg.environment!.snapshot.description);
+  await checkoutCommit(msg.repo!, expected.repositoryScope, expected.commitSha, state.repo, context);
+  const actual = await readTestEnvironment(msg.repo!, expected.repositoryScope, expected.commitSha, context);
+  if (expected.manifestHash !== actual.manifestHash || JSON.stringify(expected.inputDigests) !== JSON.stringify(actual.inputDigests) || JSON.stringify(expected.inventory) !== JSON.stringify(actual.inventory)) environmentError('description_mismatch', 'The pinned checkout differs from the accepted environment snapshot.');
+  if (!supportsTestProfile({ description: actual, profile: context.profile }, actual.runtimeCapabilities)) environmentError('runtime_missing', 'The node lacks a runtime required by this product profile.');
+  state.receipt.runtimes = actual.runtimeCapabilities; return actual;
+}
+async function productSelection(msg: TestRun, state: ProductState, env: Record<string, string>): Promise<void> {
+  const execution = TestExecution.parse(msg.environment), { selection } = execution;
+  if ('version' in selection) return versionedProductSelection(execution, state, env);
+  const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === selection.suiteId)!;
+  if (selection.kind === 'final') {
+    for (const command of suite.finalChecks!) await selectedProductCommand(state, command, env);
+    return;
+  }
+  await productSuite(execution, { ...selection, kind: 'suite' }, state, env, 0);
+}
+async function productSuite(execution: TestExecution, operation: Extract<ProductOperation, { kind: 'suite' }>, state: ProductState, env: Record<string, string>, index: number): Promise<void> {
+  const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === operation.suiteId)!;
+  const filesPath = join(state.root, `selection-${index}.json`);
+  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 } });
+  if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
+  await productResets(execution, suite.id, state, env);
+  await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env });
+}
+async function versionedProductSelection(execution: TestExecution, state: ProductState, env: Record<string, string>): Promise<void> {
+  const receipt = state.receipt;
+  if (receipt.version !== 2) environmentError('environment_invalid', 'Versioned execution requires a complete receipt.');
+  const operations = productOperations(execution);
+  let firstFailure: ProductCommandFailure | undefined;
+  for (const [index, operation] of operations.entries()) {
+    try {
+      if (operation.kind === 'command') await selectedProductCommand(state, operation.command, env);
+      else await productSuite(execution, operation, state, env, index);
+      receipt.outcomes[index] = { index, status: 'passed', exitCode: 0 };
+    } catch (error) {
+      receipt.outcomes[index] = { index, status: 'failed', exitCode: error instanceof ProductCommandFailure ? error.exitCode : null };
+      if (error instanceof ProductCommandFailure) firstFailure ??= error;
+      state.exitCode = firstFailure?.exitCode ?? null;
+      if (!(error instanceof ProductCommandFailure) || execution.selection.kind === 'prepare') throw error;
+    }
+  }
+  if (firstFailure) { state.exitCode = firstFailure.exitCode; throw firstFailure; }
+}
+async function executeProduct(msg: TestRun, state: ProductState, hidden: string[]): Promise<void> {
+  const execution = TestExecution.parse(msg.environment), context = preparationContext(state, execution.snapshot.profile, hidden);
+  let services: Awaited<ReturnType<typeof openEnvironment>> | undefined;
+  try {
+    const description = await timedPhase(state.receipt, 'checkoutMs', () => productCheckout(msg, state, context));
+    const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
+    await timedPhase(state.receipt, 'servicesMs', () => (state.options.prepareRepoBrowser ?? (repo => ensureRepoBrowser(state.options.dir, repo, state.user)))(state.repo));
+    const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
+    giveCheckout(state, state.repo, state.user);
+    services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
+    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
+  } finally { await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } }); }
+}
+function productFailure(error: unknown, signal: AbortSignal): TestError {
+  if (signal.aborted) return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError' ? 'timeout' : 'cancelled';
+  return error instanceof DOMException && error.name === 'TimeoutError' ? 'timeout' : 'failed';
+}
+async function productState(msg: TestRun, options: Options, out: Output): Promise<ProductState> {
+  const execution = TestExecution.parse(msg.environment), { description } = execution.snapshot, scope = msg.repositoryScope;
+  if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
+  await productDescription(description);
+  const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
+  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+}
+async function productFolders(state: ProductState): Promise<void> {
+  await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
+  for (const path of ['home', 'tmp']) prepareFolder(join(state.root, path), state.user);
+  ensurePasswd(state.user, partsFolder(state.options.dir));
+}
+const productSecrets = (msg: TestRun, hidden: string[]): string[] => [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
+function failedProductSignal(state: ProductState | undefined, options: Options): AbortSignal { return state?.signal ?? options.signal ?? new AbortController().signal; }
+async function cleanupProduct(state: ProductState | undefined, out: Output): Promise<TestError | null> {
+  if (!state) return null;
+  try {
+    await timedPhase(state.receipt, 'cleanupMs', async () => {
+      await stopTestUser(state.user, state.options.proc);
+      if (state.user.uid >= FIRST_UID) clearShared(state.user.uid, SHARED);
+      remove(state.root);
+    }); return null;
+  } catch (error) { out.line(error instanceof Error ? error.message : String(error)); return 'failed'; }
+}
+function productDone(msg: TestRun, state: ProductState | undefined, error: TestError | null, out: Output, hidden: string[]): TestsDone {
+  return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}) };
+}
+async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
+  const out = new Output(), hidden = productSecrets(msg, options.hidden);
+  let error: TestError | null = null, state: ProductState | undefined;
+  try { state = await productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
+  catch (failure) { out.line(failure instanceof Error ? failure.message : String(failure)); error = productFailure(failure, failedProductSignal(state, options)); }
+  finally { error = await cleanupProduct(state, out) ?? error; }
+  return productDone(msg, state, error, out, hidden);
+}
+
+async function productDescription(value: unknown): Promise<EnvironmentDescription> {
+  try { return await validateEnvironmentDescription(value); } catch { return environmentError('description_mismatch', 'The pinned environment evidence is invalid.'); }
+}
+
+async function productResets(execution: TestExecution, suiteId: string, state: ProductState, env: Record<string, string>): Promise<void> {
+  for (const reset of execution.snapshot.description.manifest.reset ?? []) {
+    if (reset.scope === 'part' && reset.suiteIds.includes(suiteId) && reset.command) await productCommand(state, state.repo, state.user, reset.command, env);
+  }
+}
+
+class ProductCommandFailure extends Error {
+  constructor(readonly exitCode: number | null, signal: NodeJS.Signals | null) { super(`The product command failed with exit ${exitCode ?? signal}.`); }
+}
+async function selectedProductCommand(state: ProductState, command: Command, env: Record<string, string>): Promise<void> {
+  state.exitCode = null;
+  try { await productCommand(state, state.repo, state.user, command, env); state.exitCode = 0; }
+  catch (error) { if (error instanceof ProductCommandFailure) state.exitCode = error.exitCode; throw error; }
 }

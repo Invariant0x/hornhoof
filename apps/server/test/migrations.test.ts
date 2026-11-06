@@ -13,6 +13,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { tasks } from '../src/db/schema.js';
 import { appOn, approvalAsked, as } from './helpers.js';
+import { migrationsThrough } from './migrations-before.js';
 
 async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<void> {
   await migrateDrizzle(db, config);
@@ -35,8 +36,9 @@ describe('department owner and approval policy migration', () => {
     const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' - 'repo_full_test_command' as data from ${table} t order by id`))).rows;
     const before = { departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') };
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsUpTo('0063_department_owner_approval_policy');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect({ departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') }).toEqual(before);
     expect((await db.execute(sql`select owner_person_id from departments`)).rows).toEqual([{ owner_person_id: null }]);
@@ -144,9 +146,15 @@ describe('migration 0050', () => {
       select ${company}, ${agent}, id, 'tests', '', '' from tasks where number = 1`);
     const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    const target = await migrationsThrough('external_wait');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(w) - 'task_version' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
+    expect((await db.execute(sql`select task_version from pending_wakes`)).rows).toEqual([{ task_version: null }]);
+    const notificationTarget = await migrationsThrough('notification_provenance');
+    await migrate(db, { migrationsFolder: notificationTarget });
+    await migrate(db, { migrationsFolder: notificationTarget });
     expect((await db.execute(sql`select to_jsonb(w) - 'task_version' - 'cause' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select task_version, cause from pending_wakes`)).rows).toEqual([{ task_version: null, cause: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
@@ -167,6 +175,80 @@ async function migrationsUpTo(tag: string): Promise<string> {
   await writeFile(journalPath, JSON.stringify(journal));
   return dir;
 }
+
+describe('model checks migration', () => {
+  it('adds its tables empty, with nobody given anything and no row of an older database touched', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0067_request_materials') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'support', 'SUP') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
+    const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await older();
+
+    const target = await migrationsUpTo('0068_model_checks');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect(await older()).toEqual(before);
+    for (const table of ['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations']) {
+      expect((await db.execute(sql.raw(`select count(*)::int as n from ${table}`))).rows, table).toEqual([{ n: 0 }]);
+    }
+  });
+});
+
+describe('outbound gateway migration', () => {
+  /* Whatever number it ends up with: the journal says which it is and which comes just before it. */
+  const journalTags = async () => (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
+  const gatewayTag = async () => (await journalTags()).find(tag => tag.endsWith('_outbound'))!;
+  const tagBeforeGateway = async () => {
+    const tags = await journalTags();
+    return tags[tags.indexOf(await gatewayTag()) - 1]!;
+  };
+
+  it('adds its tables empty, with nobody given anything and no row of two older companies touched', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo(await tagBeforeGateway()) });
+    for (const name of ['Acme', 'Moonfern']) {
+      const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values (${name}, ${name === 'Acme'}) returning id`)).rows[0]!.id;
+      const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', ${`dana@${name}.example`}, 'active', 'listed') returning id`)).rows[0]!.id;
+      const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code, owner_person_id) values (${company}, 'sales', 'SAL', ${person}) returning id`)).rows[0]!.id;
+      await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
+      await db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, updated_by) values (${company}, ${department}, 'message', 'every', ${person})`);
+    }
+    const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access', 'approval_policies'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await older();
+
+    const target = await migrationsUpTo(await gatewayTag());
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect(await older()).toEqual(before);
+    const { rows } = await db.execute<{ tablename: string }>(sql`select tablename from pg_tables where schemaname = 'public' and (tablename ~ '^(outbound_|support_)' or tablename = 'model_check_certificates') order by tablename`);
+    expect(rows).toHaveLength(19);
+    for (const { tablename } of rows) {
+      expect((await db.execute(sql.raw(`select count(*)::int as n from ${tablename}`))).rows, tablename).toEqual([{ n: 0 }]);
+    }
+  });
+
+  it('leaves its guards in place when it is run again', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    const target = await migrationsUpTo(await gatewayTag());
+    await migrate(db, { migrationsFolder: target });
+    const guards = sql`select count(*)::int as n from pg_trigger where tgname like 'outbound_guard_%' and not tgisinternal`;
+    const [{ n }] = (await db.execute<{ n: number }>(guards)).rows as [{ n: number }];
+    expect(n).toBeGreaterThan(0);
+    await migrate(db, { migrationsFolder: target });
+    expect((await db.execute(guards)).rows).toEqual([{ n }]);
+  });
+});
 
 describe('migration 0049', () => {
   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
@@ -220,7 +302,7 @@ describe('migration 0047', () => {
     await db.execute(sql`update jobs set continue_of = (select id from jobs where prompt = ${`${name} work 2`}) where prompt = ${`${name} work 3`}`);
     await db.execute(sql`insert into agent_events (company_id, agent_id, kind, data)
       select ${company}, ${agent}, 'text', jsonb_build_object('text', 'Step ' || n) from generate_series(1, 30161) n`);
-    /* Both branches add nullable columns after 0044; every older field must stay identical. */
+    /* The merged 0046/0047 prefix adds four nullable fields; every older field stays identical. */
     const oldJobs = sql`select count(*)::int as n,
       md5(jsonb_agg(to_jsonb(j) - array['requested_prompt', 'failure', 'not_before', 'restarted_at'] order by id)::text) as checksum from jobs j`;
     const before = (await db.execute(oldJobs)).rows;
@@ -229,8 +311,9 @@ describe('migration 0047', () => {
     onTestFinished(() => copy.close());
     db = drizzle(copy);
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsThrough('requested_prompt');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect((await db.execute(oldJobs)).rows).toEqual(before);
     expect((await db.execute(sql`select count(*)::int as n from jobs
@@ -347,7 +430,7 @@ describe('migration 0007', () => {
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
     await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
     const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);
-    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_full_test_command', 'repo_test_memory_gb', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
+    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_full_test_command', 'repo_test_memory_gb', 'repo_token_enc', 'repo_token_last4', 'repo_token_revision', 'repo_url']);
   });
 });
 
@@ -806,15 +889,15 @@ describe('migration 0045', () => {
         ('20000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
-    /* Migrations 0050 and 0062 check their new nullable fields separately; every earlier field must stay identical. */
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class')::text, '' order by number)) as checksum from tasks t`;
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg(to_jsonb(t)::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
     const started = performance.now();
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsThrough('task_lookup_indexes');
+    await migrate(db, { migrationsFolder: target });
     console.info(`Migration 0045 on 20001 tasks: ${(performance.now() - started).toFixed(1)} ms`);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: target });
     expect((await db.execute(fingerprint)).rows).toEqual(before.rows);
     await db.execute(sql`analyze tasks`);
 
@@ -1054,8 +1137,9 @@ describe('migration 0062', () => {
     await task(10, 'open', 'Вид: ошибка.');
     const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsThrough('pipeline_report');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect(await labels(db)).toEqual([
       { number: 1, work_kind: 'known_behavior', risk_class: 'none' },

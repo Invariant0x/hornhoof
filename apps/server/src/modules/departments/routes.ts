@@ -1,6 +1,6 @@
 import { notificationMessage } from '../events/notifications.js';
-import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
+import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
+import { and, asc, eq, inArray, isNotNull, isNull, max, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -23,6 +23,9 @@ import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSub
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
+import { waitPolicyRoutes } from './wait-policy-routes.js';
+import { workModeRoutes } from './work-mode.js';
+import { modelCheckRoutes } from '../model-checks/routes.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -31,6 +34,7 @@ import { deptName, TEMPLATE_TEXT } from './templates.js';
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
 const TeamBody = z.object({ name: z.string().trim().min(1).max(60) }).strict();
+const TeamPatch = TeamBody.partial().extend({ urgentOnly: z.boolean().optional() }).strict().refine(patch => patch.name !== undefined || patch.urgentOnly !== undefined, { message: 'Say what changes.' });
 export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
 export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
@@ -133,7 +137,7 @@ async function wakeFreed(ctx: Ctx, me: Person, freed: string[]): Promise<void> {
 /* Sub-unit routes on a department: create, rename and delete a sub-unit outside the pipeline. */
 function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
-  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate });
+  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly });
 
   app.post('/api/departments/:id/teams', async (req, reply) => {
     const me = await requirePerson(req, db);
@@ -151,10 +155,10 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id, teamId } = TeamParams.parse(req.params);
-    const body = TeamBody.parse(req.body);
+    const body = TeamPatch.parse(req.body);
     const [team] = await db
       .update(teams)
-      .set({ name: body.name })
+      .set(body)
       .where(and(eq(teams.id, teamId), eq(teams.departmentId, id), eq(teams.companyId, me.companyId)))
       .returning();
     if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
@@ -235,7 +239,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
+            .values({ companyId: me.companyId, templateKey: item.template, workMode: defaultDepartmentWorkMode(item.template), name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
@@ -315,9 +319,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* A new token replaces the saved one; without one the saved token stays, unless the address moves to another host. */
     const host = (url: string | null) => (url ? new URL(url).host : null);
     const token = body.token
-      ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4) }
+      ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4), repoTokenRevision: sql`${departments.repoTokenRevision} + 1` }
       : host(dept.repoUrl) !== host(checked.data.url)
-        ? { repoTokenEnc: null, repoTokenLast4: null }
+        ? { repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1` }
         : {};
     /* Left out, the saved author stays; null takes it away. */
     const given = checked.data.author;
@@ -338,7 +342,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await db
       .update(departments)
-      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null })
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoTokenRevision: sql`${departments.repoTokenRevision} + 1`, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null })
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();
@@ -433,4 +437,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
+  waitPolicyRoutes(app, ctx);
+  workModeRoutes(app, ctx);
+  modelCheckRoutes(app, ctx);
 }

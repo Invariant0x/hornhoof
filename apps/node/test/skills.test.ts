@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
+import { agyRules } from '../src/providers/antigravity.js';
 import { placeSkills, skillsFolder } from '../src/skills.js';
 
 const TDD = { name: 'dev-tdd', description: 'Test-driven development. Writes the test: then the code.', body: '# Test-driven development\n\nWrite the test first.' };
@@ -166,5 +168,30 @@ describe('skills as files', () => {
     writeFileSync(join(sp, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.1' }));
     await placeSkills(ownFs, dir, 'antigravity', [], sp);
     expect(readFileSync(file, 'utf8')).toContain('Word for word.');
+  });
+
+  it('materializes the shipped dev-frontend-ui skill and AGENTS.md pointer for Antigravity within its 24 KB limit', async () => {
+    const dir = work();
+    const raw = readFileSync(fileURLToPath(new URL('../../../templates/skills/dev-frontend-ui.md', import.meta.url)), 'utf8');
+    const body = `# User interface engineering\n\n${raw.replace(/^---[\s\S]*?---\n/, '').trimEnd()}`;
+    const uiSkill = {
+      name: 'dev-frontend-ui',
+      description: 'User interface engineering. Builds the interface users meet on the design system: every state, every input, every size.',
+      body,
+    };
+    const pointer = '## Skills\n\nYour other skills are files in your folder: .claude/skills/<name>/SKILL.md when you run in Claude Code, .agents/skills/<name>/SKILL.md in the other programs.\n\n- dev-frontend-ui: User interface engineering. Builds the interface users meet on the design system: every state, every input, every size.';
+    const agy = agyRules(pointer, '.hh-instructions.md');
+    expect(agy.whole).toBeNull();
+    expect(agy.rules).toContain('- dev-frontend-ui: User interface engineering.');
+    await placeSkills(ownFs, dir, 'antigravity', [uiSkill], superpowers());
+    const skillPath = join(dir, '.agents', 'skills', 'dev-frontend-ui', 'SKILL.md');
+    const placedText = readFileSync(skillPath, 'utf8');
+    expect(Buffer.byteLength(placedText)).toBeLessThan(24_000);
+    expect(placedText).toContain('name: dev-frontend-ui');
+    expect(placedText).toMatch(/whole group|together as one group/i);
+    expect(placedText).toMatch(/non-visual[\s\S]*in parallel/i);
+    expect(placedText).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
+    expect(placedText).toContain('scrollbar space');
+    expect(placedText).toContain('Chromium, Firefox and WebKit');
   });
 });

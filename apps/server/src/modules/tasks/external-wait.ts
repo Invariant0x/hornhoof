@@ -1,8 +1,9 @@
-import { WaitOnInput } from '@hornhoof/protocol/waits';
+import { randomUUID } from 'node:crypto';
+import { WaitOnInput, WaitPlan, type WaitOwnerBinding } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
+import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
@@ -11,6 +12,8 @@ import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
 import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
+import { bindSource } from './wait-producers.js';
+import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
 import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
@@ -23,22 +26,50 @@ export const WaitInput = z.object({
   reason: z.string().trim().min(1).max(600).regex(/^[^\r\n\u2028\u2029]+$/).describe('One line naming what you need from the employee or external event.'),
   until: z.iso.datetime({ offset: true }).describe('An ISO date and time in the future, at most two hours from now.'),
   on: WaitOnInput.optional().describe('Who you wait for: an employee, or time, the CEO, a machine or another external event. Omitted means an external event.'),
+  run: z.number().int().positive().optional().describe('The number of a run of yours on this task, when that run is what you wait for: its end ends this wait, and no other run does.'),
+  plan: WaitPlan.optional().describe('Who answers by when, if someone promised dates: the owner\'s, the head\'s and the decision\'s, where they come from and the head\'s final review. Omit it when no one has; the deadline above is no promise.'),
 });
 
 /* Who the wait is on, when it names someone. */
 const withOn = <T>(on: T | null | undefined) => (on ? { on } : {});
 
-function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
+type WaitAsked = z.infer<typeof WaitInput>;
+
+function waitOf(input: WaitAsked, now: Date): ExternalWait {
   const parsed = WaitInput.safeParse(input);
   if (!parsed.success) throw refuse(400, 'task_invalid', 'Name the external event in one line and give its deadline as an ISO date and time.');
   const until = new Date(parsed.data.until);
   const delay = until.getTime() - now.getTime();
   if (delay <= 0 || delay > EXTERNAL_WAIT_MS) throw refuse(400, 'task_invalid', 'The wait must end in the future, at most two hours from now.');
-  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), ...withOn(parsed.data.on) };
+  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), operation: randomUUID(), ...withOn(parsed.data.on) };
 }
 
+/* The one run this wait is for: of the one who waits, on this task, still going. A result already on its way cannot be waited for. */
+async function namedRun(ctx: Ctx, task: Task, agentId: string, number: number): Promise<string> {
+  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(
+    eq(testRuns.companyId, task.companyId), eq(testRuns.number, number), eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running'),
+  ));
+  if (!run) throw refuse(409, 'task_invalid', `You have no run ${number} going on #${task.number}. If it ended, read its result instead of waiting for it.`);
+  return run.id;
+}
+
+/* The record of who answers for the wait, written with it: the employee it names, else the one who waits. Its dates are its own
+   promise or the department's, and a wrong or missing plan is refused with the wait. */
+async function keepWaitRecord(tx: Tx, task: Task, wait: ExternalWait, plan: WaitAsked['plan'], agentId: string): Promise<void> {
+  const sourceKey = waitForSourceKey(wait.operation!);
+  const actor = { agentId };
+  await supersedeWaitFor(tx, { taskId: task.id, by: sourceKey, actor });
+  const ownerBinding: WaitOwnerBinding = { agentId: wait.on?.kind === 'employee' ? wait.on.employee : agentId };
+  await bindSource(tx, task, { kind: 'external', sourceKey, owner: ownerBinding, plan, sourceState: { stage: 'waiting', ...(wait.run ? { run: wait.run } : {}) }, actor });
+}
+
+/* Where the record of a wait stands now that the wait itself ended or came back: it has not ended by that. */
+const markRecord = (wait: ExternalWait, stage: 'waiting' | 'check_back') => async (tx: Tx, task: Task): Promise<void> => {
+  if (wait.operation) await setWaitStage(tx, { taskId: task.id, kind: 'external', sourceKey: waitForSourceKey(wait.operation), stage });
+};
+
 /* A holder can end its turn while an external system works; the task keeps its workflow status. */
-export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now?: Date): Promise<Moved> {
+export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now?: Date): Promise<Moved> {
   const at = now ?? new Date();
   const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at));
   await checkWaitHealth(ctx, at);
@@ -62,16 +93,35 @@ const keepNotice = (notice: Awaited<ReturnType<typeof requestedWaitNotice>>) => 
   if (notice) await recordWaitNotice(tx, notice);
 };
 
-async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now: Date): Promise<Moved> {
+async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now: Date): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   requireHolder(task, agentId);
   await waitingTaskTurn(ctx.db, agentId, taskId);
   if (await unreadMessage(ctx, agentId, taskId)) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
   const wait = waitOf(input, now);
-  const externalWait = { ...wait, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
+  const run = input.run ? { run: await namedRun(ctx, task, agentId, input.run) } : {};
+  const externalWait = { ...wait, ...run, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
   const notice = await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
-  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, keepNotice(notice));
+  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => {
+    await keepNotice(notice)(tx);
+    await keepWaitRecord(tx, task, externalWait, input.plan, agentId);
+  });
   return { task: row, wakes: [] };
+}
+
+/* The holder says its wait is over, having read what it waited for. Nobody is told: it goes on in the turn it is in. */
+export function endOwnWait(ctx: Ctx, agentId: string, taskId: string): Promise<{ task: Task; reason: string }> {
+  return onAgent(ctx, agentId, async () => {
+    const task = await loadTask(ctx.db, taskId);
+    requireHolder(task, agentId);
+    const wait = task.externalWait;
+    if (!wait) throw refuse(409, 'task_invalid', `#${task.number} has no wait of yours to end.`);
+    const actor = { agentId };
+    const moved = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor, text: `The wait for "${wait.reason}" is over, says its holder.`, data: { externalWait: null, reason: wait.reason } }, async tx => {
+      if (wait.operation) await endSourceWait(tx, { taskId: task.id, kind: 'external', sourceKey: waitForSourceKey(wait.operation), sourceRevision: 0, outcome: 'cancelled', proofRef: 'end_wait', actor });
+    });
+    return { task: moved, reason: wait.reason };
+  });
 }
 
 const OPEN = new Set(['open', 'working', 'review', 'waiting', 'blocked']);
@@ -143,7 +193,7 @@ async function confirmMessage(ctx: Ctx, agentId: string, id: string): Promise<vo
 /* A failed send preserves the previous wait unless another task action has already replaced it. */
 async function restoreWait(ctx: Ctx, resumed: ResumedWait, actor: Actor): Promise<void> {
   try {
-    await move(ctx, resumed.task, { externalWait: resumed.before }, { kind: 'updated', actor, text: 'The message did not go out. The previous wait continues.', data: { externalWait: resumed.before } });
+    await move(ctx, resumed.task, { externalWait: resumed.before }, { kind: 'updated', actor, text: 'The message did not go out. The previous wait continues.', data: { externalWait: resumed.before } }, markRecord(resumed.before, 'waiting'));
   } catch (error) {
     if (!(error instanceof ApiError && error.reason === 'task_changed')) throw error;
   }
@@ -158,7 +208,7 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
   requireMessageTask(task, input.agentId, sender);
   const id = await insertOrDeliverTurn(ctx, { ...turn, ...taskTurn(task, input.agentId, turn.message) }, required);
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
-  const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true });
+  const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));
   return { id, resumed: { task: resumed, before: task.externalWait } };
 }
 
@@ -177,7 +227,7 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Pr
   if (!task.externalWait || !task.assigneeAgentId) return false;
   const wakes = [waitEndedWake(task, task.assigneeAgentId, task.externalWait.reason, unavailable)];
   try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable), undefined, wakes);
+    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable), markRecord(task.externalWait, 'check_back'), wakes);
   } catch (error) {
     if (error instanceof ApiError && error.reason === 'task_changed') return false;
     throw error;
@@ -186,16 +236,24 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Pr
   return true;
 }
 
-/* A run ended, and the one who started it waits on its task: the wait goes in the write that ends the run and keeps its
-   wake, so a crash cannot leave one without the other. It keeps the wakes other moves kept, which are other news. Someone
-   else's wait stays: they wait for something else. */
-export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run: string): Promise<boolean> {
+/* A run ended, and the one who started it holds its task: the wait for that run goes in the write that ends the run and keeps
+   its wake, so a crash cannot leave one without the other. It keeps the wakes other moves kept, which are other news. A wait
+   for anything else stays, and so does someone else's: the result reaches its starter anyway, and it can end_wait. */
+const ownsRunTask = (task: Task | undefined, agentId: string): task is Task => Boolean(task && OPEN.has(task.status) && task.assigneeAgentId === agentId);
+const runEndUpdate = (task: Task, bound: boolean) => ({ version: task.version + 1, updatedAt: new Date(), ...(bound ? { externalWait: null, silent: 0 } : {}) });
+
+export type RunEnding = { waited: boolean; goesOn: ExternalWait | null };
+
+export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run: { id: string; label: string }): Promise<RunEnding> {
   const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update');
-  if (!task?.externalWait || task.assigneeAgentId !== agentId) return false;
-  await tx.update(tasks).set({ externalWait: null, silent: 0, version: task.version + 1, updatedAt: new Date() }).where(eq(tasks.id, taskId));
-  const { reason } = task.externalWait;
-  await note(tx, task, { kind: 'updated', actor: { agentId }, text: `${run} ended, and with it the wait for "${reason}".`, data: { externalWait: null, reason } });
-  return true;
+  if (!ownsRunTask(task, agentId)) return { waited: false, goesOn: null };
+  const bound = task.externalWait?.run === run.id;
+  // Invalidate a wait that checked unread messages before this result committed, even when no wait is installed yet.
+  await tx.update(tasks).set(runEndUpdate(task, bound)).where(eq(tasks.id, taskId));
+  if (!bound) return { waited: false, goesOn: task.externalWait };
+  const { reason } = task.externalWait!;
+  await note(tx, task, { kind: 'updated', actor: { agentId }, text: `${run.label} ended, and with it the wait for "${reason}".`, data: { externalWait: null, reason } });
+  return { waited: true, goesOn: null };
 }
 
 /* The task move and its wake commit together. Repeated or concurrent sweeps can end each wait only once. */

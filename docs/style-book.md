@@ -1,0 +1,429 @@
+# Hornhoof style book
+
+**Version 1.1, approved by the head of Design on 2026-11-06.** The head of Design owns this book (section 8).
+
+**Base.** `apps/web/src/theme.css` at commit `2fed0c54662d69d24e5b158200d3ef9c4205642a`, SHA256 `689f607b4abb4879a46972b779e4a0d59474a8fb99ee2bfe6b57a125474daa92`. Colours, type and sizes come from that file. Components, fonts, documents and languages were read at commit `c4053494f51a1f26be4708a0124169ebc90ad4d7`, the newest code the author could read. Between the two commits `theme.css` gains one line, so a component added in that line's commit may be missing here.
+
+**How to read it.** Everything is a fact read from the code unless it carries one of these marks:
+
+- **RULE**: mandatory for new work.
+- **PROPOSAL**: not in the code and not decided. It counts only after the head approves it.
+- **GAP**: the code today does not meet a rule. Listed so nobody copies it.
+- **NOT_AVAILABLE**: no source exists, so nothing is claimed.
+
+## 1. Colours
+
+All colours are tokens in `:root` of `theme.css`. Light is the default. Dark applies with `data-theme="dark"`, or when the system asks for dark and no theme was chosen.
+
+**RULE.** New work uses tokens by their meaning, and text uses a token whose contrast below passes.
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--bg` | `#E6EBF0` | `#141A22` | Page and map background |
+| `--surface` | `#F8FAFC` | `#1B232D` | Panels, cards, tables |
+| `--surface2` | `#EEF2F6` | `#212B37` | Controls: `.act`, `select`, inputs; `.alert`; row hover |
+| `--line` | `#C9D3DD` | `#2C3845` | Quiet lines and frames |
+| `--line2` | `#A9B7C5` | `#3D4C5C` | Control borders, stronger frames, map lines |
+| `--ink` | `#0F1B27` | `#E3EAF1` | Main text |
+| `--muted` | `#4C5A68` | `#93A0AE` | Secondary text, the most used text colour |
+| `--p-claude` | `#C2593A` | `#F08A66` | Claude mark, `.pm.claude` |
+| `--p-kimi` | `#1667E0` | `#5E9BFF` | Kimi mark, `.pm.kimi` |
+| `--p-glm` | `#3D47D6` | `#8D95FF` | GLM mark, `.pm.glm` |
+| `--p-antigravity` | `#1E8E3E` | `#6DD58C` | Antigravity mark, `.pm.antigravity` |
+| `--cyan` | `#00A3BD` | `#46E0EF` | Accent for fills, lines, active borders and focus. Not for small text |
+| `--cyan-ink` | `#00768A` | `#6FE9F5` | Accent as text: links, chosen items, `accent-color` |
+| `--amber` | `#E08A00` | `#FFB54A` | Warning fill and line |
+| `--amber-ink` | `#9A5A00` | `#FFC36E` | Warning text |
+| `--pink` | `#E0307F` | `#FF62AA` | Attention fill and line: `.alert` line, `.bar.max` |
+| `--pink-ink` | `#B0185F` | `#FF8CC2` | Error and danger text |
+| `--ok` | `#1E8E4E` | `#5FD08A` | Success text and line |
+| `--red` | `#D32F2F` | `#FF6B6B` | Alarm fill, line and text |
+| `--on-red` | `#FFFFFF` | `#2A0606` | Text on `--red` |
+| `--idle` | `#C5D0DB` | `#2C3744` | Empty track, `.spinner` ring, panel bar lights |
+| `--dot` | `rgba(30, 60, 90, .17)` | `rgba(140, 175, 205, .15)` | Dots of the map grid |
+| `--glow` | `rgba(0, 163, 189, .10)` | `rgba(70, 224, 239, .10)` | Focus halo, chosen background |
+| `--btn` | `#00768A` | `#46E0EF` | Fill of the primary button `.btn` |
+| `--on-btn` | `#FFFFFF` | `#05222A` | Text on `--btn` |
+| `--hud` | `rgba(240, 244, 247, .88)` | `rgba(23, 30, 39, .84)` | See-through layer over the map: `.glass` |
+| `--shadow` | `rgba(20, 40, 60, .18)` | `rgba(0, 0, 0, .45)` | Shadow of menus and windows |
+
+### Contrast of text
+
+Computed with the WCAG 2 formula from the values above. Only tokens that `theme.css` sets as a text `color` are listed; `--on-btn` and `--on-red` are for their own fills, so they stand under fixed pairs. The limit is 4.5:1 for body text and 3:1 for large text and controls, from `templates/skills/dsn-theme.md`. **Under 4.5 is marked in bold.**
+
+| Text token | Light on `--bg` | on `--surface` | on `--surface2` | Dark on `--bg` | on `--surface` | on `--surface2` |
+|---|---|---|---|---|---|---|
+| `--ink` | 14.51 | 16.64 | 15.47 | 14.41 | 13.06 | 11.81 |
+| `--muted` | 5.90 | 6.76 | 6.29 | 6.56 | 5.95 | 5.38 |
+| `--p-claude` | **3.66** | **4.20** | **3.90** | 7.11 | 6.44 | 5.82 |
+| `--p-kimi` | **4.32** | 4.96 | 4.61 | 6.34 | 5.74 | 5.19 |
+| `--p-glm` | 5.70 | 6.54 | 6.08 | 6.56 | 5.94 | 5.37 |
+| `--p-antigravity` | **3.51** | **4.02** | **3.74** | 9.62 | 8.72 | 7.88 |
+| `--cyan` | **2.51** | **2.88** | **2.68** | 10.97 | 9.94 | 8.99 |
+| `--cyan-ink` | **4.42** | 5.07 | 4.72 | 12.20 | 11.06 | 10.00 |
+| `--amber` | **2.24** | **2.57** | **2.39** | 9.96 | 9.03 | 8.16 |
+| `--amber-ink` | 4.56 | 5.23 | 4.87 | 11.06 | 10.03 | 9.06 |
+| `--pink` | **3.57** | **4.10** | **3.81** | 6.31 | 5.72 | 5.17 |
+| `--pink-ink` | 5.57 | 6.39 | 5.94 | 8.15 | 7.38 | 6.68 |
+| `--ok` | **3.48** | **3.99** | **3.71** | 9.06 | 8.21 | 7.42 |
+| `--red` | **4.15** | 4.76 | **4.43** | 6.30 | 5.71 | 5.16 |
+
+Fixed pairs:
+
+| Pair | Light | Dark |
+|---|---|---|
+| `--on-btn` on `--btn` | 5.31 | 10.38 |
+| `--on-red` on `--red` | 4.98 | 6.71 |
+| `--ink` on `--hud` over `--bg` | 15.60 | 13.95 |
+| `--muted` on `--hud` over `--bg` | 6.34 | 6.35 |
+
+Lines against what they stand on. The limit of 3:1 is for controls; `--line` only divides content, so it is shown for reference:
+
+| Line | On | Light | Dark |
+|---|---|---|---|
+| `--line` | `--surface` | **1.45** | **1.33** |
+| `--line2` | `--surface` | **1.95** | **1.80** |
+| `--line2` | `--surface2` | **1.82** | **1.63** |
+| `--cyan` | `--surface` | **2.88** | 9.94 |
+| `--cyan` | `--bg` | **2.51** | 10.97 |
+| `--cyan-ink` | `--surface` | 5.07 | 11.06 |
+
+**GAP.** Tokens with bold cells are used as text today. This table shows the token against each surface, not an audit of which pair appears on which screen. Do not use a bold pair for new small text. Examples: `--ok` is the text of `.status.active` at 12 px, 3.99 on `--surface` in the light theme; `--cyan-ink` is the link colour, 4.42 on `--bg` in the light theme.
+
+**GAP.** `--line2` is the border of controls and stays under 3:1 on its surfaces in both themes.
+
+**GAP.** `:focus-visible` draws its outline in `--cyan`, which is under 3:1 on `--surface` and `--bg` in the light theme.
+
+**GAP.** 7 uses of raw colours sit outside the tokens. Where: `rgba(10, 20, 30, .35)` in `.dialog-back`, `#15191F` in `.t-term`, `#dcdcdc` in `.t-load`, `#2b323b` in `.t-load .spinner`, `#fff` in `.nav-count`.
+
+### Local variables
+
+These are set on components, not themes: `--cut`, `--c2`, `--edge`, `--strip-room`, `--inset`, `--frame`, `--top-frame`, `--panel-width`, `--gap`, `--row`.
+
+## 2. Type
+
+| Token | Value, the same in both themes | Use |
+|---|---|---|
+| `--f-display` | `'Tektur', 'Onest', system-ui, sans-serif` | Headings, buttons, tabs |
+| `--f-body` | `'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif` | Body text |
+| `--f-mono` | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Commands, code, keys |
+
+Fonts are imported in `apps/web/src/main.tsx`:
+
+| Family | Imported weights | Package | Writing systems in the package |
+|---|---|---|---|
+| Onest | 400, 500, 600 | `@fontsource/onest` 5.3.1, OFL-1.1 | Cyrillic, Latin, Vietnamese, math, symbols. No Greek |
+| Tektur | 500, 600 | `@fontsource/tektur` 5.3.0, OFL-1.1 | Cyrillic, Greek, Latin, Vietnamese |
+| Mono | none, system fonts only | | |
+
+| Use | Font | Size | Weight | Line height | Source |
+|---|---|---|---|---|---|
+| Body | `--f-body` | 14 px | 400 | 1.45 | `body` |
+| `h1` | `--f-display` | 26 px | 600 | 1.15 | `h1, h2, h3`, `h1` |
+| `h2` | `--f-display` | 18 px | 600 | 1.15 | `h1, h2, h3`, `h2` |
+| `h3` | `--f-display` | set per place: 22 px in `.ac-head`, 15 px in `.settings-part`, 13 px in `.dv-drawer` | 600 | 1.15 | see the selectors |
+| Button `.btn` | `--f-display` | 14 px, `.btn.small` 13 px | 600 | inherited | `.btn` |
+| Button `.act` | `--f-display` | 13 px | 600 | inherited | `.act` |
+| Tab | `--f-display` | 14 px | 600 | inherited | `.tabs button` |
+| Field label | `--f-body` | 13 px | 500 | inherited | `.field > label` |
+| Hint and field error | `--f-body` | 12 px | 400 | inherited | `.field .hint`, `.field .bad` |
+| Status | `--f-body` | 12 px | 600 | inherited | `.status` |
+| Badge | `--f-body` | 11 px | 600 | inherited | `.badge` |
+| Panel name | `--f-body` | 12.5 px | 400 | inherited | `.t-bar` |
+| Code and commands | `--f-mono` | 12 px | 400 | 1.55 | `.command code` |
+
+Rules per value in `theme.css`. Sizes: `13px` 75, `12px` 64, `12.5px` 44, `14px` 15, `15px` 12, `13.5px` 12, `11.5px` 8, `11px` 7, `18px` 4, `22px` 3, `26px` 2, `20px` 2, `16px` 2, `8.5px` 1, `28px` 1, `15.5px` 1, `10.5px` 1, `17px` 1. Weights: `600` 84, `500` 13, `700` 9, `400` 2. Line heights: `1` 4, `1.45` 3, `1.55` 3, `1.2` 3, `1.4` 3, `1.15` 2, `22px` 2, `1.35` 2, `14px` 1, `16px` 1, `18px` 1, `1.5` 1, `1.25` 1, `1.1` 1, `1.3` 1. There are no size tokens.
+
+**GAP.** Weight 700 appears in 9 rules, but no 700 face is imported, so it never gets a real 700 face.
+
+**GAP.** `templates/skills/dsn-ui-rules.md` asks for body text of at least 16 px on phones. Body text is 14 px at every width.
+
+**RULE.** New work uses sizes already in the list above and adds none between them. Sizes under 12 px are for compact map and badge labels only.
+
+### Other writing systems
+
+Today a letter missing from Onest or Tektur falls through the token's list to `system-ui`, so it looks different on each computer. Nothing else is loaded and no script has its own font. Hindi, Arabic, Chinese, Japanese, Korean, Thai and Hebrew are all in this case.
+
+**RULE.** Line heights are numbers without a unit, so taller scripts grow the line. Fonts are chosen by language or by `unicode-range`, never by a rule that looks at one screen.
+
+**PROPOSAL.** When a language needs a script Onest lacks: add one font family with the writing system's own `unicode-range` before `system-ui` in `--f-body` and `--f-display`, and check its licence. Noto families served this way in test prototypes under #493 only, not in the product. This needs a decision on font size and download weight per language.
+
+## 3. Spacing and sizes
+
+There are no spacing tokens. Uses per value in `margin`, `padding` and `gap` in `theme.css`, most used first: `10 px` 114, `8 px` 110, `6 px` 77, `12 px` 75, `4 px` 58, `14 px` 42, `2 px` 40, `16 px` 35, `18 px` 23, `3 px` 14, `1 px` 11, `20 px` 10, `7 px` 9, `32 px` 8, `24 px` 8, `5 px` 7.
+
+**RULE.** New work uses 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 32 px, the values that already lead the count.
+
+| Place | Value | Source |
+|---|---|---|
+| Side panel content | 16 px top, 18 px sides, 20 px bottom, 18 px between blocks | `.ac-body` |
+| Notebook | 14 px 16 px | `.notebook` |
+| Panel on a page | 20 px, 14 px between blocks | `.panel > .edge-in` |
+| Dialog | 18 px, 12 px between blocks | `.dialog` |
+| Card | 28 px, 18 px between blocks | `.card > .edge-in` |
+| Table cell | 12 px 14 px, header 10 px 14 px | `.ptable td`, `.ptable th` |
+| Sort table cell | 10 px | `.dt > tbody > tr > td` |
+| Common button gap | 8 px or 10 px | `.ac-actions`, `.settings-actions`, `.card .actions` |
+| Side panel `.acard`, drawer `.dv-drawer` | 400 px; at 760 px and under 16 px from each side, 343 px on a 375 px phone (measured by #469) | `.dv-drawer, .acard` |
+| Panels in the agent window | up to 400 px; at 760 px and under the full window | `.orch`, `.side-panel` |
+| Dialog width | up to 560 px | `.dialog` |
+| Card width | up to 440 px, wide 960 px | `.card` |
+
+| Control | Height | Source |
+|---|---|---|
+| `.btn` | from 40 px | `.btn` |
+| `.btn.small` | from 30 px | `.btn.small` |
+| `.btn` in `.dv-acts` | from 44 px | `.dv-acts .btn` |
+| `.act` | 32 px fixed | `.act` |
+| Field input and select | 40 px fixed | `.field input`, `.field select` |
+| Tab, `.hbtn`, `.zbtn`, avatar | 44 px | `.tabs`, `.hbtn`, `.zbtn`, `.avatar` |
+| Panel bar | 38 px, its close button 34 px | `.t-bar`, `.t-bar button` |
+| Compact row button | from 26 px | `.t-access-row .btn` |
+
+Width breakpoints, with the number of rules: `max-width: 760px` 6, `max-width: 420px` 3, `max-width: 560px` 2, `min-width: 761px` 2, `max-width: 860px` 1, `max-width: 720px` 1, `min-width: 1200px` 1. Width of the place, by container: `card (min-width: 700px)`, `card (min-width: 1180px)`, `card (max-width: 300px)`, `tbl (max-width: 780px)`.
+
+Corners: mostly square. The cut corner is a `clip-path` with `--cut`: 7 px on `.btn`, 10 px on `.edge`, others set per place. `border-radius` is used for round dots and a few small items: `0`, `10px`, `50%`, `6px`, `4px`.
+
+**RULE.** A touch target is at least 44 by 44 px, from `templates/skills/dsn-ui-rules.md`.
+
+**GAP.** `.btn.small`, `.act`, the panel bar's close button and `.t-access-row .btn` are under 44 px, and no rule raises `.act` or `.btn.small` on a phone. Section 6 raises the buttons of a record to 44 px once it is built.
+
+## 4. Components
+
+Only what exists in the code. Source paths are relative to `apps/web/src/`. Each class exists in `theme.css` and in the named files; the check script confirms both.
+
+### Buttons
+
+| Class | Look | States in `theme.css` | Source, examples |
+|---|---|---|---|
+| `.btn` | Primary: `--btn` fill, `--on-btn` text, cut corner | hover `brightness(1.08)`; disabled opacity .45; focus see GAP | `ui/Ask.tsx`, `screens/Settings.tsx`, `ui/RepoSettings.tsx` |
+| `.btn.ghost` | Secondary: no fill, `--line2` inner line, no cut | hover `--cyan` inner line; focus outline visible | `ui/Ask.tsx`, `ui/CopyButton.tsx`, `screens/Shell.tsx` |
+| `.btn.small` | Same at 13 px, from 30 px | as above | `ui/Ask.tsx`, `ui/Requests.tsx` |
+| `.act` | Row action: `--surface2` fill, `--line2` border | hover `--cyan` border, `--cyan-ink` text; disabled opacity .45 | `screens/People.tsx`, `screens/Subscriptions.tsx`, `ui/AgentCard.tsx` |
+| `.act.danger` | Row action that removes | hover `--pink` border, `--pink-ink` text | `screens/People.tsx`, `screens/Machines.tsx` |
+| `.t-link` | Text link button, `--cyan-ink`, underlined | | `ui/Notebook.tsx`, `screens/AgentWindow.tsx` |
+| `.linkbtn`, `.rowbtn` | Link and row buttons of a sort table | | `ui/SortTable.tsx` |
+| `.hbtn` | Bar button, 44 px | | `screens/Department.tsx` |
+| `.zbtn` | Square map button, 44 px | | `ui/canvas.tsx` |
+
+**GAP.** `.btn` is cut by `clip-path`, which also cuts its focus outline, so a focused `.btn` shows no ring. Only `.t-access-row .btn` removes the cut on focus. See section 6.
+
+### Fields
+
+| Class or element | Look | States | Source |
+|---|---|---|---|
+| `.field` with label, input or select, `.hint`, `.bad` | Stack with 6 px gap | focus: `--cyan` border and `0 0 0 3px var(--glow)` | `ui/Field.tsx` |
+| `select` | Own arrow, `--surface2` fill, keeps one line | focus as above; disabled opacity .55 | `theme.css`, `ui/AgentCard.tsx` |
+| `.choice`, `.segments` | Radio cards and segments, `.on` is chosen | `.on`; segments show focus on the label | `screens/Setup.tsx` |
+| `label.check` | Checkbox with text | | `screens/Setup.tsx`, `screens/People.tsx` |
+| `textarea` | Styled per place, no shared class | focus in `textarea.ac-text` | `ui/Notebook.tsx`, `ui/NewTask.tsx`, `ui/TaskPanel.tsx` |
+
+### Statuses and messages
+
+| Class | Meaning and token | Source |
+|---|---|---|
+| `.status.active`, `.status.ready` | Good: `--ok` | `screens/Machines.tsx`, `screens/Subscriptions.tsx` |
+| `.status.invited`, `.status.needs_login`, `.status.needs_setup`, `.status.waiting_machine`, `.status.limit` | Wait or act: `--amber-ink` | `screens/People.tsx`, `screens/Subscriptions.tsx` |
+| `.status.offline`, `.status.builtin_offline` | Off: `--muted` | `screens/Subscriptions.tsx` |
+| `.badge` | Small mark, `--pink-ink`; `.badge.lead` `--btn` fill; `.badge.old` `--amber-ink` | `screens/Machines.tsx`, `screens/People.tsx` |
+| `.alert` | Message with a 3 px `--pink` line on the left, on `--surface2` | `ui/AgentCard.tsx`, `screens/People.tsx` |
+| `.field .bad`, `.update-error` | Error text, `--pink-ink` | `ui/Field.tsx`, `ui/UpdateBanner.tsx` |
+| `.spinner` | 16 px ring, `--idle` with a `--cyan` arc | `ui/UpdateProgress.tsx`, `ui/AgentTerminal.tsx` |
+| `.bar` | 4 px progress on `--idle`: `--cyan`, `.hi` `--amber`, `.max` `--pink` | `ui/Bar.tsx` |
+
+**RULE.** Status is never shown by colour alone, from `templates/skills/dsn-ui-rules.md`. The `.status` labels above carry a word.
+
+**GAP.** `ui/Notebook.tsx` uses the class `error`, which has no rule in `theme.css`, so its message has no colour of its own.
+
+### Panels and frames
+
+| Class | What it is | Source |
+|---|---|---|
+| `.edge`, `.edge-in`, `.edge.accent` | Cut frame: outer layer is the line, inner layer the fill | `ui/Edge.tsx` |
+| `.card`, `.card.wide` | Form card with the mark, on the sign-in, setup and invitation screens | `ui/Card.tsx` |
+| `.panel`, `.panel-form` | Section of a page, two columns over 760 px | `screens/People.tsx`, `ui/ConnectPanel.tsx` |
+| `.dialog`, `.dialog-back` | Centered window on a dim layer | `screens/Settings.tsx`, `screens/Versions.tsx` |
+| `.side-panel`, `.acard`, `.t-bar`, `.ac-body` | Side panel with bar and scrolling body | `ui/SidePanels.tsx` |
+| `.dv-drawer` | Department drawer | `screens/Department.tsx` |
+| `.tabs` | Top navigation, the chosen tab has a 2 px `--cyan` bottom line | `screens/Shell.tsx` |
+| `.chip` | Small labelled box on the map | `screens/Map.tsx`, `ui/RunningNow.tsx` |
+
+### Records and their buttons
+
+There is no single record component yet. These do the same job in different ways, as #469 records:
+
+| Class | Structure today | Source |
+|---|---|---|
+| `.notebook li` | Grid `auto 1fr auto auto auto`, text and buttons are siblings | `ui/Notebook.tsx` |
+| `.ask` | Question and buttons are siblings in a wrapping row | `ui/Ask.tsx`, `screens/Machines.tsx` |
+| `.settings-actions` | Row that may mix text and buttons | `screens/Settings.tsx`, `screens/Profile.tsx` |
+| `.ac-actions` | Row of buttons with a top line | `ui/AgentCard.tsx`, `ui/TaskPanel.tsx` |
+| `.repo-actions`, `.machine-actions`, `.req-actions`, `.req-options` | Groups of buttons | `ui/RepoSettings.tsx`, `screens/Machines.tsx`, `ui/Requests.tsx` |
+| `.row-actions` | Buttons of a table row, at the end of the row | `screens/People.tsx` |
+
+New work follows section 6, with the classes named there.
+
+### States
+
+**RULE.** Draw a state only where it exists, and add no new confirmation steps. Show a confirmation only where the product already has one. Saving shows a visible sign that keeps the group's width, not `disabled` alone.
+
+Which states exist, from the check with Development recorded on #478. That check was on `3e372c98` plus unfinished work of #470, so it is neither a clean snapshot nor a live test:
+
+| Place | States |
+|---|---|
+| Notebook | Normal, hover, focus, read error with retry, save error, empty and editing can be told apart. Loading and saving are being added there locally with `aria-busy` and a status |
+| People | Busy and error can be told apart |
+| Shared confirmations | Their own local state of the question |
+| Requests | Normal, hover and focus exist. Loading and empty live in the parent panels. A read error is needed there, but that it reaches the person is not proven yet. A save error is already an alert. There is no confirmation step |
+
+`Remove` in the notebook has no confirmation. Development decided on #478 that this is not a defect and that no confirmation will be added. `templates/skills/dsn-ui-rules.md` asks for one in general, so the case stands in the exceptions list of section 8.
+
+### Materials of a question
+
+A question that shows a result carries materials: pictures, documents, files and links, shared by the question or belonging to one option.
+
+**RULE.**
+
+1. A material and an answer are never nested and never look alike. A material is a flat frame in `--f-body` with the word of its kind and the word to open it. An answer is a button of section 6, under the materials of its option.
+2. Opening, zooming, paging, closing and downloading choose nothing and send nothing. The draft of the answer survives all of them.
+3. In a list of options, a picture takes the whole width of the option, so the difference shows before opening.
+4. The viewer covers the window, follows the theme and keeps its close button on screen. A document reads to its end, and a part that did not load is said in words, never hidden.
+5. A refused or failed material keeps its name and says why in words.
+6. A download mark appears only on what can be downloaded.
+
+Class names are not fixed until it is built. What each field means is decided with Development; a field not in the code yet is marked as proposed.
+
+### Tables
+
+| Class | Behaviour | Source |
+|---|---|---|
+| `.ptable` | Plain table, at 760 px of window and under each row becomes a block | `screens/People.tsx` |
+| `.dt`, `.sortbar` | Sort table, at 780 px of its own width and under each row becomes a block with a sort bar | `ui/SortTable.tsx` |
+
+## 5. Languages
+
+**Goal: ready for 20 to 30 languages.** Today the registry holds two: `en`, the source, and `ru`, in `apps/web/src/i18n/`. `LANGUAGES` lists them in `index.tsx`. `isLanguage` there also names `en` and `ru` by hand, so a new language changes both, in addition to what `CONTRIBUTING.md` lists.
+
+**RULE.**
+
+1. Plan for text 1.5 to 2 times longer than English. No layout may depend on the length of today's strings.
+2. Plan for different fonts and taller lines (section 2). Heights are minimums.
+3. Right to left mirrors the layout. New rules use logical sides: `margin-inline-start`, `padding-inline`, `inset-inline-start`, `border-inline-start`, `text-align: start`.
+4. Text wraps instead of being cut (section 6).
+5. No rule looks at one language. Words and the order of words may change, so no sentence is glued from pieces.
+
+**How to check.** Take the longest and the shortest of the languages really supported, by the method of #469 (`README-inventory.txt` on that task): import the real `LANGUAGES` registry and dictionaries, measure the shared static keys at 14 px Onest in Chromium after `fonts.ready`, sum the text widths and rank them. Recompute when the registry grows; the ranking is not a fixed rule. Add one right to left language when one exists. Until then right to left is NOT_AVAILABLE as a product language, and pseudo strings only test the rule. They are not translations.
+
+Result of #469 at `5c67fb00`, not recomputed here: 1124 shared keys, EN is the shortest and RU the longest. Some single panels go the other way, so both are captured.
+
+**Known debt, counted on the base of this book:**
+
+| What | Count | How it was counted |
+|---|---|---|
+| Physical left and right | 187 | `left` 32, `right` 30, `border-left` 29, `margin-left` 21, `text-align: left` 21, `padding-left` 20, `border-left-color` 17, `margin-right` 7, `padding-right` 6, `text-align: right` 2, `border-right` 1, `border-left-style` 1. Earlier reports said 155 with no written method, so do not compare the two numbers |
+| Logical sides | 1 | `margin-inline` 1 |
+| `text-overflow: ellipsis` | 28 | rules in `theme.css` |
+| `white-space: nowrap` | 47 | rules in `theme.css` |
+| Line heights in px | 5 | rules in `theme.css` |
+| `dir` attribute | 0 | search of `apps/web/src` for code that sets it |
+
+Not every physical side needs to change: `left: 0` on a full-width layer stays correct. The count is the list to review, not the amount of work.
+
+**Writing.** From `AGENTS.md` and `CONTRIBUTING.md`, mandatory for every text: every screen ships in English and Russian; plain words a person outside IT reads without effort; no em dashes; in Russian write "е" instead of the letter with two dots. Repository text is in English.
+
+## 6. Text wrap and action groups
+
+**RULE, mandatory for all future interface.**
+
+1. Text wraps. There is no sideways scroll and no cut text inside a panel: no ellipsis, no hidden overflow on text.
+2. A word breaks only when it does not fit on a line of its own.
+3. The buttons of a record are one element, in one row under the text, on one edge, with equal gaps. A label may take several lines inside its button. When whole words no longer fit, the row goes on from the same edge.
+4. The group stands in one position across a whole list. A form's foot in the same panel stands on the same edge.
+5. The one exception is a row of a real table, from its width threshold. A table that does not fit with whole words and one row of buttons turns its rows into records.
+6. A status keeps one whole frame. Its words may wrap inside the frame, and the frame never splits across lines.
+7. Focus is visible on every button, including those with a cut corner, in both themes. Check it on a picture: `:focus-visible` being true proves nothing if `clip-path` cuts the outline away.
+8. A closed native `select` and a one-line input are not panel text. A long value shows in the open list, and an input keeps its native editing.
+9. Width decides by the place, not the window: the same panel can be narrow on a wide screen.
+10. A check of this rule must be able to fail. Show it failing once.
+11. The order of buttons is the same everywhere and does not depend on width: the main action, then secondary actions, then cancel or a dangerous action.
+12. A list of choices is not a row of actions. Each choice takes its own line across the panel, and cancel stays in the group under the list.
+13. A table keeps its actions column last, its buttons on the end edge of the column. There is no fixed width threshold: the table stays a table while whole words, a whole status and one row of buttons fit, measured only when the data, language, font or size of the place changes.
+
+| Number | Value |
+|---|---|
+| Gap from text to group | 8 px |
+| Gap between buttons | 8 px |
+| Gap from text to its caption | 4 px |
+| Gap between records | 16 px and a 1 px `--line` |
+| Edge of the group and of a form's foot | End of the line, the same in the whole panel. Chosen by the CEO |
+| Table threshold | None, see rule 13 |
+| Button of a record, on every screen | From 44 px, padding 8 px 12 px, `--f-display` 600 14 px, line height 1.4. Chosen by the CEO |
+| Focus ring | 2 px `--cyan-ink`, offset 2 px. On the close button of a panel, offset -2 px, inside the button |
+| How a `.btn` with a cut corner shows focus | It drops the cut while it has focus, as `.t-access-row .btn` already does |
+| Class names | `.fit`, `.entries`, `.entry`, `.entry-main`, `.entry-meta`, `.entry-actions`, `.form-foot`, `.choice-list`, `.facts`. Not in the product until it is built |
+
+**GAP.** The product does not meet this section yet: #470 applies it after the choice. #469 lists the compact labels of the map, the ticker and `.chip` as a separate case with its own ellipsis. They need an entry in the exceptions list of section 8, or a fix.
+
+## 7. Site and marketing
+
+Real sources in the repository:
+
+| What | Source |
+|---|---|
+| The mark: a dome, a base line and a dot on a 30 by 30 grid, stroke width 2.4 | `.github/assets/logo.svg`, `LogoMark` in `apps/web/src/ui/icons.tsx`, `.mk-dome`, `.mk-base`, `.mk-dot` in `theme.css`, favicon in `apps/web/index.html` |
+| Mark colours | Dome `--cyan`, base and dot `--ink`. In `logo.svg` the dome stays `#00A3BD` in dark, while `--cyan` is `#46E0EF` there. Which is right is not written anywhere |
+| One line about the product | "Your own company of AI agents, on your own computers.", `README.md` |
+| What it is not | `README.md`, section "What Hornhoof is not": no cloud service, no new AI, no chat, not only for code |
+| Words used for the product | Orchestrator, department, head, employee, task, machine, plan: `README.md`, `guide/` |
+| Pictures of the product | `.github/assets/`: `build.gif`, `development.gif`, `map.gif`, `setup.gif`, `tasks.gif`, `terminal.gif`, `machines.png`, `subscriptions.png` |
+| User guide | `guide/`, 10 files |
+| How marketing agents work | `templates/roles/marketing/`, `templates/skills/mkt-*.md`. Kept general by `AGENTS.md`, for any company, so they hold no rule about Hornhoof |
+| Domain | `hornhoof.org` in public links for a company, such as in `guide/public-link.md`. That is a product feature and not a site |
+
+| Section | State | What it needs |
+|---|---|---|
+| Website: pages, layout, its own type | NOT_AVAILABLE, no site source in the repository | The site's source, or a decision to build one |
+| Brand guide: logo clear space, minimum size, colours on photos, forbidden uses | NOT_AVAILABLE | A decision by the head and the CEO. `templates/skills/dsn-brand-consistency.md` lists what it must answer |
+| Voice: three words, words we use and never use, good examples | NOT_AVAILABLE | Written by Marketing or the CEO. `templates/skills/mkt-brand-voice.md` expects it |
+| Product marketing context: audience, positioning, competitors | NOT_AVAILABLE | One document, per `templates/skills/mkt-product-context.md`. No Marketing department is open today |
+| Social and email templates, cover images | NOT_AVAILABLE | Decided after the brand guide |
+| Character: how the product should feel | NOT_AVAILABLE as a written decision | The head's decision. The code shows cut corners, square frames and a cyan accent, but nobody has written why |
+
+**RULE.** Until a section exists, marketing work uses the mark, tokens and fonts above and invents no logo, colour or claim.
+
+**GAP.** `THIRD_PARTY.md` lists server components and not the Onest and Tektur fonts. Their package licence is OFL-1.1. Development should check whether they belong there.
+
+## 8. Using and changing this book
+
+**Before work.** Every mockup and check of the department starts by rereading the sections it touches. A mockup names the book's version it follows.
+
+**A conflict.** The book and a task disagree: ask the head. The book and the code disagree: the code is what runs, so report it and the head decides which one changes. Tokens in this book must match `theme.css`, and `hornhoof-style-book-check.py` proves it.
+
+**Changes.** Only the head of Design approves a change. Each approved change raises the version and adds one line below. A change of tokens goes in the same piece of work as the change to `theme.css`.
+
+**Versions.** The first number grows when a rule changes, the second for fixes and additions that break nothing.
+
+**Exceptions.** An exception has a written reason, a place, an owner and an end date, approved by the head. Without all of them it is a bug. An exception past its date is a bug.
+
+| Place | Rule | Reason | Owner | Until |
+|---|---|---|---|---|
+| `Remove` in the notebook, `ui/Notebook.tsx` | Destructive actions ask for confirmation, `templates/skills/dsn-ui-rules.md` | Development decided on #478 that it is not a defect | Development | Reviewed by 2027-02-05 |
+| Compact labels of the map, the ticker and `.chip` | No ellipsis on text, section 6 | Existing compact labels with their own ellipsis, as #469 records; panel text gets no such right | Development | Reviewed by 2027-02-05 |
+| Close button of a panel | Touch target of 44 px, section 3 | The panel bar is 38 px; a change of the bar is its own work | Design | Reviewed by 2027-02-05 |
+
+### Change list
+
+| Version | Date | Change | Approved by |
+|---|---|---|---|
+| 1.0 | 2026-11-05 | First version: built from the code, numbers of section 6 after the CEO's choice, rules 11 to 13, section 9 | Head of Design |
+| 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
+
+## 9. Browsers
+
+**RULE.**
+
+1. Do not rely on browser defaults. Every property that shapes a screen is set on purpose: box sizing, margins and padding of built-in elements, font and line height of controls, appearance of buttons and fields, list and table defaults, and the space a scrollbar takes.
+2. Reserve the same room for a scrollbar on every engine, so a layout does not shift when one appears and panels keep their width.
+3. Check on the three browser engines: Chromium, Firefox and WebKit, on desktop and phone sizes. Passing on one engine proves nothing about the others.
+4. Between engines, key sizes differ by at most 1 px and the center of an icon by at most 0.5 px. A bigger difference is a defect, or an entry in the exceptions list of section 8.
+5. A check of this rule measures real rendering in each engine and can fail. Show it failing once. Pictures from all three go to the head of Design for review.

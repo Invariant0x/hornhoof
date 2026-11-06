@@ -231,38 +231,21 @@
         "args": [
           "--no-install",
           "vitest",
-          "run"
+          "run",
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/protocol"
         ],
-        "cwd": "packages/protocol"
+        "cwd": "."
       },
       "split": {
-        "kind": "argv-files"
+        "kind": "vitest-shard"
       },
       "profiles": [
         "fast",
         "final"
       ],
-      "finalChecks": [
-        {
-          "program": "npx",
-          "args": [
-            "--no-install",
-            "tsc",
-            "-p",
-            "packages/protocol/tsconfig.json",
-            "--noEmit"
-          ],
-          "cwd": "."
-        },
-        {
-          "program": "npm",
-          "args": [
-            "run",
-            "typecheck:tests"
-          ],
-          "cwd": "."
-        }
-      ]
+      "finalChecks": []
     },
     {
       "id": "node",
@@ -275,30 +258,22 @@
         "args": [
           "--no-install",
           "vitest",
-          "run"
+          "run",
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/node",
+          "--project=@hornhoof/node:no-proc"
         ],
-        "cwd": "apps/node"
+        "cwd": "."
       },
       "split": {
-        "kind": "argv-files"
+        "kind": "vitest-shard"
       },
       "profiles": [
         "fast",
         "final"
       ],
-      "finalChecks": [
-        {
-          "program": "npx",
-          "args": [
-            "--no-install",
-            "tsc",
-            "-p",
-            "apps/node/tsconfig.json",
-            "--noEmit"
-          ],
-          "cwd": "."
-        }
-      ]
+      "finalChecks": []
     },
     {
       "id": "server",
@@ -311,30 +286,21 @@
         "args": [
           "--no-install",
           "vitest",
-          "run"
+          "run",
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/server"
         ],
-        "cwd": "apps/server"
+        "cwd": "."
       },
       "split": {
-        "kind": "argv-files"
+        "kind": "vitest-shard"
       },
       "profiles": [
         "fast",
         "final"
       ],
-      "finalChecks": [
-        {
-          "program": "npx",
-          "args": [
-            "--no-install",
-            "tsc",
-            "-p",
-            "apps/server/tsconfig.json",
-            "--noEmit"
-          ],
-          "cwd": "."
-        }
-      ]
+      "finalChecks": []
     },
     {
       "id": "web",
@@ -348,30 +314,21 @@
         "args": [
           "--no-install",
           "vitest",
-          "run"
+          "run",
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/web"
         ],
-        "cwd": "apps/web"
+        "cwd": "."
       },
       "split": {
-        "kind": "argv-files"
+        "kind": "vitest-shard"
       },
       "profiles": [
         "fast",
         "final"
       ],
-      "finalChecks": [
-        {
-          "program": "npx",
-          "args": [
-            "--no-install",
-            "tsc",
-            "-p",
-            "apps/web/tsconfig.json",
-            "--noEmit"
-          ],
-          "cwd": "."
-        }
-      ]
+      "finalChecks": []
     },
     {
       "id": "release-scripts",
@@ -407,13 +364,14 @@
           "--no-install",
           "vitest",
           "run",
-          "-c",
-          "vitest.postgres.config.ts"
+          "--config",
+          "vitest.product.config.mjs",
+          "--project=@hornhoof/server:postgres"
         ],
-        "cwd": "apps/server"
+        "cwd": "."
       },
       "split": {
-        "kind": "argv-files"
+        "kind": "vitest-shard"
       },
       "profiles": [
         "final"
@@ -464,6 +422,25 @@
           "node",
           "server-postgres"
         ]
+      },
+      {
+        "globs": [
+          "vitest.product.config.mjs",
+          "vitest.config.mjs",
+          "scripts/test/workspace-cwd.mjs",
+          "apps/server/test/planned-vitest-sequencer.ts",
+          "apps/server/vitest.run-planning.config.ts",
+          "apps/server/test/test-run-invocations.cli.ts",
+          "apps/server/test/fixtures/run-planning/**"
+        ],
+        "suiteIds": [
+          "protocol",
+          "node",
+          "server",
+          "web",
+          "release-scripts",
+          "server-postgres"
+        ]
       }
     ],
     "migrationCheck": {
@@ -511,6 +488,115 @@
         "npx --no-install vitest run --root apps/node test/redact.test.ts"
       ],
       "cwd": "."
+    }
+  },
+  "execution": {
+    "version": 2,
+    "oncePreparation": {
+      "profiles": [
+        "final"
+      ],
+      "suiteIds": [
+        "protocol"
+      ],
+      "commands": [
+        {
+          "program": "node",
+          "args": [
+            "scripts/check-release.mjs",
+            "--local"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npm",
+          "args": [
+            "run",
+            "lint:part",
+            "--workspaces",
+            "--include-workspace-root",
+            "--"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "packages/protocol/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.eslint.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/node/tsconfig.eslint.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "packages/protocol/tsconfig.eslint.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/node/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/web/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        }
+      ]
     }
   }
 }
