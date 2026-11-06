@@ -14,7 +14,7 @@ For each new ticket:
    - P2: a main feature is broken with no workaround.
    - P3: a problem with a workaround, or a how-to question.
    - P4: feedback, feature requests, general questions.
-4. **Language**: English or Russian; note it for the reply.
+4. **Language**: the language the customer wrote in; note it for the reply.
 5. **Route**:
    - A knowledge base article answers it: draft the reply yourself (sup-deflection, sup-draft-response).
    - Bug, billing, access, or anything that needs a system you cannot read: escalate to your head for second line.

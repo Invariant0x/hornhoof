@@ -13,7 +13,7 @@ It holds:
 - **Audience**: the main kinds of buyers and users, their job, their problem in their own words, what they use today.
 - **Positioning**: the category, the main alternative, and why we win against it, one line each.
 - **Proof**: the facts we may claim, each with its source: numbers, customer results, features that exist today. Nothing else may be claimed.
-- **Voice**: three words that describe it, words we use and words we never use, in English and Russian.
+- **Voice**: three words that describe it, words we use and words we never use, in every language the company uses.
 - **Markets**: where we sell, in which languages, which channels matter there.
 - **Off limits**: claims, comparisons and topics we avoid, and why.
 
