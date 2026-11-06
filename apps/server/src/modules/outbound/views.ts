@@ -58,14 +58,14 @@ function summarizeCatalogValue(value: CatalogValue): string {
   if (value.kind === 'segment' || value.kind === 'audience') return value.name;
   if (value.kind === 'variable') return value.field;
   if (value.kind === 'taxonomy') return `${value.classes.length} classes`;
-  return value.text.slice(0, 120);
+  return 'text' in value ? value.text.slice(0, 120) : value.kind;
 }
 
 function templatePreview(value: Extract<CatalogValue, { kind: 'template' }>): string {
   return value.parts.map(part => (part.kind === 'text' ? part.text : `[${part.type}]`)).join('');
 }
 
-function decodeFrozenSubjectAndBody(sealedEnc: string, secret: string): { subject: string; body: string } {
+function decodeFrozenSubjectAndBody(sealedEnc: string, secret: Buffer): { subject: string; body: string } {
   const parsed = JSON.parse(decryptSecret(sealedEnc, secret)) as SealedPayload;
   return { subject: parsed.subject, body: parsed.text };
 }
@@ -269,10 +269,11 @@ async function loadChannelDtos(db: Db, companyId: string, deptIds: readonly stri
 
 function unknownRecoveryDto(attempt: typeof outboundAttempts.$inferSelect | undefined) {
   if (!attempt || !attempt.safeCode) return null;
+  const finishedAt = attempt.endedAt ?? attempt.startedAt ?? attempt.createdAt;
   return {
     attemptId: attempt.id,
     safeCode: attempt.safeCode,
-    endedAt: attempt.endedAt ? attempt.endedAt.toISOString() : attempt.startedAt.toISOString(),
+    endedAt: finishedAt.toISOString(),
     quotaHeld: true as const,
     nextActionCode: 'check_receiver_before_resend' as const,
   };
@@ -339,7 +340,7 @@ async function loadEscalationDtos(
     .select()
     .from(supportTickets)
     .where(and(eq(supportTickets.companyId, me.companyId), eq(supportTickets.status, 'escalated'), inArray(supportTickets.departmentId, [...deptIds])))
-    .orderBy(desc(supportTickets.updatedAt));
+    .orderBy(desc(supportTickets.createdAt));
   if (tickets.length === 0) return [];
   const ticketUuids = tickets.map(t => t.ticketId);
   const [classifications, replyMsgs] = await Promise.all([

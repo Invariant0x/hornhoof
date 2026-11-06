@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {
   CheckBinding,
+  ClassificationInput,
+  ReviewInput,
   SupportClassifyInput,
   SupportClassifyResult,
   SupportSubmit,
@@ -8,18 +10,21 @@ import {
   canonicalJson,
   type CatalogValue,
   type CheckBinding as CheckBindingDto,
-  type ClassificationInput,
   type GateCode,
   type MessageDocument,
   type ModelCheckKind,
   type ProviderId,
-  type ReviewInput,
+  type ReasonCode,
   type SupportClassifyInput as SupportClassifyInputDto,
   type SupportClassifyResult as SupportClassifyResultDto,
   type SupportSubmit as SupportSubmitDto,
   type SubmitResult as SubmitResultDto,
 } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import type { z } from 'zod';
+
+type ClassificationInputDto = z.infer<typeof ClassificationInput>;
+type ReviewInputDto = z.infer<typeof ReviewInput>;
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
@@ -209,13 +214,15 @@ async function activeCheckBinding(
   return { binding, digest: check.bindingDigest ?? bindingDigest(binding) };
 }
 
+type TaxonomyInfo = { digest: string; classes: Extract<CatalogValue, { kind: 'taxonomy' }>['classes'] };
+
 async function publishedTaxonomy(
   db: Pick<Db, 'select'>,
   companyId: string,
   departmentId: string,
   productId: string | null,
   now: Date,
-): Promise<Extract<CatalogValue, { kind: 'taxonomy' }>['classes'] | null> {
+): Promise<TaxonomyInfo | null> {
   const rows = await db
     .select()
     .from(outboundCatalogRevisions)
@@ -229,12 +236,12 @@ async function publishedTaxonomy(
   const current = [...groupLatestByEntry(rows).values()].find(row =>
     isUsableRevision(row, { departmentId, productId, channelId: null }, now),
   );
-  return current && current.value.kind === 'taxonomy' ? current.value.classes : null;
+  return current && current.value.kind === 'taxonomy' ? { digest: current.digest, classes: current.value.classes } : null;
 }
 
 async function requireAssignedTask(ctx: Ctx, caller: SupportCaller, ref: number | string) {
   const task = await taskByRef(ctx, caller.companyId, ref);
-  if (!task || task.assigneeId !== caller.agentId) {
+  if (!task || task.assigneeAgentId !== caller.agentId) {
     throw new ApiError(403, 'forbidden', 'This task is not assigned to the calling agent.', 'task_not_yours');
   }
   return task;
@@ -261,7 +268,7 @@ async function storeUnavailableClassification(
   ticket: typeof supportTickets.$inferSelect,
   bindingDigestValue: string,
   idempotencyKey: string,
-  reasonCode: 'private_data' | 'unavailable',
+  reasonCode: ReasonCode,
   now: Date,
 ): Promise<SupportClassifyResultDto> {
   const [inserted] = await db
@@ -278,7 +285,7 @@ async function storeUnavailableClassification(
       decidedAt: now,
     })
     .returning();
-  await db.update(supportTickets).set({ status: 'escalated', updatedAt: now }).where(eq(supportTickets.id, ticket.id));
+  await db.update(supportTickets).set({ status: 'escalated' }).where(eq(supportTickets.id, ticket.id));
   return SupportClassifyResult.parse({ classificationReceiptId: inserted!.id, status: 'unavailable' });
 }
 
@@ -289,26 +296,28 @@ async function runTicketModelClassification(
   ticketText: string,
   idempotencyKey: string,
   checkInfo: { binding: CheckBindingDto; digest: string },
-  classes: Extract<CatalogValue, { kind: 'taxonomy' }>['classes'],
+  taxonomy: TaxonomyInfo,
   now: Date,
 ): Promise<SupportClassifyResultDto> {
-  const modelInput: ClassificationInput = {
+  const modelInput: ClassificationInputDto = {
     schemaVersion: 1,
     kind: 'support_classification',
     locale: 'en',
     subject: { id: ticket.ticketId, contentDigest: ticket.digest },
     ticket: { text: ticketText },
-    taxonomy: classes,
+    taxonomyRevision: taxonomy.digest,
+    taxonomy: taxonomy.classes,
   };
   const checked = await ports.runModelCheck(checkInfo.binding, modelInput);
   if ('code' in checked || checked.result.kind !== 'classification') {
-    return storeUnavailableClassification(ctx.db, ticket, checkInfo.digest, idempotencyKey, 'unavailable', now);
+    return storeUnavailableClassification(ctx.db, ticket, checkInfo.digest, idempotencyKey, 'uncertain', now);
   }
-  const entry = classes.find(item => item.classId === checked.result.classId);
-  if (!entry || (entry.requiresHuman && !checked.result.requiresHuman)) {
-    return storeUnavailableClassification(ctx.db, ticket, checkInfo.digest, idempotencyKey, 'unavailable', now);
+  const classified = checked.result;
+  const entry = taxonomy.classes.find(item => item.classId === classified.classId);
+  if (!entry || (entry.requiresHuman && !classified.requiresHuman)) {
+    return storeUnavailableClassification(ctx.db, ticket, checkInfo.digest, idempotencyKey, 'uncertain', now);
   }
-  const requiresHuman = entry.requiresHuman || checked.result.requiresHuman;
+  const requiresHuman = entry.requiresHuman || classified.requiresHuman;
   const [saved] = await ctx.db
     .insert(supportClassifications)
     .values({
@@ -319,15 +328,15 @@ async function runTicketModelClassification(
       bindingDigest: checkInfo.digest,
       idempotencyKey,
       status: 'ready',
-      classId: checked.result.classId,
+      classId: classified.classId,
       requiresHuman,
-      reasonCodes: checked.result.reasonCodes,
+      reasonCodes: classified.reasonCodes,
       reviewer: checked.reviewer,
       decidedAt: now,
     })
     .returning();
   if (requiresHuman) {
-    await ctx.db.update(supportTickets).set({ status: 'escalated', updatedAt: now }).where(eq(supportTickets.id, ticket.id));
+    await ctx.db.update(supportTickets).set({ status: 'escalated' }).where(eq(supportTickets.id, ticket.id));
   }
   return SupportClassifyResult.parse({ classificationReceiptId: saved!.id, status: 'ready' });
 }
@@ -380,14 +389,14 @@ export async function classifySupportTicket(
     return storeUnavailableClassification(ctx.db, ticket, digest, input.idempotencyKey, 'private_data', now);
   }
 
-  const classes = await publishedTaxonomy(ctx.db, caller.companyId, ticket.departmentId, ticket.productId, now);
-  if (!checkInfo || !classes) {
-    return storeUnavailableClassification(ctx.db, ticket, digest, input.idempotencyKey, 'unavailable', now);
+  const taxonomy = await publishedTaxonomy(ctx.db, caller.companyId, ticket.departmentId, ticket.productId, now);
+  if (!checkInfo || !taxonomy) {
+    return storeUnavailableClassification(ctx.db, ticket, digest, input.idempotencyKey, 'uncertain', now);
   }
-  return runTicketModelClassification(ctx, ports, ticket, ticketText, input.idempotencyKey, checkInfo, classes, now);
+  return runTicketModelClassification(ctx, ports, ticket, ticketText, input.idempotencyKey, checkInfo, taxonomy, now);
 }
 
-type SupportFact = { kind: 'price' | 'terms' | 'link' | 'claim' | 'knowledge'; id: string; revision: number; text: string };
+type SupportFact = ReviewInputDto['facts'][number];
 type SupportRenderOutcome = {
   subject: string;
   body: string;
@@ -413,10 +422,19 @@ function scanRenderedContent(text: string, reasons: Set<GateCode>): void {
   if (containsForbiddenSupportPromise(text)) reasons.add('support_intent_forbidden');
 }
 
-function signedUnsubscribeUrl(ctx: Ctx, companyId: string, contactId: string, channelId: string, purpose: string): string {
-  const payload = Buffer.from(canonicalJson({ companyId, contactId, channelId, purpose })).toString('base64url');
-  const sig = createHmac('sha256', ctx.config.secret).update(`unsubscribe:${payload}`).digest('base64url');
-  return `${publicUrl(ctx)}/api/outbound/unsubscribe/${payload}.${sig}`;
+async function signedUnsubscribeUrl(
+  ctx: Ctx,
+  companyId: string,
+  contactId: string,
+  channelId: string,
+  purpose: string,
+): Promise<string> {
+  const payload = Buffer.from(JSON.stringify({ c: companyId, k: contactId, h: channelId, p: purpose })).toString('base64url');
+  const sig = createHmac('sha256', ctx.config.secret)
+    .update(`hornhoof outbound unsubscribe v1\n${payload}`)
+    .digest('base64url');
+  const base = await publicUrl(ctx.db, ctx.config);
+  return `${base}/api/outbound/unsubscribe/${payload}.${sig}`;
 }
 
 async function loadSupportCatalogMap(
@@ -460,7 +478,7 @@ function fillSingleBlock(block: MessageDocument['blocks'][number], bag: RenderBa
   }
   if (source.value.kind === 'link') {
     bag.used.set(source.entryId, source);
-    bag.facts.push({ kind: 'link', id: source.entryId, revision: source.revision, text: source.value.url });
+    bag.facts.push({ kind: 'link', id: source.entryId, revision: source.revision, canonicalValue: source.value.url, sourceId: source.id });
     return source.value.url;
   }
   if (source.locale !== bag.locale || (source.value.kind !== 'claim' && source.value.kind !== 'knowledge')) {
@@ -469,7 +487,13 @@ function fillSingleBlock(block: MessageDocument['blocks'][number], bag: RenderBa
   }
   bag.used.set(source.entryId, source);
   scanRenderedContent(source.value.text, bag.reasons);
-  bag.facts.push({ kind: source.value.kind, id: source.entryId, revision: source.revision, text: source.value.text });
+  bag.facts.push({
+    kind: source.value.kind,
+    id: source.entryId,
+    revision: source.revision,
+    canonicalValue: source.value.text,
+    sourceId: source.id,
+  });
   return source.value.text;
 }
 
@@ -596,7 +620,7 @@ async function renderSupportDocument(
   const tpl = tplRow.value;
   fillBlockSlots(tpl, spec.document, bag);
   fillVariableSlots(tpl, spec.document, { account_label: spec.account.label, channel_name: spec.channel.name }, bag);
-  const unsubUrl = signedUnsubscribeUrl(ctx, spec.companyId, spec.contactId, spec.channel.id, spec.channel.purpose);
+  const unsubUrl = await signedUnsubscribeUrl(ctx, spec.companyId, spec.contactId, spec.channel.id, spec.channel.purpose);
   fillUnsubscribeSlots(tpl, unsubscribeRows, unsubUrl, bag);
   return assembleTemplateOutput(tpl, bag);
 }
@@ -614,7 +638,7 @@ async function checkAccountAndChannel(
   const [binding] = await db
     .select()
     .from(outboundBindings)
-    .where(and(eq(outboundBindings.accountId, account.id), isNull(outboundBindings.revokedAt)));
+    .where(and(eq(outboundBindings.accountId, account.id), eq(outboundBindings.status, 'active'), isNull(outboundBindings.releasedAt)));
   if (!binding || binding.agentId !== caller.agentId) reasons.add('account_bound_elsewhere');
   else if (binding.generation !== input.bindingGeneration) reasons.add('stale_binding');
 }
@@ -716,21 +740,19 @@ async function createSupportApprovalRequest(
     text: spec.subject ? `${spec.subject}\n\n${spec.body}` : spec.body,
     approval: { channel: 'message', kind: 'support_reply', amount: null },
     topic: 'task',
-    onCreated: async (tx, request) => {
-      await tx.insert(outboundApprovals).values({
-        companyId: spec.companyId,
-        requestId: request.id,
-        kind: 'message',
-        messageId: spec.messageId,
-        messageRevision: 1,
-        contentDigest: spec.contentDigest,
-        accountId: spec.accountId,
-        bindingGeneration: spec.bindingGeneration,
-        policyDigest: spec.policyDigest,
-        sourceRevisionsDigest: spec.sourcesDigest,
-        authorityFingerprint: authorityHash,
-      });
-    },
+  });
+  await ctx.db.insert(outboundApprovals).values({
+    companyId: spec.companyId,
+    requestId: moved.request.id,
+    kind: 'message',
+    messageId: spec.messageId,
+    messageRevision: 1,
+    contentDigest: spec.contentDigest,
+    accountId: spec.accountId,
+    bindingGeneration: spec.bindingGeneration,
+    policyDigest: spec.policyDigest,
+    sourceRevisionsDigest: spec.sourcesDigest,
+    authorityFingerprint: authorityHash,
   });
   await wakeAll(ctx, moved.wakes);
 }
@@ -808,7 +830,7 @@ async function ensureClassificationIdForRejection(
       bindingDigest: sha256(`missing-classification:${messageId}`),
       idempotencyKey: randomUUID(),
       status: 'unavailable',
-      reasonCodes: ['unavailable'],
+      reasonCodes: ['uncertain'],
       decidedAt: now,
     })
     .returning();
@@ -841,7 +863,7 @@ async function judgeSupportReplyReview(
   );
   if (!reviewCheck) return { status: 'waiting_approval', reasonCodes: ['approval_required', 'check_uncertified'] };
 
-  const reviewInput: ReviewInput = {
+  const reviewInput: ReviewInputDto = {
     schemaVersion: 1,
     kind: 'support_reply_review',
     locale: spec.locale,
@@ -965,7 +987,7 @@ export async function submitSupportReply(
   await ctx.db.update(outboundMessages).set({ status: verdict.status, reasonCodes: verdict.reasonCodes, updatedAt: now }).where(eq(outboundMessages.id, messageId));
 
   if (verdict.status === 'waiting_approval') {
-    await ctx.db.update(supportTickets).set({ status: 'escalated', updatedAt: now }).where(eq(supportTickets.id, ticket.id));
+    await ctx.db.update(supportTickets).set({ status: 'escalated' }).where(eq(supportTickets.id, ticket.id));
     await createSupportApprovalRequest(ctx, {
       companyId: caller.companyId,
       taskId: task.id,

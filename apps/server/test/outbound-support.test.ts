@@ -6,11 +6,12 @@ import {
   type CheckInput,
   type CheckReceipt,
   type CheckUnavailable,
-  type ClassificationInput,
   type ModelIdentity,
   type ReasonCode,
-  type ReviewInput,
 } from '@hornhoof/protocol';
+
+type ClassificationInput = Extract<CheckInput, { kind: 'support_classification' }>;
+type ReviewInput = Exclude<CheckInput, { kind: 'support_classification' }>;
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';

@@ -1,6 +1,7 @@
 import {
   CheckReceipt,
   ClassificationResult,
+  ReviewInput,
   ReviewResult,
   canonicalJson,
   type CheckBinding,
@@ -11,8 +12,10 @@ import {
   type ModelCheckKind,
   type ModelIdentity,
   type ProviderId,
-  type ReviewInput,
 } from '@hornhoof/protocol';
+import type { z } from 'zod';
+
+type ReviewInputDto = z.infer<typeof ReviewInput>;
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { outboundReviewReceipts } from '../../db/schema.js';
@@ -180,7 +183,7 @@ export async function reviewOutboundMessageRevision(
     messageId: string;
     messageRevision: number;
     binding: CheckBinding;
-    input: ReviewInput;
+    input: ReviewInputDto;
   },
 ): Promise<CheckReceiptDto | CheckUnavailable> {
   const digest = bindingDigest(params.binding);

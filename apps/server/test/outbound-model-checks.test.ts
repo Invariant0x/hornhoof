@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import type { CheckBinding, CheckInput, ModelIdentity, ReviewInput } from '@hornhoof/protocol';
+import type { CheckBinding, CheckInput, ModelIdentity } from '@hornhoof/protocol';
+
+type ReviewInput = Exclude<CheckInput, { kind: 'support_classification' }>;
 import { outboundReviewReceipts } from '../src/db/schema.js';
 import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import {
