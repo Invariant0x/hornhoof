@@ -112,17 +112,18 @@ type MessageApprovalFields = {
   contentDigest: string;
 };
 
-function readMessageApprovalFields(bound: ApprovalRow): MessageApprovalFields | null {
-  const present = [bound.messageId, bound.messageRevision, bound.accountId, bound.bindingGeneration, bound.contentDigest];
-  if (!present.every(Boolean)) return null;
-  return {
-    messageId: bound.messageId!,
-    messageRevision: bound.messageRevision!,
-    accountId: bound.accountId!,
-    bindingGeneration: bound.bindingGeneration!,
-    contentDigest: bound.contentDigest!,
-  };
+function requireFields<T extends Record<string, unknown>>(raw: { [K in keyof T]: T[K] | null | undefined }): T | null {
+  return Object.values(raw).every(Boolean) ? (raw as T) : null;
 }
+
+const readMessageApprovalFields = (bound: ApprovalRow): MessageApprovalFields | null =>
+  requireFields<MessageApprovalFields>({
+    messageId: bound.messageId,
+    messageRevision: bound.messageRevision,
+    accountId: bound.accountId,
+    bindingGeneration: bound.bindingGeneration,
+    contentDigest: bound.contentDigest,
+  });
 
 async function loadMessageApprovalRows(db: Db, fields: MessageApprovalFields) {
   const [[msg], [rev], [account]] = await Promise.all([
@@ -188,17 +189,14 @@ type ApproachApprovalFields = {
   locale: string;
 };
 
-function readApproachApprovalFields(bound: ApprovalRow): ApproachApprovalFields | null {
-  const present = [bound.channelId, bound.templateId, bound.templateRevision, bound.segmentId, bound.locale];
-  if (!present.every(Boolean)) return null;
-  return {
-    channelId: bound.channelId!,
-    templateId: bound.templateId!,
-    templateRevision: bound.templateRevision!,
-    segmentId: bound.segmentId!,
-    locale: bound.locale!,
-  };
-}
+const readApproachApprovalFields = (bound: ApprovalRow): ApproachApprovalFields | null =>
+  requireFields<ApproachApprovalFields>({
+    channelId: bound.channelId,
+    templateId: bound.templateId,
+    templateRevision: bound.templateRevision,
+    segmentId: bound.segmentId,
+    locale: bound.locale,
+  });
 
 type SegmentCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'segment' }> };
 type TemplateCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'template' }> };

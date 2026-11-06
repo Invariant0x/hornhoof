@@ -259,21 +259,26 @@ function resolveHintedVendor(hint: AuthorVendorHint): string {
   return firstVendorOrUnknown(resolveVendorSet(provider, vendorId));
 }
 
+function pickSubscriptionId(jobSubId: string | null, agentSubId: string | null | undefined): string | null {
+  if (jobSubId) return jobSubId;
+  return agentSubId ?? null;
+}
+
 async function fetchJobSubscriptionId(db: Pick<Db, 'select'>, jobId: string | null): Promise<string | null> {
   if (!jobId) return null;
   const [job] = await db.select({ subscriptionId: jobs.subscriptionId }).from(jobs).where(eq(jobs.id, jobId));
   return job ? job.subscriptionId : null;
 }
 
-async function fetchSubscriptionProvider(db: Pick<Db, 'select'>, subId: string | null): Promise<ProviderId | null> {
+async function resolveAuthorProvider(
+  db: Pick<Db, 'select'>,
+  jobSubId: string | null,
+  agent: { subscriptionId: string | null } | undefined,
+): Promise<ProviderId | null> {
+  const subId = pickSubscriptionId(jobSubId, agent ? agent.subscriptionId : null);
   if (!subId) return null;
-  const [sub] = await db.select({ provider: subscriptions.provider }).from(subscriptions).where(eq(subscriptions.id, subId));
+  const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, subId));
   return sub ? sub.provider : null;
-}
-
-function pickSubscriptionId(jobSubId: string | null, agentSubId: string | null | undefined): string | null {
-  if (jobSubId) return jobSubId;
-  return agentSubId ?? null;
 }
 
 async function resolveStoredAuthorVendor(db: Pick<Db, 'select'>, message: MessageRow): Promise<string> {
@@ -281,7 +286,7 @@ async function resolveStoredAuthorVendor(db: Pick<Db, 'select'>, message: Messag
     db.select({ model: agents.model, subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.id, message.authorAgentId)),
     fetchJobSubscriptionId(db, message.authorJobId),
   ]);
-  const provider = await fetchSubscriptionProvider(db, pickSubscriptionId(jobSubId, agent?.subscriptionId));
+  const provider = await resolveAuthorProvider(db, jobSubId, agent);
   const model = agent ? agent.model : '';
   return firstVendorOrUnknown(resolveVendorSet(provider, model));
 }

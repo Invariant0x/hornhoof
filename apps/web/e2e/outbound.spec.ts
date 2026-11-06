@@ -140,7 +140,7 @@ for (const settings of SETTINGS) {
     await serveOutbound(page, decided);
 
     await page.goto('/tasks');
-    await expect(page.getByText('Quarterly enterprise plan overview')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Quarterly enterprise plan overview' })).toBeVisible();
     await expect(page.getByText(/https:\/\/acme\.example\/pricing\/enterprise-plan-details-for-2026-audit/).first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `${SHOTS_DIR}/outbound-requests-${lang}-${theme}-${width}.png`, animations: 'disabled' });
@@ -150,7 +150,7 @@ for (const settings of SETTINGS) {
     await expect(page).toHaveURL(/\/outbound$/);
     await expect(page.getByRole('heading', { name: t.outbound.heading, exact: true })).toBeVisible();
     await expect(page.getByText(new RegExp(t.outbound.unknownHeading))).toBeVisible();
-    await expect(page.getByText('Partner Webhook', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Partner Webhook', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `${SHOTS_DIR}/outbound-overview-${lang}-${theme}-${width}.png`, animations: 'disabled' });
 
