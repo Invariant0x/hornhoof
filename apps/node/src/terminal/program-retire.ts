@@ -26,6 +26,10 @@ export function idleRefusal(evidence: IdleEvidence): string | null {
   return REASONS.find(([field]) => evidence[field])?.[1] ?? null;
 }
 
+/* An Enter a person pressed holds the program until the time it may be heard in has passed, and has no end while its turn runs. */
+export const enterPending = (pressed: { until: number | null } | null | undefined, now = Date.now()): boolean =>
+  Boolean(pressed) && (pressed!.until ?? Infinity) > now;
+
 /* The requests that retired a program. The same request asked again has the same answer, whatever runs by then. A bounded memory,
    and gone with the host: a request it does not know after a restart is stale, as nothing proves it was done. */
 export class RetiredRequests {

@@ -26,7 +26,7 @@ import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './pr
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
-import { busy, hasSettled, idleRefusal, RETIRED, RetiredRequests, stale, type IdleEvidence, type RetireIdleWorkspace, type RetireResult } from './program-retire.js';
+import { busy, enterPending, hasSettled, idleRefusal, RETIRED, RetiredRequests, stale, type IdleEvidence, type RetireIdleWorkspace, type RetireResult } from './program-retire.js';
 import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
@@ -602,7 +602,7 @@ export class TerminalHost {
     this.endWords(a, turn);
     this.retainAssignment(a, job, turn.words);
     a.typing = null;
-    a.lastEnded = job.input.jobId ?? a.lastEnded;
+    noteEnded(a, job.input.jobId);
     if (starting && a.starting === starting) a.starting = null;
     if (a.turn === turn) {
       this.bridge.setToken(job.key, null);
@@ -2286,8 +2286,10 @@ export class TerminalHost {
     this.bindTyped(a, turn, m, early);
     turn.opened?.resolve();
     /* It ended before Hornhoof named it. */
-    if (turn.over) a.lastEnded = turn.jobId ?? a.lastEnded;
-    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure);
+    if (turn.over) {
+      noteEnded(a, turn.jobId);
+      this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.failure);
+    }
   }
 
   private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
@@ -2316,7 +2318,7 @@ export class TerminalHost {
     if (!turn?.typed) return;
     this.endWords(a, turn);
     if (a.turn === turn) { a.turn = null; this.bridge.setToken(a.key, null); }
-    a.lastEnded = turn.jobId ?? a.lastEnded;
+    noteEnded(a, turn.jobId);
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     /* Hornhoof hears the limits with the next turn it runs. */
     void this.planLimits(a);
@@ -2656,7 +2658,7 @@ export class TerminalHost {
     return {
       turn: Boolean(a.turn), queuedTurns: a.queuedTurns, unopened: a.unopened.length, busy: a.busy, starting: Boolean(a.starting), restarting: a.restarting,
       typing: a.typing != null, promptWaits: Boolean(a.promptWaits), personWords: Boolean(a.personWords), calls: a.calls.size, waitingWords: a.waitingWords.length,
-      stillTyping: this.stillTyping(a), enterPending: enterPending(a), unanswered: Boolean(a.unanswered), writers,
+      stillTyping: this.stillTyping(a), enterPending: enterPending(a.pressed), unanswered: Boolean(a.unanswered), writers,
     };
   }
 
@@ -3056,8 +3058,8 @@ const errorWords = (error: unknown) => String(error instanceof Error ? error.mes
 const sameProgram = (a: Agent, request: RetireIdleWorkspace): boolean =>
   a.instance === request.expectedInstance && a.binding?.workspaceId === request.workspaceId && a.binding.bindingVersion === request.bindingVersion;
 
-/* An Enter that may still bring its words. */
-const enterPending = ({ pressed }: Agent): boolean => Boolean(pressed) && (pressed!.until ?? Infinity) > Date.now();
+/* The last turn that ended in this program, as far as Hornhoof named it. */
+const noteEnded = (a: Agent, jobId: string | null | undefined): void => { a.lastEnded = jobId ?? a.lastEnded; };
 
 function typedOpen(agentKey: string, text: string, ref: Turn['ref'], queuedFrom: string | null): Extract<NodeMessage, { type: 'turn.open' }> {
   return { type: 'turn.open', agentKey, text: text.slice(0, 100_000), ref, ...(queuedFrom ? { queuedFrom } : {}) };

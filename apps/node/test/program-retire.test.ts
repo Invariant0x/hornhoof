@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { idleRefusal, RetiredRequests, type IdleEvidence } from '../src/terminal/program-retire.js';
+import { enterPending, idleRefusal, RetiredRequests, type IdleEvidence } from '../src/terminal/program-retire.js';
 
 const IDLE: IdleEvidence = { turn: false, queuedTurns: 0, unopened: 0, busy: false, starting: false, restarting: false, typing: false, promptWaits: false, personWords: false, calls: 0, waitingWords: 0, stillTyping: false, enterPending: false, unanswered: false, writers: false };
 
@@ -35,5 +35,21 @@ describe('the requests already answered', () => {
     for (const n of [1, 2, 3]) retired.add(nth(n));
     expect(retired.has(nth(1))).toBe(false);
     expect(retired.has(nth(3))).toBe(true);
+  });
+});
+
+describe('an Enter a person pressed', () => {
+  it('holds the program from the press on, while it has no end yet', () => {
+    expect(enterPending({ until: null }, 1000)).toBe(true);
+  });
+
+  it('holds it until the time it may be heard in has passed', () => {
+    expect(enterPending({ until: 1001 }, 1000)).toBe(true);
+    expect(enterPending({ until: 1000 }, 1000)).toBe(false);
+  });
+
+  it('holds nothing when none was pressed', () => {
+    expect(enterPending(null, 1000)).toBe(false);
+    expect(enterPending(undefined, 1000)).toBe(false);
   });
 });
