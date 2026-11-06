@@ -27,7 +27,7 @@ import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
 import { useRoute, type Route } from '../routes';
-import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
@@ -224,11 +224,12 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
 /* What waits for people as the navigation counts it and the screens show it, and whose decisions the Tasks screen shows
    after a click on a person's card: null shows everyone's. */
 function useDecisionsView() {
-  const { decisions, load } = useDecisions();
+  const { decisions, failure, load } = useDecisions();
   const requests = decisions?.requests ?? [];
   return {
     all: decisions,
     requests,
+    failure,
     load,
     /* What agents ask, the orchestrator's cards and his request for the computer. */
     waiting: decisions?.counts.total ?? 0,
@@ -325,7 +326,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && !dept));
+  const missingDepartment = departmentIsMissing({ deptId, org, orgFailure, company, personId: me.person.id });
   const updates = useUpdates(company);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
@@ -388,6 +389,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <Tasks
             onHome={goHome}
             decisions={decisions.all}
+            decisionsFailure={decisions.failure}
             onDecisionsChanged={decisions.load}
             personId={pageRoute.kind === 'tasks' ? pageRoute.personId ?? null : null}
             onClearPerson={() => navigate({ kind: 'tasks' })}

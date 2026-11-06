@@ -115,9 +115,31 @@ function received(view: View, m: Frame) {
   if (m.type === 'data' && m.data) screenCame(view, m.data);
 }
 
+type ClearScroll = { tail: string; reading: number | null; history: boolean };
+const clearScroll = new WeakMap<Terminal, ClearScroll>();
+
+function writeKeepingPlace(term: Terminal, data: string) {
+  const state = clearScroll.get(term) ?? { tail: '', reading: null, history: false };
+  clearScroll.set(term, state);
+  const stream = state.tail + data;
+  if (stream.includes('\x1b[3J') && state.reading === null) state.reading = term.buffer.active.viewportY;
+  const intoHistory = stream.includes('\x1b[1;2r');
+  state.tail = stream.slice(-2);
+  if (state.reading === null) return writeTerminalData(term, data);
+  if (intoHistory) state.history = true;
+  writeTerminalData(term, data);
+  if (!state.history) return;
+  const reading = state.reading;
+  if (!intoHistory) {
+    state.reading = null;
+    state.history = false;
+  }
+  if (term.buffer.active.baseY > 0) term.scrollToLine(Math.min(reading, term.buffer.active.baseY));
+}
+
 function screenCame(view: View, data: string) {
   if (!view.told) view.setUp(true);
-  writeTerminalData(view.term, data);
+  writeKeepingPlace(view.term, data);
   /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
   const opened = view.unconfirmed;
   view.unconfirmed = null;
