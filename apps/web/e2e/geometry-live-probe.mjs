@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { URL } from 'node:url';
 import { chromium, firefox, webkit } from '@playwright/test';
 import { geometryServer } from './geometry-fixture.ts';
 
