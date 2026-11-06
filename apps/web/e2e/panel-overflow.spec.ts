@@ -66,9 +66,27 @@ for (const lang of ['en', 'ru'] as const) {
           const second = list.locator('li').nth(1);
           await expect(first).toHaveClass(/(^| )entry( |$)/);
           await expect(first.locator('.entry-main')).toHaveCount(1);
+          const text = first.locator('.entry-main > p').first();
+          await expect(text.locator('b')).toHaveText('#1');
+          await expect(text).toContainText(LONG_TEXT);
+          const baselines = await text.evaluate(paragraph => {
+            const range = document.createRange();
+            range.setStart(paragraph.querySelector('b')!.firstChild!, 0);
+            range.setEnd(paragraph.querySelector('b')!.firstChild!, 1);
+            const numberY = range.getBoundingClientRect().y;
+            range.setStartAfter(paragraph.querySelector('b')!);
+            range.setEnd(paragraph, 1);
+            return { numberY, textY: range.getClientRects()[0]!.y };
+          });
+          expect(baselines.numberY, 'the note number shares the first text baseline').toBe(baselines.textY);
+          const newNote = notebook.getByRole('textbox', { name: m.notebook.newNote, exact: true });
+          await expect(newNote).toHaveCSS('border-radius', '0px');
+          await expect(newNote).toHaveCSS('background-color', theme === 'light' ? 'rgb(238, 242, 246)' : 'rgb(33, 43, 55)');
+          await expect(newNote).toHaveCSS('border-top-color', theme === 'light' ? 'rgb(169, 183, 197)' : 'rgb(61, 76, 92)');
+          await expect(newNote).toHaveCSS('color', theme === 'light' ? 'rgb(15, 27, 39)' : 'rgb(227, 234, 241)');
+          expect(await newNote.evaluate(el => getComputedStyle(el, '::placeholder').color)).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
           const actions = first.locator('.entry-actions');
           await expect(actions).toHaveAttribute('role', 'group');
-          const text = first.locator('.entry-main > span');
           const change = first.getByRole('button', { name: m.notebook.changeNote(1), exact: true });
           const remove = first.getByRole('button', { name: m.notebook.removeNote(1), exact: true });
           await expect(change).toHaveCSS('min-height', '44px');
@@ -131,6 +149,13 @@ for (const lang of ['en', 'ru'] as const) {
         const row = page.locator('button.trow').first();
         const brief = row.locator('.trow-brief');
         await expect(brief).toBeVisible();
+        if (width === 375) {
+          const version = page.locator('.version-mark');
+          await expect(version).toHaveCSS('position', 'static');
+          const versionBox = (await version.boundingBox())!;
+          const briefBox = (await brief.boundingBox())!;
+          expect(versionBox.y, 'the version follows the page instead of covering text').toBeGreaterThanOrEqual(briefBox.y + briefBox.height);
+        }
         await capture(page, info, `tasks-${look}`);
         await expectWrappedText(brief);
         await expectInside(row, [brief]);
@@ -190,6 +215,12 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(edit).toHaveCSS('min-height', '44px');
         await expect(name).toBeVisible();
         await expect(row.locator('xpath=ancestor::table')).toHaveAttribute('data-fit', 'entries');
+        const invite = page.getByRole('button', { name: m.people.invitePerson, exact: true });
+        await expect(invite).toHaveCSS('min-height', '44px');
+        const headerBox = (await page.locator('.people-head').boundingBox())!;
+        const inviteBox = (await invite.boundingBox())!;
+        expect(inviteBox.x + inviteBox.width, 'the page action shares the content end').toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
+        expect(inviteBox.x + inviteBox.width, 'the page action is not left-aligned').toBe(headerBox.x + headerBox.width);
         await capture(page, info, `people-${look}`);
         const cells = row.locator('td');
         for (const [index, column] of (['name', 'title', 'access', 'status', 'actions'] as const).entries()) {
@@ -241,6 +272,12 @@ for (const lang of ['en', 'ru'] as const) {
         const question = actions.locator('.entry-main');
         const group = actions.locator('.entry-actions');
         await expect(group).toHaveAttribute('role', 'group');
+        await expect(dialog.getByRole('button', { name: m.common.done, exact: true })).toHaveCSS('min-height', '44px');
+        const copy = dialog.getByRole('button', { name: m.common.copy, exact: true });
+        await expect(copy).toHaveCSS('min-height', '44px');
+        const copyBox = (await copy.boundingBox())!;
+        const groupBox = (await group.boundingBox())!;
+        expect(copyBox.x + copyBox.width, 'Copy shares the confirmation end').toBe(groupBox.x + groupBox.width);
         const buttons = group.getByRole('button');
         for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `settings-remove-${look}`);
@@ -270,10 +307,18 @@ for (const lang of ['en', 'ru'] as const) {
         const code = command.locator('code');
         const copy = command.getByRole('button');
         await expect(code).toHaveText(LONG_URL);
+        await expect(copy).toHaveCSS('min-height', '44px');
+        const codeBox = (await code.boundingBox())!;
+        const copyBox = (await copy.boundingBox())!;
+        const commandBox = (await command.boundingBox())!;
+        expect(copyBox.y, 'Copy stands below the command').toBeGreaterThanOrEqual(codeBox.y + codeBox.height);
+        expect(copyBox.x + copyBox.width, 'Copy shares the command end').toBe(commandBox.x + commandBox.width - 12);
+        const cancel = panel.getByRole('button', { name: m.subs.cancelCommand, exact: true });
+        await expect(cancel).toHaveCSS('min-height', '44px');
         await capture(page, info, `command-${look}`);
         await expectWrappedText(code);
         await expectInside(command, [code, copy]);
-        await panel.getByRole('button', { name: m.subs.cancelCommand, exact: true }).click();
+        await cancel.click();
         await expect(panel).toHaveCount(0);
         expect(hidden).toEqual(['POST']);
         expect(errors).toEqual([]);

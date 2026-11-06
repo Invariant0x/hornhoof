@@ -63,3 +63,25 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   expect(decl('.schip .r3', 'overflow')).toBe('hidden');
   expect(decl('.schip .r3', 'text-overflow')).toBe('ellipsis');
 });
+
+it('styles notebook fields and standalone panel controls with full touch geometry', () => {
+  expect(decl('.notebook textarea', 'border')).toBe('1px solid var(--line2)');
+  expect(decl('.notebook textarea', 'background')).toBe('var(--surface2)');
+  expect(decl('.notebook textarea', 'color')).toBe('var(--ink)');
+  expect(decl('.notebook textarea', 'border-radius')).toBe('0');
+  expect(decl('.notebook textarea', 'padding')).toBe('8px 12px');
+  expect(decl('.notebook textarea::placeholder', 'color')).toBe('var(--muted)');
+  expect(decl('.notebook textarea::placeholder', 'opacity')).toBe('1');
+  expect(decl('.command', 'grid-template-columns')).toBe('minmax(0, 1fr)');
+  expect(decl('.command > .btn', 'justify-self')).toBe('end');
+  expect(decl('.command > .btn', 'min-height')).toBe('44px');
+  expect(decl('.settings-link > .btn', 'justify-self')).toBe('end');
+  expect(decl('.settings-link > .btn', 'min-height')).toBe('44px');
+  expect(decl('.dialog > header .btn', 'min-height')).toBe('44px');
+  expect(decl('.people-head > .btn', 'min-height')).toBe('44px');
+  expect(decl('.people-head > .btn', 'margin-inline-start')).toBe('auto');
+  expect(decl('.panel .actions > .btn', 'min-height')).toBe('44px');
+  expect(decl('.version-mark', 'position', '(max-width: 760px)')).toBe('static');
+  expect(decl('.version-mark', 'display', '(max-width: 760px)')).toBe('block');
+  expect(decl('.version-mark', 'text-align', '(max-width: 760px)')).toBe('end');
+});
