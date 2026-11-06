@@ -4,7 +4,7 @@ import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
-import { GitCredentialMask, gitEnv, gitPreparationFailure } from './workspace.js';
+import { GitCredentialMask, gitEnv, gitPreparationFailure, type GitPreparationError } from './workspace.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
@@ -16,14 +16,18 @@ function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
   try { process.kill(-pid, signal); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
 }
 
+function gitCancellation(error: GitPreparationError, stopped: AbortSignal): Error {
+  if (!stopped.aborted) return error;
+  const timeout = stopped.reason instanceof DOMException && stopped.reason.name === 'TimeoutError';
+  return Object.assign(new DOMException(error.message, timeout ? 'TimeoutError' : 'AbortError'), { outcome: error.outcome, network: error.network, stopped: timeout ? 'timeout' : 'cancelled' });
+}
+
 function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: Error | undefined, stopped: AbortSignal, stderr: string, stderrTruncated: boolean, network: boolean, secrets: string[]): Error {
   const osCode = (failure as NodeJS.ErrnoException | undefined)?.code ?? null;
   const action = network ? 'fetch' : 'local';
   const error = gitPreparationFailure({ kind: 'child', exitCode: code !== null && code >= 0 ? code : null, signal, osCode, stderr, stderrTruncated }, network, secrets, action);
   if (failure) error.message = gitPreparationFailure({ ...error.outcome, stderr: failure.message }, network, secrets, action).message;
-  if (!stopped.aborted) return error;
-  const timeout = stopped.reason instanceof DOMException && stopped.reason.name === 'TimeoutError';
-  return Object.assign(new DOMException(error.message, timeout ? 'TimeoutError' : 'AbortError'), { outcome: error.outcome, network, stopped: timeout ? 'timeout' : 'cancelled' });
+  return gitCancellation(error, stopped);
 }
 
 function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false): Promise<Buffer> {
