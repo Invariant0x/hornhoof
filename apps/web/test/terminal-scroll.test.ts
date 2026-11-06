@@ -86,6 +86,34 @@ describe('local terminal scrollback', () => {
     expect(term.buffer.active.getLine(0)?.translateToString()).toContain('ALT-ONLY');
   });
 
+  it('leaves the reading place alone when the viewport reports no whole line', async () => {
+    const term = await fixture();
+    scrollTerminal(term, -10);
+    Object.assign(core(term).viewport, { getLinesScrolled: () => 0 });
+    attachTerminalScroll(term);
+    const event = new WheelEvent('wheel', { deltaY: -1, cancelable: true });
+    expect(core(term)._customWheelEventHandler(event)).toBe(false);
+    expect(term.buffer.active.viewportY).toBe(term.buffer.active.baseY - 10);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    [-1, -13],
+    [1, -7],
+    [0, -7],
+  ])('scrolls three lines without a viewport for wheel delta %s', async (deltaY, offset) => {
+    const term = await fixture();
+    scrollTerminal(term, -10);
+    const viewport = core(term).viewport;
+    Reflect.deleteProperty(core(term), 'viewport');
+    attachTerminalScroll(term);
+    Object.assign(core(term), { viewport });
+    const event = new WheelEvent('wheel', { deltaY, cancelable: true });
+    expect(core(term)._customWheelEventHandler(event)).toBe(false);
+    expect(term.buffer.active.viewportY).toBe(term.buffer.active.baseY + offset);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it('suppresses wheel-generated terminal data while scrolling locally', async () => {
     const term = await fixture();
     const data = vi.fn();
