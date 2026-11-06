@@ -890,6 +890,7 @@ export const ru: Messages = {
   },
   failures: {
     overloaded: 'провайдер перегружен',
+    model_access_denied: 'нет доступа к модели',
     rate_limited: 'слишком много запросов',
     usage_limit: 'лимит тарифа',
     auth: 'нужен вход',

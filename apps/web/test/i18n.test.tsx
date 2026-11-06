@@ -205,6 +205,8 @@ describe('work tree words', () => {
     expect(ru.tasks.materials.pdfUnavailable).toBe('Просмотр PDF пока недоступен. Скачайте файл.');
     expect(en.tasks.materials.proposalNote).toBe('Original proposal. Your changes are not part of it.');
     expect(ru.tasks.materials.proposalNote).toBe('Исходное предложение. Ваши правки в него не входят.');
+    expect(en.failures.model_access_denied).toBe('model access denied');
+    expect(ru.failures.model_access_denied).toBe('нет доступа к модели');
   });
 
   it('formats plural and duration helpers consistently across numeric ranges in English and Russian', () => {

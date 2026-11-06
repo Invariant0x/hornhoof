@@ -490,7 +490,6 @@ const legacyTask = (await createTask(app.ctx, { personId: ceo.id }, {
 const [attA] = await db.insert(schema.attachments).values({
   companyId: acme.id,
   agentId: designer.id,
-  taskId: legacyTask.id,
   mediaType: 'image/png',
   bytes: png,
   size: png.byteLength,
@@ -498,7 +497,6 @@ const [attA] = await db.insert(schema.attachments).values({
 const [attB] = await db.insert(schema.attachments).values({
   companyId: acme.id,
   agentId: designer.id,
-  taskId: legacyTask.id,
   mediaType: 'image/png',
   bytes: png,
   size: png.byteLength,

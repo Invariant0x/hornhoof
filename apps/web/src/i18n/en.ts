@@ -862,6 +862,7 @@ export const en = {
   },
   failures: {
     overloaded: 'provider overloaded',
+    model_access_denied: 'model access denied',
     rate_limited: 'too many requests',
     usage_limit: 'plan limit reached',
     auth: 'sign-in needed',

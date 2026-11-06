@@ -455,7 +455,18 @@ function toggleDoubleClickZoom(stage: HTMLDivElement | null, setZoom: (updater: 
   preserveStageCenter(stage, () => setZoom(z => (z === 1 ? 2 : 1)));
 }
 
-export function MaterialViewer({ items, activeId, opener, proposalSource = false, onSelect, onClose }: Props) {
+function focusElement(el: HTMLElement | null): void {
+  if (el) el.focus();
+}
+
+function ActiveMaterialViewer({
+  items,
+  active,
+  opener,
+  proposalSource = false,
+  onSelect,
+  onClose,
+}: Omit<Props, 'activeId'> & { active: ViewerItem }) {
   const titleId = useId();
   const portalRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -465,20 +476,19 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
   const [zoom, setZoom] = useState(1);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
 
-  const active = resolveActiveViewerItem(items, activeId);
-  const track = trackForKind(items, active?.kind);
+  const track = trackForKind(items, active.kind);
   const index = activeTrackIndex(track, active);
 
   useInertBackground(portalRef, opener);
 
   useEffect(() => {
-    closeBtnRef.current?.focus();
+    focusElement(closeBtnRef.current);
   }, []);
 
   useEffect(() => {
     setZoom(1);
     setPdfUnavailable(false);
-  }, [active?.id]);
+  }, [active.id]);
 
   const stepTrack = useCallback(
     (delta: number) => {
@@ -491,9 +501,7 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
   const stepZoom = useCallback((delta: number) => preserveStageCenter(stageRef.current, () => setZoom(z => clampZoom(z + delta))), []);
   const resetZoom = useCallback(() => preserveStageCenter(stageRef.current, () => setZoom(1)), []);
 
-  useViewerKeyboard(active?.kind, onClose, stepTrack, stepZoom, resetZoom);
-
-  if (!active) return null;
+  useViewerKeyboard(active.kind, onClose, stepTrack, stepZoom, resetZoom);
 
   return createPortal(
     <div ref={portalRef} className="mv-back">
@@ -529,5 +537,20 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
       </div>
     </div>,
     document.body,
+  );
+}
+
+export function MaterialViewer({ items, activeId, opener, proposalSource = false, onSelect, onClose }: Props) {
+  const active = resolveActiveViewerItem(items, activeId);
+  if (!active) return null;
+  return (
+    <ActiveMaterialViewer
+      items={items}
+      active={active}
+      opener={opener}
+      proposalSource={proposalSource}
+      onSelect={onSelect}
+      onClose={onClose}
+    />
   );
 }
