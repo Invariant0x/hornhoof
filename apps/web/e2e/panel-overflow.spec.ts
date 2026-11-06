@@ -129,6 +129,9 @@ for (const lang of ['en', 'ru'] as const) {
         await row.click();
         const detail = page.getByRole('complementary', { name: /#1 Checkout step 1/ });
         await expect(detail.locator('.tp-brief')).toHaveText(LONG_TEXT);
+        const actions = detail.locator('.ac-actions .entry-actions');
+        await expect(actions).toHaveAttribute('role', 'group');
+        for (const button of await actions.getByRole('button').all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `task-detail-${look}`);
         await expectWrappedText(detail.locator('.tp-brief'));
         await expectInside(detail.locator('.ac-body'), [detail.locator('.tp-brief')]);
