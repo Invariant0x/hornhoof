@@ -4,14 +4,18 @@ import { defineConfig, devices } from '@playwright/test';
 /* Tests in a real browser, for what jsdom cannot lay out. The app runs on Vite's dev server and every /api call is answered
    in the page by the test itself, so no Hornhoof server is needed. The browser comes from `npx playwright install chromium`
    on a developer's machine, or from PLAYWRIGHT_BROWSERS_PATH (/data/browsers) prepared on a Hornhoof node at the lockfile version. */
-const PORT = process.env.HORNHOOF_BROWSER_PORT ?? '4179';
+/* A part of a test run shares its machine with other parts; its workers read the port the runner settled on from the environment. */
+process.env.HORNHOOF_BROWSER_PORT ??= process.env.HH_TEST_REPORT ? String(4180 + process.pid % 1000) : '4179';
+const PORT = process.env.HORNHOOF_BROWSER_PORT;
+/* What the run of a release leaves to the full run: every look but English, light and wide. Without --project every test runs once, as ever. */
+const MATRIX = /\b(?:ru|dark|375(?:px)?)\b/;
 
 export default defineConfig({
   testDir: 'e2e',
   outputDir: 'e2e/results',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  reporter: 'list',
+  reporter: process.env.HH_TEST_REPORT ? [['list'], ['./e2e/file-report.ts']] : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,
     /* Without a GPU every frame is drawn on the CPU, so a page kept rendering takes a whole core from the tests around it, idle
@@ -22,7 +26,10 @@ export default defineConfig({
     /* Match UTC clock fixtures regardless of the host timezone. */
     timezoneId: 'UTC',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } }],
+  projects: [
+    { name: 'chromium', grepInvert: MATRIX, use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } },
+    { name: 'matrix', grep: MATRIX, use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } },
+  ],
   /* A browser check owns its server; another checkout can have different code or live edits. */
   webServer: { command: `vite --mode browser-test --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: false },
 });
