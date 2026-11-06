@@ -59,6 +59,7 @@ export const CEO_ONLY = new Set([
   'set_public_link',
   'remove_public_link',
   'update_hornhoof',
+  'set_team_urgent_only',
 ]);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 
@@ -150,6 +151,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       const ceos = grants || (employee === job.agentId && body.subscription !== undefined);
       return { method: 'PATCH', url: `/api/agents/${employee}`, payload: body, ...(ceos ? { asCeo: true as const } : {}) };
     },
+  );
+  tool(
+    'set_team_urgent_only',
+    'Says whether a sub-unit of a department takes only urgent work. Who is in it holds what they hold; from then on work that is not urgent is not given to them.',
+    { department: Id('department'), team: Id('sub-unit'), urgentOnly: z.boolean() },
+    ({ department, team, urgentOnly }) => ({ method: 'PATCH', url: `/api/departments/${department}/teams/${team}`, payload: { urgentOnly } }),
   );
   tool('reset_employee', 'Puts an employee back to its role as the templates have it now: its skills, texts and effort. Its model and subscription stay.', { employee: Id('employee') }, ({ employee }) => ({
     method: 'POST',
