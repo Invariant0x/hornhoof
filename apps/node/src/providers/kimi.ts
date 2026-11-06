@@ -100,6 +100,13 @@ function tellKimi(input: RunInput, instructions: string, user: JobUser | null): 
   writePrivate(file, instructions + '\n', user);
 }
 
+/* Kimi has no flags for hooks: they come from config.toml in its home, which the person's own settings share. */
+function addGuard(home: string, user: JobUser | null): void {
+  const settings = join(ensureDir(home), 'config.toml');
+  const guarded = kimiConfigWithHooks(readPrivate(settings) ?? '', GUARD_REGISTRATION.kimi);
+  if (guarded !== null) writePrivate(settings, guarded, user);
+}
+
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => {
     const own = childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...KIMI_NO_AUTO_UPDATE, ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
@@ -141,9 +148,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       if (input.sessionId) args.push('--session', input.sessionId);
       if (input.model) args.push('-m', input.model);
 
-      const settings = join(ensureDir(home), 'config.toml');
-      const guarded = kimiConfigWithHooks(readPrivate(settings) ?? '', GUARD_REGISTRATION.kimi);
-      if (guarded !== null) writePrivate(settings, guarded, user);
+      addGuard(home, user);
 
       /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
       const mcpJson = join(ensureDir(home), 'mcp.json');
