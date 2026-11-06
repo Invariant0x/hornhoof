@@ -48,7 +48,7 @@ describe('limits of a check', () => {
     const c = await owned();
     const answer = await setLimits(c, c.danaToken, { ...LIMITS, falseDenyRate: 2 });
     expect(answer.statusCode).toBe(400);
-    expect(answer.json()).toMatchObject({ code: 'model_check_thresholds' });
+    expect(answer.json()).toMatchObject({ error: { reason: 'model_check_thresholds' } });
     expect(await c.db.select().from(modelChecks)).toEqual([]);
   });
 
@@ -87,7 +87,7 @@ describe('a set of examples sent in', () => {
     await saveDefinition(c.app.ctx, place(c), DEFINITION, AUTHOR, NOW);
     const answer = await addSet(c, c.danaToken, asJsonl([reviewCase({ labelledBy: AUTHOR })]).toString());
     expect(answer.statusCode).toBe(400);
-    expect(answer.json()).toMatchObject({ code: 'model_check_set', problems: [{ line: 1, code: 'self_labelled' }] });
+    expect(answer.json()).toMatchObject({ error: { reason: 'model_check_set', details: { problems: [{ line: 1, code: 'self_labelled' }] } } });
     expect(answer.body).not.toContain('Words only a test holds');
   });
 
@@ -111,7 +111,7 @@ describe('a miss found in real work', () => {
     const c = await owned();
     const answer = await addMiss(c, c.danaToken, { note: 'x' });
     expect(answer.statusCode).toBe(400);
-    expect(answer.json()).toMatchObject({ code: 'model_check_set' });
+    expect(answer.json()).toMatchObject({ error: { reason: 'model_check_set' } });
   });
 
   it('is not taken from anyone else', async () => {

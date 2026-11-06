@@ -23,6 +23,7 @@ import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSub
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
+import { modelCheckRoutes } from '../model-checks/routes.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { coversEveryPart } from '../testruns/github-status.js';
@@ -433,4 +434,5 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
+  modelCheckRoutes(app, ctx);
 }
