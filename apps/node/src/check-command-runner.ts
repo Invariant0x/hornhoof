@@ -47,19 +47,27 @@ function send(res: ServerResponse, frame: object): boolean {
   return !res.destroyed && !res.writableEnded && res.write(`${JSON.stringify(frame)}\n`);
 }
 
+async function assertCommandPolicy(key: string, input: Command, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  const verdict = await commandPolicy(key, input);
+  signal.throwIfAborted();
+  if (!verdict.allow) throw new Error(refusalText(verdict));
+}
+
+async function admitCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<void> {
+  const run = (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
+  if (input.lease) await reuseCheckLease(input.lease, key, signal, run);
+  else await withCheckSlot(run, { agentId: key, label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
+}
+
 export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<void> {
   if ((user?.uid ?? process.getuid?.()) === 0) throw new Error('Heavy commands require an agent user.');
   const input = Command.parse(JSON.parse(body.toString('utf8')));
   if (!input.command[0]) throw new Error('A heavy command needs a program.');
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
-  const run = (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   try {
-    signal.throwIfAborted();
-    const verdict = await commandPolicy(key, input);
-    signal.throwIfAborted();
-    if (!verdict.allow) { send(res, { type: 'error', message: refusalText(verdict) }); return; }
-    if (input.lease) await reuseCheckLease(input.lease, key, signal, run);
-    else await withCheckSlot(run, { agentId: key, label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
+    await assertCommandPolicy(key, input, signal);
+    await admitCommand(key, input, signal, res);
   } catch (error) {
     send(res, { type: 'error', message: error instanceof Error ? error.message : 'Heavy command stopped.' });
   } finally { res.end(); }
@@ -73,6 +81,10 @@ function output(stream: Readable, type: string, res: ServerResponse): void {
   });
 }
 
+function killCommandGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+  try { if (pid) process.kill(-pid, signal); } catch { /* Already gone. */ }
+}
+
 async function runCommand(key: string, input: Command, signal: AbortSignal, res: ServerResponse): Promise<void> {
   signal.throwIfAborted();
   /* The shell changes directory after dropping privileges. The node never opens an agent's cwd as root. */
@@ -83,7 +95,7 @@ async function runCommand(key: string, input: Command, signal: AbortSignal, res:
   const forget = trackCheckProcess(key, child.pid);
   try { await new Promise<void>((resolve, reject) => {
     let killing: NodeJS.Timeout | undefined;
-    const kill = (value: NodeJS.Signals) => { try { if (child.pid) process.kill(-child.pid, value); } catch { /* Already gone. */ } };
+    const kill = (value: NodeJS.Signals) => killCommandGroup(child.pid, value);
     const abort = () => { kill('SIGTERM'); killing ??= setTimeout(() => kill('SIGKILL'), 5000); };
     signal.addEventListener('abort', abort, { once: true });
     child.once('error', reject);
