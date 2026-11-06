@@ -1,10 +1,17 @@
 import { ApiFailure } from '../api';
 import { useT } from '../i18n';
+import type { Org } from '../types';
 
 export type CardRoute = { selected?: string | null; onSelect?: (id: string | null) => void; onHome?: () => void };
 
 export function unavailableFailure(failure: unknown): boolean {
   return failure instanceof ApiFailure && (failure.status === 403 || failure.status === 404);
+}
+
+export function departmentIsMissing({ deptId, org, orgFailure, company, personId }: { deptId: string | null; org: Org | null; orgFailure: unknown; company: boolean; personId: string }): boolean {
+  const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
+  const reachedDepartment = company || Boolean(dept?.people.some(person => person.id === personId));
+  return deptId !== null && (unavailableFailure(orgFailure) || (org !== null && (!dept || !reachedDepartment)));
 }
 
 export function RouteUnavailable({ onHome = () => location.assign('/'), dialog = false }: { onHome?: () => void; dialog?: boolean }) {
