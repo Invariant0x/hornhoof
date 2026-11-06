@@ -1185,8 +1185,9 @@ describe("a program with no terminal, in a task's folder", () => {
   it('gives Antigravity its tools in the task\'s folder', async () => {
     const programDir = taskFolder();
     await adapter('antigravity').run(input({ programDir, tools: { url: 'http://x/mcp', token: 'tok-1' } }));
-    expect(existsSync(join(programDir, '.agents', 'mcp_config.json'))).toBe(true);
-    expect(existsSync(join(work, '.agents', 'mcp_config.json'))).toBe(false);
+    expect(lastRun().agyMcp!.json).toEqual({ mcpServers: { hornhoof: { serverUrl: 'http://x/mcp', headers: { Authorization: 'Bearer tok-1' } } } });
+    expect(existsSync(join(programDir, '.agents', 'mcp_config.json'))).toBe(false);
+    expect(existsSync(join(work, '.agents'))).toBe(false);
   });
 
   it('keeps the rule of Antigravity under what it reads, with its head', async () => {

@@ -422,6 +422,19 @@ async function setUpOnScreen(io: LoginIo, { recordingsDir, person, ...look }: Se
   if (await setupShown(look)) throw new Error('Antigravity CLI was closed before its terms were accepted.');
 }
 
+/* agy reads AGENTS.md in the folder it works in as the folder's rules, and a task's folder has a rules file of its own. */
+function tellAgy(input: RunInput, instructions: string, user: JobUser | null): void {
+  const whole = join(input.workDir, '.hh-instructions.md');
+  const { file, head } = toldPlace('antigravity', input);
+  const said = agyRules(instructions, whole, Buffer.byteLength(head));
+  if (said.whole) writePrivate(whole, said.whole + '\n', user);
+  if (input.programDir) {
+    agentDir(join(input.programDir, '.agents'), user);
+    agentDir(dirname(file), user);
+  }
+  writePrivate(file, head + said.rules + '\n', user);
+}
+
 export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null, person = onOwnTerminal }: Options): ProviderAdapter {
   /* agy has no setting for its folder: it keeps everything in HOME. It does not replace itself: the program in the node's
      tools folder stays as the node installed it, which agents on a root node could not write anyway. */
@@ -476,18 +489,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
         const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       }
-      /* agy reads AGENTS.md in the folder it works in as the folder's rules, and a task's folder has its own rules file. */
-      if (input.instructions) {
-        const file = join(input.workDir, '.hh-instructions.md');
-        const told = toldPlace('antigravity', input);
-        const { rules, whole } = agyRules(input.instructions, file, Buffer.byteLength(told.head));
-        if (whole) writePrivate(file, whole + '\n', user);
-        if (input.programDir) {
-          agentDir(join(programDir, '.agents'), user);
-          agentDir(dirname(told.file), user);
-        }
-        writePrivate(told.file, told.head + rules + '\n', user);
-      }
+      if (input.instructions) tellAgy(input, input.instructions, user);
 
       let sessionId: string | null = input.sessionId;
       let result: Record<string, unknown> | null = null;

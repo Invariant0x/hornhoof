@@ -92,6 +92,13 @@ export function kimiContextSize(config: string, model: string | null): number | 
   return Number.isInteger(size) && size > 0 ? size : null;
 }
 
+/* Kimi Code reads what it is told from the folder it works in; in a task's folder, from a file of its own there. */
+function tellKimi(input: RunInput, instructions: string, user: JobUser | null): void {
+  const { file } = toldPlace('kimi', input);
+  if (input.programDir) agentDir(dirname(file), user);
+  writePrivate(file, instructions + '\n', user);
+}
+
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => {
     const own = childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...KIMI_NO_AUTO_UPDATE, ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
@@ -139,11 +146,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       } else rmSync(mcpJson, { force: true });
-      if (input.instructions) {
-        const told = toldPlace('kimi', input);
-        if (input.programDir) agentDir(dirname(told.file), user);
-        writePrivate(told.file, input.instructions + '\n', user);
-      }
+      if (input.instructions) tellKimi(input, input.instructions, user);
 
       let sessionId: string | null = input.sessionId;
       let answer = '';
