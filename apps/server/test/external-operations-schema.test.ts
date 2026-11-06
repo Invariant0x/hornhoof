@@ -25,8 +25,8 @@ describe('external recovery private foundation', () => {
   it('creates only private recovery records beside existing canonical jobs and tasks', async () => {
     const db = await createTestDb();
     await privateTables(db.$client);
-    expect((await db.$client.query("SELECT count(*) AS n FROM jobs")).rows).toEqual([{ n: 0 }]);
-    expect((await db.$client.query("SELECT count(*) AS n FROM tasks")).rows).toEqual([{ n: 0 }]);
+    expect((await db.$client.query('SELECT id FROM jobs')).rows).toEqual([]);
+    expect((await db.$client.query('SELECT id FROM tasks')).rows).toEqual([]);
   });
 
   it('keeps the first failure and deadline across a database restart', async () => {
@@ -50,7 +50,7 @@ describe('external recovery private foundation', () => {
   it('allows only one open episode for the same immutable scope', async () => {
     const db = await createTestDb();
     await seedCase(db.$client);
-    const insert = `INSERT INTO external_recovery_cases(company_id,scope_digest,adapter,endpoint_digest,credential_revision,failure_family,ops_deadline_at,policy_revision) VALUES('${COMPANY}','${SCOPE}','git','${'b'.repeat(64)}',1,'transport','2026-11-06T03:15:00Z',1)`;
+    const insert = `INSERT INTO external_recovery_cases(company_id,scope_digest,adapter,endpoint_digest,credential_revision,failure_family,first_failure_at,ops_deadline_at,policy_revision) VALUES('${COMPANY}','${SCOPE}','git','${'b'.repeat(64)}',1,'transport','2026-11-06T03:00:00Z','2026-11-06T03:15:00Z',1)`;
     await expect(db.$client.exec(insert)).rejects.toThrow(/unique/);
     await db.$client.exec(`UPDATE external_recovery_cases SET resolved_at='2026-11-06T03:14:00Z' WHERE id='${CASE}'`);
     await db.$client.exec(insert);
