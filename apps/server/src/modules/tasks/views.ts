@@ -37,6 +37,7 @@ export type TaskLine = {
   externalWait?: Task['externalWait'];
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
+  urgent: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -131,6 +132,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   externalWait: t.externalWait,
   workKind: t.workKind,
   riskClass: t.riskClass,
+  urgent: t.urgent,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
