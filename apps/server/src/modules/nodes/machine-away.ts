@@ -24,11 +24,11 @@ function spellOf(end: Connection, back: Date | null, startedAt: Date): Spell[] {
   return back ? [] : [{ since: since > startedAt ? since : startedAt, back }];
 }
 
-/* The times no node of the machine was connected, oldest first. */
 function extendsConnection(last: Connection | null, row: Connection): boolean {
   return !last || Boolean(last.disconnectedAt && (!row.disconnectedAt || row.disconnectedAt > last.disconnectedAt));
 }
 
+/* The times no node of the machine was connected, oldest first. */
 function spellsOf(connections: Connection[], startedAt: Date): Spell[] {
   const spells: Spell[] = [];
   let last: Connection | null = null;
