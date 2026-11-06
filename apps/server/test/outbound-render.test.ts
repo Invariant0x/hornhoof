@@ -196,7 +196,7 @@ describe('slots', () => {
   });
   it('a block that says it is one kind for an entry of another', () => {
     const m = aMessage();
-    const blocks = m.document.blocks.map(b => (b.kind === 'claim' ? { ...b, id: m.link.entryId } : b));
+    const blocks = m.document.blocks.map(b => (b.kind === 'claim' ? { ...b, id: m.field.entryId } : b));
     expect(reasons(request(m, { document: { ...m.document, blocks } }))).toEqual(['claim_unapproved']);
   });
   it('a block of another revision than the one that counts', () => {
