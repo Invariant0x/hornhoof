@@ -1,4 +1,3 @@
-import type { ServerMessage } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -10,7 +9,8 @@ import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { TerminalRelay } from '../src/modules/terminals/relay.js';
 import { failureCompany } from './failure-company.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { nextOf as next } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const OTHER_NODE = nodeIdentity('00000000-0000-4000-8000-000000000001');
@@ -22,13 +22,6 @@ async function company() {
   const kept = () => c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.agent.id), eq(agentEvents.kind, 'input_left')));
   const told = () => c.sent.mock.calls.filter(([, m]) => m.type === 'agent.input_kept').map(([, m]) => m);
   return { ...c, kept, told };
-}
-
-async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const m = await node.next();
-    if (m.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
 }
 
 /* The orchestrator runs on a plan Zed lent: only Zed types in its terminal. The CEO writes turns through Hornhoof. */

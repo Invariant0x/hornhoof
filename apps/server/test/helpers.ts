@@ -144,6 +144,14 @@ export type FakeNode = {
   close(): void;
 };
 
+/* The next message of one kind a node gets, past the others. */
+export async function nextOf<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
+  for (;;) {
+    const message = await node.next();
+    if (message.type === type) return message as Extract<ServerMessage, { type: T }>;
+  }
+}
+
 /* A stand-in for a node: connects with a key and collects what the server sends. */
 export function connectNode(url: string, key: string, opts: { autoPong?: boolean } = {}): Promise<FakeNode> {
   return new Promise((resolve, reject) => {
