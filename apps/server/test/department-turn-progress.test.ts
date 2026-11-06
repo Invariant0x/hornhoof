@@ -19,7 +19,7 @@ async function fixture() {
   const [turn] = await db.insert(turns).values({ companyId, number: 8, goal: 'One common turn' }).returning();
   let number = 100;
   const add = async (departmentId: string, patch: Partial<typeof tasks.$inferInsert> = {}) =>
-    (await db.insert(tasks).values({ companyId, number: ++number, turnId: turn!.id, departmentId, title: 'Count this task', createdByPersonId: person!.id, ...patch }).returning())[0]!;
+    (await db.insert(tasks).values({ companyId, number: ++number, turnId: turn!.id, departmentId, title: 'Count this task', createdByPersonId: person!.id, closedAt: patch.status === 'done' || patch.status === 'cancelled' ? new Date() : null, ...patch }).returning())[0]!;
   const org = async (token = ceo) => {
     const response = await app.inject({ url: '/api/org', ...as(token) });
     expect(response.statusCode).toBe(200);
