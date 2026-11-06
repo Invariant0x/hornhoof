@@ -72,7 +72,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
       const frame = JSON.parse(String(raw)) as { type: string; data?: string };
       if (frame.type === 'input') server.keys.push(frame.data!);
     });
-    ws.send(JSON.stringify({ type: 'ready', write: types }));
+    ws.send(JSON.stringify({ type: 'ready', write: types, message: true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'The program runs on its plan.\r\n> ' }));
   });
@@ -128,50 +128,27 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
   const settings = { lang, theme, width };
   const t = lang === 'en' ? en : ru;
   test.describe(`a picture for an agent in ${lang}, ${theme}, at ${width}px`, () => {
-    test('dragged into the terminal view of an employee, it goes with the words and stands by them in the log', async ({ page }, info) => {
+    test('dragged on the terminal of an employee by someone with no plan of theirs, its line goes in there with no Enter', async ({ page }, info) => {
       const errors = watchErrors(page);
       const server = await serve(page, 'delegate', settings);
       const window = await open(page, 'b1', lang);
-      const line = lineOf(window, 'b1', t);
+      const terminal = window.locator('.t-xterm');
       await expect(window.locator('.xterm-screen')).toBeVisible();
       const shotOne = await picture(page, 'screen.png');
 
-      await window.dispatchEvent('dragenter', { dataTransfer: shotOne });
+      await terminal.dispatchEvent('dragenter', { dataTransfer: shotOne });
       const where = window.getByText(t.window.dropPictures);
       await expect(where).toBeVisible();
       await shot(page, info, 'dragging', settings);
-      await window.dispatchEvent('dragover', { dataTransfer: shotOne });
-      await window.dispatchEvent('drop', { dataTransfer: shotOne });
+      await terminal.dispatchEvent('dragover', { dataTransfer: shotOne });
+      await terminal.dispatchEvent('drop', { dataTransfer: shotOne });
       await expect(where).toHaveCount(0);
 
-      await expect(window.getByRole('img', { name: 'screen.png', exact: true })).toBeVisible();
-      await window.dispatchEvent('drop', { dataTransfer: await picture(page, 'second.png') });
-      await expect(window.getByRole('img', { name: 'second.png', exact: true })).toBeVisible();
-      await window.dispatchEvent('drop', { dataTransfer: await picture(page, 'taken-back.png') });
-      await window.getByRole('button', { name: t.window.removePicture('taken-back.png'), exact: true }).click();
-      await expect(window.getByRole('img', { name: 'taken-back.png', exact: true })).toHaveCount(0);
-      await expect(line).toBeFocused();
-      await line.fill('The button is cut off here');
-      await shot(page, info, 'preview', settings);
-      await checkPage(page, errors);
-
-      await line.press('Enter');
-      await expect.poll(() => server.messages).toEqual([{ agent: 'b1', text: 'The button is cut off here', pictures: ['pic1', 'pic2'] }]);
-      expect(server.uploads.map(u => u.name)).toEqual(['screen.png', 'second.png']);
-      await expect(window.getByRole('img', { name: 'screen.png', exact: true })).toHaveCount(0);
-
-      await window.getByRole('button', { name: t.window.showLog, exact: true }).click();
-      const large = window.getByRole('link', { name: t.window.openPicture('screen.png'), exact: true });
-      await expect(large).toBeVisible();
-      await expect(large.getByRole('img')).toHaveJSProperty('complete', true);
-      expect(await large.getByRole('img').evaluate(img => (img as HTMLImageElement).naturalWidth)).toBe(480);
-      await shot(page, info, 'conversation', settings);
-      const opened = page.waitForEvent('popup');
-      await large.click();
-      const tab = await opened;
-      await tab.waitForLoadState();
-      expect(new URL(tab.url()).pathname).toBe('/api/attachments/pic1');
-      await tab.close();
+      await expect.poll(() => server.keys).toEqual(['screen.png: hh-fetch message pic1']);
+      expect(server.uploads.map(u => u.name)).toEqual(['screen.png']);
+      expect(server.messages).toEqual([]);
+      await expect(lineOf(window, 'b1', t)).toHaveCount(0);
+      await shot(page, info, 'inserted', settings);
       await checkPage(page, errors);
     });
 
@@ -195,17 +172,29 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const errors = watchErrors(page);
       const server = await serve(page, 'delegate', settings);
       const window = await open(page, 'b1', lang);
+      const terminal = window.locator('.t-xterm');
+      await expect(window.locator('.xterm-screen')).toBeVisible();
+      await window.locator('.xterm-screen').click();
+      await page.keyboard.type('A draft');
+      await expect.poll(() => server.keys.join('')).toBe('A draft');
       const refusal = window.getByRole('alert').filter({ hasText: t.errors.picture_invalid });
-      await window.dispatchEvent('drop', { dataTransfer: await file(page, 'logo.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg"/>') });
+      await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'logo.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg"/>') });
       await expect(refusal).toBeVisible();
       await expect(window.locator('.t-tray')).toHaveCount(0);
       await shot(page, info, 'refused', settings);
-      await window.dispatchEvent('drop', { dataTransfer: await file(page, 'notes.png', 'image/png', 'plain words, not a picture') });
+      await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'notes.png', 'image/png', 'plain words, not a picture') });
       await expect(refusal).toBeVisible();
       await expect(window.getByRole('img', { name: 'notes.png', exact: true })).toHaveCount(0);
       expect(server.uploads).toEqual([]);
       expect(server.messages).toEqual([]);
-      await checkPage(page, errors.filter(e => !e.includes('ERR_') && !e.includes('blob:')));
+      /* Nothing of the pictures went in, the words before them stay, and this person still writes. */
+      expect(server.keys.join('')).toBe('A draft');
+      await page.keyboard.type(' goes on');
+      await expect.poll(() => server.keys.join('')).toBe('A draft goes on');
+      /* A file named a picture goes up from a terminal, where the server is who looks at its bytes and refuses it. */
+      const refused = (e: string) => e.includes('status of 400');
+      expect(errors.filter(refused)).toHaveLength(1);
+      await checkPage(page, errors.filter(e => !refused(e)));
     });
   });
 }
@@ -243,11 +232,8 @@ test.describe('a picture for an agent', () => {
     await expect(window.locator('.xterm-screen')).toBeVisible();
     const big = await picture(page, 'big.png', 'image/png', true);
     expect(await big.evaluate(t => t.files[0]!.size)).toBeGreaterThan(PICTURE_BYTES);
-    await window.dispatchEvent('drop', { dataTransfer: big });
-    const line = lineOf(window, 'b1', en);
-    await expect(window.getByRole('img', { name: 'big.jpg', exact: true })).toBeVisible({ timeout: 15_000 });
-    await line.press('Enter');
-    await expect.poll(() => server.messages.length).toBe(1);
+    await window.locator('.t-xterm').dispatchEvent('drop', { dataTransfer: big });
+    await expect.poll(() => server.keys, { timeout: 15_000 }).toEqual(['big.jpg: hh-fetch message pic1']);
     const sent = server.uploads[0]!;
     expect(sent.name).toBe('big.jpg');
     expect(sent.bytes.length).toBeLessThanOrEqual(PICTURE_BYTES);
