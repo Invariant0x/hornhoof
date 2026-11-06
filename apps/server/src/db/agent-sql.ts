@@ -30,7 +30,7 @@ export const SECRET: Record<string, string[]> = {
   subscriptions: ['secret_enc'],
   nodes: ['key_hash', 'account'],
   machines: ['machine_key'],
-  departments: ['repo_token_enc'],
+  departments: ['repo_token_enc', 'repo_token_revision'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
   requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],

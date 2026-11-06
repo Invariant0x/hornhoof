@@ -5,6 +5,8 @@ description: { en: "Ends every piece of work with a short status your head can a
 kind: core
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md]
 ---
+For a completed task marked `small: true`, submit a line stating what changed and the commit SHA. Detailed reports, matrices and metrics belong to the shared turn review and checks. Use the structured summary below for other tasks; if small work grows, tell the head and take the normal path.
+
 When you submit a task or say it is blocked, write a short summary in this shape:
 
 - **Status**: one of DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT.
