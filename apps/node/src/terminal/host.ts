@@ -6,13 +6,14 @@ import { StringDecoder } from 'node:string_decoder';
 import { cut, isProgramOwnPrompt, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
+import { programDirOf, toldPlace } from '../program-folder.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
-import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import { jobDone, tidy, type RunInput, type RunResult, type ProgramBinding } from '../runner.js';
 import { claudePlugins } from '../skills.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
@@ -39,8 +40,7 @@ import { operatorQuestion } from './operator-question.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
 /* The task workspace a program starts for. Its other fields go along unread: only these two tell one binding from another here. */
-type ProgramBinding = { workspaceId: string; bindingVersion: number };
-export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery; workspaceBinding?: ProgramBinding };
+export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery; operatorSourceDelivery?: OperatorDelivery };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
 type Deferred<T> = { promise: Promise<T>; resolve(v: T): void; settled: boolean };
@@ -99,7 +99,10 @@ type Agent = {
   program: TermProgram | null;
   signedOut: RegExp | null;
   home: string;
+  /* The folder the program works in. */
   workDir: string;
+  /* The folder of Hornhoof's own files for it: the same one unless its turn belongs to a task. */
+  contextDir: string;
   /* What the running program was started with; a turn that needs anything else starts it again. */
   hash: string | null;
   sessionId: string | null;
@@ -311,14 +314,14 @@ const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).di
 const noVersion = async (): Promise<null> => null;
 async function launchHash({ program, bin, input, version = noVersion }: TermJob, spec: LaunchSpec): Promise<string> {
   const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
-  return hashOf({ kind: program.kind, bin, version: await version(), model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
+  return hashOf({ kind: program.kind, bin, version: await version(), model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs, ...(input.programDir ? { programDir: input.programDir } : {}) });
 }
 /* An agent's state as its program starts for a turn. Kimi Code and Antigravity name a new session only once it starts,
    and what it was told from before is kept by that name. */
 function startedState({ program, home, input }: TermJob, spec: LaunchSpec): Partial<Agent> {
   const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
   return {
-    program, home, workDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
+    program, home, workDir: programDirOf(input), contextDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
     oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(home) : null,
     keep: namesLater ? (input.context ?? null) : null,
     contextSize: program.kind === 'kimi' ? kimiWindow(home, input.model) : null,
@@ -510,7 +513,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, binding: null, queuedTurns: 0, lastEnded: null, sinceRun: new Set(), leaving: null, tryingToLeave: false, retired: new RetiredRequests() };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', contextDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined, instance: null, binding: null, queuedTurns: 0, lastEnded: null, sinceRun: new Set(), leaving: null, tryingToLeave: false, retired: new RetiredRequests() };
       this.agents.set(key, a);
     }
     return a;
@@ -555,7 +558,7 @@ export class TerminalHost {
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
     const instructionsFile = await this.writeInstructions(job);
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: programDirOf(input), bound: Boolean(input.programDir), sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
     return { spec, urls, hash: await this.versionedHash(a, job, spec) };
   }
 
@@ -745,18 +748,20 @@ export class TerminalHost {
   }
 
   /* Claude Code reads what it is told from the file it starts with, which this returns. Codex, Kimi Code and Antigravity
-     read AGENTS.md in the folder they start in, agy only its start. */
+     read a file of their folder for it, each its own in a task's folder, agy only its start. */
   private async writeInstructions(job: TermJob): Promise<string | null> {
     const told = await this.toldOf(job);
-    const file = join(job.input.workDir, '.hh-instructions.md');
+    const whole = join(job.input.workDir, '.hh-instructions.md');
     if (!told) return null;
     if (job.program.kind === 'claude') {
-      await this.fs.write(file, told + '\n');
-      return file;
+      await this.fs.write(whole, told + '\n');
+      return whole;
     }
-    const { rules, whole } = job.program.kind === 'antigravity' ? agyRules(told, file) : { rules: told, whole: null };
-    if (whole) await this.fs.write(file, whole + '\n');
-    await this.fs.write(join(job.input.workDir, 'AGENTS.md'), rules + '\n');
+    const place = toldPlace(job.program.kind, job.input);
+    const { rules, whole: all } = job.program.kind === 'antigravity' ? agyRules(told, whole, Buffer.byteLength(place.head)) : { rules: told, whole: null };
+    if (all) await this.fs.write(whole, all + '\n');
+    await this.fs.mkdir(dirname(place.file));
+    await this.fs.write(place.file, place.head + rules + '\n');
     return null;
   }
 
@@ -814,7 +819,7 @@ export class TerminalHost {
 
   private async prepareLaunch(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<void> {
     await this.prepare(job, urls);
-    Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID(), binding: job.workspaceBinding ?? null, lastEnded: null });
+    Object.assign(a, { ...startedState(job, spec), hash, instance: randomUUID(), binding: job.input.workspaceBinding ?? null, lastEnded: null });
     if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
     a.tail = this.tailFor(a);
   }
@@ -824,7 +829,7 @@ export class TerminalHost {
     const scratch = this.opts.tmux.scratch();
     this.operator?.launch(a.key, 'attempt');
     try {
-      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: programDirOf(job.input), command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
       this.operator?.launch(a.key, 'started');
     } catch (error) {
       this.operator?.launch(a.key, 'failed');
@@ -862,9 +867,10 @@ export class TerminalHost {
   /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
      Antigravity, reaches its tools a moment before Hornhoof opens their turn. */
   private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
-    if (program.kind === 'claude') await acceptClaudeDialogs(home, input.workDir, this.fs);
-    if (program.kind === 'kimi') await prepareKimi(home, input.workDir, urls.mcpUrl, this.fs);
-    if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
+    const programDir = programDirOf(input);
+    if (program.kind === 'claude') await acceptClaudeDialogs(home, programDir, this.fs);
+    if (program.kind === 'kimi') await prepareKimi(home, programDir, urls.mcpUrl, this.fs);
+    if (program.kind === 'antigravity') await prepareAgy(programDir, urls.mcpUrl, this.fs);
     this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
   }
 
@@ -1442,7 +1448,7 @@ export class TerminalHost {
   }
 
   private keepNamedContext(a: Agent, sessionId: string): void {
-    if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
+    if (a.keep) void keepContext(this.fs, a.contextDir, sessionId, a.keep).catch(() => {});
     a.keep = null;
   }
 
@@ -1661,7 +1667,7 @@ export class TerminalHost {
     const typed = a.typing;
     a.typing = null;
     if (typed == null || flat(got).includes(flat(typed))) return '';
-    const file = join(a.workDir, '.hh-messages', `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
+    const file = join(a.contextDir, '.hh-messages', `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
     await this.fs.mkdir(dirname(file));
     await this.fs.write(file, typed);
     this.log(`Agent ${a.key} (${a.program?.kind}): the program got ${got.length} of the ${typed.length} characters Hornhoof typed. The whole text is in ${file}.`);
