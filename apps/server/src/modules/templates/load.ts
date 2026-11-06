@@ -57,7 +57,7 @@ export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-a
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on. */
-export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'hh-status-update'] as const;
+export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop'] as const;
 
 /* Strict, so a value that YAML split on a comma fails instead of loading half. */
 const LangText = z.object({ en: z.string().trim().min(1), ru: z.string().trim().min(1) }).strict();
