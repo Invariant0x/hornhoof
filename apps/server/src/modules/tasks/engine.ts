@@ -21,7 +21,7 @@ import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './r
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
-import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
+import { checkIndependent, currentIndependent, type IndependentPartInput } from './independent.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
