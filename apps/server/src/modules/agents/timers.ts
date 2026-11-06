@@ -16,7 +16,8 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { modelCheckRound } from '../model-checks/store.js';
-import { outboundRound, reconcileOutbound } from '../outbound/dispatcher.js';
+import { outboundReviewRound, outboundRound, reconcileOutbound } from '../outbound/dispatcher.js';
+import { certifyPassed, liveEvaluator } from '../outbound/live-checks.js';
 
 export { checkSilentTurns, SILENT_TURN_MS };
 
@@ -130,7 +131,8 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
-    modelCheckRound(ctx, now).catch(failed('running model checks failed')),
+    modelCheckRound(ctx, now, liveEvaluator(ctx), certifyPassed(ctx)).catch(failed('running model checks failed')),
+    outboundReviewRound(ctx, now).catch(failed('checking waiting outbound messages failed')),
     outboundRound(ctx, now).catch(failed('sending outbound messages failed')),
   ]);
 }

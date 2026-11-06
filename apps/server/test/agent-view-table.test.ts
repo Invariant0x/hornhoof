@@ -118,6 +118,8 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
+  'GET /api/outbound': 'outbound-views.test.ts: channels and messages of the departments the person may see',
+  'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */

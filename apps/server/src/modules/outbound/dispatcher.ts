@@ -12,8 +12,10 @@ import type { Tx } from '../tasks/engine.js';
 import { recordWaitNotice } from '../tasks/wait-notices.js';
 import { currentSettings, markInvalid, settingsToSend, type AccountSettings, type SmtpSettings, type WebhookSettings } from './accounts.js';
 import { beginDispatch, dueMessages, reserveDispatch, settleAttempt } from './core.js';
+import { liveCheckPorts } from './live-checks.js';
+import { reviewQueuedMessage } from './model-checks.js';
 import { currentPolicy, stopChannel, type Channel, type StopReason } from './policies.js';
-import type { DispatchAdmission, ReconcileOutcome, SendOutcome, TransportAdapter } from './ports.js';
+import type { DispatchAdmission, ModelCheckPorts, ReconcileOutcome, SendOutcome, TransportAdapter } from './ports.js';
 import { smtpAdapter } from './smtp.js';
 import { signature, webhookAdapter } from './webhook.js';
 
@@ -211,6 +213,21 @@ export async function noticeStops(ctx: Ctx): Promise<void> {
 const rounds = new WeakSet<object>();
 
 /* One at a time, however long a transport takes: the server's minute goes on meanwhile. */
+const reviewRounds = new WeakSet<object>();
+
+/* Reads each message a check was chosen for with a fresh model, in a round of its own, as a model may take a minute and sending
+   does not wait for it. What no model can read now keeps waiting and is asked about at the next minute. */
+export async function outboundReviewRound(ctx: Ctx, now: Date, ports: Pick<ModelCheckPorts, 'runModelCheck'> = liveCheckPorts(ctx)): Promise<void> {
+  if (reviewRounds.has(ctx)) return;
+  reviewRounds.add(ctx);
+  try {
+    const waiting = await ctx.db.select({ id: outboundMessages.id }).from(outboundMessages).where(eq(outboundMessages.status, 'waiting_checks')).orderBy(outboundMessages.createdAt);
+    await eachOf(waiting, ({ id }) => reviewQueuedMessage(ctx, ports, id, now));
+  } finally {
+    reviewRounds.delete(ctx);
+  }
+}
+
 export async function outboundRound(ctx: Ctx, now: Date, senders: Senders = LIVE): Promise<void> {
   if (rounds.has(ctx)) return;
   rounds.add(ctx);

@@ -17,6 +17,7 @@ import { outboundStatus, submitOutbound } from './core.js';
 import { receiptRoutes } from './dispatcher.js';
 import { addPolicy, channelIn, createChannel, reopenChannel, stopByPerson, type Channel } from './policies.js';
 import { authorityOf } from './tools.js';
+import { outboundViewRoutes } from './views.js';
 
 /* The gateway over HTTP. An agent submits and reads with its job's token, through the same kernel as its tools. A person sets
    up what a message can be made of. The one way in for outsiders is the stop link of a message. No route here reaches a
@@ -200,5 +201,6 @@ export function outboundRoutes(app: FastifyInstance, ctx: Ctx): void {
   contactRoutes(app, ctx);
   accountRoutes(app, ctx);
   receiptRoutes(app, ctx);
+  outboundViewRoutes(app, ctx);
   unsubscribeRoutes(app, ctx);
 }
