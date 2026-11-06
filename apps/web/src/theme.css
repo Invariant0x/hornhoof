@@ -1152,9 +1152,10 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .mat-thumb { box-sizing: border-box; display: grid; place-items: center; inline-size: 64px; block-size: 48px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); color: var(--muted); }
 .mat-thumb img { display: block; inline-size: 100%; block-size: 100%; object-fit: cover; }
 .mat-thumb svg, .mv-kind svg { inline-size: 24px; block-size: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.mat-text { display: grid; gap: 2px; min-width: 0; }
+.mat-text { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
 .mat-name { font-weight: 500; overflow-wrap: anywhere; }
-.mat-meta { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 12px; color: var(--muted); }
+.mat-meta { display: flex; flex-wrap: wrap; gap: 0 8px; min-width: 0; font-size: 12px; color: var(--muted); }
+.mat-url { min-width: 0; overflow-wrap: anywhere; }
 .mat-open { font-size: 12px; font-weight: 600; color: var(--cyan-ink); }
 .mat-large { grid-template-columns: minmax(0, 1fr); padding: 0; }
 .mat-large .mat-thumb { inline-size: 100%; block-size: auto; aspect-ratio: 16 / 10; border: 0; border-block-end: 1px solid var(--line); }
