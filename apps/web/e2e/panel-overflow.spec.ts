@@ -196,8 +196,11 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(card).toBeVisible();
         await card.getByRole('button', { name: m.machines.disconnectLabel(LONG_HOST), exact: true }).click();
         const ask = card.locator('.ask');
-        const question = ask.locator('span');
-        const buttons = ask.getByRole('button');
+        const question = ask.locator('.entry-main');
+        const group = ask.locator('.entry-actions');
+        await expect(group).toHaveAttribute('role', 'group');
+        const buttons = group.getByRole('button');
+        for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `machine-confirm-${look}`);
         await expectWrappedText(question);
         await expectInside(ask, [question, ...await buttons.all()]);
