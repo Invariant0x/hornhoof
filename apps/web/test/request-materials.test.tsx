@@ -7,6 +7,7 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { WaitingRequest } from '../src/types';
 import { extractPdfTextItems, setPdfLoaderForTests } from '../src/ui/MaterialDocument';
+import { MaterialViewer } from '../src/ui/MaterialViewer';
 import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
 import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
 
@@ -561,5 +562,145 @@ describe('separate question materials preview and explicit answering (#512)', ()
       />,
     );
     expect(screen.getByRole('article', { name: '#479 Whole company check' })).toBeInTheDocument();
+  });
+
+  it('guards empty viewer items, blocks unsafe link protocols, and handles HTTP 403, interrupted PDF streams, and no-download PDF fallbacks cleanly', async () => {
+    const emptySelect = vi.fn();
+    const emptyClose = vi.fn();
+    const emptyRender = renderWithAppShell('en', <MaterialViewer items={[]} activeId="missing" opener={null} onSelect={emptySelect} onClose={emptyClose} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    emptyRender.unmount();
+
+    const deniedDocUrl = `/api/requests/${REQ_ID}/materials/${ID_A}/content`;
+    const partialPdfUrl = `/api/requests/${REQ_ID}/materials/${ID_B}/content`;
+    const noDlPdfUrl = `/api/requests/${REQ_ID}/materials/${ID_C}/content`;
+    const imgUrl = `/api/requests/${REQ_ID}/materials/${ID_E}/content`;
+
+    let denyDoc = true;
+    let truncatePdf = true;
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === `/api/requests/${REQ_ID}/materials`) {
+        return new Response(JSON.stringify({
+          materialRevision: 1,
+          materialDigest: '9'.repeat(64),
+          common: [
+            { id: ID_A, name: 'revoked-note.txt', kind: 'document', format: 'text', state: 'available', contentUrl: deniedDocUrl, downloadUrl: null, size: 64, sha256: 'a'.repeat(64), mediaType: 'text/plain' },
+            { id: ID_B, name: 'cut-report.pdf', kind: 'document', format: 'pdf', state: 'available', contentUrl: partialPdfUrl, downloadUrl: null, size: 128, sha256: 'b'.repeat(64), mediaType: 'application/pdf' },
+            { id: ID_C, name: 'locked-scan.pdf', kind: 'document', format: 'pdf', state: 'available', contentUrl: noDlPdfUrl, downloadUrl: null, size: 128, sha256: 'c'.repeat(64), mediaType: 'application/pdf' },
+            { id: ID_D, name: 'Hostile link', kind: 'link', state: 'available', url: 'javascript:alert(1)' },
+            { id: ID_E, name: 'single-diagram.png', kind: 'image', state: 'available', contentUrl: imgUrl, downloadUrl: null, size: 256, sha256: 'e'.repeat(64), mediaType: 'image/png' },
+          ],
+          options: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === deniedDocUrl) {
+        if (denyDoc) {
+          return new Response(JSON.stringify({ error: { code: 'forbidden', message: 'Access revoked.' } }), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response('Restored plain text content', { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+      if (path === partialPdfUrl) {
+        if (truncatePdf) {
+          return new Response(chunkedStream([new Uint8Array([0x25, 0x50])], 1), {
+            status: 200,
+            headers: { 'content-type': 'application/pdf', 'content-length': '64' },
+          });
+        }
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), { status: 200, headers: { 'content-type': 'application/pdf' } });
+      }
+      if (path === noDlPdfUrl) {
+        return new Response(new Uint8Array([0x00, 0x01]), { status: 200, headers: { 'content-type': 'application/pdf' } });
+      }
+      return new Response('not found', { status: 404 });
+    }));
+
+    setPdfLoaderForTests(async bytes => {
+      if (bytes[0] !== 0x25) throw new Error('Malformed PDF');
+      return {
+        numPages: 1,
+        getPage: async pageNumber => ({
+          pageNumber,
+          width: 400,
+          height: 500,
+          text: 'Recovered PDF Page Text',
+          renderToCanvas: () => {},
+        }),
+        destroy: async () => {},
+      };
+    });
+
+    const req = {
+      ...LEGACY_CHOICE,
+      id: REQ_ID,
+      kind: 'question' as const,
+      images: [],
+      link: null,
+      options: [],
+      materialRevision: 1,
+    } as unknown as WaitingRequest;
+
+    const user = userEvent.setup();
+    renderWithAppShell('en', <Requests {...makeRequestsProps({ requests: [req] })} />);
+
+    const card = screen.getByRole('article', { name: '#478 Panel action layout' });
+    const answerBox = within(card).getByLabelText(en.tasks.yourAnswer);
+    await user.type(answerBox, 'Keep my draft safe');
+
+    /* 1. HTTP 403 on document content shows error alert + retry without losing draft; ArrowLeft at index 0 stays put. */
+    await user.click(await screen.findByRole('button', { name: /Open material: revoked-note\.txt/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'revoked-note.txt' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Access revoked.');
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(within(dialog).getByRole('heading', { name: 'revoked-note.txt' })).toBeInTheDocument();
+
+    denyDoc = false;
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }));
+    expect(await within(dialog).findByText('Restored plain text content')).toBeInTheDocument();
+    expect(within(dialog).getByText('End of document. Shown in full.')).toBeInTheDocument();
+
+    /* 2. Interrupted PDF stream shows error alert + retry with zero plain-text pre blocks and zero fake pages. */
+    await user.click(within(dialog).getByRole('button', { name: /Next/ }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not load this material.');
+    expect(dialog.querySelector('pre.mv-plain')).toBeNull();
+    expect(dialog.querySelectorAll('.mv-page')).toHaveLength(0);
+
+    truncatePdf = false;
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }));
+    expect(await within(dialog).findByText('Page 1 of 1')).toBeInTheDocument();
+    expect(within(dialog).getByText('Recovered PDF Page Text')).toBeInTheDocument();
+
+    /* 3. Unavailable PDF with downloadUrl === null renders honest message and zero download link. */
+    await user.click(within(dialog).getByRole('button', { name: /Next/ }));
+    expect(await within(dialog).findByText('PDF preview is not available right now.')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('link', { name: 'Download file' })).not.toBeInTheDocument();
+
+    /* 4. Hostile javascript: link renders warning text and zero clickable anchor; ArrowRight at end stays put. */
+    await user.click(within(dialog).getByRole('button', { name: /Next/ }));
+    expect(await within(dialog).findByText('javascript:alert(1)')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('link')).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(within(dialog).getByRole('heading', { name: 'Hostile link' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    /* 5. Single image zoom controls (+, -, 0) clamp cleanly and draft remains untouched. */
+    await user.click(within(card).getByRole('button', { name: /Open material: single-diagram\.png/ }));
+    const imgDialog = await screen.findByRole('dialog', { name: 'single-diagram.png' });
+    await user.click(within(imgDialog).getByRole('button', { name: 'Zoom in' }));
+    expect(within(imgDialog).getByText('×1.5')).toBeInTheDocument();
+    await user.click(within(imgDialog).getByRole('button', { name: 'Zoom out' }));
+    expect(within(imgDialog).getByText('×1')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: '=' });
+    expect(within(imgDialog).getByText('×1.5')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: '-' });
+    expect(within(imgDialog).getByText('×1')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: '+' });
+    fireEvent.keyDown(window, { key: '0' });
+    expect(within(imgDialog).getByText('×1')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(within(card).getByLabelText(en.tasks.yourAnswer)).toHaveValue('Keep my draft safe');
   });
 });
