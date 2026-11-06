@@ -52,10 +52,12 @@ const partsFolder = (dir: string, build: Pick<Build, 'companyId' | 'key'>) => jo
 const exists = (path: string) => access(path).then(() => true, () => false);
 
 /* What a machine asking for a unit does next, by the unit's row: the one decision of who builds. */
+const stillFailed = (build: Build, now: Date): build is Build & { nextTryAt: Date } => build.status === 'failed' && !!build.nextTryAt && build.nextTryAt > now;
+const builtElsewhere = (build: Build, me: string, now: Date): boolean => build.status === 'building' && build.builder !== me && !!build.leaseUntil && build.leaseUntil > now;
 export function decideClaim(build: Build, me: string, now: Date, stored: boolean): { answer: HarnessClaim; set?: Partial<Build> } {
   if (build.status === 'ready' && stored) return { answer: { state: 'ready', digest: build.digest!, size: build.size!, partBytes: PART_BYTES }, set: { usedAt: now } };
-  if (build.status === 'failed' && build.nextTryAt && build.nextTryAt > now) return { answer: { state: 'failed', error: build.error ?? '', afterMs: build.nextTryAt.getTime() - now.getTime() } };
-  if (build.status === 'building' && build.builder !== me && build.leaseUntil && build.leaseUntil > now) return { answer: { state: 'wait', afterMs: WAIT_MS } };
+  if (stillFailed(build, now)) return { answer: { state: 'failed', error: build.error ?? '', afterMs: build.nextTryAt.getTime() - now.getTime() } };
+  if (builtElsewhere(build, me, now)) return { answer: { state: 'wait', afterMs: WAIT_MS } };
   return { answer: { state: 'build', partBytes: PART_BYTES }, set: { status: 'building', builder: me, leaseUntil: new Date(now.getTime() + LEASE_MS), digest: null, size: null } };
 }
 
@@ -344,13 +346,14 @@ export async function harnessSynced(ctx: Ctx, id: NodeIdentity, message: Harness
 }
 
 const SHOWN_BUILDS = 20;
+const NOTHING_YET = { headCommit: null, goodCommit: null, version: null, problem: null, machines: {} };
 /* Where a product's harness stands, for its head and whoever works on it. */
 export async function harnessState(ctx: Ctx, department: Department): Promise<object> {
-  const [product] = await ctx.db.select().from(harnessProducts).where(eq(harnessProducts.departmentId, department.id));
+  const [product = NOTHING_YET] = await ctx.db.select().from(harnessProducts).where(eq(harnessProducts.departmentId, department.id));
   const builds = await ctx.db.select().from(harnessBuilds).where(eq(harnessBuilds.departmentId, department.id)).orderBy(desc(harnessBuilds.createdAt)).limit(SHOWN_BUILDS);
   return {
-    headCommit: product?.headCommit ?? null, goodCommit: product?.goodCommit ?? null, version: product?.version ?? null, problem: product?.problem ?? null,
-    machines: Object.values(product?.machines ?? {}),
+    headCommit: product.headCommit, goodCommit: product.goodCommit, version: product.version, problem: product.problem,
+    machines: Object.values(product.machines),
     builds: builds.map(build => ({ unit: build.unit, platform: build.platform, version: build.version, commit: build.commitSha, status: build.status, bytes: build.size, copies: build.copies.length, error: build.error })),
     bundles: ctx.config.harnessDir ? 'shared through Hornhoof' : 'each machine builds its own: this server keeps no bundles',
   };

@@ -434,7 +434,7 @@ it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful prod
   expect(parts).toMatchObject([{ status: 'failed', error: 'environment_invalid', environmentReceipt: null }, { status: 'failed', error: 'prerequisite_failed' }]);
 });
 
-it('selects a capable sibling volume, keeps cache ownership across runs, and cold-fills after that owner disappears', async () => {
+it('selects a capable sibling volume, holds no machine to where it ran before as each has the harness, and goes on when one disappears', async () => {
   const c = await company();
   const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
   const code = connect.json().command.split('--join ')[1];
@@ -461,12 +461,14 @@ it('selects a capable sibling volume, keeps cache ownership across runs, and col
   await advertise(original);
   expect((await call('run_tests', {})).error).toBe(false);
   const nextRequest = await nextOf(original.node, 'tests.describe'); original.node.send(await productDescription(nextRequest));
-  const warm = await nextOf(sibling.node, 'tests.run');
-  expect((await c.db.select().from(testParts).where(eq(testParts.id, warm.partId)))[0]!.nodeId).toBe(sibling.id);
-  await call('stop_tests', { run: 2 }); sibling.node.close(); await sibling.node.closed;
+  const next = await nextOf(original.node, 'tests.run');
+  expect((await c.db.select().from(testParts).where(eq(testParts.id, next.partId)))[0]!.nodeId).toBe(original.id);
+  expect(next.environment!.snapshot.description.commitSha).toBe(TEST_COMMIT);
+  await call('stop_tests', { run: 2 }); original.node.close(); await original.node.closed;
   expect((await call('run_tests', {})).error).toBe(false);
-  const coldRequest = await nextOf(original.node, 'tests.describe'); original.node.send(await productDescription(coldRequest));
-  const cold = await nextOf(original.node, 'tests.run'); expect(cold.environment!.snapshot.description.commitSha).toBe(TEST_COMMIT);
+  const otherRequest = await nextOf(sibling.node, 'tests.describe'); sibling.node.send(await productDescription(otherRequest));
+  const other = await nextOf(sibling.node, 'tests.run');
+  expect((await c.db.select().from(testParts).where(eq(testParts.id, other.partId)))[0]!.nodeId).toBe(sibling.id);
   await call('stop_tests', { run: 3 });
 });
 

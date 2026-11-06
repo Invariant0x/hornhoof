@@ -40,7 +40,7 @@ function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) 
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
     const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     let failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
-    const mask = new GitCredentialMask([auth.HH_GIT_PASSWORD ?? '']);
+    const secret = auth.HH_GIT_PASSWORD ?? '', mask = new GitCredentialMask([secret]);
     let stderr = '', stderrTruncated = false;
     const capture = (text: string) => { const combined = stderr + text; stderrTruncated ||= combined.length > 8192; stderr = combined.slice(-8192); };
     child.stderr!.setEncoding('utf8');
@@ -54,14 +54,13 @@ function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) 
       catch (error) { failure ??= error as Error; stop(); }
     });
     // A git that stops early closes this pipe: how it ended says what went wrong.
-    child.stdin?.on('error', () => {});
-    child.stdin?.end(input);
+    child.stdin?.on('error', () => {}).end(input);
     child.once('error', error => { failure = error; });
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');
       capture(mask.flush());
-      if (signal.aborted || failure || code !== 0) reject(failedGit(code, signalName, failure, signal, stderr, stderrTruncated, network, [auth.HH_GIT_PASSWORD ?? '']));
+      if (signal.aborted || failure || code !== 0) reject(failedGit(code, signalName, failure, signal, stderr, stderrTruncated, network, [secret]));
       else resolve();
     });
   });
