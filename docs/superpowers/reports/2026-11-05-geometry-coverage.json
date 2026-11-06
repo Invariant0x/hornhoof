@@ -66,7 +66,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Window/company notebook harness prepared, actual browser execution and the canonical546 source/context/export receipt still pending; unimplemented states remain NOT_RUN.",
       "states": [
         {
           "name": "terminal",
@@ -107,7 +107,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Window/company notebook harness prepared, actual browser execution and the canonical546 source/context/export receipt still pending; unimplemented states remain NOT_RUN.",
       "states": [
         {
           "name": "loading",
@@ -152,7 +152,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -199,7 +199,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -250,7 +250,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "off",
@@ -287,7 +287,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -329,7 +329,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -360,7 +360,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "ready",
@@ -396,7 +396,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "closed",
@@ -435,7 +435,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "asked",
@@ -470,7 +470,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -506,7 +506,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -543,7 +543,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -568,7 +568,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "folded",
@@ -594,7 +594,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "select",
@@ -624,7 +624,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "requests",
@@ -654,7 +654,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -686,7 +686,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -727,7 +727,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -770,7 +770,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -806,7 +806,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -845,7 +845,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -880,7 +880,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -914,7 +914,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -946,7 +946,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -983,7 +983,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1010,7 +1010,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1045,7 +1045,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1080,7 +1080,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1116,7 +1116,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "none",
@@ -1156,7 +1156,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -1194,7 +1194,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -1226,7 +1226,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "main",
@@ -1265,7 +1265,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1299,7 +1299,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -1327,7 +1327,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1349,7 +1349,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1378,7 +1378,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1406,7 +1406,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1443,7 +1443,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1469,7 +1469,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1501,7 +1501,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1540,7 +1540,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "missing",
@@ -1573,7 +1573,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draining",
@@ -1599,7 +1599,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1627,7 +1627,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "confirm",
@@ -1651,7 +1651,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1691,7 +1691,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "ready",
@@ -1729,7 +1729,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -1758,7 +1758,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -1784,7 +1784,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1815,7 +1815,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -1850,7 +1850,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "terminal",
@@ -1884,7 +1884,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "running",
@@ -1912,7 +1912,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "confirm",
@@ -1937,7 +1937,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -1980,7 +1980,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -2014,7 +2014,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2049,7 +2049,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2102,7 +2102,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "available",
@@ -2144,7 +2144,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "confirm",
@@ -2174,7 +2174,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "starting",
@@ -2205,7 +2205,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2241,7 +2241,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "open",
@@ -2279,7 +2279,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "draft",
@@ -2311,7 +2311,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "company",
@@ -2351,7 +2351,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2388,7 +2388,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "page",
@@ -2415,7 +2415,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -2449,7 +2449,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "closed",
@@ -2477,7 +2477,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "confirm",
@@ -2497,7 +2497,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -2519,7 +2519,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -2548,7 +2548,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "closed",
@@ -2575,7 +2575,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2610,7 +2610,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "main",
@@ -2643,7 +2643,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "standard",
@@ -2667,7 +2667,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "full",
@@ -2691,7 +2691,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "open",
@@ -2731,7 +2731,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "loading",
@@ -2769,7 +2769,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -2800,7 +2800,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "whole",
@@ -2836,7 +2836,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -2874,7 +2874,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "known",
@@ -2904,7 +2904,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "paragraphs",
@@ -2934,7 +2934,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "empty",
@@ -2964,7 +2964,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "normal",
@@ -2994,7 +2994,7 @@
       "sourceObservationStatus": "NOT_CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "waiting",
@@ -3023,7 +3023,7 @@
       "sourceObservationStatus": "CAPTURED",
       "sourceObservationIsAcceptance": false,
       "status": "NOT_RUN",
-      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "reason": "Real per-view fixture/state coverage is not implemented yet; actual546 source/context/export receipt is also pending. Independent code/unit checks and ordinary publication are authorized.",
       "states": [
         {
           "name": "busy",
@@ -3103,5 +3103,25 @@
     ],
     "work187": "Prior PNG/route-fixture/real-server evidence, not three-engine proof",
     "runtimeStatus": "NOT_RUN"
+  },
+  "independentEvidence": {
+    "comparator": {
+      "run": 233,
+      "part": 1,
+      "sourceSha": "9fc6fda5d710a85003e43edadaec3b01da9312a0",
+      "tests": 31,
+      "scope": "pure comparison, not browser execution"
+    },
+    "fixture": {
+      "run": 278,
+      "part": 1,
+      "sourceSha": "2788ddbcf6bbe315d06b2b8d921d5458236c7782",
+      "tests": 3,
+      "contractsPassed": true,
+      "overallRun": "failed",
+      "failure": "MJS test lint: URL import absent",
+      "mjsDryer": "UNSUPPORTED"
+    },
+    "liveMatrix": "NOT_RUN"
   }
 }

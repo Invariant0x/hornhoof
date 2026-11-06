@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import { geometryServer } from './geometry-fixture.ts';
 
 /* Real HTTP/server and build-artifact contracts only; this file never imports or launches a browser. */
@@ -54,6 +54,10 @@ test('real fixture binds API data, actual source dictionaries and built fonts to
     assert.equal(typeof locale.labels.intro, 'string');
   }
   assert.equal('runtimeReady' in fixture, false);
+  console.log('HH_GEOMETRY_FIXTURE ' + JSON.stringify({ sourceSha: fixture.sourceSha, dataSha256: fixture.dataSha256,
+    fontsSha256: fixture.fontsSha256, fontAssets: fixture.fontAssets.length, localeKeys: fixture.localeKeys,
+    localeArguments: fixture.localeArguments, rankings: fixture.locales.map(({ id, direction, score }) => ({ id, direction, score })),
+    selected: fixture.selected, shippedRtl: fixture.shippedRtl, liveBrowsers: false }));
 });
 
 test('rejects a mismatched immutable source before listening', { timeout: 15000 }, () => {
