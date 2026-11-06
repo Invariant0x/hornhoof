@@ -145,11 +145,12 @@ async function rebind(tx: Tx, task: Task, wait: TaskWait, bound: Bound, actor: A
   return kept!;
 }
 
+const boundAlike = (wait: TaskWait, bound: Bound): boolean => same(ownerOf(wait), bound.owner) && same(wait.plan, bound.plan);
+
 async function reviseWait(tx: Tx, task: Task, wait: TaskWait, bound: Bound, actor: Actor): Promise<TaskWait> {
   if (bound.sourceRevision < wait.sourceRevision) throw staleSource();
-  const legacy = wait.state === 'legacy_needs_plan';
-  const unchanged = !legacy && same(ownerOf(wait), bound.owner) && same(wait.plan, bound.plan);
-  if (bound.sourceRevision === wait.sourceRevision && !legacy) {
+  const unchanged = boundAlike(wait, bound);
+  if (bound.sourceRevision === wait.sourceRevision && wait.state !== 'legacy_needs_plan') {
     if (unchanged && same(wait.sourceState, bound.sourceState)) return wait;
     throw staleSource();
   }
@@ -287,16 +288,20 @@ export async function moveRunStage(tx: Tx, run: RunSource, stage: RunStage, at: 
 }
 
 /* Those who answer for the wait may change it: naming someone in a plan gives them no more than that. */
-async function mayReplan(tx: Tx, task: Task, wait: TaskWait, actor: Actor): Promise<boolean> {
-  if (actor.agentId) {
-    if (wait.ownerAgentId === actor.agentId || wait.plan?.finalReview.headAgentId === actor.agentId) return true;
-    const [agent] = await tx.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, actor.agentId));
-    return agent?.kind === 'orchestrator' || (agent?.kind === 'head' && agent.departmentId === task.departmentId);
-  }
-  if (wait.ownerPersonId === actor.personId || wait.finalDecisionPersonId === actor.personId) return true;
-  const [person] = await tx.select({ isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.id, actor.personId!));
+async function agentMayReplan(tx: Tx, task: Task, wait: TaskWait, agentId: string): Promise<boolean> {
+  if (wait.ownerAgentId === agentId || wait.plan?.finalReview.headAgentId === agentId) return true;
+  const [agent] = await tx.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId));
+  return agent?.kind === 'orchestrator' || (agent?.kind === 'head' && agent.departmentId === task.departmentId);
+}
+
+async function personMayReplan(tx: Tx, wait: TaskWait, personId: string): Promise<boolean> {
+  if (wait.ownerPersonId === personId || wait.finalDecisionPersonId === personId) return true;
+  const [person] = await tx.select({ isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.id, personId));
   return Boolean(person?.isOwner || person?.isCeoDelegate);
 }
+
+const mayReplan = (tx: Tx, task: Task, wait: TaskWait, actor: Actor): Promise<boolean> =>
+  actor.agentId ? agentMayReplan(tx, task, wait, actor.agentId) : personMayReplan(tx, wait, actor.personId!);
 
 function replanned(wait: TaskWait, valid: ReplanWait): { owner: WaitOwnerBinding; plan: WaitPlan } {
   const owner = valid.ownerBinding ?? ownerOf(wait);
