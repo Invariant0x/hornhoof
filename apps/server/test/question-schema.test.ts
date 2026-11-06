@@ -136,5 +136,5 @@ it('upgrades only its prefix, retaining terminal decisions and independent open 
   const history = (await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows;
   await migrate(db, { migrationsFolder: throughFolder });
   expect((await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows).toEqual(history);
-  expect((await client.query("SELECT source_key FROM requests WHERE status='open' ORDER BY id")).rows.map(row => row.source_key)).toEqual(sources);
+  expect((await client.query<{ source_key: string }>("SELECT source_key FROM requests WHERE status='open' ORDER BY id")).rows.map(row => row.source_key)).toEqual(sources);
 });
