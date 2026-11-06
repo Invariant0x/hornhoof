@@ -69,7 +69,7 @@ async function complete(ctx: Ctx, run: Run, task: Task, pending: PendingSubmissi
   return failAuthorCheck(ctx, run.agentId, task.id, { outcome, text: `Author check ${run.number} failed on ${run.commitSha}.\n\n${output}` });
 }
 
-function acceptedQuality(printed: AuthorCheckResult | null, run: Run, quality: Quality | null): quality is Quality {
+function acceptedQuality(printed: AuthorCheckResult | null, run: Run, quality: Quality | null): quality is Quality & { status: 'passed' | 'partial' } {
   return Boolean(printed && run.status === 'passed' && quality && ['passed', 'partial'].includes(quality.status));
 }
 
