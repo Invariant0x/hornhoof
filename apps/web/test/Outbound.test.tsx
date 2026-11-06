@@ -190,7 +190,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
     inRussian(<Outbound onOpenTask={() => {}} />);
     expect(await screen.findByRole('heading', { name: 'Исходящие' })).toBeInTheDocument();
     expect(screen.getByText(/Не отправляйте повторно вслепую/)).toBeInTheDocument();
-    expect(screen.getAllByText('Принимает владелец отдела Sales, CEO или его заместитель.').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Принимает хозяин отдела Sales, CEO или его заместитель.').length).toBeGreaterThanOrEqual(1);
   });
 
   it('embeds exact bound outbound snapshots inside Requests for both decision owners and read-only viewers', async () => {
@@ -256,7 +256,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
 
     mockApi({ 'GET /api/outbound': [200, { channels: [], messages: [], escalations: [], approvals: [] }] });
     const emptyView = render(<Outbound onOpenTask={() => {}} />);
-    expect(await screen.findByText('No outbound channels, messages, or escalations yet.')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing has been sent or queued outside yet.')).toBeInTheDocument();
     emptyView.unmount();
 
     mockApi({ 'GET /api/outbound': [403, { error: { code: 'forbidden', message: 'Denied' } }] });
@@ -271,8 +271,8 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
       [`POST /api/requests/${MSG_REQ_ID}`]: [500, { error: { code: 'internal', message: 'Server busy' } }],
     });
     const failCard = render(<Outbound onOpenTask={() => {}} />);
-    expect(await screen.findByText('(no subject)')).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Note (optional)'), 'Wrong quarter');
+    expect(await screen.findByText('No subject')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Note, if any'), 'Wrong quarter');
     await user.click(screen.getByRole('button', { name: 'Decline' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(calls.some(c => c.method === 'POST' && (c.body as { approve?: boolean; answer?: string })?.answer === 'Wrong quarter')).toBe(true);
@@ -293,7 +293,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
         placeName={p => p?.name ?? ''}
       />,
     );
-    expect(await screen.findByText('Could not load the bound outbound revision.')).toBeInTheDocument();
+    expect(await screen.findByText('Could not load the bound outbound snapshot.')).toBeInTheDocument();
     snapErr.unmount();
   });
 });
