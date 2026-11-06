@@ -306,12 +306,12 @@ describe('material intake through the real tool', () => {
     expect(await f.state()).toEqual(before);
   });
 
-  it('does not activate a private result producer or send SSE while its real authority port is unavailable', async () => {
+  it.each(['result', 'action'] as const)('does not treat a declared %s as a classification grant or send SSE while its real authority port is unavailable', async presentation => {
     const f = await intake();
     const stream = await openStream(f.app, f.ceo);
     expect(stream.res.status).toBe(200);
     const before = await f.state();
-    const result = await askTool(f.client, { task: f.task.number, question: 'Review the result', materials: { presentation: 'result', common: [{ kind: 'link', name: 'Result', url: 'https://example.com/result' }], options: [] } });
+    const result = await askTool(f.client, { task: f.task.number, question: 'Review this source', materials: { presentation, common: presentation === 'result' ? [{ kind: 'link', name: 'Result', url: 'https://example.com/result' }] : [], options: [] } });
     expect(result.isError).toBe(true);
     expect(result.content.map(c => c.text).join('\n')).toContain('not available');
     expect(await f.state()).toEqual(before);
