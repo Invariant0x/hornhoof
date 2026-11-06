@@ -109,16 +109,18 @@ class FakePort implements GitOperationPort {
     return { operationId: input.operationId, generation: 1, attemptId: '40000000-0000-4000-8000-000000000001', disposition: 'execute', ...this.registration } as GitRegistration;
   }
 
-  async record(input: GitRecord): Promise<GitRecordReply> {
+  private async answer<T>(seen: T[], input: T): Promise<GitRecordReply> {
     if (this.recordFails) throw this.recordFails;
-    this.recorded.push(input);
+    seen.push(input);
     return this.replies.shift() ?? { accepted: true, state: 'satisfied' };
   }
 
-  async reconcile(input: GitReconciliation): Promise<GitRecordReply> {
-    if (this.recordFails) throw this.recordFails;
-    this.reconciled.push(input);
-    return this.replies.shift() ?? { accepted: true, state: 'satisfied' };
+  record(input: GitRecord): Promise<GitRecordReply> {
+    return this.answer(this.recorded, input);
+  }
+
+  reconcile(input: GitReconciliation): Promise<GitRecordReply> {
+    return this.answer(this.reconciled, input);
   }
 
   ready(_operationId: string, signal: AbortSignal): Promise<GitGrant> {
