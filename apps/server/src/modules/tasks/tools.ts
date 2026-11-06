@@ -33,6 +33,7 @@ import { bindReviewEvidence } from './review-verdict.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
+type ToolMoveResult = { text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } };
 
 /* What one turn may do to others' work: tasks it creates and questions it puts to people. */
 export const TURN_TASKS = 10;
@@ -242,20 +243,26 @@ class TaskTools {
   }
 
   /* Apply a move, settle its turn and wake its next owners; return readable refusals. */
-  private run(fn: () => Promise<{ text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } }>): Promise<ReturnType<typeof say>> {
+  private run(fn: () => Promise<ToolMoveResult>): Promise<ReturnType<typeof say>> {
     return fn().then(
-      async ({ text, moved }) => {
-        if (!moved) return say(text);
-        const settled = moved.task ? await settle(this.ctx, moved.task) : null;
-        const orchestrator = settled ? await orchestratorOf(this.ctx, this.job.companyId) : null;
-        await wakeAll(this.ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task?.id ?? '', this.job.agentId));
-        return say(settled && orchestrator?.id === this.job.agentId ? `${text} ${settled.note}` : text);
-      },
+      result => this.movedReply(result),
       (err: unknown) => {
         if (err instanceof ApiError) return say(err.message, true);
         throw err;
       },
     );
+  }
+
+  private async movedReply({ text, moved }: ToolMoveResult): Promise<ReturnType<typeof say>> {
+    if (!moved) return say(text);
+    const settled = moved.task ? await settle(this.ctx, moved.task) : null;
+    const orchestrator = settled ? await orchestratorOf(this.ctx, this.job.companyId) : null;
+    await wakeAll(this.ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task?.id ?? '', this.job.agentId));
+    return say(this.settledReply(text, settled, orchestrator?.id));
+  }
+
+  private settledReply(text: string, settled: Awaited<ReturnType<typeof settle>>, orchestratorId: string | undefined): string {
+    return settled && orchestratorId === this.job.agentId ? `${text} ${settled.note}` : text;
   }
 
   /* Only the CEO or delegate answered in this turn can make work urgent. */
