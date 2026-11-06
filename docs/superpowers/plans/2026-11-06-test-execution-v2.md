@@ -13,8 +13,9 @@
 ## Global constraints
 
 - All new T2 checks run through targeted run_tests on exact published SHA. No full suite, local heavy checks, deployment, mutation tool or new queue.
+- The newer CEO decision delegates coverage, complexity, duplication, full-suite and live pool checks to testers on the final turn candidate. Author acceptance uses failing tests before implementation and targeted remote affected tests. Earlier evidence remains unchanged.
 - Do not edit main.ts, runs.ts, refs.ts, schema.ts, index.ts or the journal. The node tests.ts lease is ours until an explicit checked release; 546 hooks follow it.
-- Canonical manifest ownership is being checked with 6d before activation. Legacy finalChecks retain their post-suite meaning.
+- Canonical manifest ownership was transferred by 6d in task 588 at 10:33:16. Legacy finalChecks retain their post-suite meaning.
 - Commit as Ivan Korol <invariant0x@icloud.com>, no trailers or force. Main is untouched.
 
 ## Review focus
@@ -39,18 +40,18 @@ The outer TestExecution remains {snapshot, selection}, matching the existing per
 
 Files: packages/protocol/src/test-environment.ts, matching test-execution-batch.test.ts and existing environment tests.
 
-- [ ] Write focused parser/manifest/capability/receipt cases before code. Valid batch, prepare and receipt must fail on the real V1 source; existing rejection controls may already pass.
-- [ ] Run the focused expected RED remotely, retain every outcome and exact SHA.
-- [ ] Implement strict bounded shapes, profile/inventory/source checks, explicit preparation policy and feature capability, preserving V1.
-- [ ] Check focused protocol regressions/types/lint/coverage/CRAP/dryer remotely and publish the exact contract.
+- [x] Write focused parser/manifest/capability/receipt cases before code. Valid batch, prepare and receipt failed on the real V1 source; existing rejection controls passed.
+- [x] Retain RED944 and its exact SHA.
+- [x] Implement strict bounded shapes, profile/inventory/source checks, explicit preparation policy and feature capability, preserving V1.
+- [x] Check protocol regressions and publish the contract: 949 and subsequent affected 975 passed.
 
 ## Task 2: node execution
 
 Files: apps/node/src/tests.ts, test-environment.ts, focused matching tests/new helper modules where needed.
 
-- [ ] RED before code: expectedM/scope mismatch has no side effects, every batch suite executes, earlier failure stays failed, timeout/cancel leaves truthful outcomes, preparation derives only pinned commands, native shard receives local coordinates.
-- [ ] Implement the existing runProductPart path with one environment lifetime per batch, bounded selection files, native shard invocation and exact receipts. Preserve manual runs and V1.
-- [ ] Publish/check focused node regressions and compiled API. No 546 output hooks in this slice.
+- [x] RED959 covered source/scope, every suite, first failure and preparation; RED971 covered native coordinates. Timeout/cancel controls passed without changing deadlines.
+- [x] Implement runProductPart with one environment lifetime per batch, bounded selections, native coordinates and exact receipts. Preserve manual runs and V1.
+- [x] Check node/protocol affected tests: 975 passed 90/90. Release node files and matching tests to 6d for 546 hooks at ee9fdf27fc1c15686115f1b1c981f413ada96fe8.
 
 ## Task 3: server planning and durable gate
 
@@ -64,6 +65,6 @@ Files: apps/server/src/modules/testruns/describe.ts, owned plan modules, matchin
 ## Task 4: integration and acceptance
 
 - [ ] Once manifest ownership is confirmed, register the real opt-in configuration/explicit once policy and CLI runtime/dependency impacts without altering ordinary manual configs.
-- [ ] Run one targeted distributed run through the supported parts route, keep actual run/part/SHA/machine/load facts and exact selection union. This is not a full suite or a deployed-runtime claim.
+- [ ] Hand the actual pool distribution/table acceptance to testers under the newer CEO decision. Author fixture tests do not claim live or deployed-runtime readiness.
 - [ ] Reconcile remaining producer/registry/durable-history gaps with 6d/587 and head. No submit before integration.
 - [ ] Merge fresh turn-8 into task-588, check affected code on that exact commit, merge/push the turn branch as authorized, then submit with honest NOT_RUN boundaries.

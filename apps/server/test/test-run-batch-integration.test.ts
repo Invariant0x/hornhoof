@@ -3,7 +3,7 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
-import { acceptDescription, newEnvironmentRequest, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
+import { acceptDescription, newEnvironmentRequest, repositoryScope, setProductPlanningPorts, testCapabilities } from '../src/modules/testruns/describe.js';
 import { partDone, pumpTests } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 import { planningEnvironment } from './fixtures/run-planning/environment.js';
@@ -72,5 +72,25 @@ describe('persisted versioned product batches', () => {
     const parts = await f.parts();
     expect(parts.map(part => part.environmentSelection!.selection.kind)).toEqual(['batch', 'final']);
     expect(parts.every(part => part.status === 'queued')).toBe(true);
+  });
+  it('passes the locked exact run to the private history and transaction record ports once', async () => {
+    const f = await fixture(false), seen: { stage: string; runId: string; commit: string | null; reason?: string }[] = [];
+    setProductPlanningPorts(f.app.ctx, {
+      history: async (run, snapshot) => {
+        seen.push({ stage: 'history', runId: run.id, commit: run.commitSha });
+        expect(snapshot.description.commitSha).toBe(run.commitSha);
+        return { durations: snapshot.description.inventory.map(unit => ({ suiteId: unit.suiteId, file: unit.file, ms: 1 })), costs: { setupMs: 1, collectMs: 1 }, costBasis: { setup: 'historical', collection: 'historical' }, usedPartIds: ['verified-history-part'], unmatchedFiles: 0 };
+      },
+      record: async (tx, run, plan) => {
+        const [stored] = await tx.select().from(testRuns).where(eq(testRuns.id, run.id));
+        expect(stored!.commitSha).toBe(TEST_COMMIT); expect(stored!.environmentSnapshot).toBeNull();
+        seen.push({ stage: 'record', runId: run.id, commit: run.commitSha, reason: plan.reason });
+      },
+    });
+    await acceptDescription(f.app.ctx, BUILTIN, f.reply); await acceptDescription(f.app.ctx, BUILTIN, f.reply);
+    expect(seen.map(value => ({ stage: value.stage, runId: value.runId, commit: value.commit }))).toEqual([
+      { stage: 'history', runId: f.run.id, commit: TEST_COMMIT }, { stage: 'record', runId: f.run.id, commit: TEST_COMMIT },
+    ]);
+    expect(seen[1]!.reason).toContain('All file estimates use historical measurements.');
   });
 });
