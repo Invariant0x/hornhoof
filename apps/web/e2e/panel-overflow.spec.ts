@@ -7,6 +7,7 @@ import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
 import { serveRoutes } from './routes-api';
 import { serveTree } from './tree-api';
+import { wholeTurn } from './whole-turn';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const PHASE = process.env.HH_PANEL_PHASE ?? 'after';
@@ -331,6 +332,9 @@ for (const lang of ['en', 'ru'] as const) {
       test(`Map, schema and tree keyboard focus evidence: ${look}`, async ({ page }, info) => {
         const errors = await prepareRoutes(page, lang, theme, width);
         await serveTree(page, { during: true });
+        const { org } = wholeTurn(true);
+        org.people = [{ id: 'p1', name: 'Ivan', email: 'ivan@acme.test', title: 'CEO', status: 'active', isOwner: true, access: { whole: true, departments: [], teams: [] } }];
+        await page.route('**/api/org', route => route.fulfill({ json: org }));
         await page.goto('/');
         const department = page.locator('button.dept').first();
         await department.focus();
