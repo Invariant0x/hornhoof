@@ -386,7 +386,7 @@ function OutboundSections({
   );
 }
 
-export function Outbound({ onOpenTask, onHome: _onHome }: { onOpenTask: (id: string) => void; onHome?: () => void }) {
+export function Outbound({ onOpenTask }: { onOpenTask: (id: string) => void }) {
   const t = useT();
   const [data, setData] = useState<OutboundOverview | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
