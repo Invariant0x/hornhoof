@@ -216,6 +216,20 @@ describe('renderInstructions', () => {
     }
   });
 
+  it('renders hh-questions with its Materials guidance cleanly inside the 24 KB inline instruction budget', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    expect(shipped.skills.has('hh-questions')).toBe(true);
+    for (const roleKey of ['DEV-ENG', 'DEV-HEAD', 'DSN-UI'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const skillIds = [...new Set([...role.skills.filter(s => s.on).map(s => s.id), 'hh-questions'])];
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: skillIds, templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      expect(rendered.text, roleKey).toContain('<!-- hh:skill hh-questions -->');
+      expect(rendered.text, roleKey).toContain('- **Materials**:');
+      expect(rendered.whole, roleKey).toMatch(/attach[\s\S]*materials[\s\S]*question tool/i);
+    }
+  });
+
   it('delivers the canonical hh-run-checks rule once across inline, whole and file-backed packets for every role, old skill lists, null roleKey and the orchestrator', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     expect(shipped.skills.get('hh-run-checks')).toBeDefined();

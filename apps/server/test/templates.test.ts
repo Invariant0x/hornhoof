@@ -734,13 +734,14 @@ describe('templates', () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
       const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-      expect(styleBook).toContain('Version 1.0, approved by the head of Design');
+      expect(styleBook).toContain('Version 1.1, approved by the head of Design on 2026-11-06.');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',
         '## 2. Type',
         '## 3. Spacing and sizes',
         '## 4. Components',
+        '### Materials of a question',
         '## 5. Languages',
         '## 6. Text wrap and action groups',
         '## 7. Site and marketing',
@@ -749,6 +750,15 @@ describe('templates', () => {
       ]) {
         expect(styleBook).toContain(heading);
       }
+      const materialsSection = styleBook.slice(styleBook.indexOf('### Materials of a question'), styleBook.indexOf('### Tables'));
+      expect(materialsSection).toContain('A material and an answer are never nested and never look alike.');
+      expect(materialsSection).toContain('Opening, zooming, paging, closing and downloading choose nothing and send nothing.');
+      expect(materialsSection).toContain('a picture takes the whole width of the option');
+      expect(materialsSection).toContain('The viewer covers the window, follows the theme and keeps its close button on screen. A document reads to its end');
+      expect(materialsSection).toContain('A refused or failed material keeps its name and says why in words.');
+      expect(materialsSection).toContain('A download mark appears only on what can be downloaded.');
+      expect(materialsSection).toContain('a field not in the code yet is marked as proposed.');
+      expect(styleBook).toContain('| 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |');
       expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
       expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
       expect(styleBook).toMatch(/Close button of a panel[\s\S]*Reviewed by 2027-02-05/);
@@ -806,6 +816,20 @@ describe('templates', () => {
       expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a single browser engine run as cross-engine verification.`)).toContain(
         'three-browser-engines-check',
       );
+    });
+  });
+
+  describe('hh-questions shared skill and materials rule', () => {
+    it('loads hh-questions as a core skill with an abstract English rule to attach materials via the question tool rather than prose paths', () => {
+      const skill = templates.skills.get('hh-questions');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      expect(skill!.body).toContain('- **Materials**:');
+      expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
+      expect(skill!.body).toMatch(/inspect[\s\S]*in full[\s\S]*before answering/i);
+      const materialsLine = skill!.body.split('\n').find(line => line.startsWith('- **Materials**:')) ?? '';
+      expect(materialsLine).not.toMatch(/hornhoof|david|ivan|#\d+|202\d-/i);
     });
   });
 
