@@ -218,3 +218,18 @@ export async function closedPort(): Promise<number> {
   await closeTls(server);
   return port;
 }
+
+/* The part of a raw message after its headers, as the words it carries. */
+export const parts = (raw: Buffer) => {
+  const text = raw.toString('latin1');
+  const end = text.indexOf('\r\n\r\n');
+  return { headers: text.slice(0, end).replace(/\r\n[ \t]+/g, ' '), body: text.slice(end + 4) };
+};
+export const header = (headers: string, name: string) => new RegExp(`^${name}: (.*)$`, 'im').exec(headers)?.[1];
+const isBase64 = (headers: string) => String(header(headers, 'content-transfer-encoding')).toLowerCase() === 'base64';
+export const wordsOf = (raw: Buffer) => {
+  const { headers, body } = parts(raw);
+  if (isBase64(headers)) return Buffer.from(body, 'base64').toString('utf8');
+  return body.replace(/\r\n/g, '\n');
+};
+export const subjectOf = (raw: Buffer) => (header(parts(raw).headers, 'subject') ?? '').replace(/=\?utf-8\?B\?([^?]+)\?=\s?/gi, (_all, word: string) => Buffer.from(word, 'base64').toString('utf8'));

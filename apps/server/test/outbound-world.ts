@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CatalogValue, OutboundPolicyValue, OutboundSubmit } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
+import type { Deps } from '../src/app.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies } from '../src/db/schema.js';
 import { digestOf } from '../src/modules/outbound/checks.js';
@@ -89,8 +90,8 @@ export async function letTenDollarsGo(c: C) {
   await c.setRule(c.ceoToken, c.dev.id, 'price', { mode: 'within_limits', limit: 100, unit: 'USD' });
 }
 
-export async function world(policy: OutboundPolicyValue = QUIET, over: ChannelOver = {}) {
-  const c = await company({ PUBLIC_URL: 'https://hornhoof.example' });
+export async function world(policy: OutboundPolicyValue = QUIET, over: ChannelOver = {}, logger?: Deps['logger']) {
+  const c = await company({ PUBLIC_URL: 'https://hornhoof.example' }, logger);
   const channel = await aChannelOf(c, over);
   const policyRow = await aPolicyOf(c, channel.id, policy);
   const { account, binding } = await anAccountOf(c, channel.id, c.worker.id);

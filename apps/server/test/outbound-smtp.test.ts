@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SealedPayload } from '../src/modules/outbound/delivery.js';
 import { smtpAdapter, type SmtpAccount, type SmtpTimeouts } from '../src/modules/outbound/smtp.js';
-import { CERT, PASSWORD, USERNAME, closedPort, scriptedSmtp, smtpReceiver } from './outbound-receivers.js';
+import { CERT, PASSWORD, USERNAME, closedPort, header, parts, scriptedSmtp, smtpReceiver, subjectOf, wordsOf } from './outbound-receivers.js';
 
 const FROM = 'sender@acme.test';
 const PAYLOAD: SealedPayload = { recipient: 'buyer@example.test', subject: 'Your order', text: 'Plain words.\n' };
@@ -25,21 +25,6 @@ afterEach(async () => {
 
 const account = (port: number, more: Partial<SmtpAccount> = {}): SmtpAccount => ({ host: 'localhost', port, security: 'starttls', username: USERNAME, password: PASSWORD, from: FROM, ca: CERT, ...more });
 const send = (acc: SmtpAccount, sealedPayload = PAYLOAD, timeouts?: Partial<SmtpTimeouts>, attemptId: string = randomUUID()) => smtpAdapter(timeouts).send({ attemptId, sealedPayload, configuredAccount: acc });
-
-/* The part of a raw message after its headers, as the words it carries. */
-const parts = (raw: Buffer) => {
-  const text = raw.toString('latin1');
-  const end = text.indexOf('\r\n\r\n');
-  return { headers: text.slice(0, end).replace(/\r\n[ \t]+/g, ' '), body: text.slice(end + 4) };
-};
-const header = (headers: string, name: string) => new RegExp(`^${name}: (.*)$`, 'im').exec(headers)?.[1];
-const isBase64 = (headers: string) => String(header(headers, 'content-transfer-encoding')).toLowerCase() === 'base64';
-const wordsOf = (raw: Buffer) => {
-  const { headers, body } = parts(raw);
-  if (isBase64(headers)) return Buffer.from(body, 'base64').toString('utf8');
-  return body.replace(/\r\n/g, '\n');
-};
-const subjectOf = (raw: Buffer) => (header(parts(raw).headers, 'subject') ?? '').replace(/=\?utf-8\?B\?([^?]+)\?=\s?/gi, (_all, word: string) => Buffer.from(word, 'base64').toString('utf8'));
 
 describe('the SMTP adapter', () => {
   it.each(['starttls', 'tls'] as const)('hands the exact words once to an authenticated server over %s, and reports its receipt', async security => {
