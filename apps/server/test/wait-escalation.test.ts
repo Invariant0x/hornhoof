@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, people, requests, sessions, taskEvents, taskWaits, waitNotices, waitPolicies } from '../src/db/schema.js';
+import { agents, departments, jobs, people, requests, sessions, taskEvents, taskWaits, waitNotices, waitPolicies } from '../src/db/schema.js';
 import * as queue from '../src/modules/conversation/queue.js';
 import { answer, ask, cancel, comment, createTask, type Task } from '../src/modules/tasks/engine.js';
 import { checkWaitHealth } from '../src/modules/tasks/wait-monitor.js';
@@ -202,6 +202,23 @@ describe('a wait past its dates', () => {
 });
 
 describe('who hears of it in the end', () => {
+  it('tells the head its plan named while the department has none now', async () => {
+    const c = await company();
+    const { wait } = await c.waiting();
+    await c.db.update(agents).set({ kind: 'worker' }).where(eq(agents.id, c.head.id));
+    for (let i = 0; i < 2; i++) await sweepWaits(c.ctx, at(wait.headDueAt));
+    expect((await c.noticesOf(wait.id)).find(n => n.level === 2)).toMatchObject({ agentId: c.head.id });
+  });
+
+  it('tells nobody at that level once that head has left too, and still goes up', async () => {
+    const c = await company();
+    const { wait } = await c.waiting();
+    await c.db.update(agents).set({ kind: 'worker', removedAt: new Date() }).where(eq(agents.id, c.head.id));
+    for (let i = 0; i < 2; i++) await sweepWaits(c.ctx, at(wait.headDueAt));
+    expect(await c.row(wait.id)).toMatchObject({ level: 2 });
+    expect((await c.noticesOf(wait.id)).filter(n => n.level === 2)).toEqual([]);
+  });
+
   it('keeps the CEO as the one who decides, with no notice and no turn for it at any level', async () => {
     const c = await company();
     const { wait } = await c.waiting();
