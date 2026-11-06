@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { Edge } from './Edge';
+import { fitTable } from './fit-table';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
 import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
 
@@ -85,9 +86,25 @@ function visibleRows<T extends { id: string }>(rows: readonly T[], selectedId: s
   return rows.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
 }
 
+function useFitTable(table: RefObject<HTMLTableElement | null>, content: readonly unknown[], language: string) {
+  useLayoutEffect(() => {
+    const node = table.current;
+    const host = node?.parentElement;
+    if (!node || !host) return;
+    const measure = () => fitTable(node);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    void document.fonts.ready.then(measure);
+    return () => observer.disconnect();
+  }, [table, content, language]);
+}
+
 export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds, selectedId, onSelect }: Props<T>) {
   const t = useT();
   const { language } = useLanguage();
+  const table = useRef<HTMLTableElement>(null);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Selections>({});
   const [sort, setSort] = useState(initialSort);
@@ -101,6 +118,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   const needle = query.trim().toLocaleLowerCase(language);
   const visible = visibleRows(ordered, selectedId, needle, search, language, filters, selected);
   const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
+  useFitTable(table, visible, language);
 
   /* Record additions and removals after each refresh, keeping all surviving cards and their places. */
   useEffect(() => {
@@ -139,9 +157,9 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
       <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
     </>}
     {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}
-    <Edge className="tbl-frame"><div className="tbl">
+    <Edge className="tbl-frame"><div className="tbl fit">
       <SortBar columns={columns} sort={sort} choose={choose} />
-      <table className="dt">
+      <table ref={table} className="dt">
         <TableHead columns={columns} sort={sort} choose={choose} />
         <tbody>{visible.map(row => <Fragment key={row.id}>
           <TableRow row={row} columns={columns} name={name(row)} expanded={open.has(row.id)} toggle={() => toggle(row.id)} />

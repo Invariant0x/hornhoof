@@ -569,7 +569,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
-.machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.machine-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.machine-actions .btn { min-height: 44px; height: auto; }
+.machine-actions .act { min-height: 44px; height: auto; }
 .machine-actions .lend { margin-right: 4px; }
 @media (max-width: 760px) {
   .pool-facts { grid-template-rows: repeat(4, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
