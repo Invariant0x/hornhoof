@@ -20,6 +20,10 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     .insert(subscriptions)
     .values({ companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' })
     .returning();
+  const [kimi] = await db
+    .insert(subscriptions)
+    .values({ companyId, provider: 'kimi', kind: 'personal', label: 'Kimi', ownerPersonId: ceo!.id, status: 'ready' })
+    .returning();
   const [dev] = await db
     .insert(departments)
     .values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' })
@@ -32,9 +36,10 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const kai = await hire('Kai', 'worker', 'DEV-FE');
-  const rita = await hire('Rita', 'worker', 'DEV-REV');
+  /* A turn's review takes reviewers on another provider than the authors', each provider once, so these three can all sit on one. */
+  const rita = await hire('Rita', 'worker', 'DEV-REV', kimi!.id);
   const rex = await hire('Rex', 'worker', 'DEV-REV', codex!.id);
-  const sid = await hire('Sid', 'worker', 'DEV-SEC');
+  const sid = await hire('Sid', 'worker', 'DEV-SEC', codex!.id);
 
   const turnOpenedAt = new Date(Date.now() - openedMinutesAgo * 60_000);
   const [turn] = openTurn
@@ -49,12 +54,12 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     ? (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task
     : null;
 
-  const member = async (executor: string, title: string, { productId = null as string | null } = {}) =>
+  const member = async (executor: string, title: string, { productId = null as string | null, body = '' } = {}) =>
     (
       await createTask(
         ctx,
         { agentId: head.id },
-        { title, brief: '', body: '', departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, gates: [], inTurnReview: true },
+        { title, brief: '', body, departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, gates: [], inTurnReview: true },
       )
     ).task;
 
@@ -116,14 +121,16 @@ describe('GET /api/departments/:id/tree', () => {
 
   it('lists member tasks with agents, part, mergedAt after a merge, and the turn review with reviewers and findings', async () => {
     const { app, ctx, db, ceoToken, dev, turn, head, bruno, kai, rita, rex, sid, parent, member, merged, tools } = await company();
-    const api = await member(bruno.id, 'Checkout API');
+    /* Security checks only a change in its area. */
+    const api = await member(bruno.id, 'Checkout API', { body: 'Risk class: security' });
     const page = await member(kai.id, 'Checkout page');
 
     await merged(bruno.id, api.id);
     await merged(kai.id, page.id);
 
     const [review] = await db.select().from(tasks).where(and(eq(tasks.departmentId, dev.id), eq(tasks.title, 'Review of turn 4')));
-    await (await tools(rita)).callTool({ name: 'verdict', arguments: { task: review!.number, pass: false, comment: 'Two issues.', findings: 2 } });
+    const said = await (await tools(rita)).callTool({ name: 'verdict', arguments: { task: review!.number, pass: false, comment: 'Two issues.', findings: 2 } });
+    expect(said.isError).toBeFalsy();
     await verdict(ctx, rex.id, review!.id, { pass: true, comment: 'Clean.' });
 
     const res = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(ceoToken) });
