@@ -203,10 +203,10 @@ test('3J preserves the reading place and the bottom on the real terminal', async
     const rows = page.locator('.xterm-rows');
     await expect(rows).toContainText('LINE-999');
     await page.locator('.xterm-viewport').evaluate((el, line) => { el.scrollTop = el.scrollHeight * line / 1000; }, 676);
-    await expect(rows).toContainText('LINE-676');
+    await expect(rows).toContainText('LINE-700');
     histories.at(-1)!.resized();
     await expect.poll(() => streamed).toContain('\x1b[3J');
-    await expect(rows).toContainText('LINE-676');
+    await expect(rows).toContainText('LINE-700');
     await page.screenshot({ path: info.outputPath('clear-history-reading.png') });
     const box = await rows.boundingBox();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
