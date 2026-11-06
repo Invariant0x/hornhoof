@@ -23,8 +23,9 @@ export async function departmentHead(tx: Tx, departmentId: string): Promise<stri
   return head?.id ?? null;
 }
 
-/* A department that set any policy has said its waits have dates: from then on one with none is refused. Not while it has no
-   head: no dates can be made without one to look at what they miss, and setting more would not help whoever is refused. */
+/* A department that set any policy has said its waits have dates: from then on one with none is refused, a question to a person
+   excepted. Not while it has no head: no dates can be made without one to look at what they miss, and setting more would not
+   help whoever is refused. */
 export async function setsWaitDates(tx: Tx, companyId: string, departmentId: string): Promise<boolean> {
   const [any] = await tx.select({ id: waitPolicies.id }).from(waitPolicies).where(and(eq(waitPolicies.companyId, companyId), eq(waitPolicies.departmentId, departmentId))).limit(1);
   return Boolean(any) && (await departmentHead(tx, departmentId)) !== null;

@@ -93,7 +93,7 @@ it('hands a person one card, with one line in the log, when two connections deli
 it('lets one of two say a goal is in danger at once, and writes one card', async () => {
   const c = await late();
   const ref = { kind: 'turn' as const, id: randomUUID() };
-  const say = (actor: typeof c.one) => ask(actor.ctx, actor.job.agentId, actor.task.id, { kind: 'question', text: 'Missed goal.', topic: 'task', evenUnplanned: true, goal: { ref, impact: 'missed' } }).then(() => null, (error: unknown) => error);
+  const say = (actor: typeof c.one) => ask(actor.ctx, actor.job.agentId, actor.task.id, { kind: 'question', text: 'Missed goal.', topic: 'task', goal: { ref, impact: 'missed' } }).then(() => null, (error: unknown) => error);
   const refused = (await Promise.all([say(c.one), say(c.two)])).filter(Boolean);
   expect(refused).toHaveLength(1);
   expect(isUniqueViolation(refused[0])).toBe(true);

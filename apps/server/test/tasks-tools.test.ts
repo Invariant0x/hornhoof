@@ -351,20 +351,19 @@ describe('dates through the tools', () => {
     expect(await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, later.id))).toMatchObject([{ state: 'active' }]);
   });
 
-  it('takes a promise in ask_person and request_approval, and says the same refusal without one', async () => {
+  it('takes a promise in ask_person and request_approval, and a question with none where dates are set for others', async () => {
     const c = await company();
     await strict(c);
     const client = await c.tools(c.bruno);
     const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
-    const refused = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain('sets dates for its waits');
-    expect(await c.db.select().from(requests).where(eq(requests.taskId, work.id))).toEqual([]);
-    const asked = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task', plan: promise(c) });
+    const plain = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
+    expect(plain.isError, text(plain)).toBeFalsy();
+    const asked = await call(client, 'ask_person', { task: work.number, question: 'And which?', topic: 'task', plan: promise(c) });
     expect(asked.isError, text(asked)).toBeFalsy();
     const approval = await call(client, 'request_approval', { task: work.number, channel: 'message', kind: 'welcome email', text: 'Send it?', plan: promise(c) });
     expect(approval.isError, text(approval)).toBeFalsy();
-    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id))).map(w => w.kind)).toEqual(['person', 'person']);
+    expect(await c.db.select().from(requests).where(eq(requests.taskId, work.id))).toHaveLength(3);
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id))).map(w => w.kind)).toEqual(['person', 'person', 'person']);
   });
 });
 
