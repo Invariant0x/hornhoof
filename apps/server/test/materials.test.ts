@@ -75,6 +75,20 @@ async function manifest(f: Awaited<ReturnType<typeof legacy>>, token = f.ceo) {
 }
 
 describe('legacy scoped materials', () => {
+  it('retains six legacy common pictures plus both public links', async () => {
+    const f = await legacy();
+    await f.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, f.dev.id));
+    await f.db.update(requests).set({ kind: 'approval', options: [], commit: 'a'.repeat(40) }).where(eq(requests.id, f.question.id));
+    await f.db.insert(attachments).values([0, 1, 2].map(index => ({ companyId: f.company.id, jobId: f.common.jobId!, agentId: f.author.id, requestId: f.question.id, name: `legacy-${index}.png`, mediaType: 'image/png', bytes: PNG, size: PNG.length })));
+    const shown = await manifest(f);
+    expect(shown.common.map(material => material.kind)).toEqual(['image', 'image', 'image', 'image', 'image', 'image', 'link', 'link']);
+    expect(shown.options).toEqual([]);
+    expect(shown.common.slice(-2)).toMatchObject([
+      { name: 'Result', state: 'available', url: 'https://example.com/result' },
+      { name: 'Commit', state: 'available', url: `https://github.com/acme/shop/commit/${'a'.repeat(40)}` },
+    ]);
+  });
+
   it('projects ordered pictures and links with stable opaque ids and no original file selectors', async () => {
     const f = await legacy();
     const first = await manifest(f);
