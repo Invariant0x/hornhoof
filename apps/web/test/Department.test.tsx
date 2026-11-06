@@ -638,10 +638,11 @@ describe('Department view', () => {
     expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
   });
 
-  it("keeps a department's tasks from people who do not reach it", async () => {
+  it("closes a department to people who do not reach it", async () => {
     const user = userEvent.setup();
     const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
-    await flyIn(user);
+    await user.click(await screen.findByRole('button', { name: /Development/ }));
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Department tasks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(false);
