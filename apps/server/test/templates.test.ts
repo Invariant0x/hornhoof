@@ -41,6 +41,15 @@ describe('templates', () => {
   });
 
   it.each([
+    ['head skill', templates.skills.get('hh-lead-tasks')!.body],
+    ['developer role', templates.roles.get('DEV-ENG')!.body],
+  ])('keeps each connected block with one generalist developer in the %s', (_name, body) => {
+    expect(body).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
+    expect(body).toMatch(/no chains or `after` between developers when one can do it/i);
+    expect(body).toMatch(/only (affected )?tests of (their|your) own code[\s\S]*hand the block to a tester/i);
+  });
+
+  it.each([
     'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
     'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
     'dev-work-pipeline', 'dev-gates', 'dev-review-diff', 'dev-review-verdict',
