@@ -1,4 +1,5 @@
-import { CatalogValue, type ApprovalRule, type GateCode } from '@hornhoof/protocol';
+import { createHash } from 'node:crypto';
+import { canonicalJson, CatalogValue, type ApprovalRule, type GateCode } from '@hornhoof/protocol';
 import { outboundCatalogRevisions } from '../../db/schema.js';
 
 /* What decides whether a part of a message may be said: exact money, the revision of a catalog entry that counts now, and
@@ -14,6 +15,9 @@ export type Money = { minor: bigint; currency: string; scale: number };
 type PriceValue = Extract<CatalogValue, { kind: 'price' }>;
 type DiscountValue = Extract<CatalogValue, { kind: 'discount' }>;
 type LimitRule = Extract<ApprovalRule, { mode: 'within_limits' }>;
+
+/* A digest of any JSON value, the same however its keys were ordered. */
+export const digestOf = (value: unknown): string => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
 const DECIMAL = /^[0-9]+(?:\.([0-9]+))?$/;
 const digitsAfterPoint = (amount: string): number => amount.split('.')[1]?.length ?? 0;

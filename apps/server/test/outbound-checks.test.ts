@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { MessageDocument, type CatalogValue, type GateCode } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
+import { aSource } from './outbound-fixture.js';
 import { checkPrice, currentRevision, formatMoney, minorUnits, moneyWithinLimit, priceAfterDiscount, scanText, unsafeLink, type Catalog, type Money, type Place, type Source } from '../src/modules/outbound/checks.js';
 
 const NOW = new Date('2026-11-06T10:00:00.000Z');
 const PLACE: Place = { channelId: randomUUID(), departmentId: randomUUID(), productId: randomUUID() };
 
-const source = (value: CatalogValue, over: Partial<Source> = {}): Source => ({
-  entryId: randomUUID(), revision: 1, kind: value.kind, locale: 'locale' in value ? value.locale : null, value, digest: `digest of ${JSON.stringify(value)}`, status: 'published',
-  validFrom: new Date('2026-11-01T00:00:00.000Z'), validUntil: null, departmentId: PLACE.departmentId, productId: null, channelId: null, ...over,
-});
+const source = (value: CatalogValue, over: Partial<Source> = {}): Source => aSource(PLACE, value, over);
 const priceValue = (over: Partial<Extract<CatalogValue, { kind: 'price' }>> = {}): Extract<CatalogValue, { kind: 'price' }> => ({
   kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-11-01T00:00:00.000Z', validUntil: null, ...over,
 });
@@ -73,7 +71,7 @@ describe('exact money', () => {
   });
 
   it('compares with a limit exactly, in the limit\'s own unit', () => {
-    const limit = { mode: 'within_limits', limit: 100.5, unit: 'USD' } as const;
+    const limit = { limit: 100.5, unit: 'USD' };
     const usd = (minor: bigint): Money => ({ minor, currency: 'USD', scale: 2 });
     expect(moneyWithinLimit([usd(10050n)], limit)).toBe(true);
     expect(moneyWithinLimit([usd(10051n)], limit)).toBe(false);
@@ -83,10 +81,10 @@ describe('exact money', () => {
 
   it('asks the person when the amount cannot be measured against the limit', () => {
     const usd: Money = { minor: 1n, currency: 'USD', scale: 2 };
-    expect(moneyWithinLimit([], { mode: 'within_limits', limit: 100, unit: 'USD' })).toBe(false);
-    expect(moneyWithinLimit([usd], { mode: 'within_limits', limit: 100 })).toBe(false);
-    expect(moneyWithinLimit([usd], { mode: 'within_limits', limit: 100, unit: 'EUR' })).toBe(false);
-    expect(moneyWithinLimit([usd, { ...usd, currency: 'EUR' }], { mode: 'within_limits', limit: 100, unit: 'USD' })).toBe(false);
+    expect(moneyWithinLimit([], { limit: 100, unit: 'USD' })).toBe(false);
+    expect(moneyWithinLimit([usd], { limit: 100 })).toBe(false);
+    expect(moneyWithinLimit([usd], { limit: 100, unit: 'EUR' })).toBe(false);
+    expect(moneyWithinLimit([usd, { ...usd, currency: 'EUR' }], { limit: 100, unit: 'USD' })).toBe(false);
   });
 });
 

@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto';
-import { canonicalJson, type CatalogValue, type GateCode, type MessageDocument } from '@hornhoof/protocol';
-import { catalogValue, checkPrice, formatMoney, scanText, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
-import type { SealedPayload } from './ports.js';
+import type { CatalogValue, GateCode, MessageDocument } from '@hornhoof/protocol';
+import { catalogValue, checkPrice, digestOf, formatMoney, scanText, unsafeLink, usable, type Catalog, type Money, type Place, type Source } from './checks.js';
 
 /* A message is rendered by the server from approved parts and nothing else: the author names a template, blocks and fields,
    and every byte comes from the catalog. Failures come as codes, the same in every language. */
@@ -27,7 +25,6 @@ export type SourceRef = { entryId: string; revision: number; digest: string };
 export type Rendered = { subject: string; text: string; sources: SourceRef[]; sourceRevisionsDigest: string; money: Money[] };
 export type RenderResult = { ok: true; rendered: Rendered } | { ok: false; reasonCodes: GateCode[] };
 
-const digestOf = (value: unknown): string => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const MAX_FIELD = 200;
 const ONE_LINE = /^[^\p{Cc}\p{Zl}\p{Zp}]+$/u;
 const BLOCK_REFUSAL: Record<BlockKind, GateCode> = { price: 'price_unapproved', link: 'link_unapproved', claim: 'claim_unapproved', knowledge: 'claim_unapproved' };
@@ -214,6 +211,3 @@ export type Frozen = {
   scheduledAt: string; sourceRevisionsDigest: string; bindingGeneration: number;
 };
 export const frozenDigest = (frozen: Frozen): string => digestOf(frozen);
-
-/* What was sealed, kept with the seal's digest, so that a seal changed afterwards no longer matches what was frozen. */
-export const sealedDigest = (sealed: SealedPayload): string => digestOf(sealed);

@@ -2,16 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { CatalogValue, GateCode, MessageDocument } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { Catalog, Place, Source } from '../src/modules/outbound/checks.js';
-import { frozenDigest, renderMessage, sealedDigest, type Frozen, type RenderRequest } from '../src/modules/outbound/render.js';
+import { frozenDigest, renderMessage, type Frozen, type RenderRequest } from '../src/modules/outbound/render.js';
+import { aSource } from './outbound-fixture.js';
 
 const NOW = new Date('2026-11-06T10:00:00.000Z');
 const PLACE: Place = { channelId: randomUUID(), departmentId: randomUUID(), productId: null };
 const URL_OUT = 'https://hornhoof.example/api/outbound/unsubscribe/token';
 
-const source = (value: CatalogValue, over: Partial<Source> = {}): Source => ({
-  entryId: randomUUID(), revision: 1, kind: value.kind, locale: 'locale' in value ? value.locale : null, value, digest: `digest ${randomUUID()}`, status: 'published',
-  validFrom: new Date('2026-11-01T00:00:00.000Z'), validUntil: null, departmentId: PLACE.departmentId, productId: null, channelId: null, ...over,
-});
+const source = (value: CatalogValue, over: Partial<Source> = {}): Source => aSource(PLACE, value, over);
 const text = (value: string) => ({ kind: 'text', text: value }) as const;
 const slot = (type: Extract<Extract<CatalogValue, { kind: 'template' }>['parts'][number], { kind: 'slot' }>['type'], slotId: string = randomUUID()) => ({ kind: 'slot', slotId, type }) as const;
 const PRICE_VALUE: CatalogValue = { kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-11-01T00:00:00.000Z', validUntil: null };
@@ -316,12 +314,5 @@ describe('frozen bytes', () => {
     ['the binding generation', { bindingGeneration: 2 }],
   ])('change when %s changes', (_name, change) => {
     expect(frozenDigest({ ...FROZEN, ...change })).not.toBe(frozenDigest(FROZEN));
-  });
-
-  it('name what is sealed, so that an edited seal does not match its digest', () => {
-    const sealed = { recipient: 'ann@shop.example', subject: 'Hello.', text: 'Hello there.' };
-    expect(sealedDigest(sealed)).toBe(sealedDigest({ ...sealed }));
-    expect(sealedDigest({ ...sealed, text: 'Hello there!' })).not.toBe(sealedDigest(sealed));
-    expect(sealedDigest({ ...sealed, recipient: 'bob@shop.example' })).not.toBe(sealedDigest(sealed));
   });
 });
