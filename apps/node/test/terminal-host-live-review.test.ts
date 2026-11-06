@@ -5,8 +5,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { UNHEARD_MS } from '@hornhoof/protocol';
 import { claudeQueue, userMessage } from './fakes/word-receipts.mjs';
-import { until } from './terminal-host-helpers.js';
+import { kimiScreen, until } from './terminal-host-helpers.js';
 import { cleanups, liveTerminal, TEXT } from './terminal-host-live-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 describe('reviewed live delivery through program events', () => {
   afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); });
@@ -15,7 +16,7 @@ describe('reviewed live delivery through program events', () => {
     const c = await liveTerminal(kind, 'lost');
     c.screen.mockImplementation(async () => kind === 'claude'
       ? `────────\n❯ ${c.input() ? '[Pasted text #1 +3 lines]' : ''}\n────────\n`
-      : `── input ──\n ${c.input().replaceAll('\n', '\n ')}\n────────\n`);
+      : kimiScreen(c.input()));
     expect(await c.host.say('receipt', TEXT)).toBe(false);
     expect(c.input()).toBe('');
     expect(c.unheard()).toEqual([]);
@@ -24,7 +25,7 @@ describe('reviewed live delivery through program events', () => {
 
   it('erases a held collapsed paste at expiry before the next prompt', async () => {
     const c = await liveTerminal('codex', 'lost');
-    c.screen.mockImplementation(async () => `OpenAI Codex\n› ${c.input() ? '[Pasted Content 3 lines]' : ''}\n`);
+    c.screen.mockImplementation(async () => `OpenAI Codex\n${codexPrompt(c.input() ? '[Pasted Content 3 lines]' : '')}`);
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.finish(); await c.running;
     const now = Date.now.bind(Date);
@@ -121,7 +122,7 @@ describe('reviewed live delivery through program events', () => {
     const c = await liveTerminal(kind);
     const draft = '\nA person is still writing.';
     c.draft(draft);
-    c.screen.mockImplementation(async () => kind === 'claude' ? `────────\n❯ ${draft}\n` : `── input ───\n${draft}\n`);
+    c.screen.mockImplementation(async () => kind === 'claude' ? `────────\n❯ ${draft}\n` : `╭─────╮\n│ > ${draft}\n`);
     expect(await c.host.say('receipt', TEXT, 1000)).toBe(false);
     expect(c.input()).toBe(draft);
     expect(c.paste).not.toHaveBeenCalled();

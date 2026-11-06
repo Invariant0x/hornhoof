@@ -11,6 +11,14 @@ Hornhoof checks for a newer build every 30 minutes. People who see the whole com
 
 Running the install line again updates too.
 
+## Why is a new version not offered?
+
+A version reaches machines only after a real node of exactly that build ran Claude, Codex, Kimi and Antigravity: each one got its words, wrote them down, answered and ended its turn the usual way. Until that check is published next to the version's images, Hornhoof shows no banner for it, "Update" says why it cannot install it, and a node that asks for its server's build stays as it is. This holds for security updates too, and for going back to an earlier version with no check of its own. An update that fails still goes back by itself.
+
+The installer holds to the same check. A command that joins a machine, moves its nodes or goes with `--urgent` stops with the reason and leaves the machine as it is, and `install.sh server` changes nothing on a server, for a build with no check. A version from before 0.7.0 has none to show, so `HORNHOOF_VERSION=0.6.1` still takes you back to it. The one way past is the check itself: `install.sh check-node` moves one named node of a plan to a commit's build, for the turn the check speaks of, and `install.sh back-node` puts that node back.
+
+How a release goes through the check is in [CONTRIBUTING.md](../CONTRIBUTING.md#releasing-a-version).
+
 ## Why does a machine say it is waiting to update?
 
 A planned update does not cut off agents at work. The machine takes no new work, what runs on it finishes, and then it restarts and takes work again by itself. Its card says how many turns are left and until when. You can still write to its agents: their next turn starts after the update, or on another free machine of the same plan.

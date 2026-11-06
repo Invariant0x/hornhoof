@@ -2,14 +2,36 @@ import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQ
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
-import { conversationOf, GONE_ALONG, insertTurn, NoSubscription } from '../conversation/queue.js';
+import { conversationOf, GONE_ALONG, insertTurn, liveSubscription, NoSubscription, STOPPED_ON_PURPOSE, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
+import type { MessageParty } from '../events/parties.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { repeatWake, type TaskWake } from '../tasks/wake-state.js';
 import { operatorTransaction } from './transactions.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
 type Job = typeof jobs.$inferSelect;
+/* How a hold ended. A closed case proves a recovery only with its continuation: the outcome says which it was. */
+export type HoldEnd = { outcome: string; text: string; actor?: MessageParty };
+const BY_OWNER: HoldEnd = { outcome: 'owner_recovered', text: 'The owner passed the screen; the original words continue once.' };
+const AT_PROMPT: HoldEnd = { outcome: 'went_on', text: 'The program stood ready with an empty input; the original words continue once.' };
+const PROGRAM_GONE: HoldEnd = { outcome: 'program_gone', text: 'The program that waited for the words is gone; the original words continue once.' };
+const RECORDED: HoldEnd = { outcome: 'recorded', text: 'The program already recorded the original words.' };
+const LATE_RECEIPT: HoldEnd = { outcome: 'recorded', text: 'The program recorded the original words; no duplicate was sent.' };
+const STOPPED: HoldEnd = { outcome: 'stopped', text: 'The turn was stopped, so its words do not go on.' };
+const FINISHED: HoldEnd = { outcome: 'finished', text: 'The turn finished after all; its words do not go again.' };
+const OWNER_TURN: HoldEnd = { outcome: 'owner_turn', text: 'The existing owner turn continues recovery. No second assignment was injected; the original assignment remains in the journal.' };
+const NOT_AWAITED: HoldEnd = { outcome: 'not_awaited', text: 'The task no longer waits for these words, so they do not go on.' };
+const BY_ITSELF = ['went_on', 'program_gone'];
+const stoppedOnPurpose = (job: Job) => STOPPED_ON_PURPOSE.includes(job.error ?? '');
+const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
+const deliveryOf = async (ctx: Ctx, row: Case) => row.deliveryId ? (await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)))[0] : undefined;
+const programLeft = (delivery: typeof programDeliveries.$inferSelect) => delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken';
+
+export async function runsATurn(ctx: Ctx, agentId: string): Promise<boolean> {
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
+  return Boolean(running);
+}
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
   return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
@@ -79,7 +101,32 @@ export async function tellAgainWentAlong(ctx: Ctx, job: Job, at: Date, say: (wor
 export async function acceptOperatorRecovery(ctx: Ctx, frame: OperatorEvidence): Promise<void> {
   if (frame.type !== 'program.recovery_ready') return;
   const [row] = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, frame.case), eq(programOperatorCases.agentId, frame.agentKey), eq(programOperatorCases.jobId, frame.jobId!), eq(programOperatorCases.instance, frame.instance))).for('update');
-  if (row?.recoveryHold) await continueRecovery(ctx, row);
+  if (!row?.recoveryHold) return;
+  if (frame.owner !== false) return continueRecovery(ctx, row, BY_OWNER);
+  if (!await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, AT_PROMPT);
+}
+
+/* Words go on by themselves once. When that did not help, a person or Operations looks: the hold stays. */
+async function wentOnBefore(ctx: Ctx, row: Case): Promise<boolean> {
+  const [made] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.continuationJobId, row.jobId), sql`${programOperatorCases.resolution}->>'outcome' in (${sql.join(BY_ITSELF.map(outcome => sql`${outcome}`), sql`, `)})`)).limit(1);
+  return Boolean(made);
+}
+
+/* What ends a hold with nobody looking: a stop, a turn that finished after all, or a program that is gone, whose words no
+   question or tool of it can stand in the way of. The caller holds the agent row. */
+export async function settleOperatorHold(ctx: Ctx, row: Case): Promise<void> {
+  const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
+  if (!job) return;
+  if (stoppedOnPurpose(job) || await agentRemoved(ctx, row)) return finishRecovery(ctx, row, null, STOPPED);
+  if (job.status === 'done') return finishRecovery(ctx, row, null, FINISHED);
+  const delivery = await deliveryOf(ctx, row);
+  if (delivery && programLeft(delivery) && !await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, PROGRAM_GONE);
+}
+
+/* The node says the program of these words ended. */
+export async function settleDeliveryHolds(ctx: Ctx, deliveryId: string): Promise<void> {
+  const rows = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.deliveryId, deliveryId), eq(programOperatorCases.recoveryHold, true)));
+  for (const row of rows) await settleOperatorHold(ctx, row);
 }
 
 /* agent.start is emitted only by an owner opening a view whose physical program is gone. */
@@ -88,36 +135,41 @@ export async function resumeOperatorProcess(ctx: Ctx, agentId: string, nodeId: s
     await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update');
     const rows = await tx.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), eq(programOperatorCases.nodeId, nodeId), eq(programOperatorCases.recoveryHold, true))).for('update');
     if (!rows.length) return false;
-    for (const row of rows) await continueRecovery(inside, row);
+    for (const row of rows) await continueRecovery(inside, row, BY_OWNER);
     const [continued] = await tx.select({ id: programOperatorCases.continuationJobId }).from(programOperatorCases).where(and(inArray(programOperatorCases.id, rows.map(row => row.id)), eq(programOperatorCases.recoveryHold, false), isNotNull(programOperatorCases.continuationJobId)));
     return Boolean(continued?.id);
   });
 }
 
-async function continueRecovery(ctx: Ctx, row: Case): Promise<void> {
+export async function continueRecovery(ctx: Ctx, row: Case, end: HoldEnd): Promise<void> {
   const [original] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
-  const [delivery] = row.deliveryId ? await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)) : [];
+  const delivery = await deliveryOf(ctx, row);
   if (!original || !recoverableJob(original) || !delivery) return;
-  if (delivery.receiptAt) return finishRecovery(ctx, row, null, 'The program already recorded the original words.');
-  const [running] = await ctx.db.select().from(jobs).where(and(eq(jobs.agentId, row.agentId), eq(jobs.status, 'running'))).limit(1);
-  if (running) return;
-  const continuationJobId = await recoveryContinuation(ctx, row, original, delivery);
-  await finishRecovery(ctx, row, continuationJobId, 'The owner passed the screen; the original words continue once.');
+  if (await agentRemoved(ctx, row)) return finishRecovery(ctx, row, null, STOPPED);
+  if (delivery.receiptAt) return finishRecovery(ctx, row, null, RECORDED);
+  if (!await runsATurn(ctx, row.agentId)) await wordsGoOn(ctx, row, original, delivery, end);
+}
+
+/* A retry a node restart queued takes these words on already, as the same words must not run twice; one somebody stopped
+   leaves them stopped. The tasks that went out inside the unheard turn were not heard either way, and a retry says only the
+   turn's own words. With no turn to take them on, a hold stays while the agent has no plan, as the watch then calls
+   Operations, and ends when the task no longer waits for them. */
+async function wordsGoOn(ctx: Ctx, row: Case, original: Job, delivery: typeof programDeliveries.$inferSelect, end: HoldEnd): Promise<void> {
+  const next = await turnGoingOn(ctx, original.id);
+  if (next?.error === 'cancelled') return finishRecovery(ctx, row, null, STOPPED);
+  const at = new Date();
+  const continuationJobId = next?.id ?? await sayAgain(ctx, original, at, original.requestedPrompt ?? original.prompt, { operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id });
+  await tellAgainWentAlong(ctx, original, at, words => words);
+  if (continuationJobId) return finishRecovery(ctx, row, continuationJobId, end);
+  if (await liveSubscription(ctx, row.agentId)) await finishRecovery(ctx, row, null, NOT_AWAITED);
 }
 
 function recoverableJob(job: Job): boolean {
-  return job.status === 'failed' && job.error !== 'cancelled';
+  return job.status === 'failed' && !stoppedOnPurpose(job);
 }
 
-async function recoveryContinuation(ctx: Ctx, row: Case, original: Job, delivery: typeof programDeliveries.$inferSelect): Promise<string | null> {
-  const at = new Date();
-  const continuationJobId = await sayAgain(ctx, original, at, original.requestedPrompt ?? original.prompt, { operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id });
-  await tellAgainWentAlong(ctx, original, at, words => words);
-  return continuationJobId;
-}
-
-async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | null, text: string): Promise<void> {
-  await ctx.db.update(programOperatorCases).set({ status: 'resolved', recoveryHold: false, continuationJobId, revision: row.revision + 1, resolution: { outcome: 'owner_recovered', text, image: row.pictureId } }).where(eq(programOperatorCases.id, row.id));
+async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | null, { outcome, text, actor }: HoldEnd): Promise<void> {
+  await ctx.db.update(programOperatorCases).set({ status: 'resolved', recoveryHold: false, continuationJobId, revision: row.revision + 1, resolution: { outcome, text, image: row.pictureId, ...(actor ? { actor } : {}) } }).where(eq(programOperatorCases.id, row.id));
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
   await logTurnFact(ctx, job!, text, { notification: { source: 'program_operator', tasks: [] }, operatorRecovery: row.id, continuation: continuationJobId });
 }
@@ -133,7 +185,7 @@ export async function reconcileRecoveryReceipts(ctx: Ctx, agentId: string): Prom
   const [waiting] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.continueOf))).limit(1);
   for (const incident of recorded) {
     if (waiting) await cancelRepeats(ctx, incident);
-    if (incident.recoveryHold) await finishRecovery(ctx, incident, incident.continuationJobId, 'The program recorded the original words; no duplicate was sent.');
+    if (incident.recoveryHold) await finishRecovery(ctx, incident, incident.continuationJobId, LATE_RECEIPT);
   }
 }
 
@@ -148,10 +200,11 @@ async function cancelRepeats(ctx: Ctx, incident: Case): Promise<void> {
 }
 
 /* The words may be on a later retry by the time the first try's receipt comes, and retries do not stop: whatever still waits
-   to repeat them ends, all in one walk. It meets each turn once, so a chain that loops ends too. */
+   to repeat them ends, all in one walk. It meets each turn once, so a chain that loops ends too. The retry of a cut turn stays:
+   that the program recorded the words does not mean it did them before the node went. */
 async function cancelContinuations(ctx: Ctx, agentId: string, first: string[]): Promise<void> {
   const chain = sql`with recursive repeats(id) as (select id from jobs where ${inArray(jobs.id, first)} union select j.id from jobs j join repeats r on j.continue_of = r.id where j.agent_id = ${agentId}) select id from repeats`;
-  await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.status, 'queued'), sql`${jobs.id} in (${chain})`));
+  await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.status, 'queued'), isNotNull(jobs.continueOf), sql`${jobs.id} in (${chain})`));
 }
 
 export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: string, nodeId: string): Promise<void> {
@@ -163,9 +216,10 @@ export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: s
     for (const row of rows) {
       const [child] = row.continuationJobId ? await tx.select().from(jobs).where(eq(jobs.id, row.continuationJobId)) : [];
       if (!row.recoveryHold && child?.status !== 'queued') continue;
-      if (child) await tx.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The owner already started a turn.', finishedAt: new Date() }).where(and(eq(jobs.id, child.id), eq(jobs.status, 'queued')));
+      /* The retry of a cut turn stays: the owner's own words do not do what that turn was to do. */
+      if (child) await tx.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The owner already started a turn.', finishedAt: new Date() }).where(and(eq(jobs.id, child.id), eq(jobs.status, 'queued'), isNull(jobs.retryOf)));
       await tx.update(jobs).set({ continueOf: row.jobId }).where(eq(jobs.id, typed.id));
-      await finishRecovery(inside, row, typed.id, 'The existing owner turn continues recovery. No second assignment was injected; the original assignment remains in the journal.');
+      await finishRecovery(inside, row, typed.id, OWNER_TURN);
     }
   });
 }

@@ -1,0 +1,48 @@
+  /permissions[2m - choose what Codex is allowed to do[0m[39m[49m            
+  /model[2m - choose what model and reasoning effort to use[0m[39m[49m                                                                                                       
+  /review[2m - review any changes and find issues[0m[39m[49m                                                                                                                 
+                                                        
+[48;5;8m                                                                            
+[1;2m› [0m[39m[48;5;8mFrom Restart check (CEO) to Lead codex (Head of development, Development):
+                                                                                           
+  Restart check (CEO): Live check 00000000-0000-4000-8000-000000000001. Answer in one word.
+                                                   
+[49m                                                                                           
+[2m• [0m[39m[49mDone 00000000-0000-4000-8000-000000000001.            
+                                                                                                                                                                
+[2m  Worked for 6s • 22:05                                                                                                                                         
+[0m[39m[49m                                                                            
+[48;5;8m                                                                                                                                                                
+[1;2m› [0m[39m[48;5;8mFrom Restart check (CEO) via Hornhoof, task assigned on #1 to Lead codex (Head of development, Development):
+                                                                                                                                                                
+  Restart check assigned work on #1.                                                                          
+                                                                                                                                                             
+  #1 "Live check 00000000-0000-4000-8000-000000000002 slow" is your department's. Read it with the task tool first: its body is the current truth and its log  
+  has the rest. Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent 1) with its executor and no 
+  gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.                                              
+                                                                                                                                                               
+[49m                                                                                                                                                             
+■ Conversation interrupted - use /feedback if something went wrong                                                                                             
+                                                                                                                  
+[48;5;8m                                                                                                                                                
+[1;2m› [0m[39m[48;5;8mFrom Hornhoof, machine state changed on #1 (after turn 00000000-0000-4000-8000-000000000003) to Lead codex (Head of development, Development):             
+                                                                                                                                                               
+  Your last turn on #1 "Live check 00000000-0000-4000-8000-000000000002 slow" was cut off at 2026-11-05 22:05 UTC: stand restarted, its program       
+  started again in the same container, after a crash or a restart of the container. Hornhoof runs it once more: check what that turn already did, then go on.
+                                                                                                                                                        
+  Restart check assigned work on #1.                                                                                                                         
+                                                                                                                                                             
+  #1 "Live check 00000000-0000-4000-8000-000000000002 slow" is your department's. Read it with the task tool first: its body is the current truth and its log  
+  has the rest. Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent 1) with its executor and no
+  gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.                                           
+                                                                                                                                                               
+[49m                                                                                                                                                             
+[2m• [0m[39m[49mDone 00000000-0000-4000-8000-000000000002.                                                                                                                   
+                                                                                                                  
+[2m  Worked for 6s • 22:06                                                                                                                                         
+[0m[39m[49m                                                                                                                                                             
+                                                                                                                                                               
+[1m›[0m[39m[49m [2mAsk Codex to do anything[0m[39m[49m                                                                                        
+ 
+  [38;2;246;226;183mGPT-6.1-Sol default[39m · [38;2;171;223;167m/work…
+[39m  [1m?[0m[39m[49m for shortcuts                                                                                                                     ⚠ [38;2;196;167;103m3 warnings[39m · [1mf2[0m[39m[49m to view
