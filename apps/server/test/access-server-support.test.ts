@@ -1,7 +1,7 @@
 import { it } from 'vitest';
 import { createInterface } from 'node:readline';
 import { eq } from 'drizzle-orm';
-import { agents, jobs, subscriptions } from '../src/db/schema.js';
+import { agents, jobs, subscriptions, turns } from '../src/db/schema.js';
 import { aclCompany } from './agent-view-company.js';
 import { connectNode } from './helpers.js';
 
@@ -9,6 +9,7 @@ it('serves the real browser integration', async () => {
   const key = 'k'.repeat(40);
   const c = await aclCompany({ NODE_KEY: key, STREAM_PING_MS: '100' });
   await c.db.update(subscriptions).set({ kind: 'api_key', targetKind: 'any' });
+  await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'ACL integration', openedAt: new Date() });
   const node = await connectNode(c.url, key);
   node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], terminals: true });
   const hiddenTask = await c.work('Hidden work', c.crew.other);
