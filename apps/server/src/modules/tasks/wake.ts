@@ -43,7 +43,7 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
 /* What a reviewer may take from the test runs on a task. */
-const READ_PROOF = 'Its testEvidence names the exact commit each test run pinned and whether its branch still stands there: only a run with proves true counts, and a run on another commit proves nothing about what you review.';
+const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and gateCounts without rerunning author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;

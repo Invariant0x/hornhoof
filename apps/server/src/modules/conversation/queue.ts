@@ -216,56 +216,77 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
 }
 
 /* A node and the owner of the subscription it runs: the person who may type into the agent's terminal there. */
-export type ProgramNode = { node: NodeIdentity; ownerPersonId: string };
+export type ProgramNode = { node: NodeIdentity; ownerPersonId: string; planId: string };
+
+const JOB_PLAN = { id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId };
+
+/* A program stays up after its last turn, on the plan that turn ran on, until a turn of another plan takes its place. Company
+   keys share the built-in node, so a window there shows that plan's program, even when the agent is on another key by now. A
+   personal plan has nodes of its own, with no other plan's program on them. */
+async function stayedProgram(ctx: Ctx, agentId: string, planId: string) {
+  const [last] = await ctx.db
+    .select(JOB_PLAN)
+    .from(jobs)
+    .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .where(and(conversationOf(agentId), isNotNull(jobs.startedAt), eq(subscriptions.kind, 'api_key')))
+    .orderBy(desc(jobs.startedAt))
+    .limit(1);
+  return last && last.id !== planId ? last : null;
+}
 
 /* The plan that holds the agent's program now, with the node it is on: the one its running turn went out to, since that
-   turn goes on there when the agent moves, or else its own and its live node there. */
-async function programPlan(ctx: Ctx, agentId: string) {
+   turn goes on there when the agent moves, or else its own and its live node there, unless another plan's program stayed
+   up there. */
+export async function programPlan(ctx: Ctx, agentId: string) {
   const [running] = await ctx.db
-    .select({ kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId })
+    .select(JOB_PLAN)
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(conversationOf(agentId), eq(jobs.status, 'running')))
     .limit(1);
-  const [own] = running
-    ? [running]
-    : await ctx.db
-        .select({ kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id })
-        .from(agents)
-        .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-        .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
-        .where(eq(agents.id, agentId));
-  return own;
+  if (running) return running;
+  const [own] = await ctx.db
+    .select({ id: subscriptions.id, kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id })
+    .from(agents)
+    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
+    .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
+    .where(eq(agents.id, agentId));
+  return (own?.kind === 'api_key' && (await stayedProgram(ctx, agentId, own.id))) || own;
 }
 
 /* The node that holds the agent's program now. A company key's agents are on the built-in node. */
 export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
   const own = await programPlan(ctx, agentId);
   const node = own && identityOf(own, own.nodeId);
-  return node ? { node, ownerPersonId: own.ownerPersonId } : null;
+  return node ? { node, ownerPersonId: own.ownerPersonId, planId: own.id } : null;
 }
-
-/* Whether the person types into the agent's terminal: its plan is theirs. Anyone else who reaches the agent writes through
-   Hornhoof. */
-export const typesInTerminal = async (ctx: Ctx, agentId: string, personId: string): Promise<boolean> => (await programPlan(ctx, agentId))?.ownerPersonId === personId;
 
 export const nodeOfAgent = async (ctx: Ctx, agentId: string) => (await programNode(ctx, agentId))?.node ?? null;
 
 /* The node someone who opens the agent's window watches. One that runs no turn starts its program where its next turn
    would go, and keeps that node; while no machine of its plan can take it, the window waits for the first to come back. */
 export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
-  const placed = await onAgent(ctx, agentId, async () => {
-    const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-    const sub = running ? null : await liveSubscription(ctx, agentId);
-    if (sub?.kind !== 'personal') return null;
-    const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
-    const place = agent ? await placement(ctx, agent, sub) : null;
-    if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
-    if (place) return { node: place.node, ownerPersonId: sub.ownerPersonId };
-    const [first] = await planNodes(ctx.db, [sub.id]);
-    return (await programNode(ctx, agentId)) ?? (first ? { node: nodeIdentity(first.id), ownerPersonId: sub.ownerPersonId } : null);
-  });
-  return placed ?? programNode(ctx, agentId);
+  return (await onAgent(ctx, agentId, () => placedProgram(ctx, agentId))) ?? programNode(ctx, agentId);
+}
+
+/* Where an agent on a personal plan that runs no turn opens now. Anyone else's stays where it is. */
+async function placedProgram(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const sub = running ? null : await liveSubscription(ctx, agentId);
+  if (sub?.kind !== 'personal') return null;
+  const at = (node: NodeIdentity) => ({ node, ownerPersonId: sub.ownerPersonId, planId: sub.id });
+  const place = await nextTurnNode(ctx, agentId, sub);
+  if (place) return at(place);
+  const [first] = await planNodes(ctx.db, [sub.id]);
+  return (await programNode(ctx, agentId)) ?? (first ? at(nodeIdentity(first.id)) : null);
+}
+
+/* The machine of its plan the agent's next turn would go to, which it keeps from now on. */
+async function nextTurnNode(ctx: Ctx, agentId: string, sub: Parameters<typeof placement>[2]): Promise<NodeIdentity | null> {
+  const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
+  const place = agent ? await placement(ctx, agent, sub) : null;
+  if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
+  return place?.node ?? null;
 }
 
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
