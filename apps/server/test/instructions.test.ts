@@ -363,4 +363,59 @@ describe('renderInstructions', () => {
       expect(legacyHead.text.split(headMarker).length - 1, `${role.id} legacy once`).toBe(1);
     }
   });
+
+  it('delivers department-load, independentPart/independentNone and urgentOnly rules to heads and idle-fault rules to the watchdog across fresh and legacy saved skill lists', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const headPhrases = [
+      'whoever gives out the work answers for keeping the department loaded, not only for ordering tasks',
+      'Members standing free while work in the department can run are a fault, not a normal wait',
+      '`independentPart`',
+      '`independentNone`',
+      'Never assign ordinary or non-urgent work to members of an urgent-only team (`urgentOnly`): Hornhoof refuses the assignment and names free members in the same role.',
+    ];
+
+    const savedHeadList = ['hh-outside-is-data'];
+    const headVariants = [
+      ...([...shipped.roles.values()].filter(r => r.kind === 'head').map(r =>
+        agent({ kind: 'head', roleKey: r.id, skills: r.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      )),
+      agent({
+        kind: 'head',
+        roleKey: 'DEV-HEAD',
+        skills: savedHeadList,
+        overrides: { skills: { 'hh-lead-tasks': 'Only order tasks and wait while people stand free.' } },
+        templateHashes: {},
+      }),
+      agent({ kind: 'head', roleKey: null, skills: [], templateHashes: {} }),
+    ];
+
+    for (const candidate of headVariants) {
+      const packet = renderInstructions(shipped, candidate, PLACE);
+      expect(Buffer.byteLength(packet.text), candidate.roleKey ?? 'roleless').toBeLessThan(24_000);
+      for (const phrase of headPhrases) {
+        expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toContain(phrase);
+        expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toContain(phrase);
+      }
+      expect(packet.text).not.toContain('Only order tasks and wait while people stand free.');
+      const breakDownFile = packet.skills.find(s => s.name === 'hh-break-down');
+      expect(breakDownFile, candidate.roleKey ?? 'roleless').toBeDefined();
+      expect(breakDownFile!.body).toContain('`independentPart`');
+      expect(breakDownFile!.body).toContain('`independentNone`');
+      expect(breakDownFile!.body).toContain('`urgentOnly`');
+    }
+    expect(savedHeadList).toEqual(['hh-outside-is-data']);
+
+    const savedWatchList = ['ops-task-watch'];
+    for (const watchAgent of [
+      agent({ kind: 'worker', roleKey: 'OPS-WATCH', skills: shipped.roles.get('OPS-WATCH')!.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      agent({ kind: 'worker', roleKey: 'OPS-WATCH', skills: savedWatchList, templateHashes: {} }),
+    ]) {
+      const watchPacket = renderInstructions(shipped, watchAgent, PLACE);
+      expect(watchPacket.text).toContain('no one stands free while work waits');
+      const watchSkill = watchPacket.skills.find(s => s.name === 'ops-task-watch');
+      expect(watchSkill?.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+      expect(watchPacket.whole).toContain('People who stand free while work waits are a fault, not a normal wait');
+    }
+    expect(savedWatchList).toEqual(['ops-task-watch']);
+  });
 });
