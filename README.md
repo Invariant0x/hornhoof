@@ -174,7 +174,7 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 
 - **Machines in different homes, connected directly**, without going through the public link.
 - **More machines holding the company's data**, five out of ten instead of three.
-- **Phones as workers.** An old Android phone on a charger runs work, and any device with a browser lends its power by keeping a page open.
+- **Phones and tablets as workers.** One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests, and checks on a real device.
 - **Departments on their own turns.** Development on turn 8 while marketing is on turn 3, each with its own progress on the map.
 - **Checkpoints for every department.** Marketing, content and sales get stages and checks between them, the way development has them.
 - **Schemes to share.** Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working.
