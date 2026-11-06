@@ -170,8 +170,13 @@ for (const lang of ['en', 'ru'] as const) {
         await page.route('**/api/people', route => route.fulfill({ json: { people: [LONG_PERSON] } }));
         await page.goto('/people');
         const row = page.locator('.ptable tbody tr').first();
+        await expect(row.locator('xpath=ancestor::div[contains(@class, "fit")]')).toHaveCount(1);
         const name = row.locator('.pname');
         const actions = row.locator('.row-actions');
+        const group = actions.locator('.entry-actions');
+        await expect(group).toHaveAttribute('role', 'group');
+        const edit = group.getByRole('button', { name: m.people.editLabel(LONG_PERSON.name), exact: true });
+        await expect(edit).toHaveCSS('min-height', '44px');
         await expect(name).toBeVisible();
         await capture(page, info, `people-${look}`);
         const cells = row.locator('td');
@@ -181,7 +186,6 @@ for (const lang of ['en', 'ru'] as const) {
         if (width === 375) expect(await cells.first().evaluate(el => getComputedStyle(el, '::before').content)).toBe(`"${m.people.columns.name}"`);
         await expectWrappedText(name);
         await expectInside(row, [name, actions]);
-        const edit = row.getByRole('button', { name: m.people.editLabel(LONG_PERSON.name), exact: true });
         await expectInside(actions, [edit]);
         await edit.click();
         await expect(page.getByRole('heading', { name: m.people.editHeading(LONG_PERSON.name) })).toBeVisible();
