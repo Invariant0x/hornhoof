@@ -18,7 +18,8 @@ async function company() {
   const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+  /* Timer tests need a ready modern sender; conversation tests cover the legacy instruction limit. */
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Wanda heads the Operations it starts with; the others rest, so each test's rounds are its own. */
   const [wanda] = await db.update(agents).set({ name: 'Wanda' }).where(eq(agents.kind, 'head')).returning();
@@ -39,7 +40,6 @@ describe('timers', () => {
     const status = async () => (await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
     expect(await status()).toBe('queued');
     await minuteRound(app.ctx, new Date(), () => () => {});
-    console.info('HH489_TRACE', JSON.stringify({ case: 'minute-round', skillFiles: app.ctx.hub.takesSkillFiles(BUILTIN), jobs: await db.select({ status: jobs.status, error: jobs.error, result: jobs.result }).from(jobs).where(eq(jobs.id, jobId)) }));
     expect(await status()).toBe('running');
   });
 
@@ -78,7 +78,6 @@ describe('timers', () => {
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, wandaId), eq(agentEvents.kind, 'message')));
     expect(said!.personId).toBeNull();
     /* Its round still waits, so the next tick adds no second one. */
-    console.info('HH489_TRACE', JSON.stringify({ case: 'timer-round', skillFiles: app.ctx.hub.takesSkillFiles(BUILTIN), jobs: await db.select({ status: jobs.status, error: jobs.error, result: jobs.result }).from(jobs).where(eq(jobs.agentId, wandaId)) }));
     expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 25 * MIN))).toBe(0);
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, round!.id));
     expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 25 * MIN))).toBe(1);
