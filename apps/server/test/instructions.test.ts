@@ -77,6 +77,20 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
 
 const PLACE = { company: 'Acme', department: 'Development', product: 'Mascot' };
 
+describe('what a node from before skill files takes', () => {
+  const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
+
+  it('holds what every shipped role always carries, or its agent gets no turn there at all', () => {
+    const over = [...shipped.roles.values()].filter(role => always(role).whole.length > OLD_NODE_INSTRUCTIONS).map(role => [role.id, always(role).whole.length]);
+    expect(over).toEqual([]);
+  });
+
+  it('holds what the orchestrator always carries', () => {
+    expect(orchestratorSteady(shipped).whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+  });
+});
+
 describe('renderInstructions', () => {
   it('shows the header, the role and each enabled skill between markers on the card', () => {
     const { parts, raw } = renderInstructions(T, agent(), PLACE);
