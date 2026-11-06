@@ -7,7 +7,7 @@ export const MAX_CONTEXT_BYTES = 64 * 1024;
 
 const MAX_RECORD_CHARS = 16 * 1024;
 const MIN_CUT_PIECE = 6;
-const MIN_SPLIT_SECRET = 8;
+const MAX_PASSES = 8;
 const MAX_DECODED_SPANS = 16;
 const CUT_NOTICE = '[cut: older records left out]\n';
 
@@ -142,16 +142,42 @@ function splitRecords(text: string): Records {
   return { bodies, endings };
 }
 
-/* Lines a known secret runs across when the line breaks and spaces are taken out. */
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+const quotedWords = (body: string): string => (body.match(QUOTED) ?? []).map(quoted => decodeEscapes(quoted.slice(1, -1))).join('');
+/* What a line may say of a secret, and what between the pieces of it is not part of it: line breaks, concatenation, a comment, a variable's name. */
+const LINE_VIEWS: readonly ((body: string) => string)[] = [body => body, body => body.normalize('NFKC'), decodeEscapes, decodePercent, quotedWords];
+const BETWEEN_PIECES = [/\s+/g, /[^\p{L}\p{N}]+/gu];
+
+function lineHolding(starts: readonly number[], offset: number): number {
+  let low = 0, high = starts.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (starts[middle]! <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+function markLinesSpanned(parts: readonly string[], joined: string, target: string, marked: Set<number>): void {
+  const starts: number[] = [];
+  let length = 0;
+  for (const part of parts) { starts.push(length); length += part.length; }
+  for (let at = joined.indexOf(target); at !== -1; at = joined.indexOf(target, at + 1)) {
+    const last = lineHolding(starts, at + target.length - 1);
+    for (let line = lineHolding(starts, at); line <= last; line++) if (parts[line]) marked.add(line);
+  }
+}
+/* Lines a known secret of any length runs across in some view. A redaction or a line too long to judge says nothing: it goes anyway. */
 function linesSplittingASecret(bodies: readonly string[], forms: readonly string[]): Set<number> {
-  const marked = new Set<number>(), starts: number[] = [];
-  let joined = '';
-  for (const body of bodies) { starts.push(joined.length); joined += body.replace(/\s+/g, ''); }
-  const lineAt = (offset: number) => { let line = 0; while (line + 1 < starts.length && starts[line + 1]! <= offset) line++; return line; };
-  for (const form of forms) {
-    if (form.length < MIN_SPLIT_SECRET) continue;
-    for (let at = joined.indexOf(form); at !== -1; at = joined.indexOf(form, at + 1)) {
-      for (let line = lineAt(at); line <= lineAt(at + form.length - 1); line++) marked.add(line);
+  const marked = new Set<number>(), seen = new Set<string>();
+  if (!forms.length) return marked;
+  const judged = bodies.map(body => (body === REDACTED || body.length > MAX_RECORD_CHARS ? '' : body));
+  for (const view of LINE_VIEWS) {
+    const viewed = judged.map(view);
+    for (const between of BETWEEN_PIECES) {
+      const parts = viewed.map(part => part.replace(between, '')), joined = parts.join('');
+      if (seen.has(joined)) continue;
+      seen.add(joined);
+      for (const target of new Set(forms.map(form => form.replace(between, '')))) if (target) markLinesSpanned(parts, joined, target, marked);
     }
   }
   return marked;
@@ -182,8 +208,8 @@ function pemBlockEnd(bodies: readonly string[], start: number): number | null {
 }
 
 export interface SanitizedText { text: string; redactedRecords: number }
-export function sanitizeText(text: string, secrets: readonly string[]): SanitizedText {
-  const forms = knownForms(secrets), { bodies, endings } = splitRecords(text);
+function cleanOnce(text: string, forms: readonly string[]): SanitizedText {
+  const { bodies, endings } = splitRecords(text);
   const marked = new Set([...linesSplittingASecret(bodies, forms), ...linesCutThroughASecret(bodies, forms)]);
   const out: string[] = [];
   let redactedRecords = 0;
@@ -191,11 +217,24 @@ export function sanitizeText(text: string, secrets: readonly string[]): Sanitize
     const end = pemBlockEnd(bodies, line) ?? line;
     if (end !== line || marked.has(line) || PEM_BEGIN.test(bodies[line]!) || recordIsDoubtful(bodies[line]!, forms)) {
       out.push(REDACTED + endings[end]!);
-      redactedRecords++;
+      if (end !== line || bodies[line] !== REDACTED) redactedRecords++;
       line = end;
     } else out.push(bodies[line]! + endings[line]!);
   }
   return { text: out.join(''), redactedRecords };
+}
+/* A line gone can bring two others together, so cleaning repeats until it finds nothing. A chain too long to follow leaves nothing to judge. */
+export function sanitizeText(text: string, secrets: readonly string[]): SanitizedText {
+  const forms = knownForms(secrets);
+  let current = text, redactedRecords = 0;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const once = cleanOnce(current, forms);
+    if (!once.redactedRecords) return { text: current, redactedRecords };
+    current = once.text;
+    redactedRecords += once.redactedRecords;
+  }
+  const { bodies, endings } = splitRecords(current);
+  return { text: bodies.map((_, line) => REDACTED + endings[line]!).join(''), redactedRecords: redactedRecords + bodies.length };
 }
 
 /* The second pass: text that sanitizing would still change has not been sanitized. */
@@ -237,7 +276,7 @@ export function classifyPath(path: string): PathClass {
 
 /* A context file: cleaned first, then cut from its old end at whole records. A record too long for the limit is not cut, it goes. */
 export function sanitizeContext(text: string | null, secrets: readonly string[], maxBytes = MAX_CONTEXT_BYTES): string {
-  if (text === null) return 'unavailable\n';
+  if (text === null) return sanitizeText('unavailable\n', secrets).text;
   const clean = sanitizeText(text, secrets).text;
   if (Buffer.byteLength(clean) <= maxBytes) return clean;
   const lines = clean.split('\n'), kept: string[] = [];
@@ -247,5 +286,5 @@ export function sanitizeContext(text: string | null, secrets: readonly string[],
     if (room < 0) break;
     kept.unshift(lines[line]!);
   }
-  return kept.length ? CUT_NOTICE + kept.join('\n') : REDACTED;
+  return kept.length ? sanitizeText(CUT_NOTICE + kept.join('\n'), secrets).text : REDACTED;
 }

@@ -48,13 +48,14 @@ function assertAdoptable(snapshot: WipSnapshot, input: RestoreInput, workspace: 
   if (snapshot.digest !== input.contentDigest || manifest.baseSha !== input.baseSha || workspace.sourceHeadSha !== manifest.baseSha || manifest.requiresRepair) throw refused();
   if (workspace.binding.assignmentEpoch <= manifest.epoch) throw new HandoffFault('stale_epoch');
 }
-const TEMPORARY = /(?:^|\/)\.hh-restore-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/* Only what this restore itself would have left, and the temporary file a crash left: anything else there is somebody's work. */
-async function clearOwnLeftovers(workspace: VerifiedWorkspace, input: RestoreInput, manifest: Manifest): Promise<void> {
-  const own = new Set(manifest.files.map(file => file.path));
+/* A path may differ from the base only by what this restore leaves there, as a crash may have stopped it midway; its own writes are whole, by rename.
+   Anything else is somebody's work, whatever its name, and stops the restore before its first write. */
+async function assertNoOtherWork(workspace: VerifiedWorkspace, input: RestoreInput, manifest: Manifest): Promise<void> {
+  const planned = new Map(manifest.files.map(file => [file.path, file]));
   for (const delta of await readDeltas(workspace, input, manifest.baseSha)) {
-    if (!delta.tracked && TEMPORARY.test(delta.path)) removeFile(workspace.realPath, delta.path);
-    else if ((delta.tracked || classifyPath(delta.path) === 'task') && (delta.doubtful || !own.has(delta.path))) throw refused();
+    if (!delta.tracked && classifyPath(delta.path) !== 'task') continue;
+    const file = planned.get(delta.path);
+    if (delta.doubtful || !file || !holdsWhatItLeaves(workspace, manifest, file)) throw refused();
   }
 }
 /* A folder on the way that is a link stops everything before the first write. A file or nothing there is for the deletes to settle. */
@@ -82,25 +83,29 @@ function writeOpened(fd: number, bytes: Buffer, mode: number, owner: JobUser): v
   fchmodSync(fd, mode);
   fsyncSync(fd);
 }
-/* A new file beside the target, renamed over it: a link standing there is replaced and never written through. */
-function writePlain(root: string, path: string, bytes: Buffer, mode: number, owner: JobUser): void {
+/* A new file in the staging folder beside the repository, renamed over the target: a link standing there is replaced and never written through,
+   and a crash leaves no file of this restore in the repository, for nobody could tell it from somebody's work. */
+function writeInFolder(folder: number, name: string, bytes: Buffer, mode: number, owner: JobUser, staging: number): void {
+  const temporary = under(staging, `.staging-${randomUUID()}`);
+  const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    try { writeOpened(fd, bytes, mode, owner); } finally { closeSync(fd); }
+    renameSync(temporary, under(folder, name));
+  } catch (error) { rmSync(temporary, { force: true }); throw error; }
+}
+function writePlain(root: string, path: string, bytes: Buffer, mode: number, owner: JobUser, staging: number): void {
   const parts = path.split('/'), name = parts.pop()!;
-  withPinnedFolder(root, parts, folder => {
-    const temporary = under(folder, `.hh-restore-${randomUUID()}`);
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try {
-      try { writeOpened(fd, bytes, mode, owner); } finally { closeSync(fd); }
-      renameSync(temporary, under(folder, name));
-    } catch (error) { rmSync(temporary, { force: true }); throw error; }
-  }, enterFolder(owner));
+  withPinnedFolder(root, parts, folder => { writeInFolder(folder, name, bytes, mode, owner, staging); }, enterFolder(owner));
 }
 const gone = (error: unknown): boolean => errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR';
-function removeFile(root: string, path: string): void {
+/* Deleting a file can make room for a folder the same checkpoint fills, and only then is a folder at its name this restore's own. */
+const becomesFolder = (manifest: Manifest, path: string): boolean => manifest.files.some(file => file.action !== 'delete' && file.path.startsWith(`${path}/`));
+function removeFile(root: string, path: string, manifest: Manifest): void {
   const parts = path.split('/'), name = parts.pop()!;
   try {
     withPinnedFolder(root, parts, folder => { unlinkSync(under(folder, name)); });
   } catch (error) {
-    if (!gone(error)) throw error;
+    if (!gone(error) && !(errorCode(error) === 'EISDIR' && becomesFolder(manifest, path))) throw error;
   }
   pruneEmpty(root, parts);
 }
@@ -110,43 +115,42 @@ function pruneEmpty(root: string, parts: readonly string[]): void {
     for (let depth = parts.length; depth > 0; depth--) withPinnedFolder(root, parts.slice(0, depth - 1), folder => { rmdirSync(under(folder, parts[depth - 1]!)); });
   } catch { /* A folder still in use ends the climb. */ }
 }
-function applyManifest(root: string, snapshot: WipSnapshot, owner: JobUser): void {
-  const { files } = snapshot.manifest;
-  for (const file of files.filter(file => file.action === 'delete')) removeFile(root, file.path);
-  for (const file of files.filter(file => file.action !== 'delete')) writePlain(root, file.path, snapshot.payloads.get(file.id)!, file.mode === '100755' ? 0o755 : 0o644, owner);
+function applyManifest(root: string, snapshot: WipSnapshot, owner: JobUser, staging: number): void {
+  const { manifest, payloads } = snapshot, { files } = manifest;
+  for (const file of files.filter(file => file.action === 'delete')) removeFile(root, file.path, manifest);
+  for (const file of files.filter(file => file.action !== 'delete')) writePlain(root, file.path, payloads.get(file.id)!, file.mode === '100755' ? 0o755 : 0o644, owner, staging);
 }
-/* A deleted file may have left its name to a folder of the same name. */
-function holdsNoFile(root: string, path: string): boolean {
-  try { return lstatSync(join(root, path)).isDirectory(); } catch (error) { return gone(error); }
+function holdsNoFile(root: string, path: string, manifest: Manifest): boolean {
+  try { return lstatSync(join(root, path)).isDirectory() && becomesFolder(manifest, path); } catch (error) { return gone(error); }
+}
+function holdsWhatItLeaves(workspace: VerifiedWorkspace, manifest: Manifest, file: ManifestFile): boolean {
+  if (file.action === 'delete') return holdsNoFile(workspace.realPath, file.path, manifest);
+  const read = readVerifiedFile(workspace.realPath, file.path, workspace.ownerUid, MAX_FILE_BYTES);
+  return read.kind === 'file' && read.digest === file.contentSha256 && read.mode === file.mode;
 }
 /* Read back from the workspace, against the manifest: a digest of what is there, never of what was meant to be. */
 function restoredDigest(workspace: VerifiedWorkspace, manifest: Manifest): string {
   const lines = manifest.files.map(file => {
-    if (file.action === 'delete') {
-      if (!holdsNoFile(workspace.realPath, file.path)) throw refused();
-      return `delete ${file.path}`;
-    }
-    const read = readVerifiedFile(workspace.realPath, file.path, workspace.ownerUid, MAX_FILE_BYTES);
-    if (read.kind === 'unsafe' || read.digest !== file.contentSha256 || read.mode !== file.mode) throw refused();
-    return `${read.mode} ${read.digest} ${file.path}`;
+    if (!holdsWhatItLeaves(workspace, manifest, file)) throw refused();
+    return `${file.action} ${file.mode ?? ''} ${file.contentSha256 ?? ''} ${file.path}`;
   });
   return sha256(lines.join('\n'));
 }
-function writeContext(workspace: VerifiedWorkspace, snapshot: WipSnapshot, owner: JobUser): string {
-  const root = dirname(workspace.realPath), folder = `handoff/${snapshot.manifest.captureId}`;
+function writeContext(folder: number, snapshot: WipSnapshot, owner: JobUser): void {
   const parts = [[META_FILES.diffStat, snapshot.context.diffStat], [META_FILES.lastTests, snapshot.context.lastTests], [META_FILES.conversationTail, snapshot.context.conversationTail]] as const;
-  for (const [name, bytes] of parts) writePlain(root, `${folder}/${name}`, bytes, 0o644, owner);
-  return join(root, folder);
+  for (const [name, bytes] of parts) writeInFolder(folder, name, bytes, 0o644, owner, folder);
 }
 async function restoreOnce(input: RestoreInput, workspace: VerifiedWorkspace, scratch: string): Promise<z.infer<typeof Done>> {
-  const snapshot = await fetchCheckpoint(input, scratch), { manifest } = snapshot;
+  const snapshot = await fetchCheckpoint(input, scratch), { manifest } = snapshot, outside = dirname(workspace.realPath);
   assertAdoptable(snapshot, input, workspace);
-  await clearOwnLeftovers(workspace, input, manifest);
+  await assertNoOtherWork(workspace, input, manifest);
   assertRealFolders(workspace.realPath, manifest.files);
-  const contextDir = writeContext(workspace, snapshot, input.owner);
-  applyManifest(workspace.realPath, snapshot, input.owner);
+  withPinnedFolder(outside, ['handoff', manifest.captureId], folder => {
+    writeContext(folder, snapshot, input.owner);
+    applyManifest(workspace.realPath, snapshot, input.owner, folder);
+  }, enterFolder(input.owner));
   return { handoffId: manifest.handoffId, captureId: manifest.captureId, taskId: manifest.taskId, epoch: workspace.binding.assignmentEpoch, baseSha: manifest.baseSha, checkpointSha: snapshot.sha,
-    restoredTreeDigest: restoredDigest(workspace, manifest), contextDir, readyForPrompt: true };
+    restoredTreeDigest: restoredDigest(workspace, manifest), contextDir: join(outside, 'handoff', manifest.captureId), readyForPrompt: true };
 }
 /* Once per assignment: a lost answer gets the same answer, and what the replacement did since stays. */
 function readDone(file: string): z.infer<typeof Done> | null {
