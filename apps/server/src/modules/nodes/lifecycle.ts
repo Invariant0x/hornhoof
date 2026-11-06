@@ -31,14 +31,15 @@ async function receiveOperatorFrame(ctx: Ctx, id: NodeIdentity, msg: OperatorNod
   if (await hasCurrentKey(ctx, id)) receiveOperatorReply(ctx, id, msg);
 }
 
-async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>, transport?: NodeTransport): Promise<void> {
+async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>): Promise<void> {
   if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
-  await handleNodeMessage(ctx, id, msg, undefined, transport);
+  await handleNodeMessage(ctx, id, msg);
   if (msg.type === 'hello') await restoreOperatorNode(ctx, id);
 }
 
 export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage, transport?: NodeTransport): Promise<void> {
-  return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg, transport);
+  if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
+  return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg);
 }
