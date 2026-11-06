@@ -132,4 +132,15 @@ describe('legacy scoped materials', () => {
     expect(response.body).not.toContain('material_snapshot');
     expect((await f.db.select().from(requestInternal)).length).toBe(1);
   });
+
+  it.each(['private-staging', 'public-stamp'] as const)('refuses an unclassified private source instead of treating %s as legacy permission', async state => {
+    const f = await legacy();
+    if (state === 'private-staging') await f.db.insert(requestInternal).values({ requestId: f.question.id, companyId: f.company.id, materialSnapshot: { schemaVersion: 1, versions: [] } });
+    else await f.db.update(requests).set({ materialRevision: 1, materialDigest: 'a'.repeat(64) }).where(eq(requests.id, f.question.id));
+    const response = await f.app.inject({ url: f.url, ...as(f.ceo) });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.reason).toBe('source_producer_unavailable');
+    expect(response.body).not.toContain(f.common.id);
+    expect((await f.db.select().from(requests).where(eq(requests.id, f.question.id)))[0]!.status).toBe('open');
+  });
 });
