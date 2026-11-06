@@ -1,6 +1,6 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { taskEvents, testParts, testRuns } from '../../db/schema.js';
+import { attachments, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { endWaitForRun } from './external-wait.js';
 import { endRunWaits } from './wait-state.js';
@@ -44,7 +44,9 @@ export async function finishAuthorCheck(ctx: Ctx, runId: string): Promise<Moved>
 
 async function complete(ctx: Ctx, run: typeof testRuns.$inferSelect, task: Task, pending: PendingSubmission, events: { data: Record<string, unknown> }[]): Promise<Moved> {
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(testParts.part);
-  const printed = readAuthorCheck(run.id, parts);
+  const names = parts.map(part => `tests-${run.number}-${part.part}.log`);
+  const files = names.length ? await ctx.db.select().from(attachments).where(and(eq(attachments.taskId, task.id), inArray(attachments.name, names))) : [];
+  const printed = readAuthorCheck(run, parts, files);
   if (printed) await recordAuthorCheck(ctx.db, task.id, printed);
   const quality = printed ? await authorQuality(ctx.db, task.id, run.commitSha) : null;
   const output = parts.map(part => part.tail).filter(Boolean).join('\n') || `Author check ${run.number} ended without a structured result.`;
@@ -61,17 +63,19 @@ async function complete(ctx: Ctx, run: typeof testRuns.$inferSelect, task: Task,
   return failAuthorCheck(ctx, run.agentId, task.id, { outcome, text: `Author check ${run.number} failed on ${run.commitSha}.\n\n${output}` });
 }
 
-function readAuthorCheck(runId: string, parts: (typeof testParts.$inferSelect)[]): AuthorCheckResult | null {
+function readAuthorCheck(run: typeof testRuns.$inferSelect, parts: (typeof testParts.$inferSelect)[], files: (typeof attachments.$inferSelect)[]): AuthorCheckResult | null {
   const part = parts[0];
   if (!part) return null;
-  const lines = (part.tail ?? '').split('\n').filter(line => line.startsWith('AUTHOR_CHECK '));
+  const file = files.find(candidate => candidate.name === `tests-${run.number}-${part.part}.log`);
+  const log = file ? Buffer.from(file.bytes).toString('utf8') : (part.tail ?? '');
+  const lines = log.split('\n').filter(line => line.startsWith('AUTHOR_CHECK '));
   for (const line of lines.reverse()) {
     try {
       const value: unknown = JSON.parse(line.slice('AUTHOR_CHECK '.length));
       if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
       const raw = value as Record<string, unknown>;
       const stages = Array.isArray(raw.stages) ? raw.stages.map(stage => stage && typeof stage === 'object' && !Array.isArray(stage) ? { ...stage, partId: part.id } : stage) : raw.stages;
-      const parsed = AuthorCheckInput.safeParse({ ...raw, runId, stages });
+      const parsed = AuthorCheckInput.safeParse({ ...raw, runId: run.id, stages });
       if (parsed.success) return parsed.data;
     } catch { /* A malformed line is unavailable output, never a manufactured record. */ }
   }
