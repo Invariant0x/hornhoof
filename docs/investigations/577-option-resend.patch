@@ -1,0 +1,69 @@
+diff --git a/apps/node/src/terminal/host.ts b/apps/node/src/terminal/host.ts
+index b1edf787..38ad3ef9 100644
+--- a/apps/node/src/terminal/host.ts
++++ b/apps/node/src/terminal/host.ts
+@@ -2728,8 +2728,10 @@ export class TerminalHost {
+   async resize(m: Msg<'term.resize'>): Promise<void> {
+     const wanted = this.wanted.get(m.termId);
+     if (!wanted) return;
++    const taller = m.rows !== wanted.size.rows;
+     wanted.size = { cols: m.cols, rows: m.rows };
+     await this.fit(wanted.key);
++    if (taller) this.views.get(m.termId)?.history?.resized();
+   }
+ 
+   /* One session runs one program at one size. People watching it in windows of different sizes are tmux clients of
+diff --git a/apps/node/src/terminal/view-stream.ts b/apps/node/src/terminal/view-stream.ts
+index 2ebb960e..10bb9e6c 100644
+--- a/apps/node/src/terminal/view-stream.ts
++++ b/apps/node/src/terminal/view-stream.ts
+@@ -64,6 +64,7 @@ export class ViewHistory {
+   private timer: NodeJS.Timeout | null = null;
+   private again = false;
+   private stopped = false;
++  private stale = false;
+ 
+   constructor(
+     private readonly tmux: Pick<Tmux, 'run'>,
+@@ -87,6 +88,11 @@ export class ViewHistory {
+     this.wake();
+   }
+ 
++  resized(): void {
++    this.stale = true;
++    this.wake();
++  }
++
+   stop(): void {
+     this.stopped = true;
+     if (this.timer) clearTimeout(this.timer);
+@@ -118,6 +124,7 @@ export class ViewHistory {
+     const [status] = await this.say();
+     if (!status || this.stopped) return true;
+     const now = paneOf(status);
++    if (this.stale || now.height !== this.pane.height) return this.resend(now);
+     const rows = Math.min(rowsGone(this.pane, now), VIEW_HISTORY_LINES);
+     const left = now.alternate && !this.pane.alternate;
+     if (rows || left) return this.gave(now, rows, left);
+@@ -140,6 +147,21 @@ export class ViewHistory {
+     return true;
+   }
+ 
++  private async resend(wanted: Pane): Promise<boolean> {
++    const said = await this.say(this.capture('-S', String(-VIEW_HISTORY_LINES), '-E', '-1'), this.capture('-a', '-q'), this.capture('-S', '0', '-E', '1'));
++    const now = paneOf(said.at(-1));
++    if (this.stopped) return true;
++    if (this.sequence || !sameRows(now, wanted) || now.height !== wanted.height) return false;
++    const [history = '', saved = '', top = ''] = said.slice(0, -1);
++    this.pane = now;
++    this.stale = false;
++    this.given = savedRows(saved);
++    const lines = [...(now.size ? linesOf(history) : []), ...this.given];
++    this.give(`\x1b7\x1b[${now.height + 1};1H\x1b[J\x1b8\x1b[3J${intoHistory(lines, { rows: top, row: now.row, col: now.col })}`);
++    await this.repaint();
++    return true;
++  }
++
+   private keep(saved: string[]): string[] {
+     const fresh = this.notGiven(saved);
+     this.given = saved;
