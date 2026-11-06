@@ -38,8 +38,8 @@ type Applied = {
   removed?: { template: TemplateKey | null; name: string | null }[];
   hired?: { id: string; name: string }[];
 };
-type Proposal = { proposalId: string; brief: string; items: StructureItem[] };
-type StaffProposal = { proposalId: string; kind: 'staff'; department: string; brief: string; people: StaffLine[] };
+type Proposal = { proposalId: string; brief: string; items: StructureItem[]; materialRevision?: number | null; materialDigest?: string | null };
+type StaffProposal = { proposalId: string; kind: 'staff'; department: string; brief: string; people: StaffLine[]; materialRevision?: number | null; materialDigest?: string | null };
 type Todo = { items: { text: string; state: 'todo' | 'doing' | 'done' }[] };
 
 const field = (data: unknown, key: string): string => {
@@ -534,9 +534,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   const cards = (
     <>
-      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={focusLine} locked={cardLock} />}
+      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items, ...{ materialRevision: pending.materialRevision, materialDigest: pending.materialDigest } }} departments={org.departments} onCorrect={focusLine} locked={cardLock} />}
       {staffing && (
-        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={focusLine} locked={cardLock} />
+        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people, ...{ materialRevision: staffing.materialRevision, materialDigest: staffing.materialDigest } }} onCorrect={focusLine} locked={cardLock} />
       )}
       {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} locked={handLock} />}
       {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} locked={handLock} />}
