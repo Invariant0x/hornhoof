@@ -162,7 +162,16 @@ async function seedSupportWorld() {
   for (const kind of ['support_classification', 'support_reply_review'] as const) {
     const [chk] = await c.db
       .insert(modelChecks)
-      .values({ companyId: c.companyId, departmentId: c.sales.id, kind, status: 'on', validUntil: new Date('2026-11-12T00:00:00.000Z') })
+      .values({
+        companyId: c.companyId,
+        departmentId: c.sales.id,
+        kind,
+        status: 'on',
+        bindingDigest: sha(`support-binding-${kind}`),
+        thresholds: { falseAllowRate: 0, falseDenyRate: 0.2, classErrorRate: 0 },
+        thresholdsBy: c.ids.sam,
+        validUntil: new Date('2026-11-12T00:00:00.000Z'),
+      })
       .returning();
     const hashes = OUTBOUND_CHECK_HASHES[kind];
     await c.db.insert(modelCheckRevisions).values({
@@ -820,7 +829,8 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
 
     const [reqRow] = await w.c.db.select().from(requests).where(eq(requests.id, bound!.requestId));
     expect(reqRow?.kind).toBe('approval');
-    expect(reqRow?.approvalChannel).toBe('outbound');
+    expect(reqRow?.decisionTopic).toBe('task');
+    expect(reqRow?.approvalChannel).toBe('message');
 
     const [storedClass] = await w.c.db.select().from(supportClassifications).where(eq(supportClassifications.id, classified.classificationReceiptId));
     await expect(

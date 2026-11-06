@@ -237,8 +237,8 @@ async function seedOutboundViewWorld() {
       agentId: c.seller.id,
       kind: 'approval',
       text: 'Approve outbound message to verified retail lead',
-      decisionTopic: 'department',
-      approvalChannel: 'outbound',
+      decisionTopic: 'task',
+      approvalChannel: 'message',
       approvalKind: 'first_contact',
     })
     .returning();
@@ -264,8 +264,8 @@ async function seedOutboundViewWorld() {
       agentId: c.seller.id,
       kind: 'approval',
       text: 'Approve outbound approach for Verified retail leads',
-      decisionTopic: 'department',
-      approvalChannel: 'outbound',
+      decisionTopic: 'task',
+      approvalChannel: 'message',
       approvalKind: 'approach',
     })
     .returning();

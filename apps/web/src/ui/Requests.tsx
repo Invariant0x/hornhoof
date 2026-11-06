@@ -5,6 +5,7 @@ import type { TaskPlace, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
+import { BoundApprovalSnapshot } from './Outbound';
 import { proseErrorText } from './TaskAttachments';
 
 /* Whether this person's words to the agent in its window or terminal answer any of these: a question and a stuck task they
@@ -283,8 +284,8 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
 }
 
 /* The exact commit, linked on GitHub when the repository is there. */
-/* An approval under a department's policy is about the work its words name, and shows no commit. */
-const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : null);
+/* An approval under a department's policy is about the work its words name, and shows its bound snapshot when present. */
+const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : <BoundApprovalSnapshot requestId={request.id} />);
 
 function Commit({ request }: { request: WaitingRequest }) {
   const code = <code className="req-commit">{request.commit}</code>;
