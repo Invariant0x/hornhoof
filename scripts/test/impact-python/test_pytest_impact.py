@@ -108,9 +108,8 @@ def test_uncertain_graph_is_unavailable(tmp_path: Path, extra: dict[str, str]) -
 @pytest.mark.parametrize("path", ["../secret.py", "/etc/passwd", "src/../a.py"])
 def test_unsafe_paths_do_not_open_files(tmp_path: Path, path: str) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, inventory_tests(files), [path])["reason"] == (
-        "invalid_inventory"
-    )
+    result = select_tests(tmp_path, [*files, path], inventory_tests(files), [path])
+    assert result["reason"] == "invalid_inventory"
 
 
 def test_symlink_cannot_import_outside_the_package(tmp_path: Path) -> None:
