@@ -423,7 +423,10 @@ it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful prod
   const part = await nextOf(node, 'tests.run');
   const message = productDone(part) as ReturnType<typeof productDone> & { environmentReceipt: import('@hornhoof/protocol').TestEnvironmentReceipt };
   if (kind === 'missing') delete (message as { environmentReceipt?: unknown }).environmentReceipt;
-  if (kind === 'wrong-selection') message.environmentReceipt.files = ['test/a.ts'];
+  if (kind === 'wrong-selection') {
+    if (message.environmentReceipt.version !== 1) throw new Error('This fixture requires a legacy receipt.');
+    message.environmentReceipt.files = ['test/a.ts'];
+  }
   if (kind === 'wrong-hash') message.environmentReceipt.manifestHash = 'f'.repeat(64);
   node.send(message);
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');

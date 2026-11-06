@@ -160,6 +160,23 @@ describe('the facts of any turn', () => {
     const empty = await c.turn(7, 'closed', 0, 10);
     expect((await turnFacts(c.db, empty, empty.closedAt!)).departments).toEqual([]);
   });
+
+  it('measure only closed small tasks from creation to closing, with no data without them', async () => {
+    const c = await company();
+    const seven = await c.turn(7, 'closed', 0, 120);
+    await c.task(seven.id, 1, { small: true, closedAt: at(10) });
+    await c.task(seven.id, 2, { small: true, closedAt: at(20) });
+    await c.task(seven.id, 3, { small: true, closedAt: at(40) });
+    await c.task(seven.id, 4, { small: false, closedAt: at(100) });
+    await c.task(seven.id, 5, { small: true, status: 'working', closedAt: null });
+    const facts = await turnFacts(c.db, seven, seven.closedAt!);
+    expect(facts.whole.small).toEqual({ count: 3, median: min(20), worst: min(40) });
+    expect(facts.departments[0]!.small).toEqual({ count: 3, median: min(20), worst: min(40) });
+
+    const eight = await c.turn(8, 'closed', 120, 240);
+    await c.task(eight.id, 6, { small: false, closedAt: at(180) });
+    expect((await turnFacts(c.db, eight, eight.closedAt!)).whole.small).toEqual({ count: 0, median: null, worst: null });
+  });
 });
 
 describe('the snapshot of a turn', () => {

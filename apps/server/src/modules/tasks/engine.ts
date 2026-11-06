@@ -520,6 +520,7 @@ export type NewTask = {
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
   urgent?: boolean;
+  small?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -647,6 +648,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
         workKind: input.workKind,
         riskClass: input.riskClass,
         urgent,
+        small: input.small === true,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -1131,7 +1133,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1305,7 +1307,7 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
 function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: string[] } {
   const set: Partial<Task> = {};
   const fields: string[] = [];
-  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass'] as const) {
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) {
     if (c[key] !== undefined && c[key] !== task[key]) {
       Object.assign(set, { [key]: c[key] });
       fields.push(key);
