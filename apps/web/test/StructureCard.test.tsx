@@ -120,6 +120,81 @@ describe('StructureCard', () => {
       localStorage.removeItem('hh-lang');
     }
   });
+
+  it('previews the sealed native structure proposal in MaterialViewer without calling build or mutating the original text when departments are unticked', async () => {
+    const proposalDocId = '22222222-2222-4222-8222-222222222222';
+    const contentUrl = `/api/proposals/pr1/materials/${proposalDocId}/content`;
+    const sealedText = 'Original structure snapshot:\n- Operations\n- Development (Mascot, Characters)\n- Design';
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      calls.push({ method, path, body });
+      if (method === 'GET' && path === '/api/proposals/pr1/materials') {
+        return new Response(JSON.stringify({
+          materialRevision: 1,
+          materialDigest: 'c'.repeat(64),
+          common: [{
+            id: proposalDocId,
+            name: 'Company structure proposal.txt',
+            kind: 'document',
+            format: 'text',
+            state: 'available',
+            contentUrl,
+            downloadUrl: null,
+            size: sealedText.length,
+            sha256: 'd'.repeat(64),
+            mediaType: 'text/plain',
+          }],
+          options: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (method === 'GET' && path === contentUrl) {
+        return new Response(sealedText, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+      return new Response(JSON.stringify({ created: ['a'], removed: [] }), { status: 201, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const proposalWithMaterials = { ...PROPOSAL, materialRevision: 1 } as unknown as typeof PROPOSAL;
+    render(<StructureCard proposal={proposalWithMaterials} departments={[]} onCorrect={noop} />);
+
+    const openBtn = await screen.findByRole('button', { name: /Open material: Company structure proposal\.txt/ });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Design/ }));
+    expect(screen.getByRole('button', { name: 'Create departments (4)' })).toBeInTheDocument();
+
+    fireEvent.click(openBtn);
+    const dialog = await screen.findByRole('dialog', { name: 'Company structure proposal.txt' });
+    expect(await screen.findByText(/Original structure snapshot:/)).toBeInTheDocument();
+    expect(screen.getByText('Original proposal. Your changes are not part of it.')).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create departments (4)' })).toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create departments (4)' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({
+        proposalId: 'pr1',
+        materialRevision: 1,
+        materialDigest: 'c'.repeat(64),
+      }),
+    );
+  });
+
+  it('shows the localized alert without fake materials when GET /api/proposals/:id/materials returns 503 source_producer_unavailable', async () => {
+    mockApi({
+      'GET /api/proposals/pr1/materials': [503, { error: { code: 'unavailable', reason: 'source_producer_unavailable' } }],
+    });
+    const proposalWithMaterials = { ...PROPOSAL, materialRevision: 1 } as unknown as typeof PROPOSAL;
+    const { container } = render(<StructureCard proposal={proposalWithMaterials} departments={[]} onCorrect={noop} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
+    expect(container.querySelectorAll('.mat')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Create departments (5)' })).toBeEnabled();
+  });
 });
 
 describe('TEMPLATES', () => {

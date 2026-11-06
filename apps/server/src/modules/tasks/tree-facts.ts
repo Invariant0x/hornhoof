@@ -1,3 +1,4 @@
+import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'drizzle-orm';
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
@@ -6,6 +7,7 @@ import type { Task, Tx } from './engine.js';
 import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
 import { readTurnHistory, upTo } from './tree-history.js';
+import { openWaitsOf, shownWaits } from './wait-views.js';
 
 type Reader = Db | Tx;
 
@@ -100,7 +102,8 @@ function hasRepository(t: Task, repoIds: Set<string>): boolean {
   return Boolean(t.productId && repoIds.has(t.productId));
 }
 
-const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean): FactTask => ({
+const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean, waits: TaskWaitView[]): FactTask => ({
+  waits,
   id: t.id,
   number: t.number,
   title: t.title,
@@ -175,6 +178,8 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
     .where(inArray(requests.taskId, taskIds))
     .orderBy(asc(requests.createdAt));
 
+  const waits = await openWaitsOf(db, until ? [] : taskIds);
+  const seenAfter = new Set([...turnTasks, ...extraTasks].filter(sees).map(t => t.id));
   const from = turn.openedAt ?? turn.createdAt;
   const signs = await readSigns(db, taskIds, from, until);
   const jobStates = await readJobStates(db, taskIds);
@@ -188,7 +193,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
     repository,
     turn,
     agents: agentRows,
-    tasks: turnTasks.map(t => toFactTask(t, repoIds, sees)),
+    tasks: turnTasks.map(t => toFactTask(t, repoIds, sees, shownWaits(waits.get(t.id) ?? [], id => seenAfter.has(id)))),
     related: extraTasks.map(t => ({ id: t.id, number: t.number, title: t.title, status: t.status, visible: sees(t) })),
     events,
     requests: asks,

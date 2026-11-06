@@ -622,7 +622,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -737,11 +737,21 @@ export const requests = pgTable(
     approvalChannel: text('approval_channel', { enum: APPROVAL_CHANNELS }),
     approvalKind: text('approval_kind'),
     approvalAmount: doublePrecision('approval_amount'),
+    /* A goal in danger, as whoever may say so said it: which goal, which episode of it, how bad and whether it is over. An
+       answer to the question does not end the episode, and neither a text nor a date ever opens one. */
+    goalRefKind: text('goal_ref_kind', { enum: ['task', 'turn'] }),
+    goalRefId: uuid('goal_ref_id'),
+    goalEpisodeId: uuid('goal_episode_id'),
+    goalImpact: text('goal_impact', { enum: ['at_risk', 'missed'] }),
+    goalRevision: integer('goal_revision'),
+    goalState: text('goal_state', { enum: ['open', 'resolved'] }),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
     check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+    check('requests_goal_whole', sql`num_nonnulls(${t.goalRefKind}, ${t.goalRefId}, ${t.goalEpisodeId}, ${t.goalImpact}, ${t.goalRevision}, ${t.goalState}) IN (0, 6)`),
+    uniqueIndex('requests_one_open_goal').on(t.companyId, t.goalRefKind, t.goalRefId).where(sql`${t.goalState} = 'open'`),
     unique('requests_company_id').on(t.companyId, t.id),
     index('requests_task_id').on(t.taskId),
     index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
@@ -1073,7 +1083,9 @@ export const publicLinks = pgTable('public_links', {
 export const waitNotices = pgTable('wait_notices', {
   id: id(),
   companyId: companyId(),
-  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  /* Who it is for: an employee, who gets it as a turn, or a person, who keeps it as a card until they say they saw it. */
+  agentId: uuid('agent_id').references(() => agents.id),
+  personId: uuid('person_id').references(() => people.id),
   dedupKey: text('dedup_key').notNull(),
   message: jsonb('message').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeMessage>().notNull(),
   guard: jsonb('guard').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeGuard>().notNull(),
@@ -1088,8 +1100,13 @@ export const waitNotices = pgTable('wait_notices', {
   level: integer('level'),
   purpose: text('purpose'),
   routeRevision: integer('route_revision'),
+  /* A person saw the card. It decides nothing: the question it speaks of stays as it is. */
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  acknowledgedByPersonId: uuid('acknowledged_by_person_id').references(() => people.id),
 }, t => [
   unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
+  check('wait_notices_one_recipient', sql`(${t.agentId} IS NULL) <> (${t.personId} IS NULL)`),
+  index('wait_notices_cards').on(t.personId, t.createdAt).where(sql`${t.personId} IS NOT NULL AND ${t.acknowledgedAt} IS NULL`),
   index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
   uniqueIndex('wait_notices_one_per_level').on(t.waitId, t.generation, t.level, t.purpose, t.routeRevision).where(sql`${t.waitId} IS NOT NULL`),
   check('wait_notices_wait_whole', sql`${t.waitId} IS NULL OR (${t.generation} IS NOT NULL AND ${t.level} IS NOT NULL AND ${t.purpose} IS NOT NULL AND ${t.routeRevision} IS NOT NULL)`),
