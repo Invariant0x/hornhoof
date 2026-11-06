@@ -76,7 +76,7 @@ describe('private repository credential revision', () => {
     const c = await fixture();
     expect((await c.put({ repoTokenRevision: 999, token: 'test-token-first' })).statusCode).toBe(400);
     expect((await c.put({ url: 'http://example.test/repo.git', token: 'test-token-first' })).statusCode).toBe(400);
-    const [foreignCompany] = await c.db.insert(companies).values({ name: 'Another company' }).returning();
+    const [foreignCompany] = await c.db.insert(companies).values({ name: 'Another company', singleton: false }).returning();
     const [foreign] = await c.db.insert(departments).values({ companyId: foreignCompany!.id, roleCode: 'DEV' }).returning();
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${foreign!.id}/repository`, payload: { url: 'https://example.test/acme/shop.git', token: 'test-token-first' }, ...as(c.ceo) })).statusCode).toBe(404);
     expect(await c.revision()).toBe(1);
