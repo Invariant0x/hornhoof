@@ -30,8 +30,13 @@ function shownWait(viewer: AgentViewer, line: TaskLine): TaskLine['externalWait'
   return rest;
 }
 
+function shownIndependent(viewer: AgentViewer, part: TaskLine['independentPart']): TaskLine['independentPart'] {
+  if (!part || 'reason' in part) return part;
+  return shownRef(viewer, part.executor) ? part : null;
+}
+
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line) };
+  return { ...line, assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
 }
 
 /* Task lines as this person reads them. */

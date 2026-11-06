@@ -360,6 +360,7 @@ export type TaskLine = {
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
+  independentPart?: ({ title: string; brief: string; body: string; executor: AgentRef; task: { id: string; number: number; title: string; status: TaskStatus } } | { reason: string }) | null;
   createdAt: string;
   updatedAt: string;
 };
