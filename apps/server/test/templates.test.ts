@@ -704,6 +704,10 @@ describe('templates', () => {
     expect(rules).toMatch(/temporary JavaScript scripts inside the repository's package or workspace that owns their dependencies/);
     expect(rules).toMatch(/imports resolve its `node_modules`/);
     expect(rules).toMatch(/ERR_MODULE_NOT_FOUND` when a run started without the harness is not an application defect/);
+    /* The rule holds in any language, and what is about npm stands apart, for that kind of project. */
+    const setup = rules.split('\n').find(line => line.startsWith('4.'))!;
+    expect(setup).toContain('In an npm project:');
+    expect(setup.split('In an npm project:')[0]).not.toMatch(/npm|npx|node_modules|JavaScript|ESLint|Vitest|Playwright/);
   });
 
   it('credits every source a skill names in SOURCES.md', () => {
