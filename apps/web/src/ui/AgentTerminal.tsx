@@ -617,8 +617,12 @@ type TerminalNoticesProps = {
   pictureState: 'uploading' | 'uploaded' | null;
 };
 
-function TerminalNotices({ t, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) {
-  if (!dropped && !denied && pictureFailure === null && !pictureState) return null;
+const noTerminalNotices = ({ dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) =>
+  !dropped && !denied && pictureFailure === null && !pictureState;
+
+function TerminalNotices(props: TerminalNoticesProps) {
+  if (noTerminalNotices(props)) return null;
+  const { t, dropped, denied, pictureFailure, pictureState } = props;
   return (
     <div className="t-menu glass" style={{ left: 12, right: 12, bottom: 8, padding: '2px 0 6px', pointerEvents: 'none' }}>
       {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}

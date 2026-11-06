@@ -25,6 +25,10 @@ export class TerminalInput {
     const text = paste?.[1] ?? data;
     if ((paste ? PASTE_CONTROL : CONTROL).test(text)) return { data: '', denied: 'control' };
     if (this.blocked) return this.afterBlocked(data, text);
+    return this.acceptMessage(data, text);
+  }
+
+  private acceptMessage(data: string, text: string): { data: string; denied?: InputRefusal } {
     const line = this.after(text);
     if (line === null) {
       this.blocked = this.line === 0 && /^[/!]/.test(text) && !/[\r\n]/.test(text);
