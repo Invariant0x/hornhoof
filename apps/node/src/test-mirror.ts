@@ -4,7 +4,8 @@ import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
-import { gitEnv } from './workspace.js';
+import { gitEnv, gitPreparationFailure } from './workspace.js';
+import { StreamMask } from './terminal/mask.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
@@ -15,12 +16,17 @@ function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
   if (pid === undefined) return;
   try { process.kill(-pid, signal); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
 }
-function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}): Promise<Buffer> {
+function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false): Promise<Buffer> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
-    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: ['ignore', 'pipe', 'ignore', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
+    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
+    const mask = new StreamMask(() => [auth.HH_GIT_PASSWORD ?? '']);
+    let stderr = '', stderrTruncated = false;
+    const capture = (text: string) => { const combined = stderr + text; stderrTruncated ||= combined.length > 8192; stderr = combined.slice(-8192); };
+    child.stderr!.setEncoding('utf8');
+    child.stderr!.on('data', (text: string) => capture(mask.push(text)));
     const stop = () => {
       stopGit(child.pid, 'SIGTERM');
       killTimer ??= setTimeout(() => stopGit(child.pid, 'SIGKILL'), 5000); killTimer.unref();
@@ -32,11 +38,12 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
     });
     child.once('error', error => { failure = error; });
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
-    child.once('close', code => {
+    child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');
+      capture(mask.flush());
       if (signal.aborted) reject(signal.reason);
       else if (failure) reject(failure);
-      else if (code !== 0) reject(new Error(`Git ${args[0]} failed for the pinned commit.`));
+      else if (code !== 0) reject(gitPreparationFailure({ kind: 'child', exitCode: code, signal: signalName, osCode: null, stderr, stderrTruncated }, network, [auth.HH_GIT_PASSWORD ?? '']));
       else resolve(Buffer.concat(chunks));
     });
   });
@@ -66,7 +73,7 @@ async function mirrorAt(source: Source, scope: RepositoryScope, commitSha: strin
     if (!(await exists(mirror))) await gitBytes(['init', '--bare', '--template=', '--', mirror], context);
     if (!(await lstat(mirror)).isDirectory()) throw new Error('The repository mirror is not a private directory.');
     const hasCommit = await gitBytes(['--git-dir', mirror, 'cat-file', '-e', `${commitSha}^{commit}`], context).then(() => true, () => false);
-    if (!hasCommit) await gitBytes(['--git-dir', mirror, 'fetch', '--no-tags', '--no-recurse-submodules', '--', source.url, commitSha], context, 1024, gitEnv(source));
+    if (!hasCommit) await gitBytes(['--git-dir', mirror, 'fetch', '--no-tags', '--no-recurse-submodules', '--', source.url, commitSha], context, 1024, gitEnv(source), true);
     const actual = (await gitBytes(['--git-dir', mirror, 'rev-parse', '--verify', `${commitSha}^{commit}`], context)).toString('ascii').trim();
     if (actual !== commitSha) throw new Error('The mirror returned a different commit.');
     await gitBytes(['--git-dir', mirror, 'update-ref', `refs/hornhoof/pins/${commitSha}`, commitSha], context);

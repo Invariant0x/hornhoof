@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { repoFolder, type Workspace } from '@hornhoof/protocol';
+import { repoFolder, type ExternalGitOutcome, type Workspace } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
+import { redact } from './redact.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
@@ -13,10 +14,26 @@ const GIT_TIMEOUT_MS = 5 * 60_000;
 
 export type Git = (args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv; user: JobUser | null }) => Promise<string>;
 
+type ChildOutcome = Extract<ExternalGitOutcome, { kind: 'child' }>;
+
+/* Evidence from an owned preparation child, not a retry decision or proof that
+   the whole check slot and cache have settled. The runner supplies that receipt. */
+export class GitPreparationError extends Error {
+  constructor(readonly outcome: ChildOutcome, readonly network: boolean) {
+    super(`Git preparation failed: ${outcome.stderr || outcome.osCode || 'The child did not complete successfully.'}`);
+    this.name = 'GitPreparationError';
+  }
+}
+
+export function gitPreparationFailure(outcome: ChildOutcome, network: boolean, secrets: string[]): GitPreparationError {
+  const text = redact(outcome.stderr, secrets).replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[hidden]@').trim();
+  return new GitPreparationError({ ...outcome, stderr: text.slice(-8192), stderrTruncated: outcome.stderrTruncated || text.length > 8192 }, network);
+}
+
 const realGit: Git = (args, { cwd, env, user }) =>
   new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env, uid: user?.uid, gid: user?.gid, timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`git ${args[0]} failed: ${String(stderr).trim() || err.message}`));
+    execFile('/usr/bin/git', args, { cwd, env, uid: user?.uid, gid: user?.gid, timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+      if (err) reject(gitPreparationFailure({ kind: 'child', exitCode: typeof err.code === 'number' ? err.code : null, signal: err.signal ?? null, osCode: typeof err.code === 'string' ? err.code : null, stderr: String(stderr), stderrTruncated: false }, ['clone', 'fetch', 'ls-remote'].includes(args[0] ?? ''), [env.HH_GIT_PASSWORD ?? '']));
       else resolve(String(stdout).trim());
     });
   });
