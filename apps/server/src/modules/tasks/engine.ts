@@ -26,6 +26,7 @@ import { checkIndependent, currentIndependent, type IndependentDeclaration, type
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
+import { stuckRecipient } from './stuck-route.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -1607,13 +1608,24 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
   return askAboutStill(ctx, agentId, task, task.silent, text);
 }
 
-/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+/* Hornhoof stops waking the agent on the task and asks its head, or the orchestrator about a head. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  const recipient = asker ? await stuckRecipient(ctx.db, asker) : null;
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
-    wakes = await explaining(tx, task, agentId, note!.id);
+    const [note] = await tx.insert(requests).values({
+      companyId: task.companyId,
+      taskId: task.id,
+      agentId,
+      kind: 'stuck',
+      text,
+      decisionTopic: 'task',
+      audience: 'internal',
+      triageAgentId: recipient?.id ?? null,
+      sourceKey: `stuck:${task.id}:${task.version}`,
+    }).returning();
+    wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
     await keepWakes(tx, task.companyId, wakes);
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
@@ -1810,7 +1822,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, departmentId: tasks.departmentId, productId: tasks.productId })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck']), or(ne(requests.kind, 'stuck'), eq(requests.audience, 'human'))))
     .orderBy(asc(requests.createdAt));
   const wakes: Wake[] = [];
   for (const r of open) {

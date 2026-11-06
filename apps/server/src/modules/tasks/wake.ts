@@ -255,8 +255,8 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
   }
 }
 
-/* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
-   people read above their answer. Typed into the orchestrator's turn when it works, else its own turn, one per request. */
+/* Requests reach their current addressee: a person through the orchestrator's plain words, or an internal stuck resolver
+   directly. Typed into its turn when it works, else its own turn, one per request. */
 async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   const [found] = await ctx.db
     .select({ request: requests, asker: agents.name, task: tasks })
@@ -267,14 +267,22 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
   const { request, asker, task } = found;
   const ref = `#${task.number} "${task.title}"`;
-  const what =
-    request.kind === 'stuck'
+  let text: string;
+  if (request.kind === 'stuck' && request.audience === 'internal') {
+    if (request.triageAgentId !== w.agentId) return;
+    const [recipient] = await ctx.db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, w.agentId));
+    const action = recipient?.kind === 'orchestrator'
+      ? `Read the task, then close this request yourself with "answer_request" and request ${request.id}, with answer or retry true. Do not ask a person.`
+      : `Read the task, then answer it with "comment" on #${task.number}. Do not ask a person.`;
+    text = `Hornhoof stopped waking ${asker} on ${ref} (internal stuck request ${request.id}). Hornhoof noted: ${request.text}\n\n${action}`;
+  } else {
+    const what = request.kind === 'stuck'
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
       : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
-  const text =
-    `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-    `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
-    'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
+    text = `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
+      `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
+      'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
+  }
   const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked people', task: { id: task.id, number: task.number } };
   const notice = await wakeNotice(ctx, task, { ...w, cause });
   const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id, ...notice };
