@@ -1,4 +1,4 @@
-import type { ExternalGitOutcome } from '@hornhoof/protocol';
+import type { ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 
 export type GitFailureDecision =
   | { readonly kind: 'success' }
@@ -65,4 +65,24 @@ function classifyHttp(outcome: HttpOutcome): GitFailureDecision {
    not authority, child settlement or permission to repeat an ambiguous write. */
 export function classifyGitOutcome(outcome: ExternalGitOutcome): GitFailureDecision {
   return outcome.kind === 'child' ? classifyChild(outcome) : classifyHttp(outcome);
+}
+
+export type GitOutcomeState = 'outcome_unknown' | 'satisfied' | 'failed_permanent' | 'deferred';
+
+function unresolvedGitOutcome(intent: ExternalGitIntent, decision: Extract<GitFailureDecision, { kind: 'transient' | 'unknown' }>, observedHead: string | null | undefined): GitOutcomeState {
+  if (intent.kind !== 'git_push') return decision.kind === 'transient' ? 'deferred' : 'outcome_unknown';
+  if (observedHead === intent.sourceSha) return 'satisfied';
+  if (observedHead === undefined) return 'outcome_unknown';
+  return decision.kind === 'transient' ? 'deferred' : 'outcome_unknown';
+}
+
+/* This pure decision consumes facts already checked by the private receiver.
+   It neither proves settlement/current authority nor starts another attempt.
+   A different observed SHA alone does not establish a non-fast-forward. */
+export function gitOutcomeState(intent: ExternalGitIntent, outcome: ExternalGitOutcome, settled: boolean, observedHead?: string | null): GitOutcomeState {
+  if (!settled) return 'outcome_unknown';
+  const decision = classifyGitOutcome(outcome);
+  if (decision.kind === 'permanent') return 'failed_permanent';
+  if (decision.kind === 'success') return 'satisfied';
+  return unresolvedGitOutcome(intent, decision, observedHead);
 }

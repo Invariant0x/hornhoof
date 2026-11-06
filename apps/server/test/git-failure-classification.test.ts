@@ -1,7 +1,6 @@
 import type { ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { classifyGitOutcome } from '../src/modules/failures/git.js';
-import * as gitPolicy from '../src/modules/failures/git.js';
+import { classifyGitOutcome, gitOutcomeState } from '../src/modules/failures/git.js';
 
 const child = (stderr: string, extra: Partial<Extract<ExternalGitOutcome, { kind: 'child' }>> = {}): ExternalGitOutcome =>
   ({ kind: 'child', exitCode: 1, signal: null, osCode: null, stderr, stderrTruncated: false, ...extra });
@@ -61,7 +60,6 @@ describe('typed Git failure classification', () => {
 });
 
 describe('Git outcome state', () => {
-  const state = (gitPolicy as unknown as { gitOutcomeState?: (intent: ExternalGitIntent, outcome: ExternalGitOutcome, settled: boolean, observedHead?: string | null) => string }).gitOutcomeState;
   const push: ExternalGitIntent = { kind: 'git_push', repositoryId: '00000000-0000-4000-8000-000000000001', sourceSha: 'a'.repeat(40), destinationRef: 'refs/heads/task-559' };
   const fetch: ExternalGitIntent = { kind: 'git_fetch', repositoryId: push.repositoryId, target: { kind: 'commit', commitSha: 'a'.repeat(40) } };
   const refs: ExternalGitIntent = { kind: 'git_refs', repositoryId: push.repositoryId, selector: 'refs/heads/task-559' };
@@ -84,6 +82,6 @@ describe('Git outcome state', () => {
     { name: 'a settled transient refs read', intent: refs, outcome: http(429), settled: true, head: undefined, expected: 'deferred' },
     { name: 'an unclassified fetch without a grant from a matching-looking ref', intent: fetch, outcome: child('unknown'), settled: true, head: 'a'.repeat(40), expected: 'outcome_unknown' },
   ])('keeps $name in $expected', ({ intent, outcome, settled, head, expected }) => {
-    expect(state?.(intent, outcome, settled, head)).toBe(expected);
+    expect(gitOutcomeState(intent, outcome, settled, head)).toBe(expected);
   });
 });
