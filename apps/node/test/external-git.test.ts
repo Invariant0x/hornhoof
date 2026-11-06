@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 import { Bridge } from '../src/terminal/bridge.js';
-import { procOwner, type Capture, type Owns } from '../src/terminal/peer.js';
+import { procOwner } from '../src/terminal/peer.js';
 import { GitAdapter, fetchTarget, parseGitMarker, type GitGrant, type GitJob, type GitOperationPort, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
 
 const SHIM = fileURLToPath(new URL('../hh-git.cjs', import.meta.url));
@@ -1245,7 +1245,7 @@ describe('the child the node owns', () => {
 });
 
 describe('through the real bridge', () => {
-  async function bridged(s: Stand, port: GitOperationPort, owners: (pid: () => number) => { owns: Owns; capture: Capture } | null) {
+  async function bridged(s: Stand, port: GitOperationPort, owners: (pid: () => number) => ReturnType<ReturnType<typeof procOwner>> | null) {
     const adapter = new GitAdapter({ port, git: s.bin });
     adapter.bind(KEY, jobOf(s));
     let pane = 0;
