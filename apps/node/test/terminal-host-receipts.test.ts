@@ -531,7 +531,8 @@ describe('program receipts for live words', () => {
 
   it.each(['claude', 'codex'] as const)('completes a %s job without the flag when there are no queued words', async kind => {
     const c = await atWork(kind, 'queued');
-    await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    else c.finish();
     await c.running;
     expect(c.sent.filter(m => m.type === 'job.done')).toHaveLength(1);
     expect(c.sent.find(m => m.type === 'job.done')).not.toHaveProperty('wordsWaiting');
@@ -558,7 +559,11 @@ describe('program receipts for live words', () => {
     await until(() => c.sent.slice(at).some(m => m.type === 'turn.open'));
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'token' });
     await prompt;
-    await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Human answer.' });
+    if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Human answer.' });
+    else {
+      c.record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'human', last_agent_message: 'Human answer.' } });
+      c.drain();
+    }
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'human'));
     c.expire();
     await c.running;

@@ -19,8 +19,12 @@ id_of() {
 }
 case "$1" in
   info) echo "Server Version: 28.0.0" ;;
-  # STUB_PULL: "fail" for every image, "node" for the node's alone.
-  pull) case "${STUB_PULL:-ok}:$2" in fail:* | node:*hornhoof-node*) echo "pull access denied" >&2; exit 1 ;; esac ;;
+  # STUB_PULL: "fail" for every image, "node" for the node's alone, "digest" for one named by its digest.
+  pull) case "${STUB_PULL:-ok}:$2" in fail:* | node:*hornhoof-node* | digest:*@sha256:*) echo "pull access denied" >&2; exit 1 ;; esac ;;
+  # STUB_NODE_LOGS: what a node said since it started. It reached its server unless told otherwise.
+  logs) printf '%s\n' "${STUB_NODE_LOGS-Connected to Hornhoof.}" ;;
+  # STUB_VOLUMES words are "name=server=id", the volume of a node and what its settings say.
+  volume) case " ${STUB_VOLUMES:-} " in *" ${!#}="*) ;; *) exit 1 ;; esac ;;
   create) echo cid-app ;;
   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
   image)
@@ -57,6 +61,13 @@ case "$1" in
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
+    WORD=/data/node.json; if has "$@"; then
+      for v in ${STUB_VOLUMES:-}; do
+        WORD="${v%%=*}:/data:ro"
+        if has "$@"; then rest=${v#*=}; printf '{\n  "server": "%s",\n  "subscriptionId": "%s"\n}\n' "${rest%=*}" "${rest#*=}"; exit 0; fi
+      done
+      exit 1
+    fi
     # STUB_LIVE_CHECK: "no" as the door of a build says it, "warned" with Docker's words first, "unread" as it says of a registry
     # it could not read, "no answer" as a build from before it has none.
     WORD=apps/server/dist/live-check-gate.js

@@ -218,10 +218,13 @@ describe('stop hook branches before extraction', () => {
     expect(await c.finished).toBe(expected);
   });
 
-  it('follows a session named only by Stop and accepts an empty successful answer', async () => {
+  it('follows a session named only by Stop and accepts an empty successful answer from its log', async () => {
     const c = fixture('codex');
     await c.host['hook']('branches', 'stop', { session_id: 'new' });
     expect(c.agent.sessionId).toBe('new');
+    expect(c.agent.turn!.ending).toBeUndefined();
+    write(c.file('new'), [{ type: 'session_meta', payload: { id: 'new', cwd: c.workDir } }, { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: '' } }].map(line => JSON.stringify(line)).join('\n') + '\n');
+    c.host['drain'](c.agent);
     expect(await c.finished).toBe('');
   });
 
@@ -283,7 +286,7 @@ describe('stop hook branches before extraction', () => {
     c.agent.lastText = 'Former wire text';
     vi.useFakeTimers();
     const stopping = c.host['hook']('branches', 'stop', { last_assistant_message: 'Current hook text' });
-    c.agent.program = codexProgram;
+    c.agent.program = claudeProgram;
     await vi.advanceTimersByTimeAsync(5000);
     await stopping;
     expect(await c.finished).toBe('Current hook text');

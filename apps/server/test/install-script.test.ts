@@ -344,9 +344,15 @@ describe('install.sh a server serves', () => {
       const r = install({ args: check(), env: HERE });
       expect(indexOf(r.calls, `docker pull ${BACK}`)).toBeGreaterThanOrEqual(0);
       expect(indexOf(r.calls, `docker pull ${BACK}`)).toBeLessThan(indexOf(r.calls, 'docker stop'));
-      const stuck = install({ args: check(), env: { ...HERE, STUB_PULL: 'node' } });
+      const stuck = install({ args: check(), env: { ...HERE, STUB_PULL: 'digest' } });
       nothingHappened(stuck);
-      expect(stuck.out).toContain('Could not download');
+      expect(stuck.out).toContain(`Could not download ${BACK}`);
+    });
+
+    it('takes only the published image of that commit, not a copy of that name built on this computer', () => {
+      const r = install({ args: check(), env: { ...HERE, STUB_PULL: 'node', STUB_IMAGE_LOCAL: '1' } });
+      nothingHappened(r);
+      expect(r.out).toContain(`Could not download ${BY_TAG}`);
     });
 
     it('lets the work of the node end first, and leaves it as it is when it cannot learn when', () => {
@@ -356,6 +362,16 @@ describe('install.sh a server serves', () => {
       const left = install({ args: check(), env: { ...HERE, STUB_WAIT_UPDATE: '1' } });
       nothingHappened(left);
       expect(left.out).toContain('Nothing changed');
+      expect(left.out).not.toContain('--urgent');
+      const old = install({ args: check(), env: { ...HERE, STUB_WAIT_UPDATE: '3' } });
+      nothingHappened(old);
+      expect(old.out).toContain('from before nodes wait');
+    });
+
+    it('stops with the way back in its words when the new container does not start', () => {
+      const r = install({ args: check(), env: { ...HERE, STUB_RUN: 'fail' } });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(`back-node ${KIMI}`);
     });
 
     it.each(['latest', '0.7.1', COMMIT.slice(0, 12), COMMIT.toUpperCase(), `${COMMIT}0`, `x${COMMIT.slice(1)}`, 'ghcr.io/invariant0x/hornhoof-node:latest', ''])('takes only a whole commit, not %j', commit => {
@@ -410,8 +426,15 @@ describe('install.sh a server serves', () => {
         expect(r.out).toContain(`${KIMI} runs ${BACK}`);
       });
 
-      it('goes from the image on this computer when it cannot download', () => {
-        expect(install({ args: back(), env: { ...HERE, STUB_PULL: 'node', STUB_IMAGE_LOCAL: '1' } }).code).toBe(0);
+      it('goes from the image on this computer without asking the registry, which may be what stopped working', () => {
+        const r = install({ args: back(), env: { ...HERE, STUB_IMAGE_LOCAL: '1' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.filter(c => c.startsWith('docker pull'))).toEqual([]);
+        expect(r.calls.find(c => c.startsWith('docker run -d'))!.endsWith(BACK)).toBe(true);
+      });
+
+      it('downloads the way back when this computer does not have it, and leaves the node as it is when it cannot', () => {
+        expect(install({ args: back(), env: HERE }).calls).toContain(`docker pull ${BACK}`);
         nothingHappened(install({ args: back(), env: { ...HERE, STUB_PULL: 'node' } }));
       });
 
@@ -425,11 +448,34 @@ describe('install.sh a server serves', () => {
         nothingHappened(install({ args, env: HERE }));
       });
 
-      it('says so when the node does not answer after a while, and still has it running', () => {
-        const r = install({ args: back(), env: { ...HERE, STUB_STATUS: 'offline', HORNHOOF_NODE_ANSWER_WAIT: '1' } });
+      it('says it worked once the node reached its server, not because its folder reads ready, and still has it running', () => {
+        const r = install({ args: back(), env: { ...HERE, STUB_NODE_LOGS: 'Starting.', HORNHOOF_NODE_ANSWER_WAIT: '1' } });
         expect(r.code).toBe(1);
         expect(r.out).toContain(`docker logs ${KIMI}`);
+        expect(r.out).not.toContain('reached Hornhoof');
         expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(true);
+        expect(install({ args: back(), env: HERE }).out).toContain(`${KIMI} runs ${BACK} and reached Hornhoof`);
+      });
+
+      describe('when a start that failed took the container and left the volume', () => {
+        const ID = '1c07dac4-aaaa-4bbb-8ccc-dddddddddddd';
+        const GONE = { STUB_CONTAINERS: `${CODEX}=${SERVER}` };
+
+        it('finds the node by what its volume says', () => {
+          const r = install({ args: back(), env: { ...GONE, STUB_VOLUMES: `${KIMI}=${SERVER}=${ID}` } });
+          expect(r.code).toBe(0);
+          const started = r.calls.find(c => c.startsWith('docker run -d'))!;
+          expect(started).toContain(`--name ${KIMI} --label hornhoof.subscription=${ID} `);
+          expect(started.endsWith(BACK)).toBe(true);
+        });
+
+        it.each([['another server', `${KIMI}=https://another.example.test=${ID}`], ['another node', `${KIMI}=${SERVER}=ffffffff-aaaa-4bbb-8ccc-dddddddddddd`], ['none', '']])('takes no volume that says it is of %s', (_of, STUB_VOLUMES) => {
+          nothingHappened(install({ args: back(), env: { ...GONE, STUB_VOLUMES } }));
+        });
+
+        it('does this on the way back alone', () => {
+          nothingHappened(install({ args: check(), env: { ...GONE, STUB_VOLUMES: `${KIMI}=${SERVER}=${ID}` } }));
+        });
       });
     });
   });

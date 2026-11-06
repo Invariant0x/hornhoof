@@ -90,20 +90,20 @@ The check runs on the nodes of our own plans, one node at a time, and each gets 
    export HORNHOOF_SERVER=<the address of your Hornhoof, as its nodes know it>
    ```
 
-3. Move one node, when the agents of its plan are not in the middle of a turn. It gets the way back first, lets the work of the node end, and says when the node answers:
+3. Move one node, when the agents of its plan are not in the middle of a turn. It needs a server that can let a node's work end, 0.7.0 or later. It gets the published image and the way back first, lets the work of the node end, and says when the node reached its server:
 
    ```sh
    bash hornhoof-install.sh check-node hornhoof-kimi-1c07dac4 $COMMIT
    ```
 
 4. Give an agent on that node one short turn. Write down what the program's own journal shows: that it recorded the words, that it answered, and that its turn ended the usual way. Fixtures, wrappers around a program and another commit's build do not count.
-5. If it passed, go on to the next node, until Kimi, Codex, Claude and Antigravity have each passed. If it did not, put that node back at once, leave the others as they are, and tell the developer why. The node goes without waiting for its work, and the command says how long it took:
+5. If it passed, go on to the next node, until Kimi, Codex, Claude and Antigravity have each passed. If it did not, put that node back at once, leave the others as they are, and tell the developer why. The node goes without waiting for its work, from a copy of the image on this computer when there is one, and the command says how long it took:
 
    ```sh
    bash hornhoof-install.sh back-node hornhoof-kimi-1c07dac4
    ```
 
-6. Write the proof of those images: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by. Run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.
+6. Show the owner the record of all four for the exact commit, with the cleaned evidence. After the owner approved it, write the proof of those images: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by. Run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.
 7. Move `main` to that commit by fast-forward: a merge commit is another commit, with no check. If the publish job ran before the proof was out, run that job again. The server and all nodes then go to the build the usual way, through the door. `BACK_NODE` in `scripts/install.sh` then moves to this release, for the next check.
 
 Without nodes of your own to spare, or to check a candidate before anything of it is published, use a stand, the one kind of server that gives its nodes a build without a check. It must be a new server with a name of its own, which keeps its database, its port and its nodes to itself. Build the candidate on a free machine that runs no real work, start the stand, and connect a node for each of the four programs with the commands this server shows, on this same computer. Each plan signs in through its own link on that server; no credential is copied from anywhere. Images you built yourself are other images than the published ones, so a proof needs the published ones checked the same way: a new stand with `HORNHOOF_VERSION=$COMMIT` downloads them.

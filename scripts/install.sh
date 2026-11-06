@@ -7,7 +7,7 @@
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
 #   install.sh check-node <node> <commit>                        one node goes to the build of a commit, for that build's live check
-#   install.sh back-node <node>                                  that node goes back to the last version before live checks
+#   install.sh back-node <node>                                  that node goes back to 0.6.1 at once, without waiting for its work
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
@@ -38,7 +38,7 @@ STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
 NODE_REPOSITORY=ghcr.io/invariant0x/hornhoof-node
 LATEST_NODE=$NODE_REPOSITORY:latest
-# Where back-node goes: 0.6.1, the last node from before live checks, by the digest of its image for every computer.
+# Where back-node goes: 0.6.1, the way back the owner set for this check, by the digest of its image for every computer.
 BACK_NODE=$NODE_REPOSITORY@sha256:1703324e18e59af650d3d69be9dcac3f12352d53ecefc71ae805e91f10aa1b73
 case "$BUILD_IMAGE" in
   __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
@@ -289,7 +289,7 @@ check_server() {
 }
 
 pull_image() {
-  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ] && [ -z "$ONE_NODE" ]; then
+  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
     say "This Hornhoof is a local build with no node image published for it, so this machine gets the latest node image, which may not match it."
   fi
   say "Getting the node image $IMAGE."
@@ -457,6 +457,8 @@ wait_for_node() {
   LEFT="$LEFT $name"
   if [ "$code" -eq 3 ]; then
     say "This Hornhoof server is from before nodes wait for their work, so $name stays as it is and what it runs goes on. Update the Hornhoof server first, then run this command again."
+  elif [ -n "$ONE_NODE" ]; then
+    say "Could not learn when $name is free, so it stays as it is and what it runs goes on. Run this command again."
   else
     say "Could not learn when $name is free, so it stays as it is and what it runs goes on. Run this command again, or add --urgent to stop what it runs and replace it now."
   fi
@@ -692,6 +694,22 @@ node_mode() {
   if [ -n "$LEFT" ]; then fail "These nodes stay as they are:$LEFT."; fi
 }
 
+provider_of() {
+  local provider=${1#hornhoof-}
+  printf '%s' "${provider%-*}"
+}
+
+# A start that failed took the container and left the volume, whose settings say whose node it is. Only the way back goes from there.
+lost_node() {
+  local name=$1 settings id
+  "${DOCKER[@]}" volume inspect "$name" > /dev/null 2>&1 || return 1
+  settings=$("${DOCKER[@]}" run --rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges --entrypoint cat -v "$name:/data:ro" "$IMAGE" /data/node.json 2> /dev/null) || return 1
+  [ "$(printf '%s\n' "$settings" | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')" = "$NODE_SERVER" ] || return 1
+  id=$(printf '%s\n' "$settings" | sed -n 's/^ *"subscriptionId": *"\([^"]*\)".*/\1/p')
+  [ "$(node_name "$id" "$(provider_of "$name")")" = "$name" ] || return 1
+  printf '%s:%s' "$name" "$id"
+}
+
 # The node of that name, as "name:id", when this server has it on this machine and it has a plan to check.
 named_node() {
   local entry
@@ -702,61 +720,65 @@ named_node() {
       return 0
     fi
   done
+  if [ "$MODE" = back-node ] && lost_node "$1"; then return 0; fi
   fail "$SERVER has no node called $1 on this machine, so nothing changed."
 }
 
 # The check of a plan needs one node. Another of the plan on this build would be the start of an update without a check.
 only_one_of_its_plan() {
-  local name=$1 provider=$2 entry other
+  local name=$1 entry other
   for entry in $(existing_nodes); do
     other=${entry%%:*}
-    case "$other" in hornhoof-"$provider"-*) ;; *) continue ;; esac
+    case "$other" in hornhoof-"$(provider_of "$name")"-*) ;; *) continue ;; esac
     if [ "$other" != "$name" ] && [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$other" 2> /dev/null)" = "$IMAGE" ]; then
       fail "$other, of the same plan, runs this build already, and one node is what the check of a plan needs. So $name stays as it is."
     fi
   done
 }
 
-# start_one <name:id>: the node goes to IMAGE with its volume, and this says when it answers, so a way back is known to have worked.
+# start_one <name:id>: the node goes to IMAGE with its volume, and this says once it reached its server. Its settings read ready long before.
 start_one() {
-  local entry=$1 name id provider status tries=${HORNHOOF_NODE_ANSWER_WAIT:-60}
+  local entry=$1 name id tries=${HORNHOOF_NODE_ANSWER_WAIT:-60}
   name=${entry%%:*}
   id=${entry#*:}
-  provider=${name#hornhoof-}
-  provider=${provider%-*}
-  start_node "$name" "$id" "$provider"
-  status=offline
-  while [ "$tries" -gt 0 ]; do
-    status=$(node_status "$name")
-    [ "$status" = offline ] || break
+  start_node "$name" "$id" "$(provider_of "$name")"
+  # grep reads all of the log: with -q it would stop early, and pipefail would take that for no.
+  until "${DOCKER[@]}" logs "$name" 2>&1 | grep 'Connected to Hornhoof' > /dev/null; do
     tries=$((tries - 1))
+    [ "$tries" -gt 0 ] || fail "$name runs $IMAGE and has not reached $SERVER: docker logs $name shows why."
     sleep 1
   done
-  [ "$status" != offline ] || fail "$name runs $IMAGE and does not answer yet: docker logs $name shows why."
-  say "$name runs $IMAGE and says $status, $SECONDS s after this command began. Its first turn goes on from here."
+  say "$name runs $IMAGE and reached Hornhoof, $SECONDS s after this command began. It says $(node_status "$name"). Its first turn goes on from here."
+}
+
+one_node_machine() {
+  detect_system
+  check_server
+  ensure_docker
+  node_server
+  RETRY="install.sh back-node $CHECK_NODE brings it back from its volume."
+}
+
+# The digest says what the image is, so a copy here will do: a way back does not wait for a registry that may not answer.
+way_back_here() {
+  "${DOCKER[@]}" image inspect "$BACK_NODE" > /dev/null 2>&1 && return 0
+  say "Getting the way back, $BACK_NODE."
+  "${DOCKER[@]}" pull "$BACK_NODE" > /dev/null || fail "Could not download $BACK_NODE, the way back. Nothing changed."
 }
 
 # The live check of a release gives a real node of the build a turn, before the proof the door asks for can exist, so this does not ask
 # the door. Every machine and everything else still does. See CONTRIBUTING.md.
 check_node_mode() {
-  local entry provider
-  case "$CHECK_COMMIT" in
-    *[!0-9a-f]*) fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed." ;;
-  esac
-  [ "${#CHECK_COMMIT}" -eq 40 ] || fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed."
+  local entry
+  [[ "$CHECK_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed."
   IMAGE=$NODE_REPOSITORY:$CHECK_COMMIT
-  detect_system
-  check_server
-  ensure_docker
-  node_server
+  one_node_machine
   entry=$(named_node "$CHECK_NODE")
-  provider=${CHECK_NODE#hornhoof-}
-  provider=${provider%-*}
-  only_one_of_its_plan "$CHECK_NODE" "$provider"
-  pull_image
-  say "Getting the way back, $BACK_NODE."
-  "${DOCKER[@]}" pull "$BACK_NODE" > /dev/null || "${DOCKER[@]}" image inspect "$BACK_NODE" > /dev/null 2>&1 ||
-    fail "Could not download $BACK_NODE, the way back. Nothing changed."
+  only_one_of_its_plan "$CHECK_NODE"
+  # The check speaks of the published image, not of a copy of that name built on this computer.
+  say "Getting the node image $IMAGE."
+  "${DOCKER[@]}" pull "$IMAGE" > /dev/null || fail "Could not download $IMAGE, the published node image of that commit. Nothing changed."
+  way_back_here
   wait_for_node "$CHECK_NODE" || fail "Nothing changed on this machine."
   start_one "$entry"
 }
@@ -765,12 +787,9 @@ check_node_mode() {
 back_node_mode() {
   local entry
   IMAGE=$BACK_NODE
-  detect_system
-  check_server
-  ensure_docker
-  node_server
+  one_node_machine
+  way_back_here
   entry=$(named_node "$CHECK_NODE")
-  pull_image
   start_one "$entry"
 }
 
