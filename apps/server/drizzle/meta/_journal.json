@@ -477,6 +477,13 @@
       "when": 1793933451596,
       "tag": "0068_model_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793935012542,
+      "tag": "0069_department_work_mode",
+      "breakpoints": true
     }
   ]
 }

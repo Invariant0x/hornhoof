@@ -35,8 +35,9 @@ describe('department owner and approval policy migration', () => {
     const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' - 'repo_full_test_command' as data from ${table} t order by id`))).rows;
     const before = { departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') };
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsUpTo('0063_department_owner_approval_policy');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect({ departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') }).toEqual(before);
     expect((await db.execute(sql`select owner_person_id from departments`)).rows).toEqual([{ owner_person_id: null }]);
@@ -181,8 +182,9 @@ describe('model checks migration', () => {
     const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
     const before = await older();
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsUpTo('0068_model_checks');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect(await older()).toEqual(before);
     for (const table of ['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations']) {
