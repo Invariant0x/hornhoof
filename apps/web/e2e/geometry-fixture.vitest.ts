@@ -12,8 +12,9 @@ for (const field of ['HH_GEOMETRY_SOURCE_ROOT', 'HH_GEOMETRY_SOURCE_SHA']) {
   it('refuses missing pinned input without a host fallback: ' + field, async () => {
     vi.stubEnv('HH_GEOMETRY_SOURCE_ROOT', source);
     vi.stubEnv('HH_GEOMETRY_SOURCE_SHA', sha);
-    vi.stubEnv(field, undefined);
-    await expect(geometryServer()).rejects.toThrow(/NOT_RUN: geometry requires a pinned source checkout.*no host fallback/);
+    vi.stubEnv(field, '');
+    const started = geometryServer().then(fixture => { onTestFinished(() => fixture.stop()); return fixture; });
+    await expect(started).rejects.toThrow(/NOT_RUN: geometry requires a pinned source checkout.*no host fallback/);
   });
 }
 

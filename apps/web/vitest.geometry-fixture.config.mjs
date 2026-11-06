@@ -1,4 +1,4 @@
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /* Explicit fixture-only authorcheck. It is not part of the default browser or web unit suites. */
