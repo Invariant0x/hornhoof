@@ -76,6 +76,7 @@ const errorsOf = (page: Page) => (page as Page & { __errors?: string[] }).__erro
 
 async function openAgent(page: Page, name: string) {
   await page.goto('/');
+  await page.getByRole('button', { name: /Development/ }).click();
   const chip = page.locator('.dept-chip').filter({ hasText: name });
   await expect(chip).toBeVisible();
   await chip.locator('.schip').click();
@@ -113,10 +114,13 @@ test('real server applies both plan and department to map, schema, tree and list
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     await ann.goto('/');
-    await expect(ann.locator('.map')).toContainText('Mina');
-    for (const hidden of ['Otto', 'Awa', 'Fara', 'Hana', 'Oleg', 'Wanda', 'Lena']) await expect(ann.locator('.map')).not.toContainText(hidden);
+    await expect(ann.locator('.map')).toContainText('Own work');
+    await expect(ann.locator('.map')).not.toContainText('Hidden work');
+    await expect(ann.locator('.map')).not.toContainText('Away work');
     await ann.getByRole('button', { name: /Development/ }).click();
     await expect(ann.locator('.dcanvas .dept-chip')).toHaveCount(1);
+    await expect(ann.locator('.dcanvas')).toContainText('Mina');
+    for (const hidden of ['Otto', 'Hana', 'Oleg']) await expect(ann.locator('.dcanvas')).not.toContainText(hidden);
     await ann.getByRole('button', { name: 'Tree', exact: true }).click();
     await expect(ann.locator('.tv-labs .dept-chip')).toHaveCount(1);
     await expect(ann.locator('.tv-in')).not.toContainText('Hidden work');
@@ -135,16 +139,18 @@ test('real server lets the department owner see only their own agent and full vi
   const server = await startServer();
   try {
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
-    await olga.goto('/');
-    await expect(olga.locator('.map')).toContainText('Oleg');
-    await expect(olga.locator('.map')).not.toContainText('Mina');
-    await expect(olga.locator('.map')).not.toContainText('Otto');
-    const ceo = await signedIn(browser, server, 'ceo', 'en', 'light', 1440);
-    await ceo.goto('/');
-    for (const name of ['Mina', 'Otto', 'Awa', 'Fara', 'Hana', 'Oleg', 'Wanda', 'Lena']) await expect(ceo.locator('.map')).toContainText(name);
-    const lisa = await signedIn(browser, server, 'lisa', 'en', 'light', 1440);
-    await lisa.goto('/');
-    for (const name of ['Mina', 'Otto', 'Awa', 'Fara', 'Hana', 'Oleg', 'Wanda', 'Lena']) await expect(lisa.locator('.map')).toContainText(name);
+    await olga.goto(`/departments/${server.dev.id}`);
+    await expect(olga.locator('.dcanvas')).toContainText('Oleg');
+    await expect(olga.locator('.dcanvas')).not.toContainText('Mina');
+    await expect(olga.locator('.dcanvas')).not.toContainText('Otto');
+    for (const who of ['ceo', 'lisa'] as const) {
+      const viewer = await signedIn(browser, server, who, 'en', 'light', 1440);
+      await viewer.goto(`/departments/${server.dev.id}`);
+      for (const name of ['Mina', 'Otto', 'Hana', 'Oleg']) await expect(viewer.locator('.dcanvas')).toContainText(name);
+      await viewer.goto(`/departments/${server.sales.id}`);
+      for (const name of ['Awa', 'Fara', 'Wanda', 'Lena']) await expect(viewer.locator('.dcanvas')).toContainText(name);
+      await viewer.close();
+    }
   } finally {
     await server.stop();
   }
