@@ -157,6 +157,22 @@ async function trialFixture() {
   return { ...f, ...cache, candidate, publication, fullRef: `refs/tags/${candidate.ref}` };
 }
 
+/* Force the real receive-pack processes to compete, then verify after both have settled. No Git outcome is replaced. */
+function pairedPublishers(contexts: [StagingGitContext, StagingGitContext]): void {
+  let releaseReads!: () => void, releasePushes!: () => void, reads = 0, pushes = 0;
+  const readBarrier = new Promise<void>(resolve => { releaseReads = resolve; });
+  const pushBarrier = new Promise<void>(resolve => { releasePushes = resolve; });
+  for (const context of contexts) {
+    const real = context.git; let firstRead = true;
+    context.git = async (args, options) => {
+      const result = await real(args, options);
+      if (args[0] === 'ls-remote' && firstRead) { firstRead = false; if (++reads === 2) releaseReads(); await readBarrier; }
+      if (args[0] === 'push') { if (++pushes === 2) releasePushes(); await pushBarrier; }
+      return result;
+    };
+  }
+}
+
 describe('immutable trial tags on disposable Git remotes', () => {
   it('creates only the exact trial tag with ordinary push and exact remote readback', async () => {
     const f = await trialFixture(), calls: string[][] = [], real = f.context.git;
@@ -202,6 +218,7 @@ describe('immutable trial tags on disposable Git remotes', () => {
     const f = await trialFixture(), second = await f.cache();
     const candidate = await prepareStagingCandidate({ ...f.request, heads: [...f.request.heads].reverse() }, second.context); prepared(candidate);
     expect(candidate.commitSha).not.toBe(f.candidate.commitSha);
+    pairedPublishers([f.context, second.context]);
     const results = await Promise.all([publishStagingTrial(f.publication, f.context), publishStagingTrial({ ...f.publication, commitSha: candidate.commitSha }, second.context)]);
     expect(results.map(result => result.status).sort()).toEqual(['conflict', 'published']);
     const winner = results.find(result => result.status === 'published');
@@ -212,6 +229,7 @@ describe('immutable trial tags on disposable Git remotes', () => {
     const f = await trialFixture(), second = await f.cache();
     const candidate = await prepareStagingCandidate(f.request, second.context); prepared(candidate);
     const expected = { status: 'published', ref: f.fullRef, commitSha: f.candidate.commitSha };
+    pairedPublishers([f.context, second.context]);
     expect(await Promise.all([publishStagingTrial(f.publication, f.context), publishStagingTrial(f.publication, second.context)])).toEqual([expected, expected]);
     expect(await git(f.origin, ['rev-parse', f.fullRef])).toBe(f.candidate.commitSha);
   });

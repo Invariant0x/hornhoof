@@ -16,13 +16,51 @@ export interface StagingGitContext {
 export type StagingPreparationResult = { status: 'prepared'; ref: string; commitSha: string; treeSha: string; members: string[] }
   | { status: 'conflict'; submissionId: string } | { status: 'unavailable' };
 
-export interface StagingTrialPublicationRequest { batchId: string; trialId: string; turn: number; commitSha: string }
+const TrialRequest = Request.pick({ batchId: true, trialId: true, turn: true }).extend({ commitSha: ProductCommitSha }).strict();
+export type StagingTrialPublicationRequest = z.infer<typeof TrialRequest>;
 export type StagingTrialPublicationResult = { status: 'published'; ref: string; commitSha: string } | { status: 'conflict' | 'unavailable' };
+
+const trialName = (request: Pick<StagingPreparationRequest, 'turn' | 'batchId' | 'trialId'>) => `turn-${request.turn}-staging-${request.batchId}-${request.trialId}`;
+type RemoteTrial = { status: 'present'; commitSha: string } | { status: 'absent' | 'unavailable' };
+
+async function readTrial(ref: string, context: StagingGitContext): Promise<RemoteTrial> {
+  const result = await git(context, ['ls-remote', '--refs', 'origin', ref]);
+  if (result.code !== 0) return { status: 'unavailable' };
+  if (!result.stdout.trim()) return { status: 'absent' };
+  const [sha, actualRef, ...extra] = result.stdout.trim().split(/\s+/), parsed = ProductCommitSha.safeParse(sha);
+  if (!parsed.success || actualRef !== ref || extra.length) return { status: 'unavailable' };
+  return { status: 'present', commitSha: parsed.data };
+}
+
+async function trialCommit(sha: string, fetch: boolean, context: StagingGitContext): Promise<boolean> {
+  if (fetch && (await git(context, ['fetch', '--quiet', '--no-tags', 'origin', sha])).code !== 0) return false;
+  const result = await git(context, ['cat-file', '-t', sha]);
+  return result.code === 0 && result.stdout.trim() === 'commit';
+}
+
+async function trialReadback(request: StagingTrialPublicationRequest, ref: string, context: StagingGitContext): Promise<StagingTrialPublicationResult> {
+  const remote = await readTrial(ref, context);
+  if (remote.status !== 'present') return { status: 'unavailable' };
+  return remote.commitSha === request.commitSha ? { status: 'published', ref, commitSha: remote.commitSha } : { status: 'conflict' };
+}
 
 /* Exact remote effect only; private operation/plan/inclusion authority belongs to the protected caller. */
 export async function publishStagingTrial(request: StagingTrialPublicationRequest, context: StagingGitContext): Promise<StagingTrialPublicationResult> {
-  void request; void context;
-  return { status: 'unavailable' };
+  context.signal.throwIfAborted();
+  const parsed = TrialRequest.safeParse(request);
+  if (!parsed.success) return { status: 'unavailable' };
+  const ref = `refs/tags/${trialName(parsed.data)}`;
+  try {
+    const remote = await readTrial(ref, context);
+    if (remote.status === 'unavailable') return { status: 'unavailable' };
+    if (remote.status === 'present' && remote.commitSha !== parsed.data.commitSha) return { status: 'conflict' };
+    if (!await trialCommit(parsed.data.commitSha, remote.status === 'present', context)) return { status: 'unavailable' };
+    if (remote.status === 'absent') await git(context, ['push', '--porcelain', '--no-follow-tags', 'origin', `${parsed.data.commitSha}:${ref}`]);
+    return await trialReadback(parsed.data, ref, context);
+  } catch {
+    context.signal.throwIfAborted();
+    return { status: 'unavailable' };
+  }
 }
 
 async function git(context: StagingGitContext, args: string[], options: StagingGitOptions = {}) {
@@ -83,7 +121,7 @@ export async function prepareStagingCandidate(request: StagingPreparationRequest
     if ('status' in merged) return merged;
     const commitSha = await commitTree(parsed.data, context, merged.treeSha, [parsed.data.baseSha]);
     if (!commitSha) return { status: 'unavailable' };
-    return { status: 'prepared', ref: `turn-${parsed.data.turn}-staging-${parsed.data.batchId}-${parsed.data.trialId}`,
+    return { status: 'prepared', ref: trialName(parsed.data),
       commitSha, treeSha: merged.treeSha, members: parsed.data.heads.map(head => head.submissionId) };
   } catch {
     context.signal.throwIfAborted();
