@@ -50,9 +50,9 @@ async function heldCard(tx: Tx, call: TriageCall, guard: Guard, may: 'resolve' |
   return card;
 }
 
-async function doneBefore(tx: Tx, companyId: string, guard: Guard, inputDigest: string): Promise<QuestionResult | null> {
+export async function doneBefore(tx: Tx, companyId: string, guard: Guard, inputDigest: string): Promise<QuestionResult | null> {
   const [done] = await tx.select({ data: agentEvents.data }).from(agentEvents)
-    .where(and(eq(agentEvents.companyId, companyId), inArray(agentEvents.kind, ['proposal', 'applied']), sql`${agentEvents.data}->'question'->>'operationId' = ${guard.operationId}`)).limit(1);
+    .where(and(eq(agentEvents.companyId, companyId), inArray(agentEvents.kind, ['proposal', 'applied', 'computer']), sql`${agentEvents.data}->'question'->>'operationId' = ${guard.operationId}`)).limit(1);
   if (!done) return null;
   const kept = (done.data as { question: { inputDigest: string; result: QuestionResult } }).question;
   if (kept.inputDigest !== inputDigest) throw operationConflict();

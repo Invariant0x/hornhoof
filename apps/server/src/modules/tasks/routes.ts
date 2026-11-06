@@ -148,6 +148,8 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
     canAnswer: computer.canAnswer,
     decidedBy: decidedByView(computer.decidedBy, new Map()),
     at: computer.asked.at,
+    envelope: computer.asked.envelope ?? null,
+    purpose: computer.asked.purpose ?? null,
     view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId), canAnswer: computer.canAnswer },
   };
 }

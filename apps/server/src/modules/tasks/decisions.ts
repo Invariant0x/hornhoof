@@ -9,6 +9,7 @@ import type { Db } from '../../db/client.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type Asked } from '../computer/access.js';
 import { addresseesOf, requestSubject, taskSpot, type Request, type Task } from './engine.js';
+import { computerAsked } from './question-computer.js';
 import { shownQuestion } from './question-lifecycle.js';
 import { seesTask, type TaskPlace } from './sight.js';
 
@@ -31,7 +32,7 @@ export type Decisions = {
   /* known: read with its task and agent; otherwise it shows only because it is this person's to answer. */
   requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; known: boolean }[];
   proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
-  computer: { asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
+  computer: { asked: Asked & { envelope?: unknown; purpose?: unknown }; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
   counts: Counts;
 };
 
@@ -102,18 +103,18 @@ const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAns
 /* What the orchestrator asks of people, for those who see him: his pending cards for people who see the whole company, and
    his request for the computer. The control folder is read once, for the item and for the counts alike. Only a screen of a
    person takes it. */
-async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ id: string | null; cards: ProposalRow[]; asked: Asked | null }> {
+async function orchestratorAsks(ctx: Pick<Ctx, 'db'>, me: Person, viewer: AgentViewer): Promise<{ id: string | null; cards: ProposalRow[]; asked: (Asked & { envelope?: unknown; purpose?: unknown }) | null }> {
   const { db } = ctx;
   const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
   if (!seesAgentId(viewer, orchestrator?.id)) return { id: null, cards: [], asked: null };
   const cards = me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending'), eq(proposals.audience, 'human')))).sort(byTimeAndId) : [];
-  return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? ctx.computer.view().asked : null };
+  return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? await computerAsked(ctx, me.companyId) : null };
 }
 
 /* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
    by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
    computer for people who see the whole company and see him. */
-export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person): Promise<Decisions> {
+export async function visibleDecisions(ctx: Pick<Ctx, 'db'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const viewer = await viewerOf(db, me);
   const { access } = viewer;

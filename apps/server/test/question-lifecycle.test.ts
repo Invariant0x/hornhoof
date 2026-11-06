@@ -327,7 +327,7 @@ describe('whoever has a question inside', () => {
     const res = await call(c.head.client, 'route_question', { ...c.guard, target: 'operations' });
     expect(res.isError, res.content[0]!.text).toBeFalsy();
     expect((await c.questionsOf(c.work))[0]).toMatchObject({ triageAgentId: c.watcher.id, routeRevision: 2, audience: 'internal' });
-    expect(await c.waitsOf(c.work)).toMatchObject([{ kind: 'external', ownerAgentId: c.watcher.id }]);
+    expect((await c.waitsOf(c.work)).filter(w => w.endedAt === null)).toMatchObject([{ kind: 'external', ownerAgentId: c.watcher.id }]);
     expect((await c.turnsFor(c.watcher.id))[0]!.prompt).toContain('The key is broken');
     const ops = await c.run(c.watcher.id);
     const guard = { ...c.guard, operationId: randomUUID(), expectedRouteRevision: 2 };
@@ -728,7 +728,7 @@ describe('a question whose route is no more', () => {
     await claimQuestions(c.ctx);
     expect((await c.questionsOf(work))[0]).toMatchObject({ triageAgentId: c.orchestrator.id, routeRevision: 2, status: 'open' });
     expect(await c.turnsFor(c.orchestrator.id)).toHaveLength(1);
-    expect(await c.waitsOf(work)).toMatchObject([{ ownerAgentId: c.orchestrator.id }]);
+    expect((await c.waitsOf(work)).filter(w => w.endedAt === null)).toMatchObject([{ ownerAgentId: c.orchestrator.id }]);
   });
 
   it('stays with Operations once handed there, while it can look', async () => {

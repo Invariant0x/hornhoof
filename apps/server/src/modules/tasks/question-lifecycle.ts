@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { QuestionClassificationSnapshot, QuestionMutationGuard, QuestionRouteTarget, type QuestionClassificationInput, type SourceRef } from '@hornhoof/protocol';
+import { QuestionClassificationSnapshot, QuestionMutationGuard, QuestionRouteTarget, type QuestionClassificationInput, type QuestionPurpose, type SourceRef } from '@hornhoof/protocol';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -74,11 +74,19 @@ export function shownQuestion<R extends Pick<Request, 'audience' | 'text' | 'ans
 }
 
 /* What a screen is given besides: the plain words whole and what kind of thing it is, with no person, digest or source. */
+/* What a person is told of what they would be deciding: what it is and how far it goes, and nothing about who asked. */
+function shownPurpose(purpose: QuestionPurpose) {
+  if (purpose.kind === 'decision') return { kind: purpose.kind, decisionKind: purpose.decisionKind };
+  if (purpose.kind === 'owner_login') return { kind: purpose.kind, provider: purpose.provider };
+  if (purpose.kind === 'ceo_permission') return { kind: purpose.kind, permission: purpose.permission, until: purpose.until };
+  return { kind: purpose.kind };
+}
+
 export function humanView(r: Pick<Request, 'classification'>) {
   const snapshot = r.classification;
   if (!snapshot) return { envelope: null, purpose: null };
   const { purpose } = snapshot.authority;
-  return { envelope: snapshot.humanEnvelope, purpose: purpose.kind === 'decision' ? { kind: purpose.kind, decisionKind: purpose.decisionKind } : purpose.kind === 'owner_login' ? { kind: purpose.kind, provider: purpose.provider } : { kind: purpose.kind } };
+  return { envelope: snapshot.humanEnvelope, purpose: shownPurpose(purpose) };
 }
 
 type Turn = { id: string; agentId: string; companyId: string };
@@ -105,7 +113,7 @@ export const RouteInput = z.strictObject({ ...QuestionMutationGuard.shape, targe
 export type RouteInput = z.infer<typeof RouteInput>;
 
 type Guard = z.infer<typeof QuestionMutationGuard>;
-export type QuestionResult = { source: SourceRef; status: Request['status'] | 'pending' | 'applied' | 'dismissed'; audience: Request['audience']; revision: number; routeRevision: number; classificationId?: string; digest?: string };
+export type QuestionResult = { source: SourceRef; status: string; audience: Request['audience']; revision: number; routeRevision: number; classificationId?: string; digest?: string };
 export type Settled = { result: QuestionResult; wakes: Wake[] };
 
 export const noSuchSource = () => new ApiError(404, 'not_found', 'There is no such question.', 'request_unknown');

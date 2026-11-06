@@ -87,12 +87,17 @@ export const digestOf = (value: unknown): string => createHash('sha256').update(
 const bound = (purpose: QuestionPurpose, recipientPersonIds: string[]): QuestionAuthorityBinding => ({ recipientPersonIds, purpose, authorityDigest: digestOf({ purpose, recipientPersonIds }) });
 
 /* Who takes a decision is the rule every other decision follows: nobody is picked here, and nobody gains a right. */
-async function authorityOver(tx: Tx, companyId: string, subject: DecisionSubject, decisionKind: Extract<QuestionPurpose, { kind: 'decision' }>['decisionKind']): Promise<QuestionAuthorityBinding> {
+async function deciders(tx: Tx, companyId: string, subject: DecisionSubject) {
   const everyone = await candidates({ db: tx as unknown as Db }, companyId);
   const access = new Map(everyone.map(p => [p.id, p.access]));
   const rows = await tx.select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.companyId, companyId));
   const recipients = rows.filter(p => canDecide(subject, p, access.get(p.id)!, companyId)).map(p => p.id).sort();
   if (!recipients.length) throw producerUnavailable('Nobody can take this decision now.');
+  return { everyone, recipients };
+}
+
+async function authorityOver(tx: Tx, companyId: string, subject: DecisionSubject, decisionKind: Extract<QuestionPurpose, { kind: 'decision' }>['decisionKind']): Promise<QuestionAuthorityBinding> {
+  const { everyone, recipients } = await deciders(tx, companyId, subject);
   const by = decidedBy(subject, everyone);
   return bound({ kind: 'decision', decisionKind, authorityKind: by.kind, departmentId: by.departmentId }, recipients);
 }
@@ -101,6 +106,12 @@ const decisionAuthority = (tx: Tx, task: Task, request: Request): Promise<Questi
 
 /* A card of the orchestrator is decided as every card is. */
 export const cardAuthority = (tx: Tx, card: { companyId: string; kind: 'structure' | 'staff' }): Promise<QuestionAuthorityBinding> => authorityOver(tx, card.companyId, { source: 'proposal' }, card.kind);
+
+/* Who may open the computer is who decides it now; the date is the one this request was put before them with. */
+export async function computerAuthority(tx: Tx, companyId: string, machineId: string | null, until: string): Promise<QuestionAuthorityBinding> {
+  const { recipients } = await deciders(tx, companyId, { source: 'computer_access' });
+  return bound({ kind: 'ceo_permission', resourceId: 'server', permission: 'server_computer_access', machineId, until }, recipients);
+}
 
 const notARealResource = () => new ApiError(400, 'validation', 'There is no such resource of this company, or it has nobody who owns it.', 'task_invalid');
 

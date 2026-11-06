@@ -24,8 +24,8 @@ export type RunResult = { exit: number; output: string };
 export type Waited = RunResult | 'running' | 'gone';
 /* What the control folder keeps: until when access is open, in seconds for the updater and as a date for people, and
    what the orchestrator asked it for. */
-type Settings = { untilSec: number | null; until: string | null; asked: Asked | null };
-const CLOSED: Settings = { untilSec: null, until: null, asked: null };
+type Settings = { untilSec: number | null; until: string | null; asked: Asked | null; controlRevision: number; appliedOperationId: string | null };
+const CLOSED: Settings = { untilSec: null, until: null, asked: null, controlRevision: 0, appliedOperationId: null };
 
 /* Access to the computer the server runs on, kept in the control folder the app shares with the updater. The updater
    runs the orchestrator's commands there while it is open, and checks that itself too. */
@@ -60,6 +60,8 @@ export class ComputerAccess {
         untilSec: typeof s.untilSec === 'number' ? s.untilSec : null,
         until: typeof s.until === 'string' ? s.until : null,
         asked: s.asked && typeof s.asked.reason === 'string' && typeof s.asked.at === 'string' ? s.asked : null,
+        controlRevision: typeof s.controlRevision === 'number' ? s.controlRevision : 0,
+        appliedOperationId: typeof s.appliedOperationId === 'string' ? s.appliedOperationId : null,
       };
     } catch {
       return CLOSED;
@@ -92,17 +94,46 @@ export class ComputerAccess {
     this.write({ ...this.read(), asked: { reason, at: new Date().toISOString() } });
   }
 
-  /* Opens access for a day from now and answers what the orchestrator had asked it for. */
+  /* Opens access for a day from now. Each open and close moves the revision, so that an operation begun before it cannot undo it. */
   open(now = Date.now()): { until: string; asked: Asked | null } {
-    const { asked } = this.read();
+    const { asked, controlRevision } = this.read();
     const untilSec = Math.floor((now + ACCESS_MS) / 1000);
     const until = new Date(untilSec * 1000).toISOString();
-    this.write({ untilSec, until, asked: null });
+    this.write({ untilSec, until, asked: null, controlRevision: controlRevision + 1, appliedOperationId: null });
     return { until, asked };
   }
 
   close(): void {
-    this.write({ ...this.read(), untilSec: null, until: null });
+    const s = this.read();
+    this.write({ ...s, untilSec: null, until: null, controlRevision: s.controlRevision + 1, appliedOperationId: null });
+  }
+
+  /* What an operation has to be fenced by, and what it can be read back against. */
+  control(): { revision: number; until: string | null; appliedOperationId: string | null } {
+    const { controlRevision: revision, until, appliedOperationId } = this.read();
+    return { revision, until, appliedOperationId };
+  }
+
+  /* Carries out one sealed grant, to its own date and no other. Nothing happens between the read and the write: every writer of
+     this file is in this process and none of them waits. Nothing is done if an open or close came after the fence. */
+  applyGrant(op: { operationId: string; fence: number; until: Date }): 'applied' | 'fenced' {
+    const s = this.read();
+    if (s.appliedOperationId === op.operationId) return 'applied';
+    if (s.controlRevision !== op.fence) return 'fenced';
+    const untilSec = Math.floor(op.until.getTime() / 1000);
+    this.write({ ...s, untilSec, until: new Date(untilSec * 1000).toISOString(), controlRevision: s.controlRevision + 1, appliedOperationId: op.operationId });
+    return 'applied';
+  }
+
+  /* Whether the file says exactly this operation's date, and it is this operation's. */
+  readBack(operationId: string, until: Date): boolean {
+    const s = this.read();
+    return s.appliedOperationId === operationId && s.untilSec === Math.floor(until.getTime() / 1000);
+  }
+
+  /* A request kept here before requests went inside the company, once it is kept there. */
+  clearAsked(): void {
+    this.write({ ...this.read(), asked: null });
   }
 
   /* Takes the orchestrator's request away; false when there was none. */

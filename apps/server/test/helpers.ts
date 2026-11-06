@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -17,6 +18,7 @@ import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { ask, createTask, type Ask, type Request } from '../src/modules/tasks/engine.js';
+import { classifyComputerIntent, raiseComputerIntent } from '../src/modules/tasks/question-computer.js';
 import { bindRequest, questionSourceKey } from '../src/modules/tasks/wait-producers.js';
 import { endOpenSource } from '../src/modules/tasks/wait-state.js';
 import { openTestDb, timed } from './helpers-db.js';
@@ -136,6 +138,18 @@ export async function allBeforePerson(ctx: { db: Db }, taskId: string): Promise<
 /* Every card still inside, already before a person. classify_human_intent takes one there, as question-proposals.test.ts proves; a
    test of what comes after a person has it starts here. */
 export const allCardsBeforePerson = (ctx: { db: Db }) => ctx.db.update(schema.proposals).set({ audience: 'human' }).where(and(eq(schema.proposals.status, 'pending'), eq(schema.proposals.audience, 'internal')));
+
+/* The orchestrator's request for the computer before the CEO, the way it gets there. */
+export async function computerBeforePerson(ctx: FastifyInstance['ctx'], reason: string) {
+  const [orchestrator] = await ctx.db.select().from(schema.agents).where(eq(schema.agents.kind, 'orchestrator'));
+  const { id: agentId, companyId, subscriptionId } = orchestrator!;
+  const [job] = await ctx.db.insert(schema.jobs).values({ companyId, agentId, subscriptionId: subscriptionId!, kind: 'conversation', prompt: 'Work.', status: 'running', startedAt: new Date(), timeoutMs: 1000 }).returning();
+  const by = { id: job!.id, agentId, companyId };
+  const intent = await raiseComputerIntent(ctx, by, reason);
+  await classifyComputerIntent(ctx, { jobId: job!.id, agentId, companyId }, { operationId: randomUUID(), source: { kind: 'computer_access', id: intent.id }, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'human_only_action', actionBinding: { kind: 'ceo_permission', resourceId: 'server' } }, humanEnvelope: { situation: reason, requiredAction: 'Open it or say no.', options: [] } });
+  await ctx.db.update(schema.jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(schema.jobs.id, job!.id));
+  return intent;
+}
 
 /* An agent asks, and the question is already before a person. */
 export async function askedOfPerson(ctx: Parameters<typeof ask>[0], agentId: string, taskId: string, q: Ask) {

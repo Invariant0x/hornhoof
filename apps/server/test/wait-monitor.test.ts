@@ -94,7 +94,7 @@ describe('quiet departments', () => {
       await c.db.update(tasks).set({ departmentId: c.watcher.departmentId }).where(eq(tasks.id, prerequisite.id));
       await c.db.update(tasks).set({ after: [prerequisite.id] }).where(eq(tasks.id, c.taskRow.id));
     }
-    if (kind === 'person') await c.db.insert(requests).values({ companyId: c.companyId, taskId: c.taskRow.id, agentId: c.agent.id, kind: 'question', text: 'Confirm acceptance.' });
+    if (kind === 'person') await c.db.insert(requests).values({ audience: 'human', companyId: c.companyId, taskId: c.taskRow.id, agentId: c.agent.id, kind: 'question', text: 'Confirm acceptance.' });
     if (kind === 'run') {
       const run = await c.run();
       await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(c.now.getTime() - 16 * MINUTE) }).where(eq(jobs.id, run.job.id));

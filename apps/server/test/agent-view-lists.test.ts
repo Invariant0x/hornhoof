@@ -5,7 +5,7 @@ import { agents, attachments, departments, improvements, jobs, machines, proposa
 import { REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { comment } from '../src/modules/tasks/engine.js';
-import { as, askedOfPerson, openStream, until } from './helpers.js';
+import { as, askedOfPerson, computerBeforePerson, openStream, until } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -47,7 +47,7 @@ describe('what waits for people', () => {
     expect(res.json().requests).toEqual([]);
     const [line, ...rest] = res.json().addressed;
     expect(rest).toEqual([]);
-    expect(Object.keys(line).sort()).toEqual(['approval', 'at', 'canAnswer', 'commit', 'decidedBy', 'id', 'images', 'kind', 'options', 'ownerPersonId', 'text'].sort());
+    expect(Object.keys(line).sort()).toEqual(['approval', 'at', 'canAnswer', 'commit', 'decidedBy', 'envelope', 'id', 'images', 'kind', 'options', 'ownerPersonId', 'purpose', 'text'].sort());
     expect(line).toMatchObject({ id: request.id, kind: 'approval', text: 'May this go out?', canAnswer: true, ownerPersonId: c.ids.olga, images: [picture.id], approval: { channel: 'spend', kind: 'ads', amount: 12 }, commit: null });
     expect(leaks(res, [c.crew.other, c.crew.head])).toEqual([]);
     for (const word of [...taskWords(task), 'task-secret']) expect(res.body).not.toContain(word);
@@ -147,8 +147,7 @@ describe('what waits for people', () => {
   it("keeps the orchestrator's cards and his ask for the computer from anyone who does not see him", async () => {
     const c = await aclCompany();
     await c.db.insert(proposals).values({ audience: 'human', companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', brief: 'Hire Zed', items: [], departmentId: c.dev.id });
-    const view = c.app.ctx.computer.view;
-    c.app.ctx.computer.view = () => ({ ...view.call(c.app.ctx.computer), asked: { reason: 'Fix the disk', at: new Date().toISOString() } });
+    await computerBeforePerson(c.app.ctx, 'Fix the disk');
     const wes = await c.get('/api/requests', c.tokens.wes);
     expect(wes.json().proposals).toEqual([]);
     expect(wes.json().computerAccess).toBeNull();
@@ -461,8 +460,7 @@ describe('the events of a seen agent', () => {
 describe('the computer', () => {
   it("shows its state and keeps the orchestrator's ask from whoever does not see him", async () => {
     const c = await aclCompany();
-    const view = c.app.ctx.computer.view;
-    c.app.ctx.computer.view = () => ({ ...view.call(c.app.ctx.computer), asked: { reason: 'Fix the disk', at: new Date().toISOString() } });
+    await computerBeforePerson(c.app.ctx, 'Fix the disk');
     const wes = await c.get('/api/computer', c.tokens.wes);
     expect(wes.statusCode).toBe(200);
     expect(wes.json().asked).toBeNull();

@@ -10,6 +10,7 @@ import { jobOf, type ToolJob } from '../tools/job.js';
 import { picturesOf } from './attachments.js';
 import type { Request } from './engine.js';
 import { answerInternal, approvalDigest, claimQuestion, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
+import { classifyComputerIntent, importAskedFromFile, internalIntents, resolveComputerIntent, settleComputerIntents } from './question-computer.js';
 import { claimProposals, classifyProposal, internalCards, resolveProposal } from './question-proposals.js';
 import type { TriageCall } from './question-authority.js';
 import { wakeAll } from './wake.js';
@@ -72,7 +73,7 @@ export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) 
     .limit(PAGE + 1);
   const page = rows.slice(0, PAGE);
   const pictures = await picturesOf(ctx.db, page.map(r => r.request));
-  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), cards: from ? [] : await internalCards(ctx, job), next: nextCursor(rows) };
+  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), cards: from ? [] : await internalCards(ctx, job), access: from ? [] : await internalIntents(ctx, job), next: nextCursor(rows) };
 }
 
 const call = (job: Pick<ToolJob, 'id' | 'agentId' | 'companyId'>) => ({ jobId: job.id, agentId: job.agentId, companyId: job.companyId });
@@ -84,8 +85,10 @@ async function done(ctx: Ctx, settled: Settled) {
 }
 
 /* One way in for every kind of question: each goes on by the rules of its own kind. */
-const resolveAny = (ctx: Ctx, by: TriageCall, input: ResolveInput): Promise<Settled> => (input.source.kind === 'proposal' ? resolveProposal(ctx, by, input) : answerInternal(ctx, by, input));
-const classifyAny = (ctx: Ctx, by: TriageCall, input: QuestionClassificationInput): Promise<Settled> => (input.source.kind === 'proposal' ? classifyProposal(ctx, by, input) : classifyInternal(ctx, by, input));
+const RESOLVES = { task_request: answerInternal, proposal: resolveProposal, computer_access: resolveComputerIntent };
+const CLASSIFIES = { task_request: classifyInternal, proposal: classifyProposal, computer_access: classifyComputerIntent };
+const resolveAny = (ctx: Ctx, by: TriageCall, input: ResolveInput): Promise<Settled> => RESOLVES[input.source.kind](ctx, by, input);
+const classifyAny = (ctx: Ctx, by: TriageCall, input: QuestionClassificationInput): Promise<Settled> => CLASSIFIES[input.source.kind](ctx, by, input);
 
 const readable = async (fn: () => Promise<unknown>) => {
   try {
@@ -138,6 +141,8 @@ export async function claimQuestions(ctx: Ctx): Promise<void> {
     }
   }
   await claimProposals(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'A card could not go to the orchestrator and is tried again in a minute.'));
+  await settleComputerIntents(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'What was left of opening the computer could not be settled and is tried again in a minute.'));
+  await importAskedFromFile(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'A request for the computer could not go inside and is tried again in a minute.'));
 }
 
 const refused = async (req: FastifyRequest, ctx: Ctx): Promise<ToolJob> => jobOf(ctx, req);
