@@ -22,6 +22,13 @@ test('root projects retain every normal workspace file and the existing no-proc 
   assert.deepEqual(files(actual.all.filter(row => row.project === '@hornhoof/node:no-proc')), files(noProc.all));
 });
 
+test('one collection can answer for several changed files', { timeout: 60000 }, async () => {
+  const together = await probe({ root }, ['apps/server/src/app.ts', 'packages/protocol/src/waits.ts']);
+  const first = await probe({ root }, 'apps/server/src/app.ts');
+  const second = await probe({ root }, 'packages/protocol/src/waits.ts');
+  assert.deepEqual(files(together.selected), files([...first.selected, ...second.selected]));
+});
+
 test('an app change selects real server integration tests and leaves database-only tests out', { timeout: 60000 }, async () => {
   const changed = 'apps/server/src/app.ts';
   const baseline = await probe(workspaceOptions('apps/server', 'vitest.config.ts'), changed);

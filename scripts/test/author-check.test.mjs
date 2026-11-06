@@ -1,17 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { URL } from 'node:url';
 import { changedLines, countDuplicates, exitCodeOf, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from '../author-check/judge.mjs';
 import { baseTable, buildPlan, decodePlan, encodePlan, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus, PLAN_CHARS } from '../author-check/plan.mjs';
 import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
+import { complexityAt, prepare, tracked } from '../author-check/wired.mjs';
 
 const SHA = '1'.repeat(40), BASE = '2'.repeat(40);
-const edn = (...rows) => `{:entries [\n${rows.map(([name, namespace, complexity, coverage, crap]) => `  {:name "${name}", :namespace "${namespace}", :complexity ${complexity}, :coverage ${coverage ?? 'nil'}, :crap ${crap ?? 'nil'}}`).join('\n')}\n]}\n`;
+const edn = (...rows) => `{:entries [\n${rows.map(([name, namespace, complexity, coverage, crap]) => `  {:name "${name.replaceAll('"', '\\"')}", :namespace "${namespace}", :complexity ${complexity}, :coverage ${coverage ?? 'nil'}, :crap ${crap ?? 'nil'}}`).join('\n')}\n]}\n`;
 const vitestSuite = { id: 'node', root: 'apps/node', files: ['apps/node/test/**/*.test.ts'], run: { program: 'npx', args: ['--no-install', 'vitest', 'run'], cwd: 'apps/node' }, split: { kind: 'argv-files' }, finalChecks: [{ program: 'npx', args: ['--no-install', 'tsc', '-p', 'apps/node/tsconfig.json', '--noEmit'], cwd: '.' }] };
 const opaqueSuite = { id: 'ruby', root: 'lib', files: ['lib/**/*_test.rb'], run: { program: 'sh', args: ['lib/run.sh'], cwd: '.' }, split: { kind: 'whole-package' }, finalChecks: [] };
 const unit = file => ({ suiteId: 'node', file, selectionUnit: file });
@@ -223,6 +225,15 @@ test('types run the checks of the suites touched and the test types once when Ty
   const result = await runStages(given({ suites }), ports);
   assert.deepEqual(ports.calls.filter(call => call.args.includes('tsc') || call.args.includes('typecheck:tests')).map(call => call.args.at(-1)), ['--noEmit', 'typecheck:tests']);
   assert.deepEqual([stage(result, 'types').status, stage(result, 'types').exitCode], ['failed', 2]);
+});
+
+test('the test types of the repository run when TypeScript changed, whatever suite was touched', async () => {
+  const ports = fake();
+  await runStages(given({ scripts: { 'typecheck:tests': 'x' } }), ports);
+  assert.equal(named(ports, 'npm').filter(call => call.args.includes('typecheck:tests')).length, 1);
+  const quiet = fake();
+  await runStages(given({ scripts: { 'typecheck:tests': 'x' }, changes: [{ path: 'apps/node/src/a.mjs', kind: 'modified' }] }), quiet);
+  assert.equal(named(quiet, 'npm').length, 0);
 });
 
 test('a check that cannot even start is unavailable, not failed', async () => {
@@ -536,4 +547,34 @@ test('the real git port reads commits, a plan of a real repository included', { 
     assert.deepEqual(plan.changes, [{ kind: 'modified', path: 'a.md' }]);
     assert.deepEqual(plan.hunks, { 'a.md': [[2, 1]] });
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('preparing a run installs only what is missing and builds what the selector needs', async () => {
+  const asked = [];
+  const ports = have => ({ exists: () => have, exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code: 0 }; } });
+  assert.equal(await prepare(ports(false)), null);
+  assert.deepEqual(asked, ['npm ci --ignore-scripts', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
+  asked.length = 0;
+  assert.equal(await prepare(ports(true)), null);
+  assert.equal(asked.length, 2);
+  assert.equal(await prepare({ exists: () => true, exec: async () => ({ code: 1 }) }), 'prepare_failed');
+  assert.equal(await prepare({ exists: () => true, exec: async () => ({ code: null }) }), 'prepare_failed');
+});
+
+test('the tracked files of the index keep paths with spaces', () => {
+  assert.deepEqual(tracked(() => '100644 aaa 0\ta b.ts\0' + '120000 bbb 0\tlink\0'), [{ path: 'a b.ts', mode: '100644', oid: 'aaa' }, { path: 'link', mode: '120000', oid: 'bbb' }]);
+});
+
+const hasCrapper = spawnSync('crapper', ['--help'], { stdio: 'ignore' }).status === 0;
+
+test('the complexity of the base is read at the path the file has now', { skip: !hasCrapper }, () => {
+  const source = 'export function f(x: number) {\n  if (x > 1) return 1;\n  if (x > 2) return 2;\n  return 3;\n}\n';
+  const shown = [];
+  const entries = complexityAt(BASE, args => { shown.push(args); return source; })('apps/node', [{ path: 'src/deep/moved.ts', from: 'apps/node/src/old.ts' }]);
+  assert.deepEqual(shown, [['show', `${BASE}:apps/node/src/old.ts`]]);
+  assert.deepEqual(entries.map(({ name, namespace, complexity }) => [name, namespace, complexity]), [['f', 'deep.moved', 3]]);
+});
+
+test('a missing tool for the base is said, not taken for a simple base', () => {
+  assert.throws(() => complexityAt(BASE, () => 'x', 'no-such-tool-at-all')('.', [{ path: 'a.ts', from: 'a.ts' }]), /crapper_unavailable/);
 });
