@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -7,7 +8,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseNodeMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
+import { readTestEnvironment } from '../src/test-environment.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -1250,5 +1252,175 @@ describe('runNode', () => {
     });
     expect(lines).toContain('Playwright Chromium is ready.');
     expect(existsSync(join(dir, 'browser-error'))).toBe(false);
+  });
+});
+
+function descriptionRepo(dir: string) {
+  const root = join(dir, 'description-source'); mkdirSync(root);
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--quiet', '--allow-empty', '-m', 'No descriptor'], { cwd: root });
+  const localUrl = new URL(`file://${root}`).href, url = 'https://example.test/description.git';
+  const read: typeof readTestEnvironment = (repo, scope, sha, context) => readTestEnvironment({ ...repo, url: localUrl }, { ...scope, repoUrlHash: createHash('sha256').update(localUrl).digest('hex') }, sha, context);
+  return { read, repo: { url, token: '' }, commitSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(url).digest('hex') } };
+}
+
+const environmentTestUid = 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000;
+const environmentTestUser = { uid: environmentTestUid, gid: environmentTestUid };
+
+it('queues description discovery before reading a cold mirror and replies with a typed missing descriptor', async () => {
+  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: expect.arrayContaining([expect.objectContaining({ id: 'node' })]) });
+  const requestId = '33333333-3333-4333-8333-333333333333'; server.send({ type: 'tests.describe', requestId, ...source });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
+  expect(server.received.filter(frame => frame.type === 'tests.described')).toEqual([]);
+  const acquired = server.received.find(frame => frame.type === 'check.acquire')!;
+  server.send({ type: 'check.state', id: acquired.id, state: 'running', position: 0 });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ requestId, commitSha: source.commitSha, result: { status: 'error', problem: { code: 'environment_missing' } } });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.release'));
+});
+
+it('cancels a queued description before repository materialization', async () => {
+  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const requestId = '44444444-4444-4444-8444-444444444444'; server.send({ type: 'tests.describe', requestId, ...source });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
+  server.send({ type: 'tests.describe.cancel', requestId });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'error', problem: { code: 'cancelled' } } });
+  expect(existsSync(join(dir, 'cache', source.repositoryScope.companyId))).toBe(false);
+});
+
+it('reports a metadata deadline and replays its settled reply without acquiring another slot', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: async () => { throw new DOMException('Description deadline expired.', 'TimeoutError'); } }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const request = { type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', ...source };
+  server.send(request); await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'error', problem: { code: 'timeout' } } });
+  server.send(request); await server.wait(() => server.received.filter(frame => frame.type === 'tests.described').length === 2);
+  expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
+});
+
+it('keeps a stopped part cleanup exclusive when another machine slot is granted to the same test user', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url);
+  let release!: () => void, cleaning = false;
+  const cleanup = new Promise<void>(done => { release = done; });
+  const runPart = vi.fn<typeof runTests>(async (message, options) => {
+    if (message.partId === 'first') {
+      await new Promise<void>(done => { if (options.signal!.aborted) done(); else options.signal!.addEventListener('abort', () => done(), { once: true }); });
+      cleaning = true; await cleanup;
+    }
+    return { type: 'tests.done', partId: message.partId, ok: message.partId !== 'first', exitCode: message.partId === 'first' ? null : 0, error: message.partId === 'first' ? 'cancelled' : null, commit: null, log: 'cleanup finished' };
+  });
+  const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+  onTestFinished(() => { release(); node.stop(); });
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const part = { type: 'tests.run', repo: { url: 'https://example.test/repo.git', token: '' }, branch: null, task: 1, command: 'check', part: 1, parts: 1, timeoutMs: 1000 };
+  server.send({ ...part, partId: 'first' }); await server.wait(() => vi.mocked(runPart).mock.calls.length === 1);
+  server.send({ type: 'tests.cancel', partId: 'first' }); await server.wait(() => cleaning);
+  server.send({ ...part, partId: 'second' }); await server.wait(() => server.received.filter(frame => frame.type === 'check.acquire').length === 2);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(runPart).toHaveBeenCalledTimes(1);
+  expect(server.received.some(frame => frame.type === 'tests.started' && frame.partId === 'second')).toBe(false);
+  expect(server.received).toContainEqual({ type: 'tests.waiting', partId: 'second', position: 1 });
+  release(); await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'second'));
+  expect(runPart).toHaveBeenCalledTimes(2);
+});
+
+it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting the next terminal assignment', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url), key = 'kept-agent';
+  const tmux = new Tmux({ socket: `hh-main-kept-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+  const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } });
+  onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(message => message.type === 'hello'));
+  const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: 'fixture-token', workspace: { key, repo: null } };
+  server.send({ ...run, jobId: 'kept-first', prompt: 'First assignment.', sessionId: null });
+  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-first'), 15000);
+  const first = server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-first')!;
+  expect(first).toMatchObject({ ok: true });
+  server.send({ type: 'term.open', termId: 'kept-window', agentKey: key, cols: 100, rows: 30, write: true });
+  await server.wait(() => server.received.some(message => message.type === 'term.data' && message.termId === 'kept-window'));
+  server.send({ type: 'term.input', termId: 'kept-window', data: 'Unsent draft' });
+  await server.wait(() => server.received.some(message => message.type === 'term.data' && String(message.data).includes('Unsent draft')));
+  // Advance only the idle clock past the host's typing grace; do not change its timeout policy.
+  const now = Date.now.bind(Date), clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + 16_000);
+  onTestFinished(() => clock.mockRestore());
+  server.send({ ...run, jobId: 'kept-second', prompt: 'Second assignment.', sessionId: first.sessionId });
+  await server.wait(() => server.received.some(message => message.type === 'agent.input_left' && message.jobId === 'kept-second'), 8000);
+  const left = server.received.find(message => message.type === 'agent.input_left' && message.jobId === 'kept-second')!;
+  expect(left).toMatchObject({ text: 'Unsent draft', typed: true });
+  expect(server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second')).toBe(false);
+  server.send({ type: 'agent.input_kept', agentKey: key, ref: left.ref });
+  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second'), 8000);
+  expect(server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-second')).toMatchObject({ ok: true, result: 'echo: Second assignment.' });
+});
+
+
+describe('checking work before admission', () => {
+  it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts', 'npm run ordinary'])('refuses %s before any part preparation', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'part preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'fixture part ran' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const stale = join(dir, 'runs', 'checking-work', 'work');
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, 'package.json'), JSON.stringify({ scripts: { ordinary: 'echo stale-authorization' } }));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'checking-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'checking-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toEqual([]);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
+  });
+
+  it('refuses a product selection labelled work before its lifecycle starts', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url), sentinel = join(dir, 'product-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'product preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'unexpected product execution' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const manifest = parseTestEnvironment({ version: 1, defaultProfile: 'fast', runtimes: [], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
+      dependencies: { adapter: 'npm', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
+      suites: [{ id: 'unit', root: '.', files: ['one.test.js'], run: { program: 'node', args: ['one.test.js'], cwd: '.' }, split: { kind: 'argv-files' }, profiles: ['fast'] }],
+      impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'Fixture.' } }, mutation: { status: 'unsupported', language: 'javascript', reason: 'Fixture.' } });
+    const manifestSource = JSON.stringify(manifest), commitSha = 'a'.repeat(40);
+    const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'b'.repeat(64) };
+    const description = { version: 1, repositoryScope, commitSha, manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'), manifest, inputDigests: [], inventory: [{ suiteId: 'unit', file: 'one.test.js', selectionUnit: 'one.test.js' }], runtimeCapabilities: [] };
+    server.send({ type: 'tests.run', kind: 'work', partId: 'product-work', repo: { url: 'https://example.test/product.git', token: '' }, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 1000,
+      environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['one.test.js'] } } });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'product-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire' || frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'product-work')).toMatchObject({ ok: false, exitCode: null, log: expect.stringMatching(/^запусти через run_tests\n/) });
+  });
+
+  it.each(['npm ci', 'echo prepared'])('keeps non-check work %s inside one existing slot', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, part.kind ?? 'test');
+      return { type: 'tests.done', partId: part.partId, ok: false, exitCode: 7, error: 'failed', commit: null, log: 'original work output' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'ordinary-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work'));
+    expect(readFileSync(sentinel, 'utf8')).toBe('work');
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toHaveLength(1);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work')).toMatchObject({ ok: false, exitCode: 7, log: 'original work output' });
   });
 });

@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws';
 import { sameNode, type NodeIdentity, type TerminalMessage } from '../nodes/hub.js';
+import { InputLine } from './input-rights.js';
 
 /* Who watches which agent, through the node that shows its session. */
 export type View = { socket: WebSocket; node: NodeIdentity; agentId: string; personId: string };
@@ -36,6 +37,7 @@ export class TerminalRelay {
   private readonly pressed = new Map<string, Pressed[]>();
   private readonly refused = new Map<string, TurnRefusal>();
   private readonly writers = new Map<string, { personId: string; node: NodeIdentity }>();
+  private readonly lines = new Map<string, InputLine>();
 
   add(termId: string, view: View): void {
     this.views.set(termId, view);
@@ -75,6 +77,13 @@ export class TerminalRelay {
   /* A person pressed Enter in the agent's terminal, which the node shows. */
   typing(agentId: string, personId: string, node: NodeIdentity): void {
     this.typed.set(agentId, { personId, node, at: Date.now() });
+  }
+
+  /* The input line of the agent's program, as all its terminals made it. */
+  inputLine(agentId: string): InputLine {
+    let line = this.lines.get(agentId);
+    if (!line) this.lines.set(agentId, (line = new InputLine()));
+    return line;
   }
 
   /* A person typed words in the agent's terminal, which may stay there unsent. */

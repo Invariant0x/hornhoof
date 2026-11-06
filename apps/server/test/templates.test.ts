@@ -87,10 +87,12 @@ describe('templates', () => {
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
-    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     const steady = orchestratorSteady(templates);
-    /* His core rule stays whole in his instructions; the others are files his program reads when a step needs one. */
+    /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
+    expect(steady.text).toContain('<!-- hh:skill hh-run-checks -->');
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
@@ -339,7 +341,8 @@ describe('templates', () => {
       expect(rules).toContain(words);
     }
     expect(rules).not.toContain('Push to the main line at the end.');
-    expect(rules).toContain('crapper and dryer are installed on your machine');
+    expect(rules).not.toContain('crapper and dryer are installed on your machine');
+    expect(rules).toMatch(/crapper[\s\S]*dryer[\s\S]*run_tests/);
     expect(rules).toContain('Push your branch, not the main line');
     /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
     const changed = 'git diff --name-only --diff-filter=d';
@@ -805,6 +808,95 @@ describe('templates', () => {
       );
     });
   });
+
+  describe('shared remote check route, reconciled skill sources and head operational hold rules', () => {
+    const runChecksBody = () => templates.skills.get('hh-run-checks')!.body;
+    const leadTasksBody = () => templates.skills.get('hh-lead-tasks')!.body;
+    const checkSources = (): ReconciledCheckSkills => ({
+      tdd: templates.skills.get('dev-tdd')!.body,
+      gates: templates.skills.get('dev-gates')!.body,
+      engineering: templates.skills.get('dev-engineering-rules')!.body,
+      language: templates.skills.get('dev-language-rules')!.body,
+      implement: templates.skills.get('dev-implement')!.body,
+      browser: templates.skills.get('dev-browser-check')!.body,
+      e2e: templates.skills.get('dev-e2e-tests')!.body,
+      reviewDiff: templates.skills.get('dev-review-diff')!.body,
+      ciRelease: templates.skills.get('dev-ci-release')!.body,
+    });
+
+    it('locks abstract hh-run-checks on for every role and the orchestrator with zero extra grants or incident facts', () => {
+      expect(CORE_SKILLS).toContain('hh-run-checks');
+      expect(ORCHESTRATOR_SKILLS).toContain('hh-run-checks');
+      const skill = templates.skills.get('hh-run-checks');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, runChecksBody())).toEqual([]);
+      for (const r of roles) {
+        expect(r.skills.find(s => s.id === 'hh-run-checks'), r.id).toEqual({ id: 'hh-run-checks', on: true, locked: true });
+      }
+      expect(orchestratorSteady(templates).text).toContain(runChecksBody());
+    });
+
+    it('rejects broken-meaning hh-run-checks text even when required keywords remain present', () => {
+      const base = runChecksBody();
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nRun two test files or a directory locally during RED.`)).toContain('single-regular-file-local-red-green');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nAllow npm install locally when adding a feature dependency.`)).toContain('deny-local-installers-keep-manifest-edits');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nCount a run_work dependency step as T2 check evidence.`)).toContain('noncheck-run-work-separate-from-mixed-checks');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nWhen run_tests is unavailable, fall back to running heavy checks locally.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nTreat a command refusal as PASS once logged.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nPatch Hornhoof task #530 for David on 2026-11-06.`)).toContain('abstract-english-no-incident-facts');
+    });
+
+    it('reconciles the nine development check skills with run_tests while preserving project commands and screenshot rules', () => {
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, checkSources())).toEqual([]);
+    });
+
+    it('rejects contradictory local bulk-check instructions reintroduced into reconciled skills', () => {
+      const base = checkSources();
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, ciRelease: `${base.ciRelease}\nReproduce it locally with the same command.` })).toContain(
+        'no-contradictory-local-heavy-directions',
+      );
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, engineering: `${base.engineering}\ncrapper and dryer are installed on your machine.` })).toContain(
+        'no-contradictory-local-heavy-directions',
+      );
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, browser: `${base.browser}\nTreat every Chromium screenshot capture as a full browser test suite.` })).toContain(
+        'browser-suite-remote-light-screenshot-distinct',
+      );
+    });
+
+    it('teaches every department head abstract external-outage hold recovery and orchestrator-authority forwarding', () => {
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, leadTasksBody())).toEqual([]);
+      for (const role of roles.filter(r => r.kind === 'head')) {
+        const rendered = renderInstructions(
+          templates,
+          { id: 'h', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1],
+          { company: 'Acme', department: 'Work', product: null },
+        );
+        expect(Buffer.byteLength(rendered.text), role.id).toBeLessThan(24_000);
+        expect(rendered.text, role.id).toContain(leadTasksBody());
+      }
+    });
+
+    it('rejects head instructions that prolong holds after recovery, freeze unrelated work or leak incident history', () => {
+      const base = leadTasksBody();
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, base)).toEqual([]);
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nKeep a general hold active after the external service recovers until each task asks again.`)).toContain(
+        'outage-does-not-prolong-hold-and-lifts-at-once',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nFreeze all unrelated tasks across the department when one task hits a repeated local error.`)).toContain(
+        'local-error-isolated-and-orchestrator-decisions-forwarded',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nHold orchestrator-level decisions in your own queue until the end of the turn.`)).toContain(
+        'local-error-isolated-and-orchestrator-decisions-forwarded',
+      );
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nRemember the GitHub push outage from David on #551 on 2026-11-06.`)).toContain(
+        'abstract-head-rule-preserves-gates-and-dependencies',
+      );
+    });
+  });
 });
 
 type ReviewSkills = { diff: string; verdict: string; security: string };
@@ -989,6 +1081,129 @@ const FRONTEND_UI_RULES: { id: string; holds: (text: string) => boolean }[] = [
       /\bChromium\b[\s\S]*\bFirefox\b[\s\S]*\bWebKit\b/.test(text) &&
       /\b(?:never|do not|instead of)\b[^.!?]*\b(?:single|one) browser engine\b/i.test(text) &&
       forbids(text, /\b(?:claim|count)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:single|one) browser engine\b[^.!?;,]*\bas\b[^.!?;,]*\bcross-engine\b/i),
+  },
+];
+
+type ReconciledCheckSkills = {
+  tdd: string;
+  gates: string;
+  engineering: string;
+  language: string;
+  implement: string;
+  browser: string;
+  e2e: string;
+  reviewDiff: string;
+  ciRelease: string;
+};
+
+const INCIDENT_OR_BRAND_LEAK_RE = /\b(?:hornhoof|github|david|ivan|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b/i;
+
+const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => re.test(text));
+
+const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
+
+const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'single-regular-file-local-red-green',
+    holds: text =>
+      matchesAll(text, [/\bat most one\b[\s\S]*\bregular test file\b/i, /\btracked\b[\s\S]*\buntracked\b/i, /\bRED\b[\s\S]*\bGREEN\b/]) &&
+      forbids(text, /\brun\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:two test files|a directory)\s+locally\b/i),
+  },
+  {
+    id: 'heavy-stages-through-run-tests',
+    holds: text =>
+      matchesAll(text, [
+        /"run_tests"/,
+        /\bfree compatible machine\b/i,
+        /\bbuilds?\b[\s\S]*\btype checks?\b[\s\S]*\blinters?\b/i,
+        /\bbrowser suites?\b[\s\S]*\bcoverage\b[\s\S]*\bcrapper\b[\s\S]*\bdryer\b[\s\S]*\bmutation\b/i,
+      ]),
+  },
+  {
+    id: 'deny-local-installers-keep-manifest-edits',
+    holds: text =>
+      matchesAll(text, [
+        /\b(?:never|do not)\b[^.!?]*\b(?:dependency install|install, add)\b[^.!?]*\blocally\b/i,
+        /\bfeature dependency\b/i,
+        /\bmanifest\b[\s\S]*\blockfile\b[\s\S]*\bordinary work\b/i,
+      ]) && forbids(text, /\ballow\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bnpm install\s+locally\b/i),
+  },
+  {
+    id: 'noncheck-run-work-separate-from-mixed-checks',
+    holds: text =>
+      matchesAll(text, [/"run_work"/, /\bnever counts as\b[^.!?]*"run_tests"[^.!?]*\bT2\b/i, /\bmix\w*\b[^.!?]*\bthrough "run_tests"/i]) &&
+      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brun_work\b[^.!?;,]*\bas\s+T2\b/i),
+  },
+  {
+    id: 'unavailable-route-blocks-and-refusal-never-pass',
+    holds: text =>
+      matchesAll(text, [/"blocked"/, /\b(?:never|do not)\s+fall back\b[^.!?]*\blocally\b/i, /\brefus\w*\b[^.!?]*\bnever\b[^.!?]*\bPASS\b/]) &&
+      forbidsAll(text, [/\bfall\s+back\s+to\s+running\s+heavy\s+checks\s+locally\b/i, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brefusal\s+as\s+PASS\b/i]),
+  },
+  {
+    id: 'final-stage-full-suite-and-light-screenshot',
+    holds: text =>
+      matchesAll(text, [/\bwhole test suite\b[^.!?]*\bfinal stage\b/i, /\blightweight\b[^.!?]*\bscreenshot\b/i, /\bbrowser executable name alone\b/i]),
+  },
+  {
+    id: 'abstract-english-no-incident-facts',
+    holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text),
+  },
+];
+
+const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
+  {
+    id: 'all-nine-sources-reference-remote-route',
+    holds: s =>
+      forEvery(
+        [s.tdd, s.gates, s.engineering, s.language, s.implement, s.browser, s.e2e, s.reviewDiff, s.ciRelease],
+        text => matchesAll(text, [/\brun_tests\b/, /\bhh-run-checks\b/]),
+      ),
+  },
+  {
+    id: 'no-contradictory-local-heavy-directions',
+    holds: s => {
+      const joined = Object.values(s).join('\n');
+      return (
+        !/Reproduce it locally with the same command|\bcrapper and dryer are installed on your machine/i.test(joined) &&
+        /\bsame pinned commit and command through `run_tests`/i.test(s.ciRelease)
+      );
+    },
+  },
+  {
+    id: 'browser-suite-remote-light-screenshot-distinct',
+    holds: s =>
+      matchesAll(s.browser, [/\blightweight screenshot capture\b/i, /\bbrowser binary name alone\b/i]) &&
+      forbids(s.browser, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bscreenshot capture as a full browser test suite\b/i),
+  },
+];
+
+const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'outage-does-not-prolong-hold-and-lifts-at-once',
+    holds: text =>
+      matchesAll(text, [
+        /\bexternal service failure\b[^.!?]*\bnever prolongs a general hold once the service recovers\b/i,
+        /\bhold is lifted\b[^.!?]*\bat once in one pass to every affected holder\b/i,
+      ]) && forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
+  },
+  {
+    id: 'local-error-isolated-and-orchestrator-decisions-forwarded',
+    holds: text =>
+      matchesAll(text, [
+        /\brepeated local error\b[^.!?]*\bnever freezes unrelated work\b/i,
+        /\borchestrator's authority promptly\b[^.!?]*"tell_orchestrator"[^.!?]*\binstead of holding them in your own queue\b/i,
+      ]) && forbidsAll(text, [/\bfreeze\w*\s+all\s+unrelated\s+tasks\b/i, /\bhold\w*\s+orchestrator-level\s+decisions\s+in\s+your\s+own\s+queue\b/i]),
+  },
+  {
+    id: 'abstract-head-rule-preserves-gates-and-dependencies',
+    holds: text => {
+      const section = text.slice(text.indexOf('External outages and holds:'));
+      return (
+        matchesAll(section, [/^External outages and holds:/, /\bdependencies\b[\s\S]*\bprotected actions\b[\s\S]*\baccess boundaries\b[\s\S]*\brelease gates\b/i]) &&
+        !INCIDENT_OR_BRAND_LEAK_RE.test(section)
+      );
+    },
   },
 ];
 

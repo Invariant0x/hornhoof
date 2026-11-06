@@ -25,5 +25,7 @@ export async function keepLeftInput(ctx: Ctx, node: NodeIdentity, msg: Left): Pr
     const personId = msg.typed ? ctx.terminals.lastWriter(node, agent.id) : null;
     await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: msg.jobId, kind: 'input_left', personId, data: { text: msg.text, ref: msg.ref } });
   });
+  /* The node clears them now. */
+  ctx.terminals.inputLine(agent.id).empty();
   ctx.hub.send(node, { type: 'agent.input_kept', agentKey: agent.id, ref: msg.ref });
 }

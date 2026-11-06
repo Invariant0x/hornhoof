@@ -27,13 +27,28 @@ export function keepLooking(ctx: Ctx, socket: WebSocket, { termId, node, company
   const closeOnNode = () => {
     if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId });
   };
-  const look = async () => {
+  const lookNow = async () => {
     looked = Date.now();
     const close: Close | null = await why().catch((): Close => CLOSE.noAccess);
     if (!close || !open) return;
     open = false;
     closeOnNode();
     socket.close(close[0], close[1]);
+  };
+  /* One look at a time, as a look can take longer than a ping, and those that ask meanwhile share the one after it: what runs
+     may have read from before they asked. */
+  let running: Promise<void> | null = null;
+  let waiting: Promise<void> | null = null;
+  const look = (): Promise<void> => {
+    if (!running) {
+      running = lookNow().finally(() => { running = null; });
+      return running;
+    }
+    waiting ??= running.then(() => {
+      waiting = null;
+      return open ? look() : undefined;
+    });
+    return waiting;
   };
   const check = setInterval(() => void look(), ctx.config.streamPingMs);
   const stopLooking = ctx.bus.onAccessChange(companyId, () => void look());

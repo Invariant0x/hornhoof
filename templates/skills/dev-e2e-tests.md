@@ -11,4 +11,4 @@ sources: [affaan-m/ECC skills/e2e-testing/SKILL.md, openai/skills skills/.curate
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - A test that fails sometimes is a bug in the test or the product; find which before retrying it.
-- Run them in CI on every change to the main line and before every release.
+- Run affected end-to-end and browser specs through `run_tests` on a free compatible machine (`hh-run-checks`), never as a local browser suite in your working terminal, and run them in CI on every change to the main line and before every release.
