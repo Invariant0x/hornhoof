@@ -32,11 +32,9 @@ const frameTitle = (f: Frame, language: 'en' | 'ru', others: string) =>
   f.team ? f.team.name : f.role ? f.role.title[language] : others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
-  switch (role.schema) {
-    case 'final_check': return t.dept.finalTurnCheck;
-    case 'observer': return t.dept.turnObserver;
-    default: return role.description[language] ?? '';
-  }
+  if (role.schema === 'final_check') return t.dept.finalTurnCheck;
+  if (role.schema === 'observer') return t.dept.turnObserver;
+  return role.description[language] ?? '';
 }
 
 type Props = {
