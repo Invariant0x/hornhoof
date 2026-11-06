@@ -223,4 +223,20 @@ describe('versioned node execution', () => {
     expect(result).toMatchObject({ ok: false, commit: null }); expect(result.log).toContain('description_mismatch'); expect(prepared).toBe(false);
     await expect(access(join(f.dir, 'runs'))).rejects.toThrow();
   });
+  it.each(['cancelled', 'timeout'])('records the unfinished batch suffix after %s and removes the attempt', async reason => {
+    const f = await batchFixture(["require('fs').writeFileSync('batch-started','yes');setInterval(()=>{},100)", "console.log('suffix must not execute')"]), stop = new AbortController();
+    if (reason === 'timeout') f.msg.timeoutMs = 5000;
+    const running = runTests(f.msg, { ...f.options, signal: stop.signal });
+    if (reason === 'cancelled') {
+      const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'batch-started'), end = Date.now() + 5000;
+      while (await readFile(started).catch(() => null) === null) { if (Date.now() >= end) throw new Error('The first batch command never started.'); await new Promise(resolve => setTimeout(resolve, 10)); }
+      stop.abort(new Error('Caller cancelled the batch'));
+    }
+    const result = await running;
+    expect(result, result.log).toMatchObject({ ok: false, error: reason, environmentReceipt: { outcomes: [
+      { index: 0, status: 'failed', exitCode: null }, { index: 1, status: 'not-run', exitCode: null },
+    ] } });
+    expect(result.log).not.toContain('suffix must not execute');
+    await expect(access(join(f.dir, 'runs', f.msg.partId))).rejects.toThrow();
+  });
 });
