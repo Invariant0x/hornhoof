@@ -15,6 +15,7 @@ import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
+import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
@@ -363,7 +364,9 @@ const testStatusReady = (unblocked: boolean, msg: Extract<NodeMessage, { type: '
 async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Other node frames remain with their owning handler.
   switch (msg.type) {
-    case 'hello': case 'status': noteTestCapabilities(ctx, id, msg); return false;
+    case 'hello': noteTestCapabilities(ctx, id, msg); harnessGreeted(ctx, id); return false;
+    case 'status': noteTestCapabilities(ctx, id, msg); return false;
+    case 'tests.harness.done': await harnessSynced(ctx, id, msg); return true;
     case 'tests.described': await acceptDescription(ctx, id, msg); await pumpTests(ctx); return true;
     case 'tests.started': await partStarted(ctx, id, msg.partId); return true;
     case 'tests.done': await partDone(ctx, id, msg); return true;

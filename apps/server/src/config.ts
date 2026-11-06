@@ -47,6 +47,9 @@ export type Config = {
   tunnelHost?: string;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
+  /* Where the bundles of products' test harnesses lie, and how much they may take. No folder: each machine builds its own. */
+  harnessDir?: string;
+  harnessBytes: number;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
   hostId: string | null;
 };
@@ -90,6 +93,8 @@ const Env = z.object({
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+  HARNESS_DIR: z.preprocess(unset, z.string().min(1).optional()),
+  HARNESS_MB: wholeNumber(1, 100_000_000, 'HARNESS_MB must be a whole number of megabytes, like 20480.'),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
@@ -143,6 +148,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+    ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}),
+    harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024,
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }

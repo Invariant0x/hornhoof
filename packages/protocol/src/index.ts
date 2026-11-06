@@ -435,7 +435,7 @@ export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
   HandoffMessage,
-  CheckAcquire, CheckRelease, TestsDescribed,
+  CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -455,6 +455,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     noRuns: z.string().max(300).optional(),
     testEnvironmentVersion: z.literal(1).optional(),
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
+    /* It takes the harness of a product ahead of any run, and shares what it builds through Hornhoof. */
+    testHarness: z.literal(1).optional(),
     /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
@@ -499,6 +501,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     noRuns: z.string().max(300).nullable().optional(),
     testEnvironmentVersion: z.literal(1).optional(),
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
+    /* It takes the harness of a product ahead of any run, and shares what it builds through Hornhoof. */
+    testHarness: z.literal(1).optional(),
   }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({
@@ -688,6 +692,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      at by now; none on a part of work, or on one of a run from before commits were pinned. */
   z.strictObject({ type: z.literal('tests.describe'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),
   z.strictObject({ type: z.literal('tests.describe.cancel'), requestId: Id }),
+  /* Get the harness of this commit ready before any run asks for it. */
+  z.strictObject({ type: z.literal('tests.harness'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),
   z.object({
     type: z.literal('tests.run'),
     partId: Id,

@@ -24,7 +24,7 @@ import { wakeAll } from '../tasks/wake.js';
 import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, type RunMark } from './github-status.js';
-import { forRun, noteProductOwner, productPlaces, together } from './load.js';
+import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
 import { pickMachine } from './pick.js';
 
@@ -545,7 +545,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
-async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
+export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
   if (ref === undefined) {
     const [turn] = await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, job.id));
     const [task] = turn?.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, turn.taskId)) : [];
@@ -879,7 +879,6 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
     } else {
       reserved.take(place);
-      noteProductOwner(ctx, place, run);
       await runReached(ctx, run, 'execution');
     }
 }

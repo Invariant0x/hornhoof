@@ -1,7 +1,7 @@
-import { requiredTestRuntimes, supportsTestProfile, type RepositoryScope, type RuntimeCapability, type NodeLoad } from '@hornhoof/protocol';
+import { supportsTestProfile, type RepositoryScope, type RuntimeCapability, type NodeLoad } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { nodeHeld } from '../updates/drain.js';
-import { availableMemory, computerKey } from './capacity.js';
+import { availableMemory } from './capacity.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { nodes, subscriptions, testRuns } from '../../db/schema.js';
@@ -47,14 +47,7 @@ export function machineState(hub: NodeHub, ids: string[]): { online: boolean; lo
 
 type ProductRun = typeof testRuns.$inferSelect;
 type RunPlace = import('./runs.js').Place;
-const cacheOwners = new WeakMap<Ctx, Map<string, string>>();
-const identityKey = (node: NodeIdentity): string => node.kind === 'builtin' ? 'builtin' : node.nodeId;
-function productAffinityKey(ctx: Ctx, place: RunPlace, run: ProductRun): string {
-  const snapshot = run.environmentSnapshot!, actual = testCapabilities(ctx, place.node).testRuntimes ?? [];
-  const runtime = requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).map(requested => ({ id: requested.id, fingerprint: actual.find(item => item.id === requested.id)!.fingerprint })).sort((a, b) => a.id.localeCompare(b.id));
-  return JSON.stringify([computerKey(place), scopeKey(snapshot.description.repositoryScope), runtime]);
-}
-function productCapable(ctx: Ctx, place: RunPlace, run: ProductRun, need: number): boolean {
+function productCapable(ctx: Ctx, place: RunPlace, run: Pick<ProductRun, 'environmentSnapshot'>, need: number): boolean {
   const capabilities = testCapabilities(ctx, place.node);
   if (capabilities.testEnvironmentVersion !== 1 || nodeHeld(ctx, place.node) || !ctx.hub.isReady(place.node) || ctx.hub.noRunsOf(place.node)) return false;
   if (!place.load || availableMemory(place.load) < need) return false;
@@ -68,22 +61,24 @@ async function siblingPlaces(ctx: Ctx, place: RunPlace): Promise<RunPlace[]> {
 }
 export async function productPlaces(ctx: Ctx, open: RunPlace[], run: ProductRun, need = 0): Promise<RunPlace[]> {
   if (!run.environmentRequest) return open;
-  const selected: RunPlace[] = [], owners = cacheOwners.get(ctx);
+  const selected: RunPlace[] = [];
   for (const place of open) {
-    const candidates = (await siblingPlaces(ctx, place)).filter(candidate => productCapable(ctx, candidate, run, need));
-    const owner = run.environmentSnapshot && candidates.find(candidate => owners?.get(productAffinityKey(ctx, candidate, run)) === identityKey(candidate.node));
-    const chosen = owner || candidates[0];
+    const chosen = (await siblingPlaces(ctx, place)).find(candidate => productCapable(ctx, candidate, run, need));
     if (chosen) selected.push(chosen);
   }
   return selected;
 }
-export function noteProductOwner(ctx: Ctx, place: RunPlace, run: ProductRun): void {
-  if (!run.environmentSnapshot) return;
-  const owners = cacheOwners.get(ctx) ?? new Map<string, string>(); cacheOwners.set(ctx, owners);
-  owners.set(productAffinityKey(ctx, place, run), identityKey(place.node));
+/* The node of each machine that takes a product's harness: the one product parts go to, so they find it there. */
+export async function harnessPlaces(ctx: Ctx, open: RunPlace[]): Promise<RunPlace[]> {
+  const selected: RunPlace[] = [];
+  for (const place of open) {
+    const chosen = (await siblingPlaces(ctx, place)).find(candidate => productCapable(ctx, candidate, { environmentSnapshot: null }, 0));
+    if (chosen && testCapabilities(ctx, chosen.node).testHarness === 1) selected.push(chosen);
+  }
+  return selected;
 }
 
-type Capability = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[] };
+type Capability = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1 };
 const capabilities = new WeakMap<Ctx, Map<string, Capability>>();
 const nodeKey = (id: NodeIdentity): string => id.kind === 'builtin' ? 'builtin' : id.nodeId;
 export function noteTestCapabilities(ctx: Ctx, id: NodeIdentity, value: Capability): void {

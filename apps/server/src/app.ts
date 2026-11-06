@@ -42,6 +42,7 @@ import { startNodeDrains } from './modules/updates/node-drain.js';
 import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
+import { harnessRoutes } from './modules/testruns/harness.js';
 import { readCommit, type CommitReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
@@ -153,6 +154,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   taskRoutes(app, ctx);
   attachmentRoutes(app, ctx);
   partFileRoutes(app, ctx);
+  harnessRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   outboundRoutes(app, ctx);

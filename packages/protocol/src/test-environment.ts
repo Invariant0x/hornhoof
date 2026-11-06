@@ -69,7 +69,10 @@ const EnvironmentShape = z.strictObject({
   version: z.literal(1), defaultProfile: Id,
   runtimes: z.array(z.strictObject({ id: Id, version: Text.max(100) })).max(64),
   profiles: z.array(z.strictObject({ id: Id, requiredSuiteIds: Ids.min(1) })).min(1).max(128),
-  dependencies: z.strictObject({ adapter: Id, inputs: Inputs, install: z.array(Command).max(1000), paths: Inputs, cache: z.enum(['copy', 'none']) }),
+  /* cache link: every part shares one read-only tree through hard links, which is for dependencies nothing writes into;
+     copy: each part gets its own; none: each part installs. env: variables that name a path of the repository once it is
+     installed, for a language that finds its packages that way. */
+  dependencies: z.strictObject({ adapter: Id, inputs: Inputs, install: z.array(Command).max(1000), paths: Inputs, cache: z.enum(['copy', 'link', 'none']), env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), RepositoryPath).optional() }),
   services: z.array(TestService).max(128), prepare: z.array(TestPrepare).max(1000),
   reset: z.array(TestReset).min(1).max(1000).nullable(), suites: z.array(TestSuite).min(1).max(1000),
   impact: z.strictObject({ adapter: Id, fullPackageGlobs: z.array(z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1) })).max(1000), migrationCheck: MigrationCheck }),
@@ -265,7 +268,7 @@ function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z
 }
 export const TestExecution = z.strictObject({ snapshot: EnvironmentSnapshot, selection: Selection }).superRefine(executionSelection);
 export type TestExecution = z.infer<typeof TestExecution>;
-const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.boolean() })
+const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.boolean(), fetched: z.boolean().optional() })
   .refine(receipt => !receipt.hit || receipt.key !== null, 'An uncached preparation cannot be a cache hit.');
 const Duration = z.number().finite().nonnegative();
 const ReceiptFields = {
@@ -289,7 +292,7 @@ export const TestEnvironmentReceipt = z.union([
 export type TestEnvironmentReceipt = z.infer<typeof TestEnvironmentReceipt>;
 
 export const EnvironmentProblem = z.strictObject({
-  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'cancelled', 'timeout']),
+  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'build_failed', 'cancelled', 'timeout']),
   detail: Text.max(2000),
 });
 export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;

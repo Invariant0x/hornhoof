@@ -1048,6 +1048,54 @@ export const testRuns = pgTable(
   t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId), index('test_runs_environment_request').on(sql`(${t.environmentRequest}->>'requestId')`).where(sql`${t.environmentRequest} is not null and ${t.environmentSnapshot} is null and ${t.status} = 'running'`)],
 );
 
+export const HARNESS_BUILD_STATUSES = ['building', 'ready', 'failed'] as const;
+/* One built piece of a product's test harness. key: what it was built from, the program and the architecture, so a machine
+   of another architecture has a row of its own for the same version. One machine holds the lease and builds; the others
+   wait for it and take its bundle, which lies in HARNESS_DIR. */
+export const harnessBuilds = pgTable(
+  'harness_builds',
+  {
+    id: id(),
+    companyId: companyId(),
+    departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    version: text('version').notNull(),
+    unit: text('unit').notNull(),
+    platform: text('platform').notNull(),
+    commitSha: text('commit_sha').notNull(),
+    status: text('status', { enum: HARNESS_BUILD_STATUSES }).notNull().default('building'),
+    builder: text('builder'),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    digest: text('digest'),
+    size: bigint('size', { mode: 'number' }),
+    error: text('error'),
+    failures: integer('failures').notNull().default(0),
+    nextTryAt: timestamp('next_try_at', { withTimezone: true }),
+    /* The machines that said they hold it. */
+    copies: jsonb('copies').$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+    usedAt: timestamp('used_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [unique('harness_builds_company_key').on(t.companyId, t.key), index('harness_builds_department').on(t.departmentId, t.createdAt)],
+);
+
+/* Where a machine stands with a product's harness: the last commit it answered for, and what stopped it. */
+export type HarnessMachine = { name: string; commitSha: string; version: string | null; problem: string | null; at: string };
+/* A problem of a product's harness: the commit it was seen on, and what the head last heard of, so it hears once. */
+export type HarnessProblem = { code: string; detail: string; commitSha: string };
+/* A product's harness as a whole. goodCommit: the last one a machine had all of, which stays usable when a later one breaks. */
+export const harnessProducts = pgTable('harness_products', {
+  departmentId: uuid('department_id').primaryKey().references(() => departments.id, { onDelete: 'cascade' }),
+  companyId: companyId(),
+  headCommit: text('head_commit'),
+  goodCommit: text('good_commit'),
+  version: text('version'),
+  problem: jsonb('problem').$type<HarnessProblem>(),
+  told: text('told'),
+  machines: jsonb('machines').$type<Record<string, HarnessMachine>>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
 export type LostRun = { key: string; machine: string; why: string; computer?: string };
