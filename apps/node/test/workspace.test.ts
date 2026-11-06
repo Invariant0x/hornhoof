@@ -35,14 +35,14 @@ function fakeAdapter(result: (input: RunInput) => Partial<RunResult> = () => ({}
 
 /* git as the node calls it: what it was asked, and a clone that leaves a .git folder behind. */
 const NOTED = ['config', '--local', '--get', 'hornhoof.username'];
+const originAnswer = (args: string[], origin: string): string => args.join(' ') === 'remote get-url origin' ? origin : '';
 
 function fakeGit(origin = REPO.url) {
   const calls: { args: string[]; cwd: string; env: NodeJS.ProcessEnv; user: unknown }[] = [];
   const git: Git = async (args, opts) => {
     calls.push({ args, ...opts });
     if (args[0] === 'clone') mkdirSync(join(args.at(-1)!, '.git'), { recursive: true });
-    if (args.join(' ') === 'remote get-url origin') return origin;
-    return '';
+    return originAnswer(args, origin);
   };
   return { git, calls };
 }

@@ -50,6 +50,24 @@ export function gitEnv(repo: Pick<Repo, 'url' | 'token'>): Record<string, string
 
 type Owner = { user: JobUser | null; home: string | null };
 
+/* Preserve an author the clone was given separately from Hornhoof's setting. */
+async function setRepoAuthor(author: Repo['author'], run: (args: string[]) => Promise<string>): Promise<void> {
+  const AUTHOR = [['user.name', 'hornhoof.username'], ['user.email', 'hornhoof.useremail']] as const;
+  if (author) {
+    const values = [author.name, author.email];
+    for (const [i, [key]] of AUTHOR.entries()) await run(['config', '--', key, values[i]!]);
+    for (const [i, [, note]] of AUTHOR.entries()) await run(['config', '--', note, values[i]!]);
+  } else {
+    const local = (key: string) => run(['config', '--local', '--get', key]).catch(() => '');
+    if (!(await local(AUTHOR[0][1]))) return;
+    for (const [key, note] of AUTHOR) {
+      const noted = await local(note);
+      if (noted && (await local(key)) === noted) await run(['config', '--local', '--unset', key]);
+      await run(['config', '--local', '--unset', note]).catch(() => '');
+    }
+  }
+}
+
 /* The repository's clone inside the agent's folder: cloned once, then left to the agent, pointed at the address
    Hornhoof has now. A folder of the same name that is no clone stays untouched and the turn fails. */
 export async function prepareRepo(workDir: string, repo: Repo, owner: Owner, git: Git = realGit): Promise<Record<string, string>> {
@@ -67,20 +85,6 @@ export async function prepareRepo(workDir: string, repo: Repo, owner: Owner, git
   }
   /* Set each turn, so a changed author reaches clones made before. Hornhoof notes the author it set, so one taken away in
      Hornhoof leaves the clone too, while one the clone was given otherwise stays. */
-  const AUTHOR = [['user.name', 'hornhoof.username'], ['user.email', 'hornhoof.useremail']] as const;
-  if (repo.author) {
-    const values = [repo.author.name, repo.author.email];
-    for (const [i, [key]] of AUTHOR.entries()) await run(['config', '--', key, values[i]!], target);
-    for (const [i, [, note]] of AUTHOR.entries()) await run(['config', '--', note, values[i]!], target);
-  } else {
-    /* Git answers a key that is not set with an error. One read, as the notes go together. */
-    const local = (key: string) => run(['config', '--local', '--get', key], target).catch(() => '');
-    if (!(await local(AUTHOR[0][1]))) return env;
-    for (const [key, note] of AUTHOR) {
-      const noted = await local(note);
-      if (noted && (await local(key)) === noted) await run(['config', '--local', '--unset', key], target);
-      await run(['config', '--local', '--unset', note], target).catch(() => '');
-    }
-  }
+  await setRepoAuthor(repo.author, args => run(args, target));
   return env;
 }
