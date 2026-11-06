@@ -19,8 +19,10 @@ const GIVER_NEWS = new Set(['blocked', 'stuck_at_gate', 'tests', 'work']);
 const REVIEW = new Set(['review', 'turn_review']);
 const RUN_ENDS = new Set(['tests', 'work']);
 
-/* A review wake carries words only for the reviewer who sent the work back: its own findings, to check the fixes for. */
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text' | 'again' | 'mechanical'>): TaskWake => ({ why: wake.why, ...(wake.why === 'review' && wake.again === true ? { again: true } : {}), ...(wake.why === 'changes' && wake.mechanical === true ? { mechanical: true } : {}), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
+/* Only the server's explicit signals qualify a repeat or mechanical changes. */
+const effortSignals = (wake: Pick<Wake, 'why' | 'again' | 'mechanical'>): Pick<TaskWake, 'again' | 'mechanical'> => ({ ...(wake.why === 'review' && wake.again === true ? { again: true } : {}), ...(wake.why === 'changes' && wake.mechanical === true ? { mechanical: true } : {}) });
+
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text' | 'again' | 'mechanical'>): TaskWake => ({ why: wake.why, ...effortSignals(wake), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
 
 /* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);

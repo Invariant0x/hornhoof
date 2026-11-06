@@ -17,7 +17,7 @@ import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
 import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext } from './review-context.js';
-import { degradedReviewNotes, turnReviewPlan, type Plan } from './review-plan.js';
+import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
@@ -173,16 +173,14 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
   const pool = [...new Set(roles.flatMap(p => p.panel))];
   /* A role none of whose reviewers has a subscription does not check it, and the head hears who. */
   const unable = roles.filter(p => !p.panel.length).flatMap(p => p.idle);
-  if (!pool.length) {
-    const who = joined(unable.map(a => a.name));
-    return unable.length ? { note: `Nobody could review the turn: ${who} ${unable.length === 1 ? 'has' : 'have'} no subscription to run on. Give them one on their cards, or give the final check without the review.` } : {};
-  }
+  if (!pool.length) return unavailableTurnReview(unable);
   const [turn] = await tx.select({ number: turns.number }).from(turns).where(eq(turns.id, parent.turnId!));
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
   const branch = `turn-${turn!.number}`;
   const candidates = await Promise.all(roles.flatMap((role, i) => role.panel.map(async reviewerId => ({ reviewerId, vendor: await authorVendor(tx, reviewerId), role: String(i) }))));
   const reviewPlan = await turnReviewPlan(tx, scoped, candidates, result);
-  const panel = [...new Set([...reviewPlan.assignments.map(a => a.reviewerId), ...(reviewPlan.integrationReviewerId ? [reviewPlan.integrationReviewerId] : [])])];
+  const panel = reviewPanel(reviewPlan);
+  const assignee = panel[0] ?? head;
   const review = await turnReviewContext(tx, parent, head, branch, result);
   const titles = joined(covered.map(t => `"${t.title}"`));
   const under = joined(covered.map(t => `#${t.number} "${t.title}"`));
@@ -200,7 +198,7 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       body: `Review ${branch} against the main line: everything the turn changed under ${under}. The verdicts go to the head in one list.`,
       status: 'review',
       stage: 1,
-      assigneeAgentId: panel[0] ?? head,
+      assigneeAgentId: assignee,
       executorAgentId: head,
       gates: leads,
       panel,
@@ -212,9 +210,14 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
     kind: 'created',
     actor: { agentId: head },
     text: row!.brief,
-    data: { assignee: panel[0] ?? head, gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result), review, reviewPlan },
+    data: { assignee, gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result), review, reviewPlan },
   });
   return { row: row!, wakes: turnReviewWakes(row!, head, branch, reviewPlan) };
+}
+
+function unavailableTurnReview(unable: { name: string }[]): { note?: string } {
+  const who = joined(unable.map(agent => agent.name));
+  return unable.length ? { note: `Nobody could review the turn: ${who} ${unable.length === 1 ? 'has' : 'have'} no subscription to run on. Give them one on their cards, or give the final check without the review.` } : {};
 }
 
 function turnReviewWakes(task: Task, head: string, branch: string, plan: Plan): Wake[] {

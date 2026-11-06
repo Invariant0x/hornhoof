@@ -18,6 +18,10 @@ const Assignment = z.object({
 });
 export const ReviewPlan = z.object({ threshold: z.number(), large: z.boolean(), assignments: z.array(Assignment), integrationReviewerId: z.string().nullable(), degraded: z.array(z.string()) });
 export type Plan = z.infer<typeof ReviewPlan>;
+export function reviewPanel(plan: Plan): string[] {
+  const integration = plan.integrationReviewerId ? [plan.integrationReviewerId] : [];
+  return [...new Set([...plan.assignments.map(area => area.reviewerId), ...integration])];
+}
 export type Candidate = { reviewerId: string; vendor: string | null; role: string };
 type Slice = { taskId: string; authorId: string; review: Review | null };
 const CONTRACTS = ['packages/protocol/**', '**/schema.*', '**/routes.*', '**/contracts/**'];
