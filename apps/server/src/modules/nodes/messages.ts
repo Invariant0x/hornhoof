@@ -16,7 +16,7 @@ import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
-import { sameNode, type NodeIdentity } from './hub.js';
+import { sameNode, type NodeIdentity, type NodeTransport } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
@@ -202,7 +202,7 @@ async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Da
   if (msg.type === 'agent.input_left') await keepLeftInput(ctx, id, msg);
 }
 
-export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
+export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date(), _transport?: NodeTransport): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);

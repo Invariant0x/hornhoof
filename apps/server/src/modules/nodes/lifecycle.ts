@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { nodes } from '../../db/schema.js';
 import { nodeReported } from './connections.js';
-import { isOperatorReply, type NodeIdentity } from './hub.js';
+import { isOperatorReply, type NodeIdentity, type NodeTransport } from './hub.js';
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
@@ -31,14 +31,14 @@ async function receiveOperatorFrame(ctx: Ctx, id: NodeIdentity, msg: OperatorNod
   if (await hasCurrentKey(ctx, id)) receiveOperatorReply(ctx, id, msg);
 }
 
-async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>): Promise<void> {
+async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>, transport?: NodeTransport): Promise<void> {
   if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
-  await handleNodeMessage(ctx, id, msg);
+  await handleNodeMessage(ctx, id, msg, undefined, transport);
   if (msg.type === 'hello') await restoreOperatorNode(ctx, id);
 }
 
-export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage): Promise<void> {
-  return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg);
+export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage, transport?: NodeTransport): Promise<void> {
+  return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg, transport);
 }
