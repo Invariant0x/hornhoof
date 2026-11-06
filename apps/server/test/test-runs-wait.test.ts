@@ -1,3 +1,4 @@
+import { deferred as waitRaceBarrier } from '../../../test-support/deferred.mjs';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
@@ -531,12 +532,6 @@ describe('a run that ends while the one who started it waits', () => {
     expect((await taskRow(c)).externalWait).toBeNull();
   });
 });
-
-function waitRaceBarrier() {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => { resolve = done; });
-  return { promise, resolve };
-}
 
 it.each(RUN_TOOLS)('rejects a stale wait after unread check when $tool commits its result before the wait write', async run => {
   const c = await company(), machine = await c.machine(c.ceo, 'wait-race');

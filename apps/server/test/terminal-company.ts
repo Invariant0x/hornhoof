@@ -1,10 +1,11 @@
-import type { ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import WebSocket from 'ws';
 import { agents, jobs, subscriptions } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
-import { as, connectNode, until, type FakeNode } from './helpers.js';
+import { as, connectNode, until } from './helpers.js';
+
+export { nextOf as next } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -33,13 +34,6 @@ export const opened = async (url: string, token: string, agentId: string): Promi
   if ('status' in screen) throw new Error(`Turned away: ${screen.status}`);
   return screen;
 };
-
-export async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const m = await node.next();
-    if (m.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
-}
 
 /* The company of #398 on the built-in node, whose API key plans let an agent move between plans on one machine. */
 export async function company(env: NodeJS.ProcessEnv = {}) {

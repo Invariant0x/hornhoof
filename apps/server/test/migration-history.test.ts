@@ -34,11 +34,15 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
   return folder;
 }
 
-/* What migrations after this history add to retained rows: a stamp on subscriptions, and the id an open wait is kept by. */
+/* New defaults and the operation id of an open wait, while retaining every preexisting field. */
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
+  if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, assignment_epoch: 0, workspace_id: null, workspace_spec_version: null } }));
   if (table !== 'tasks') return rows;
-  return rows.map(row => (row.row.external_wait ? { row: { ...row.row, external_wait: { ...(row.row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } } : row));
+  return rows.map(({ row }) => ({ row: {
+    ...row, assignment_epoch: 0,
+    ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
+  } }));
 }
 
 describe('migration histories merged in turn 5', () => {

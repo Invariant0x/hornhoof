@@ -2,36 +2,31 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CheckSlotQueue as CheckQueue } from '@hornhoof/protocol';
 import { CheckClient } from '../src/check-client.js';
 import { setCheckClient, withCheckSlot, currentCheckSignal } from '../src/check-queue.js';
+import { deferred } from '../../../test-support/deferred.mjs';
 afterEach(() => setCheckClient(null));
-
-function gate() {
-  let open!: () => void;
-  const waiting = new Promise<void>(resolve => { open = resolve; });
-  return { waiting, open };
-}
 
 describe('the machine check queue', () => {
   it('holds checks above capacity, reports FIFO positions and starts the next check on release', async () => {
     const queue = new CheckQueue(() => 1);
-    const first = gate(), second = gate();
+    const first = deferred(), second = deferred();
     const started: string[] = [], positions: number[] = [];
-    const a = queue.withSlot(async () => { started.push('a'); await first.waiting; });
-    const b = queue.withSlot(async () => { started.push('b'); await second.waiting; }, { onPosition: p => positions.push(p) });
+    const a = queue.withSlot(async () => { started.push('a'); await first.promise; });
+    const b = queue.withSlot(async () => { started.push('b'); await second.promise; }, { onPosition: p => positions.push(p) });
     const c = queue.withSlot(async () => { started.push('c'); }, { onPosition: p => positions.push(p) });
     await Promise.resolve();
     expect(started).toEqual(['a']);
     expect(positions).toEqual([1, 2]);
-    first.open(); await a;
+    first.resolve(); await a;
     expect(started).toEqual(['a', 'b']);
     expect(positions).toContain(1);
-    second.open(); await Promise.all([b, c]);
+    second.resolve(); await Promise.all([b, c]);
     expect(started).toEqual(['a', 'b', 'c']);
   });
 
   it('frees the slot after a failing command and removes cancelled waiters', async () => {
     const queue = new CheckQueue(() => 1);
-    const first = gate();
-    const a = queue.withSlot(async () => { await first.waiting; throw new Error('command failed'); });
+    const first = deferred();
+    const a = queue.withSlot(async () => { await first.promise; throw new Error('command failed'); });
     const rejected = expect(a).rejects.toThrow('command failed');
     const cancelled = new AbortController();
     let ran = false;
@@ -39,7 +34,7 @@ describe('the machine check queue', () => {
     const aborted = expect(b).rejects.toThrow();
     const c = queue.withSlot(async () => 'next');
     cancelled.abort(); await aborted;
-    first.open(); await rejected;
+    first.resolve(); await rejected;
     expect(await c).toBe('next');
     expect(ran).toBe(false);
   });
@@ -47,12 +42,12 @@ describe('the machine check queue', () => {
   it('uses all available slots, waits while capacity is zero, and starts on a refreshed measurement', async () => {
     let capacity = 0;
     const queue = new CheckQueue(() => capacity);
-    const hold = gate(), started: number[] = [];
-    const runs = [1, 2, 3].map(n => queue.withSlot(async () => { started.push(n); await hold.waiting; }));
+    const hold = deferred(), started: number[] = [];
+    const runs = [1, 2, 3].map(n => queue.withSlot(async () => { started.push(n); await hold.promise; }));
     await Promise.resolve(); expect(started).toEqual([]);
     capacity = 2; queue.refresh();
     await Promise.resolve(); expect(started).toEqual([1, 2]);
-    hold.open(); await Promise.all(runs);
+    hold.resolve(); await Promise.all(runs);
     expect(started).toEqual([1, 2, 3]);
   });
 
@@ -87,15 +82,15 @@ describe('the machine check queue', () => {
 
   it('keeps an aborted running slot occupied until the command and its children have finished', async () => {
     const queue = new CheckQueue(() => 1), cancel = new AbortController();
-    const started = gate(), stopped = gate();
+    const started = deferred(), stopped = deferred();
     let nextRan = false;
-    const run = queue.withSlot(async () => { started.open(); await stopped.waiting; return 'stopped'; }, { signal: cancel.signal });
-    await started.waiting;
+    const run = queue.withSlot(async () => { started.resolve(); await stopped.promise; return 'stopped'; }, { signal: cancel.signal });
+    await started.promise;
     const next = queue.withSlot(async () => { nextRan = true; });
     cancel.abort(new Error('stop process group'));
     await Promise.resolve();
     expect(nextRan).toBe(false);
-    stopped.open();
+    stopped.resolve();
     expect(await run).toBe('stopped');
     await next;
     expect(nextRan).toBe(true);
@@ -140,12 +135,12 @@ describe('the machine check queue', () => {
       return true;
     });
     client.online(true); setCheckClient(client);
-    const started = gate(), finished = gate(), cancel = new AbortController();
+    const started = deferred(), finished = deferred(), cancel = new AbortController();
     let childSignal: AbortSignal | undefined, ambientSignal: AbortSignal | undefined;
-    const pending = withCheckSlot(async () => withCheckSlot(async signal => { childSignal = signal; ambientSignal = currentCheckSignal(); started.open(); await finished.waiting; }, { signal: cancel.signal }));
-    await started.waiting;
+    const pending = withCheckSlot(async () => withCheckSlot(async signal => { childSignal = signal; ambientSignal = currentCheckSignal(); started.resolve(); await finished.promise; }, { signal: cancel.signal }));
+    await started.promise;
     cancel.abort();
     try { expect(ambientSignal).toBe(childSignal); expect(childSignal?.aborted).toBe(true); }
-    finally { finished.open(); await pending; }
+    finally { finished.resolve(); await pending; }
   });
 });

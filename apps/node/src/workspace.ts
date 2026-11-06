@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { repoFolder, type ExternalGitOutcome, type Workspace } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
+import { secretPrefixLength } from './redact.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
@@ -30,7 +31,7 @@ export class GitCredentialMask {
   push(chunk: string): string {
     const combined = this.held + chunk;
     const text = this.pattern ? combined.replace(this.pattern, '[hidden]') : combined;
-    const keep = credentialPrefix(text, this.forms);
+    const keep = secretPrefixLength(text, this.forms);
     this.held = text.slice(text.length - keep);
     return text.slice(0, text.length - keep);
   }
@@ -40,16 +41,6 @@ export class GitCredentialMask {
     this.held = '';
     return text;
   }
-}
-
-function credentialPrefix(text: string, forms: string[]): number {
-  let keep = 0;
-  for (const value of forms) {
-    for (let size = Math.min(value.length - 1, text.length); size > keep; size--) {
-      if (text.endsWith(value.slice(0, size))) { keep = size; break; }
-    }
-  }
-  return keep;
 }
 
 /* Evidence from an owned preparation child, not a retry decision or proof that

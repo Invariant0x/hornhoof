@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, listsDepartment, type Access } from '../../auth/access.js';
-import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
+import { canDecide, decidedBy } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
@@ -23,7 +23,7 @@ import {
   tasks,
 } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { deptName } from '../departments/templates.js';
+import { decidedByView } from '../tasks/decision-views.js';
 import { candidates, decisionOwner, departmentNames, mayOpenRequest, type Candidate, type DecisionSubject } from '../tasks/decisions.js';
 import { requestSubject, taskSpot } from '../tasks/engine.js';
 import type { SealedPayload } from './ports.js';
@@ -36,11 +36,6 @@ type ApprovalRow = typeof outboundApprovals.$inferSelect;
 type RequestRow = typeof requests.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type CatalogRow = typeof outboundCatalogRevisions.$inferSelect;
-
-function decidedByDto(d: DecidedBy, places: Places) {
-  const place = d.departmentId ? places.get(d.departmentId) : undefined;
-  return { kind: d.kind, department: place ? { id: place.id, name: deptName(place) } : null };
-}
 
 type CatalogSummarizers = {
   readonly [K in CatalogValue['kind']]: (value: Extract<CatalogValue, { kind: K }>) => string;
@@ -101,7 +96,7 @@ type ApprovalBase = {
   requestId: string;
   status: RequestRow['status'];
   canAnswer: boolean;
-  decidedBy: ReturnType<typeof decidedByDto>;
+  decidedBy: ReturnType<typeof decidedByView>;
 };
 
 const MESSAGE_APPROVAL_KEYS = ['messageId', 'messageRevision', 'accountId', 'bindingGeneration', 'contentDigest'] as const;
@@ -249,7 +244,7 @@ async function buildBoundApprovalDto(
     requestId: reqRow.id,
     status: reqRow.status,
     canAnswer,
-    decidedBy: decidedByDto(decidedBy(subject, everyone), places),
+    decidedBy: decidedByView(decidedBy(subject, everyone), places),
   };
   if (bound.kind === 'message') return buildMessageApprovalDto(ctx, bound, base);
   return buildApproachApprovalDto(ctx, bound, base);
@@ -461,7 +456,7 @@ function toEscalationDto(t: TicketRow, ctx: EscalationContext) {
     ...replyLinkFields(ctx.replyMap.get(key), ctx.approvalMap),
     ownerPersonId: decisionOwner(subject, ctx.everyone),
     canAnswer: canDecide(subject, ctx.me, ctx.access, ctx.me.companyId),
-    decidedBy: decidedByDto(decidedBy(subject, ctx.everyone), ctx.places),
+    decidedBy: decidedByView(decidedBy(subject, ctx.everyone), ctx.places),
     createdAt: t.createdAt.toISOString(),
   };
 }

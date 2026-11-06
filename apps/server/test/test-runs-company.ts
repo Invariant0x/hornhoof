@@ -9,6 +9,8 @@ import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, unti
 
 export const GIB = 1024 ** 3;
 
+export { nextOf as nextOf } from './helpers.js';
+
 const NODE_KEY = 'builtin-node-key-0123456789abcdef';
 
 export const idle = (over: object = {}) => ({ cpus: 8, load: 0.5, memFree: 12 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 0, ...over });
@@ -102,14 +104,6 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
     return node;
   };
   return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
-}
-
-/* The next message of one kind a node gets, past the others. */
-export async function nextOf<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const msg = await node.next();
-    if (msg.type === type) return msg as Extract<ServerMessage, { type: T }>;
-  }
 }
 
 /* Whether a node got a message of this kind within a short wait; what came meanwhile is taken. */

@@ -187,12 +187,28 @@ describe('the tracker', () => {
     const calls = shell({ 'GET /api/requests': [200, decisions([choice])], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
     await openTasks(user);
     const asked = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#11/ });
-    expect(within(asked).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', '/api/attachments/p0');
-    expect(within(asked).getByRole('img', { name: 'Round' })).toHaveAttribute('src', '/api/attachments/p1');
-    expect(within(asked).getByRole('link', { name: 'See the work' })).toHaveAttribute('href', 'https://preview.example.com/logo');
+    const materials = within(asked).getByRole('region', { name: 'Materials' });
+    const options = within(asked).getAllByRole('listitem');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent('Round');
+    expect(options[1]).toHaveTextContent('Square');
+    const commonPicture = within(materials).getByRole('button', { name: 'Open material: Picture 1 (Image)' });
+    const optionPicture = within(options[0]!).getByRole('button', { name: 'Open material: Picture 1 (Image)' });
+    for (const [opener, source] of [[commonPicture, '/api/attachments/p0'], [optionPicture, '/api/attachments/p1']] as const) {
+      await user.click(opener);
+      const viewer = await screen.findByRole('dialog', { name: 'Picture 1' });
+      expect(within(viewer).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', source);
+      await user.click(within(viewer).getByRole('button', { name: 'Close' }));
+    }
+    await user.click(within(materials).getByRole('button', { name: 'Open material: See the work (Link)' }));
+    const linkViewer = await screen.findByRole('dialog', { name: 'See the work' });
+    expect(within(linkViewer).getByRole('link', { name: 'Open link' })).toHaveAttribute('href', 'https://preview.example.com/logo');
+    await user.click(within(linkViewer).getByRole('button', { name: 'Close' }));
+    expect(calls.filter(c => c.path === '/api/requests/r4')).toHaveLength(0);
     /* A pick is made here only: words to the agent answer a question, not a choice. */
     expect(screen.getByRole('region', { name: 'Waiting for you' })).not.toHaveTextContent(/window or terminal/);
-    await user.click(within(asked).getByRole('button', { name: /Square/ }));
+    await user.click(within(options[1]!).getByRole('button', { name: 'Choose option 2' }));
+    expect(calls.filter(c => c.path === '/api/requests/r4')).toHaveLength(1);
     expect(calls.find(c => c.path === '/api/requests/r4')?.body).toEqual({ pick: 1 });
   });
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
 import { GitCredentialMask, gitEnv, gitPreparationFailure, type GitPreparationError } from './workspace.js';
+import { signalProcessGroup } from './process-group.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
@@ -13,7 +14,7 @@ const GIT_FLAGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false
 
 function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
   if (pid === undefined) return;
-  try { process.kill(-pid, signal); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  signalProcessGroup(pid, signal);
 }
 
 function gitCancellation(error: GitPreparationError, stopped: AbortSignal): Error {

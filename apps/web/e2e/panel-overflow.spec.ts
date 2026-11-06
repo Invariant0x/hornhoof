@@ -1,10 +1,11 @@
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, NoteView, PersonView, ShownCommand } from '../src/types';
 import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
 import { serveRoutes } from './routes-api';
+import { captureWith } from './capture';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const PHASE = process.env.HH_PANEL_PHASE ?? 'after';
@@ -18,12 +19,7 @@ const NOTES: NoteView[] = [
 
 test.use({ hasTouch: true });
 
-async function capture(page: Page, info: TestInfo, name: string) {
-  const file = `${PHASE}-${name}.png`;
-  const path = SCREENSHOT_DIR ? `${SCREENSHOT_DIR}/${file}` : info.outputPath(file);
-  await page.screenshot({ path });
-  await info.attach(file, { path, contentType: 'image/png' });
-}
+const capture = captureWith(PHASE, SCREENSHOT_DIR);
 
 async function expectInside(container: Locator, elements: Locator[]) {
   const outer = await container.boundingBox();

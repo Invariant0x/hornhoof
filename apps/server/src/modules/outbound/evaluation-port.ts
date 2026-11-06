@@ -11,7 +11,7 @@ import {
   type ModelIdentity,
   type VerifiedEvaluation as VerifiedEvaluationDto,
 } from '@hornhoof/protocol';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { modelCheckCertificates, modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks } from '../../db/schema.js';
@@ -19,6 +19,7 @@ import type { Party } from '../model-checks/dataset.js';
 import { bindingDigest, isOn } from '../model-checks/lifecycle.js';
 import { decide, parseThresholds } from '../model-checks/score.js';
 import { saveDefinition, type CheckPlace } from '../model-checks/store.js';
+import { sameCheckPlace } from '../model-checks/place.js';
 import type { ModelCheckPorts } from './ports.js';
 
 const EVALUATOR_BRAND: unique symbol = Symbol('hornhoof.trustedEvaluator');
@@ -70,14 +71,6 @@ function assertTrustedEvaluator(auth: unknown): void {
   if (!valid) throw new Error('Untrusted evaluator caller cannot publish model check evaluations.');
 }
 
-const samePlace = (place: CheckPlace) =>
-  and(
-    eq(modelChecks.companyId, place.companyId),
-    eq(modelChecks.departmentId, place.departmentId),
-    place.productId ? eq(modelChecks.productId, place.productId) : isNull(modelChecks.productId),
-    eq(modelChecks.kind, place.kind),
-  );
-
 const latestRevision = async (db: Pick<Db, 'select'>, checkId: string) =>
   (await db.select().from(modelCheckRevisions).where(eq(modelCheckRevisions.checkId, checkId)).orderBy(desc(modelCheckRevisions.definitionVersion)).limit(1))[0] ?? null;
 
@@ -112,7 +105,7 @@ export async function syncOutboundCheckDefinition(
     spec.author,
     now,
   );
-  const [check] = await ctx.db.select().from(modelChecks).where(samePlace(place));
+  const [check] = await ctx.db.select().from(modelChecks).where(sameCheckPlace(place));
   if (!check) return;
   await ctx.db
     .update(modelCheckCertificates)
@@ -124,7 +117,7 @@ export async function currentCheckBinding(
   db: Pick<Db, 'select'>,
   place: CheckPlace,
 ): Promise<{ checkId: string; binding: CheckBindingDto; bindingDigest: string } | null> {
-  const [check] = await db.select().from(modelChecks).where(samePlace(place));
+  const [check] = await db.select().from(modelChecks).where(sameCheckPlace(place));
   if (!check) return null;
   const [revision, dataset] = await Promise.all([latestRevision(db, check.id), latestDataset(db, check.id)]);
   const thresholds = parseThresholds(check.thresholds);
@@ -155,7 +148,7 @@ export async function activeCheckBinding(
   place: CheckPlace,
   now: Date,
 ): Promise<{ checkId: string; binding: CheckBindingDto; digest: string } | null> {
-  const [check] = await db.select().from(modelChecks).where(samePlace(place));
+  const [check] = await db.select().from(modelChecks).where(sameCheckPlace(place));
   if (!check || !isOn(check, now)) return null;
   const current = await currentCheckBinding(db, place);
   if (!current || check.bindingDigest !== current.bindingDigest) return null;

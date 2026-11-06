@@ -91,7 +91,7 @@ const ownerColumns = (owner: WaitOwnerBinding | undefined) => {
   return { ownerAgentId: agentId, ownerPersonId: personId, attentionAgentId: agentId, attentionPersonId: personId };
 };
 
-const ownerOf = (wait: TaskWait): WaitOwnerBinding | null => {
+export const waitOwner = (wait: TaskWait): WaitOwnerBinding | null => {
   if (wait.ownerAgentId) return { agentId: wait.ownerAgentId };
   return wait.ownerPersonId ? { personId: wait.ownerPersonId } : null;
 };
@@ -145,7 +145,7 @@ async function rebind(tx: Tx, task: Task, wait: TaskWait, bound: Bound, actor: A
   return kept!;
 }
 
-const boundAlike = (wait: TaskWait, bound: Bound): boolean => same(ownerOf(wait), bound.owner) && same(wait.plan, bound.plan);
+const boundAlike = (wait: TaskWait, bound: Bound): boolean => same(waitOwner(wait), bound.owner) && same(wait.plan, bound.plan);
 
 async function reviseWait(tx: Tx, task: Task, wait: TaskWait, bound: Bound, actor: Actor): Promise<TaskWait> {
   if (bound.sourceRevision < wait.sourceRevision) throw staleSource();
@@ -253,7 +253,7 @@ export async function endOpenSource(tx: Tx, input: { taskId: string; kind: WaitS
 
 /* Another now answers for a source: with a plan a new generation on the same dates, without one only the name changes. */
 export async function moveWaitOwner(tx: Tx, wait: TaskWait, owner: WaitOwnerBinding, actor: Actor): Promise<void> {
-  if (same(ownerOf(wait), owner)) return;
+  if (same(waitOwner(wait), owner)) return;
   if (wait.state === 'legacy_needs_plan') {
     await tx.update(taskWaits).set({ ...ownerColumns(owner), updatedAt: new Date() }).where(eq(taskWaits.id, wait.id));
     return;
@@ -322,7 +322,7 @@ const mayReplan = (tx: Tx, task: Task, wait: TaskWait, actor: Actor): Promise<bo
   actor.agentId ? agentMayReplan(tx, task, wait, actor.agentId) : personMayReplan(tx, wait, actor.personId!);
 
 function replanned(wait: TaskWait, valid: ReplanWait): { owner: WaitOwnerBinding; plan: WaitPlan } {
-  const owner = valid.ownerBinding ?? ownerOf(wait);
+  const owner = valid.ownerBinding ?? waitOwner(wait);
   const plan = valid.plan ? normalPlan(valid.plan) : wait.plan;
   if (!owner || !plan) throw refuse(400, 'task_invalid', 'A wait with no plan yet needs a whole plan and its owner.');
   if ((plan.finalReview.intervalMs === null) !== signalsOnce(wait.kind, wait.sourceKey)) throw refuse(400, 'task_invalid', 'Only an external operation reviews once; every other source repeats until it ends.');
