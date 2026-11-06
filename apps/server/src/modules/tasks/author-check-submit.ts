@@ -6,9 +6,9 @@ import { taskEvents, testRuns } from '../../db/schema.js';
 import type { RunJob } from '../tools/job.js';
 import { startRun } from '../testruns/runs.js';
 import { loadTask, move, refuse, submissionTask, submit, type Moved, type Task } from './engine.js';
-import { AuthorCheckPending, pendingSubmission, type PendingSubmission } from './author-check-pending.js';
+import { pendingSubmission, type PendingSubmission } from './author-check-pending.js';
 import { finishAuthorCheck } from './author-check-completion.js';
-import { captureReview, type ReviewSubmission } from './review-context.js';
+import { captureReview, type Review, type ReviewSubmission } from './review-context.js';
 
 export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
 
@@ -19,19 +19,22 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: strin
   const task = await submissionTask(ctx, job.agentId, taskId);
   if (task.merging) return submit(ctx, job.agentId, taskId, input);
   const review = await captureReview(ctx, task, input.review);
-  if (!review?.commit || !review.source) throw refuse(409, 'task_invalid', 'The author check needs an exact review commit and base comparison.');
+  if (!validReview(review)) throw refuse(409, 'task_invalid', 'The author check needs an exact review commit and base comparison.');
   const command = authorCommand(review.commit, review.source.baseCommit, input.review.authorCheckPlan);
   await startRun(ctx, job, { task: task.id, branch: review.branch ?? undefined, command, parts: 1, expectedCommit: review.commit, dedupe: true });
   const [run] = await ctx.db.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.command, command))).orderBy(desc(testRuns.number)).limit(1);
   if (!run || run.commitSha !== review.commit) throw refuse(409, 'task_changed', `#${task.number} moved while its author check was being pinned. Read the branch and submit again.`);
-  const until = new Date(Date.now() + run.timeoutMs).toISOString();
   const data: PendingSubmission = { version: 1, runId: run.id, summary: input.summary, evidence: input.evidence, baseCommit: review.source.baseCommit, authorCheckPlan: input.review.authorCheckPlan, review };
   const row = await move(ctx, task, {
     status: 'working', silent: 0,
-    externalWait: { reason: `Author check ${run.number} on ${review.commit}.`, since: new Date().toISOString(), until, operation: randomUUID(), on: { kind: 'external', event: 'machine' }, run: run.id },
+    externalWait: { reason: `Author check ${run.number} on ${review.commit}.`, since: new Date().toISOString(), until: new Date(Date.now() + run.timeoutMs).toISOString(), operation: randomUUID(), on: { kind: 'external', event: 'machine' }, run: run.id },
   }, { kind: 'updated', actor: { agentId: job.agentId }, text: `Author check ${run.number} runs on ${review.commit}.`, data: { authorCheckPending: data } });
   if (run.status !== 'running') return finishAuthorCheck(ctx, run.id);
   return { task: row, wakes: [] };
+}
+
+function validReview(review: Review | null): review is Review & { commit: string; source: NonNullable<Review['source']> } {
+  return Boolean(review?.commit && review.source);
 }
 
 async function samePending(ctx: Ctx, taskId: string, input: AuthorCheckSubmission): Promise<Task | null> {
@@ -41,9 +44,13 @@ async function samePending(ctx: Ctx, taskId: string, input: AuthorCheckSubmissio
   const events = await ctx.db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'updated'))).orderBy(desc(taskEvents.id));
   for (const event of events) {
     const pending = pendingSubmission(event.data);
-    if (pending && pending.runId === runId && pending.summary === input.summary && pending.evidence === input.evidence && pending.baseCommit === input.review.baseCommit && pending.authorCheckPlan === input.review.authorCheckPlan) return task;
+    if (pending && matches(pending, input, runId)) return task;
   }
   return null;
+}
+
+function matches(pending: PendingSubmission, input: AuthorCheckSubmission, runId: string): boolean {
+  return pending.runId === runId && pending.summary === input.summary && pending.evidence === input.evidence && pending.baseCommit === input.review!.baseCommit && pending.authorCheckPlan === input.review!.authorCheckPlan;
 }
 
 function authorCommand(commit: string, base: string, plan: string): string {
@@ -53,5 +60,3 @@ function authorCommand(commit: string, base: string, plan: string): string {
 }
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-
-export { AuthorCheckPending };
