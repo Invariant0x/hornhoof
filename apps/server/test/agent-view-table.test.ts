@@ -148,6 +148,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
   'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',
   'GET /api/parts/:id/files/:name', 'PUT /api/parts/:id/files/:name',
+  'POST /api/harness/claim', 'POST /api/harness/:key/done', 'POST /api/harness/:key/failed', 'GET /api/harness/:key/bundle', 'PUT /api/harness/:key/parts/:index',
   'PATCH /api/people/:id', 'PUT /api/people/:id/ceo-delegate', 'POST /api/people/:id/invite', 'POST /api/people/invite',
   'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
   'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',

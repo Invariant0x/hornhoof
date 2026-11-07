@@ -45,6 +45,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'ceo', path: /^\/api\/computer\/(?:open|close|decline)$/, rule: 'human CEO or delegate' },
   { name: 'targets', path: /^\/api\/nodes\/update$/, rule: 'node key and builtin scope for server updates' },
   { name: 'identify', path: /^\/api\/nodes\/socket$/, rule: 'node key before websocket upgrade' },
+  { name: 'nodeOf', path: /^\/api\/harness\/(?:claim|:key\/(?:done|failed|bundle|parts\/:index))$/, rule: 'node key, and a build of that node or of a product whose tests it may take' },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },
 ];
 
