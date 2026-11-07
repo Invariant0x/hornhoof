@@ -117,10 +117,10 @@ async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId'>): Promis
 }
 /* What a release relies on was proved on its own line: the repository's main branch or the turn's. A job writes its own report, so
    what another branch says holds for that branch's work and no further, and a turn's full run is of the turn's branch. */
-async function onMainLine(db: Db, run: Pick<Run, 'branch' | 'departmentId'>, turn: number | null): Promise<boolean> {
-  if (turn !== null && run.branch === `turn-${turn}`) return true;
-  const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, run.departmentId));
-  return run.branch === (owner?.branch ?? 'main');
+async function onMainLine(db: Db, branch: string | null, scope: RepositoryScope, turn: number | null): Promise<boolean> {
+  if (turn !== null && branch === `turn-${turn}`) return true;
+  const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, scope.repositoryOwnerId));
+  return branch === (owner?.branch ?? 'main');
 }
 /* A full run of another branch, stopped halfway, or with a part that failed without naming a file (no machine, out of time, no
    preparation) did not get to all the turn needs, so the next one is the full run. One still going counts, so two do not start. */
@@ -137,7 +137,7 @@ export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLi
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
   if (!fullRun) return null;
-  const turn = await turnOfRun(ctx.db, run), mainLine = await onMainLine(ctx.db, run, turn);
+  const turn = await turnOfRun(ctx.db, run), mainLine = await onMainLine(ctx.db, run.branch, scope, turn);
   const due = mainLine && fullRunDue({ turn, everyTurns: fullRun.everyTurns, lastFullTurn: await lastFullTurnOf(ctx.db, run, scope) });
   const chosen = chooseRunMode(manifest, request, due, printed);
   return chosen && { ...chosen, turn, mainLine };

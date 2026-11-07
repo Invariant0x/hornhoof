@@ -91,6 +91,8 @@ describe('packageTiming', () => {
 describe('the reporter in a part of a run', () => {
   function run(part: string | undefined, root: string) {
     vi.stubEnv('HH_TEST_PART', part as string);
+    /* This reporter speaks of made-up files: under a report of the real run it would write them over that report. */
+    vi.stubEnv('HH_TEST_REPORT', '');
     onTestFinished(() => { vi.unstubAllEnvs(); });
     const write = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     onTestFinished(() => { write.mockRestore(); });

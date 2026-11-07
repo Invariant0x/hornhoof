@@ -7,7 +7,7 @@ describe('what a result came to', () => {
   it('stays with the green file and is shown with the run', () => {
     const snapshot = {} as never, batch = { kind: 'suite', suiteId: 'a', files: ['a/1.ts'] } as never;
     expect(partFileResults(snapshot, batch, true, [{ suiteId: 'a', file: 'a/1.ts', status: 'passed', note: '2 killed, 7 survived' }]).green).toEqual([{ suiteId: 'a', file: 'a/1.ts', note: '2 killed, 7 survived' }]);
-    expect(reuseLines({ mode: 'cached', turn: 1, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: [], notes: [{ file: 'a/1.ts', note: '2 killed, 7 survived' }, { file: 'a/2.ts', note: 'all killed' }] }, [])).toEqual(['Notes on test files: a/1.ts: 2 killed, 7 survived; a/2.ts: all killed.']);
+    expect(reuseLines({ mode: 'cached', turn: 1, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [{ file: 'a/1.ts', note: '2 killed, 7 survived' }, { file: 'a/2.ts', note: 'all killed' }] }, [])).toEqual(['Notes on test files: a/1.ts: 2 killed, 7 survived; a/2.ts: all killed.']);
   });
 });
 
