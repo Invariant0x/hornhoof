@@ -5,6 +5,55 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.8.1] - 2026-11-07
+
+Prepare a product's test environment once for the machines that share it, reuse unchanged green test files, and load each
+agent's instructions from shared skills and the skills of its department.
+
+### Added
+
+- Build and share reusable test environments per product and machine architecture, updating the parts whose inputs changed.
+- Keep green results by test-file fingerprint, run changed dependencies again, and report a mismatch found by a periodic
+  full run without reuse.
+- Offer a generalist developer role that takes a whole task through its own checks and cleanup.
+
+### Changed
+
+- Choose affected test groups by changed paths; a shared protocol change also selects its consumers.
+- Load common instructions, leadership rules and department knowledge as separate skills. Existing heads and employees
+  receive the speed skill without replacing their role text.
+
+### Fixed
+
+- Give a test job a writable copy of saved service state while keeping the protection against job-owned links.
+- Declare access to the test environment's sharing routes and include its tool in agent tool lists.
+
+### Before you update
+
+- Update the server before its nodes. Startup applies migrations 0081 through 0085 for saved skills, test results and
+  shared test environments. Keep a backup from 0.8.0; there is no down-migration command.
+- Nodes must support skill files before agents restart with the new instructions. Older nodes cannot start a role whose
+  instructions exceed their inline limit. Applying the generalist role to existing employees is a separate action.
+
+### Russian
+
+Среда тестирования продукта готовится один раз для машин, которые ее используют. Неизмененные файлы с зеленым результатом
+не запускаются повторно, а инструкции сотрудников собираются из общих навыков и знаний отдела.
+
+- Готовая среда передается между машинами одной архитектуры; при изменении ее входных файлов обновляются затронутые части.
+- Результат файла тестов хранится с отпечатком зависимостей. Изменение зависимости запускает файл снова, а периодический
+  полный прогон без кэша показывает расхождения с сохраненным результатом.
+- Добавлена роль разработчика-универсала, который ведет задачу целиком, проверяет ее и убирает лишнее.
+- Группы тестов выбираются по измененным путям. Правка общего протокола выбирает также его потребителей.
+- Общие инструкции, правила руководителя и знания отдела подключаются отдельными навыками. Действующие главы и сотрудники
+  получают навык быстрой работы без замены текста их роли.
+- Копия сохраненного состояния сервиса доступна тестовому заданию на запись с сохранением защиты от подмены ссылками.
+- Для маршрутов общей среды явно заданы правила доступа, а ее инструмент включен в списки инструментов сотрудников.
+
+Перед обновлением: сначала обновите сервер, затем ноды. При старте применяются миграции 0081–0085. Сохраните резервную копию
+0.8.0: команды обратных миграций нет. Перед перезапуском сотрудников ноды должны поддерживать файлы навыков; старые ноды
+не запускают роли, чьи инструкции превышают их предел. Применение роли универсала к действующим сотрудникам идет отдельно.
+
 ## [0.8.0] - 2026-11-06
 
 Turn 8: agents on Codex and Kimi Code get their assignments again, and a release reaches machines only after a live check of its
