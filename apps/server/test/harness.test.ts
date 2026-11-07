@@ -56,7 +56,12 @@ async function shared(env: NodeJS.ProcessEnv = {}) {
 type Shared = Awaited<ReturnType<typeof shared>>;
 
 function pauseIO(operation: string) {
-  const entered = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>();
+  const deferred = () => {
+    let finish = () => {};
+    const promise = new Promise<void>(resolve => { finish = resolve; });
+    return { promise, resolve: () => finish() };
+  };
+  const entered = deferred(), resume = deferred();
   io.pause = async (kind, path) => {
     if (kind !== operation || !path.includes('.parts') && !path.includes('.staging-')) return;
     io.pause = null; entered.resolve(); await resume.promise;

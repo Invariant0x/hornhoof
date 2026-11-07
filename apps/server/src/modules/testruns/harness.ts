@@ -72,8 +72,8 @@ function nodeAllowed(ctx: Ctx, node: NodeIdentity, department: Department) {
       isNull(subscriptions.removedAt), isNull(machines.revokedAt), eq(machines.kind, 'computer'), eq(machines.lendsTests, true), eq(people.status, 'active'), or(eq(people.scopeKind, 'company'), reaches))));
 }
 async function nodeMayTake(ctx: Ctx, node: NodeIdentity, department: Department): Promise<boolean> {
-  const [row] = await ctx.db.select({ allowed: nodeAllowed(ctx, node, department) });
-  return row!.allowed === true;
+  const [row] = await ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, department.id), nodeAllowed(ctx, node, department))).limit(1);
+  return !!row;
 }
 
 async function departmentFor(ctx: Ctx, node: NodeIdentity, scope: RepositoryScope): Promise<Department> {
