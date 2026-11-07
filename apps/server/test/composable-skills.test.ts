@@ -44,6 +44,23 @@ describe('standalone employee abilities', () => {
     }
   });
 
+  it('delivers assignment-scoped descriptions rather than a mandatory route', () => {
+    const role = templates.roles.get('SUP-T2')!;
+    const selected = ['dev-gates', 'dev-ci-release', 'dev-qa-acceptance'];
+    const packet = renderInstructions(templates, {
+      id: 'a', companyId: 'c', kind: 'worker', name: 'Alex', roleKey: role.id,
+      skills: selected, overrides: {}, templateHashes: {},
+    } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
+    for (const id of selected) {
+      const ability = packet.skills.find(file => file.name === id)!;
+      expect(ability.description, id).toMatch(/assign(?:ed|ment)|authoriz(?:ed|ation)|task/i);
+      expect(packet.text, id).toContain(ability.description);
+      expect(ability.description, id).not.toMatch(/each turn through four gates|review and testing run once per turn/i);
+    }
+    expect(templates.skills.get('dev-lead')!.description.en).not.toMatch(/generalist/i);
+    expect(templates.skills.get('dev-lead')!.description.ru).not.toMatch(/универсал/i);
+  });
+
   it('renders one selected ability intact across department identities', () => {
     const roles = [...new Map([...templates.roles.values()].map(role => [role.department, role])).values()];
     for (const role of roles) {
