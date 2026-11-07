@@ -77,6 +77,26 @@ describe('the fingerprint of a test file', () => {
     expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.1.0', fingerprint: 'b'.repeat(64) }] }))).toEqual([]);
   });
 
+  it('changes everywhere with what a harness names for tests to find', async () => {
+    const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
+    const naming = (named: Partial<TestEnvironmentV1['dependencies']>) => input(app, manifest(suites, { dependencies: { ...manifest(suites).dependencies, ...named } }));
+    expect(await changed(base(), naming({ bin: ['.tools/bin'] }))).toEqual(everyone);
+    expect(await changed(base(), naming({ env: { TOOL_HOME: '.tools' } }))).toEqual(everyone);
+  });
+
+  it('changes with how what a suite starts from is made, and not with what only another profile or suite gets', async () => {
+    const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
+    const build = (profiles: string[], program: string): TestEnvironmentV1['prepare'][number] => ({ id: 'build', profiles, serviceIds: [], inputs: [], commands: [{ program, args: [], cwd: '.' }], artifacts: [] });
+    const made = (extra: Partial<TestEnvironmentV1>) => input(app, manifest(suites, extra));
+    expect(await changed(made({ prepare: [build(['fast'], 'one')] }), made({ prepare: [build(['fast'], 'two')] }))).toEqual(everyone);
+    expect(await changed(made({ prepare: [build(['full'], 'one')] }), made({ prepare: [build(['full'], 'two')] }))).toEqual([]);
+    const postgres = (profiles: string[], database: string): TestEnvironmentV1['services'][number] => ({ id: 'db', runtime: 'node', profiles, driver: 'postgres', options: { database } });
+    expect(await changed(made({ services: [postgres(['fast'], 'one')] }), made({ services: [postgres(['fast'], 'two')] }))).toEqual(everyone);
+    expect(await changed(made({ services: [postgres(['full'], 'one')] }), made({ services: [postgres(['full'], 'two')] }))).toEqual([]);
+    const reset = (program: string): TestEnvironmentV1['reset'] => [{ suiteIds: ['a'], scope: 'file', command: { program, args: [], cwd: '.' }, inputs: [] }];
+    expect(await changed(made({ reset: reset('one') }), made({ reset: reset('two') }))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
+  });
+
   it('changes everywhere with the suite command of its own, not of another suite', async () => {
     expect(await changed(base(), input(app, manifest([suite('a', 'apps/a', { run: { ...run, args: ['vitest', 'run', '--bail'] } }), suite('b', 'apps/b')])))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
   });

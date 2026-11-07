@@ -406,14 +406,24 @@ async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, strin
 function versionOf(description: FingerprintInput['description'], id: string): [string, string | null] {
   return [id, description.runtimeCapabilities.find(runtime => runtime.id === id)?.version ?? null];
 }
-/* The runtimes' versions and not the machines, and what is installed. A service counts for a suite only where they share
-   every profile, so a suite that may run without it keeps its results. */
+/* A service counts for a suite only where they share every profile, so a suite that may run without it keeps its results. */
+const servicesOf = (manifest: Manifest, suite: Suite | null) => manifest.services.filter(service => suite === null || suite.profiles.every(profile => service.profiles.includes(profile)));
+/* The runtimes' versions and not the machines, and what is installed. */
 function runtimesOf(description: FingerprintInput['description'], suite: Suite | null): unknown {
   const { manifest } = description, services = new Set(manifest.services.map(service => service.runtime));
-  const needed = manifest.services.filter(service => suite === null || suite.profiles.every(profile => service.profiles.includes(profile))).map(service => service.runtime);
+  const needed = servicesOf(manifest, suite).map(service => service.runtime);
   const own = manifest.runtimes.filter(runtime => !services.has(runtime.id)).map(runtime => runtime.id);
   const ids = [...new Set([...own, ...needed, ...(manifest.execution ? ['hornhoof-test-execution'] : [])])].sort(lexical);
   return ids.map(id => versionOf(description, id));
+}
+
+/* How what a suite starts from is made: a preparation of any profile it runs in, its services and a reset that names it. */
+function madeFor(manifest: Manifest, suite: Suite): unknown {
+  return {
+    prepare: manifest.prepare.filter(unit => unit.profiles.some(profile => suite.profiles.includes(profile))),
+    services: servicesOf(manifest, suite),
+    reset: (manifest.reset ?? []).filter(reset => reset.suiteIds.includes(suite.id)),
+  };
 }
 
 function screensFor(tree: Tree, sources: string, spec: string): string[] {
@@ -458,8 +468,8 @@ export async function fingerprintUnits(input: FingerprintInput, pause: Pause = n
   await graph.scanAll(pause);
   const outside = await outOfGraph(graph, pause), suites = new Map(manifest.suites.map(suite => [suite.id, suite])), { mutation } = manifest;
   const sources = new Set(mutation.status === 'supported' ? mutation.sourcePaths : []);
-  const installed = { inputs: inputDigests.filter(item => manifest.dependencies.inputs.some(pattern => matchesPattern(item.path, pattern))), commands: manifest.dependencies.install };
-  const environments = new Map(manifest.suites.map(suite => [suite.id, digest([runtimesOf(description, suite), installed, suite.id, suite.run, suite.split])]));
+  const installed = { inputs: inputDigests.filter(item => manifest.dependencies.inputs.some(pattern => matchesPattern(item.path, pattern))), commands: manifest.dependencies.install, env: manifest.dependencies.env ?? {}, bin: manifest.dependencies.bin ?? [] };
+  const environments = new Map(manifest.suites.map(suite => [suite.id, digest([runtimesOf(description, suite), installed, madeFor(manifest, suite), suite.id, suite.run, suite.split])]));
   const printOf = (unit: TestUnit): UnitFingerprint => {
     const suite = suites.get(unit.suiteId)!, environment = environments.get(suite.id)!;
     const fingerprint = mutation.status === 'supported' && sources.has(unit.file)
