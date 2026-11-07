@@ -341,6 +341,14 @@ describe('who may share a build', () => {
 });
 
 describe('the harness reaching every machine', () => {
+  it('reports a local build failure when no registry attempt could report it', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'legacy-local');
+    atHead(c); await harnessRound(c.app.ctx);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(await asked(one.node), { result: { status: 'error', problem: { code: 'build_failed', detail: 'local preparation broke' } } }));
+    expect((await c.db.select().from(harnessProducts))[0]!.problem).toMatchObject({ code: 'build_failed', detail: 'local preparation broke' });
+    expect((await turnsOf(c, c.head.id)).join('\n')).toContain('local preparation broke');
+  });
+
   it('ignores a forged commit without consuming the matching active request', async () => {
     const c = await shared(), one = await capable(c, c.ceo, 'one');
     atHead(c); await harnessRound(c.app.ctx); const request = await asked(one.node);
