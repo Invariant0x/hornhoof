@@ -57,7 +57,7 @@ function readJson(text: string, path: string): Record<string, unknown> {
 }
 
 /* JavaScript: a folder with a lock file is a project; a package of its workspaces is part of it. */
-type PackageFile = { scripts?: Record<string, unknown>; workspaces?: unknown; installConfig?: { pnp?: unknown } };
+type PackageFile = { scripts?: Record<string, unknown>; workspaces?: unknown; packageManager?: unknown; installConfig?: { pnp?: unknown } };
 const LOCKS: [string, string, (text: string) => string][] = [
   ['package-lock.json', 'npm', () => 'npm ci --no-audit --no-fund'],
   ['pnpm-lock.yaml', 'pnpm', () => 'corepack pnpm install --frozen-lockfile --package-import-method=copy'],
@@ -83,7 +83,9 @@ async function javascriptProject(seen: Seen, root: string): Promise<Program | Or
   if (lock[1] === 'yarn') {
     const text = await read(seen, under(root, lock[0]));
     const config = seen.tracked.has(under(root, '.yarnrc.yml')) ? await read(seen, under(root, '.yarnrc.yml')) : '';
-    if (!text.includes('yarn lockfile v1') || within(seen, root, ['.pnp.cjs', '.pnp.js', '.pnp.loader.mjs']).length || pkg.installConfig?.pnp || /^\s*nodeLinker:\s*['"]?pnp\b/m.test(config)) {
+    const classic = seen.tracked.has(under(root, '.yarnrc')) ? await read(seen, under(root, '.yarnrc')) : '';
+    const modern = typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('yarn@') && !pkg.packageManager.startsWith('yarn@1.');
+    if (modern || !text.includes('yarn lockfile v1') || within(seen, root, ['.pnp.cjs', '.pnp.js', '.pnp.loader.mjs']).length || pkg.installConfig?.pnp || /^\s*nodeLinker:\s*['"]?pnp\b/m.test(config) || /(?:^|\s)(?:--install\.)?pnp\s+true\b/m.test(classic)) {
       throw new DiscoveryProblem('environment_unsupported', 'Yarn Plug\'n\'Play and modern Yarn need an explicit .hornhoof/test-environment.json with their artifacts and runner.');
     }
   }
