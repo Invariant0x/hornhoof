@@ -15,10 +15,11 @@ export function registry(root: string) {
   const remote = (name: string): HarnessRemote => ({
     async claim(unit: HarnessUnit): Promise<HarnessClaim> {
       const build = builds.get(unit.key);
-      if (build?.file) return { state: 'ready', digest: build.digest!, size: build.size!, partBytes: 32 * 1024 ** 2 };
+      const lease = { companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333' };
+      if (build?.file) return { state: 'ready', ...lease, digest: build.digest!, size: build.size!, partBytes: 32 * 1024 ** 2 };
       if (build && build.builder !== name) return { state: 'wait', afterMs: 100 };
       builds.set(unit.key, { builder: name, unit: unit.unit });
-      return { state: 'build', partBytes: 32 * 1024 ** 2 };
+      return { state: 'build', ...lease, partBytes: 32 * 1024 ** 2 };
     },
     async upload(key, file, digest, size) { const kept = join(root, `${key}.zst`); await copyFile(file, kept); builds.set(key, { ...builds.get(key)!, file: kept, digest, size }); },
     async download(key, file) { await copyFile(builds.get(key)!.file!, file); },
