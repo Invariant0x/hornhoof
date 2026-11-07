@@ -48,6 +48,14 @@ const PASSING: string[] = ['cancelled', 'timeout', 'commit_unavailable'];
 const bundleFile = (dir: string, build: Pick<Build, 'companyId' | 'key' | 'id'>) => join(dir, build.companyId, `${build.key}.${build.id}.zst`);
 const partsFolder = (dir: string, build: Pick<Build, 'companyId' | 'key' | 'id'>) => join(dir, build.companyId, `${build.key}.${build.id}.parts`);
 const exists = (path: string) => access(path).then(() => true, () => false);
+async function removeAttempt(dir: string, build: Build): Promise<void> {
+  await Promise.all([rm(bundleFile(dir, build), { force: true }), rm(partsFolder(dir, build), { recursive: true, force: true })]);
+}
+/* An ID is never reused: only an attempt that no row can publish any more may clean up after its delayed work. */
+async function discardSuperseded(ctx: Ctx, dir: string, build: Build): Promise<void> {
+  const [current] = await ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(eq(harnessBuilds.id, build.id)).limit(1);
+  if (!current) await removeAttempt(dir, build);
+}
 
 /* What a machine asking for a unit does next, by the unit's row: the one decision of who builds. */
 const stillFailed = (build: Build, now: Date): build is Build & { nextTryAt: Date } => build.status === 'failed' && !!build.nextTryAt && build.nextTryAt > now;
@@ -100,6 +108,7 @@ async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now =
     if (decided.set) {
       const changed = await tx.update(harnessBuilds).set(decided.set).where(and(eq(harnessBuilds.id, build!.id), nodeAllowed(scoped, node, department))).returning();
       if (!changed.length) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
+      if (decided.set.id && decided.set.id !== build!.id) await removeAttempt(dir, build!);
     }
     return decided.answer;
   });
@@ -217,8 +226,10 @@ function needDir(ctx: Ctx): string {
 
 async function finishBuild(ctx: Ctx, node: NodeIdentity, key: string, body: unknown, lease: Lease): Promise<void> {
   const { digest, size } = HarnessDone.parse(body), dir = needDir(ctx), build = await heldBuild(ctx, node, key, lease);
-  await assemble(dir, build, digest, size);
-  await changeBuild(ctx, node, build, { status: 'ready', digest, size, error: null, failures: 0, nextTryAt: null, builder: null, leaseUntil: null, usedAt: new Date(), copies: [who(node)] });
+  try {
+    await assemble(dir, build, digest, size);
+    await changeBuild(ctx, node, build, { status: 'ready', digest, size, error: null, failures: 0, nextTryAt: null, builder: null, leaseUntil: null, usedAt: new Date(), copies: [who(node)] });
+  } finally { await discardSuperseded(ctx, dir, build); }
   await rm(partsFolder(dir, build), { recursive: true, force: true });
   await prune(ctx, dir, key, new Date());
   await spread(ctx, build, node);
@@ -274,7 +285,7 @@ export function harnessRoutes(app: FastifyInstance, ctx: Ctx): void {
           await rename(staging, file);
           await changeBuild(scoped, node, build, { leaseUntil: new Date(Date.now() + LEASE_MS) });
         });
-      } finally { await rm(staging, { force: true }); }
+      } finally { await rm(staging, { force: true }); await discardSuperseded(ctx, dir, build); }
       return reply.code(204).send();
     });
   });
