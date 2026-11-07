@@ -202,12 +202,12 @@ async function failBuild(ctx: Ctx, node: NodeIdentity, key: string, body: unknow
   if (department) await noteProblem(ctx, department, { code: 'build_failed', detail: error, commitSha: build.commitSha }, `build:${build.key}`);
 }
 
-async function sendBundle(ctx: Ctx, req: FastifyRequest, key: string) {
-  const node = await nodeOf(ctx, req), dir = needDir(ctx), [build] = await ctx.db.select().from(harnessBuilds).where(ofNode(node, key));
+async function sendBundle(ctx: Ctx, node: NodeIdentity, ranged: string | undefined, key: string) {
+  const dir = needDir(ctx), [build] = await ctx.db.select().from(harnessBuilds).where(ofNode(node, key));
   if (!build || build.status !== 'ready') throw new ApiError(404, 'not_found', 'This bundle is not ready.');
   const [department] = await ctx.db.select().from(departments).where(eq(departments.id, build.departmentId));
   if (!department || !await nodeMayTake(ctx, node, department)) throw new ApiError(403, 'forbidden', 'This machine takes no tests of this product.');
-  const { start, end } = range(req.headers.range, build.size!);
+  const { start, end } = range(ranged, build.size!);
   return { start, end, size: build.size!, stream: createReadStream(bundleFile(dir, build), { start, end }) };
 }
 
@@ -217,7 +217,7 @@ export function harnessRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/harness/:key/done', async (req, reply) => { await finishBuild(ctx, await nodeOf(ctx, req), Key.parse(req.params).key, req.body); return reply.code(204).send(); });
   app.post('/api/harness/:key/failed', async (req, reply) => { await failBuild(ctx, await nodeOf(ctx, req), Key.parse(req.params).key, req.body); return reply.code(204).send(); });
   app.get('/api/harness/:key/bundle', async (req, reply) => {
-    const { start, end, size, stream } = await sendBundle(ctx, req, Key.parse(req.params).key);
+    const { start, end, size, stream } = await sendBundle(ctx, await nodeOf(ctx, req), req.headers.range, Key.parse(req.params).key);
     return reply.code(206).header('content-type', 'application/octet-stream').header('content-range', `bytes ${start}-${end}/${size}`).header('content-length', end - start + 1).send(stream);
   });
   void app.register(async scope => {
