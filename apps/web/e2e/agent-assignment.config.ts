@@ -2,7 +2,9 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 
-const port = process.env.HORNHOOF_BROWSER_PORT ?? String(4300 + process.pid % 1000);
+/* Workers inherit the runner's chosen port instead of recomputing it from their own PID. */
+process.env.HORNHOOF_BROWSER_PORT ??= String(4300 + process.pid % 1000);
+const port = process.env.HORNHOOF_BROWSER_PORT;
 const origin = `http://127.0.0.1:${port}`;
 
 /* This check uses prepared browser executables and owns a Vite server in this checkout. */
