@@ -630,6 +630,46 @@ describe('migration 0084', () => {
   });
 });
 
+describe('migration 0085', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('gives the speed skill every role lists to every head and member that keeps a list of its own, once, and nothing to the orchestrator', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0084_skill_bricks') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const cards: [name: string, kind: 'orchestrator' | 'head' | 'worker', role: string | null, skills: string[]][] = [
+      ['Lead', 'head', 'DEV-HEAD', ['dev-lead', 'dev-work-pipeline']],
+      ['Design lead', 'head', 'DSN-HEAD', ['dsn-work-pipeline']],
+      ['Developer', 'worker', 'DEV-GEN', ['dev-task-flow', 'dev-tdd']],
+      ['Seller', 'worker', 'SAL-SDR', ['sal-prospecting']],
+      ['Trimmed', 'worker', 'OPS-WATCH', []],
+      ['Of its own', 'worker', null, ['dev-docs']],
+      ['Already', 'worker', 'DEV-ENG', ['hh-work-fast', 'dev-tdd']],
+      /* The orchestrator's skills come from code, not from a card. */
+      ['Orchestrator', 'orchestrator', null, []],
+    ];
+    for (const [name, kind, role, skills] of cards) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, role_key, skills) values (${C}, ${kind}, ${name}, '', ${role}, ${JSON.stringify(skills)}::jsonb)`);
+    }
+
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
+
+    const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents`);
+    expect(Object.fromEntries(rows.rows.map(r => [r.name, r.skills]))).toEqual({
+      Lead: ['dev-lead', 'dev-work-pipeline', 'hh-work-fast'],
+      'Design lead': ['dsn-work-pipeline', 'hh-work-fast'],
+      Developer: ['dev-task-flow', 'dev-tdd', 'hh-work-fast'],
+      Seller: ['sal-prospecting', 'hh-work-fast'],
+      Trimmed: ['hh-work-fast'],
+      'Of its own': ['dev-docs', 'hh-work-fast'],
+      Already: ['hh-work-fast', 'dev-tdd'],
+      Orchestrator: [],
+    });
+  });
+});
+
 describe('migration 0023', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const D = '00000000-0000-4000-8000-0000000000d1';
