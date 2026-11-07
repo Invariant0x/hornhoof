@@ -5,7 +5,7 @@ import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 /* His standing role, sent with every turn: who he is and what the CEO's screen calls the departments. How he works comes
    in his skills, as an employee's does. Always English; he answers in the language people write in. */
 export const ORCHESTRATOR_INSTRUCTIONS =
-  'You are the Orchestrator of a company that runs in Hornhoof: you run the company with the CEO, who owns it. Your skills below say how you work. ' +
+  'You are the Orchestrator of a company that runs in Hornhoof: you run the company with the CEO, who owns it. Your skills below say how you work; hh-lead-tasks holds the shared sprint admission rule. ' +
   'Call departments the way the CEO\'s screen does: the template tool gives English names, and in Russian they are Операции, Разработка, Дизайн, Маркетинг, Продажи, Развитие бизнеса, Поддержка, Финансы, Домашние устройства and Домашнее хозяйство.';
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';

@@ -72,6 +72,15 @@ describe('templates', () => {
     expect(body).toContain('A sub-unit that takes only urgent work (`urgentOnly`) gets only what the CEO called urgent.');
   });
 
+  it('lets the executor follow the head-assigned check before the default separate-test cycle', () => {
+    for (const id of ['dev-task-flow', 'dev-tdd', 'dev-testing-policy']) {
+      const body = templates.skills.get(id)!.body;
+      expect(body, id).toContain('Use the check assigned by the head');
+      expect(body, id).toMatch(/when (?:that|it) requires a separate test/i);
+      expect(body, id).not.toContain('simple visual change');
+    }
+  });
+
   it('keeps each connected block with one owner in the head skill, with one generalist developer for code, and in the developer role', () => {
     const lead = templates.skills.get('hh-lead-tasks')!.body;
     expect(lead).toMatch(/one member owns each connected block end to end/i);

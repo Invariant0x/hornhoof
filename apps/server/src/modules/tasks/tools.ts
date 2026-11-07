@@ -500,7 +500,7 @@ class TaskTools {
       'add_tasks',
       {
         description:
-          'Adds tasks to a turn that is not over. A new ask goes into the next planned turn, into the running turn only when the CEO says now. ' +
+          'Adds tasks to a turn that is not over. Follow the shared admission rule in hh-lead-tasks. ' +
           'In the running turn they go to the heads at once, in a planned turn they wait for it to start. Work that does not belong to any planned turn goes into a new one with plan_turn.',
         inputSchema: { turn: Turn, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional() },
       },
