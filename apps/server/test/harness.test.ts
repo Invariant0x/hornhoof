@@ -141,6 +141,7 @@ describe('harness access and attempt fences', () => {
     expect(await pending).toBe(409);
     expect((await c.bundle(two.key, 'all')).rawPayload).toEqual(current);
     expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'ready', digest: sha(current) });
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
   });
 
   it('rechecks authorization after assembling a bundle', async () => {
