@@ -56,8 +56,8 @@ describe('reading what a commit\'s harness is built from', () => {
     const described = await readTestEnvironment(f.source, f.scope, f.sha, f.context);
     expect(gitCalls('--batch')).toHaveLength(1);
     expect(gitCalls('blob').filter(([, args]) => !(args as string[]).includes('--batch')).length).toBeLessThanOrEqual(1);
-    expect(described.inputDigests).toEqual(expect.arrayContaining(Object.entries(migrations).map(([path, bytes]) => ({ path, digest: sha256(bytes) }))));
-    expect(described.inputDigests).toContainEqual({ path: 'package-lock.json', digest: sha256('{}') });
+    expect(described.inputDigests).toEqual(expect.arrayContaining(Object.entries(migrations).map(([path, bytes]) => ({ path, digest: createHash('sha256').update('100644\0').update(bytes).digest('hex') }))));
+    expect(described.inputDigests).toContainEqual({ path: 'package-lock.json', digest: sha256('100644\0{}') });
     expect(described.inputDigests).toHaveLength(44);
   });
 

@@ -465,8 +465,8 @@ describe('source files mutation checks', () => {
     expect(await after('apps/a/test/used.test.ts', `${app['apps/a/test/used.test.ts']}// more\n`)).toEqual([key]);
   });
 
-  it('not what they import: only a changed function runs again, and the full run looks at the rest', async () => {
-    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([]);
+  it('follow what their source imports because it can change the judges outcome', async () => {
+    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([key]);
   });
 
   it.each(['apps/a/test/helper.ts', 'apps/a/test/deep-helper.ts', 'scripts/mutation/config-helper.mjs'])('follow transitive judges input %s', async path => {

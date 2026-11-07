@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,17 +61,16 @@ export function mutatorArgs(source, tests, whole) {
 
 /* What judged a source last time, kept beside the tool's snapshot. Parts of a run merge by file, so each source has its own. */
 const judgesFile = (folder, source) => join(folder, source.replaceAll('/', '__'));
-const judgesOf = (tests, oids) => createHash('sha256').update(JSON.stringify(tests.map(test => [test, oids.get(test)]))).digest('hex');
 function kept(file) {
   try { return readFileSync(file, 'utf8'); }
   catch { return null; }
 }
-export function judgedAgain(folder, source, tests, oids) {
-  return kept(judgesFile(folder, source)) !== judgesOf(tests, oids);
+export function judgedAgain(folder, source, fingerprint) {
+  return !fingerprint || kept(judgesFile(folder, source)) !== fingerprint;
 }
-export function keepJudges(folder, source, tests, oids) {
+export function keepJudges(folder, source, fingerprint) {
   mkdirSync(folder, { recursive: true });
-  writeFileSync(judgesFile(folder, source), judgesOf(tests, oids));
+  writeFileSync(judgesFile(folder, source), fingerprint);
 }
 
 const toolEnv = () => ({ ...process.env, HH_TEST_FILES: '', HH_TEST_REPORT: '' });
@@ -95,21 +93,24 @@ function mutate(tool, args) {
 }
 
 /* The same fast tests a source's fingerprint reads: what they reach decides both. */
-async function fastTestsOf(manifest, tracked, sources) {
+async function judgesFor(manifest, tracked, sources) {
   const fingerprint = await import('../../apps/node/dist/test-fingerprint.js');
   const texts = new Map(fingerprint.codeFilesOf(tracked).map(path => [path, readFileSync(path, 'utf8')]));
-  return fingerprint.fastTestsOf({ description: { manifest, inventory: [], inputDigests: [], runtimeCapabilities: [] }, tracked, texts }, manifest.mutation, sources);
+  const input = { description: { manifest, inventory: [], inputDigests: [], runtimeCapabilities: [] }, tracked, texts };
+  const suite = manifest.suites.find(suite => suite.id === 'mutation');
+  if (!suite) throw new Error('The mutation suite is missing.');
+  return { tests: fingerprint.fastTestsOf(input, manifest.mutation, sources), prints: fingerprint.mutationJudgesOf(input, manifest.mutation, suite, sources) };
 }
 
 async function main() {
   const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')), { mutation } = manifest;
   const sources = selectedSources(process.env.HH_TEST_FILES && readFileSync(process.env.HH_TEST_FILES, 'utf8'), mutation);
-  const tracked = trackedIn('.'), oids = new Map(tracked.map(entry => [entry.path, entry.oid]));
-  const files = await mutateSources(sources, await fastTestsOf(manifest, tracked, sources), {
+  const { tests: fastTests, prints } = await judgesFor(manifest, trackedIn('.'), sources);
+  const files = await mutateSources(sources, fastTests, {
     testsPass,
     mutate: async (source, tests) => {
-      const ended = await mutate(mutation.tool, mutatorArgs(source, tests, judgedAgain(JUDGES, source, tests, oids)));
-      if (outcomeOf(ended.code, ended.output).status === 'passed') keepJudges(JUDGES, source, tests, oids);
+      const ended = await mutate(mutation.tool, mutatorArgs(source, tests, judgedAgain(JUDGES, source, prints.get(source))));
+      if (outcomeOf(ended.code, ended.output).status === 'passed') keepJudges(JUDGES, source, prints.get(source));
       return ended;
     },
   });

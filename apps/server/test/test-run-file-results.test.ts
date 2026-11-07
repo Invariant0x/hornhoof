@@ -1,7 +1,8 @@
-import { hashTestEnvironment, parseTestEnvironment, type NodeMessage, type TestsDescribed } from '@hornhoof/protocol';
+import { PREPARATION_UNIT, hashTestEnvironment, parseTestEnvironment, type NodeMessage, type TestsDescribed } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
+import { turnReviewContext } from '../src/modules/tasks/review-context.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription, newEnvironmentRequest, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
 import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
@@ -15,17 +16,17 @@ const print = (name: string) => name.repeat(64).slice(0, 64);
 const PRINTS = { 'test/a.test.ts': print('a'), 'test/b.test.ts': print('b'), 'test/c.test.ts': print('c') } as Record<string, string>;
 const fingerprints = (over: Record<string, string> = {}) => FILES.map(file => ({ suiteId: 'unit', file, fingerprint: over[file] ?? PRINTS[file]! }));
 
-const manifest = (everyTurns = 5) => parseTestEnvironment({
+const manifest = (everyTurns = 5, preparation = false) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
   suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
-  execution: { version: 2, fullRun: { everyTurns, replaces: 'final', profile: 'full' } },
+  execution: { version: 2, fullRun: { everyTurns, replaces: 'final', profile: 'full' }, ...(preparation ? { oncePreparation: { profiles: ['fast', 'final', 'full'], suiteIds: ['unit'], commands: [{ program: 'node', args: ['--version'], cwd: '.' }] } } : {}) },
 });
 
-async function fixture(turnNumber = 3, everyTurns = 5) {
+async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
   const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '50' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
@@ -43,13 +44,13 @@ async function fixture(turnNumber = 3, everyTurns = 5) {
 
   /* A run through the real path: requested, described by the node, planned, given out. It is of the turn's branch unless it says. */
   const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`) => {
-    const prints = given === undefined ? fingerprints() : given;
+    const prints = given === undefined ? [...fingerprints(), ...(preparation ? [{ ...PREPARATION_UNIT, fingerprint: print('e') }] : [])] : given;
     number += 1;
     const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: 600_000,
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
-    const value = manifest(everyTurns), manifestSource = JSON.stringify(value);
+    const value = manifest(everyTurns, preparation), manifestSource = JSON.stringify(value);
     const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: runtimes };
     const reply: TestsDescribed = { type: 'tests.described', requestId: stored!.environmentRequest!.requestId!, commitSha: TEST_COMMIT, result: { status: 'ready', description, ...(prints ? { fingerprints: prints } : {}) } };
     await acceptDescription(app.ctx, BUILTIN, reply);
@@ -335,5 +336,49 @@ describe('reusing green test results', () => {
     await f.finish(await f.start({}));
     await f.db.update(testFileResults).set({ repoUrlHash: 'e'.repeat(64) });
     expect(await f.ranFiles(await f.start({}))).toEqual(FILES);
+  });
+});
+
+
+describe('zero-part review receipts', () => {
+  it.each([false, true])('accepts complete server reuse after closeFileCache, preparation=%s', async preparation => {
+    const f = await fixture(3, 5, preparation);
+    const review = () => f.db.transaction(tx => turnReviewContext(tx, f.task, f.agent.id, TEST_COMMIT, 'turn-3', { complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }));
+    await f.finish(await f.start({ profile: 'final' }));
+    const id = await f.start({ profile: 'final' }), ended = await f.runOf(id);
+    expect(ended).toMatchObject({ status: 'passed', parts: 0, fileCache: { mode: 'cached', reused: 3, preparationReused: preparation, fingerprints: [] } });
+    expect((await review()).runs.find(run => run.id === id)?.verified).toBe(true);
+
+    const snapshot = ended.environmentSnapshot!, request = ended.environmentRequest!, cache = ended.fileCache!;
+    const described = (over: Partial<typeof snapshot.description>) => ({ ...snapshot, description: { ...snapshot.description, ...over } });
+    const invalid: [string, Partial<typeof ended>][] = [
+      ['absent receipt', { fileCache: null }],
+      ['empty receipt', { fileCache: { ...cache, reused: 0 } }],
+      ['partial receipt', { fileCache: { ...cache, reused: 2 } }],
+      ['oversized receipt', { fileCache: { ...cache, reused: 4 } }],
+      ['reuse off', { fileCache: { ...cache, mode: 'off' } }],
+      ['full run cannot reuse', { fileCache: { ...cache, mode: 'full' } }],
+      ['missing snapshot', { environmentSnapshot: null }],
+      ['missing request', { environmentRequest: null }],
+      ['wrong snapshot commit', { environmentSnapshot: described({ commitSha: 'f'.repeat(40) }) }],
+      ['wrong repository', { environmentRequest: { ...request, repositoryScope: { ...request.repositoryScope, repoUrlHash: 'f'.repeat(64) } } }],
+      ['wrong repository owner', { environmentRequest: { ...request, repositoryScope: { ...request.repositoryScope, repositoryOwnerId: f.agent.id } } }],
+      ['foreign company', { environmentSnapshot: described({ repositoryScope: { ...snapshot.description.repositoryScope, companyId: f.agent.id } }) }],
+      ['wrong manifest', { environmentHash: 'f'.repeat(64) }],
+      ['unbound manifest bytes', { environmentSnapshot: described({ manifestHash: 'f'.repeat(64) }), environmentHash: 'f'.repeat(64) }],
+      ['wrong profile', { environmentSnapshot: { ...snapshot, profile: 'fast' } }],
+      ['unknown suite', { environmentRequest: { ...request, suite: 'foreign' } }],
+      ['empty inventory', { environmentSnapshot: described({ inventory: [] }) }],
+      ['partial inventory', { environmentSnapshot: described({ inventory: snapshot.description.inventory.slice(1) }) }],
+      ['duplicate inventory', { environmentSnapshot: described({ inventory: [snapshot.description.inventory[0]!, snapshot.description.inventory[0]!, snapshot.description.inventory[2]!] }) }],
+      ['description problem', { environmentRequest: { ...request, problem: { code: 'description_mismatch', detail: 'Fixture mismatch' } } }],
+      ...(preparation ? [['missing preparation', { fileCache: { ...cache, preparationReused: false } }] as [string, Partial<typeof ended>]] : []),
+    ];
+    for (const [why, change] of invalid) {
+      await f.db.update(testRuns).set({ ...ended, ...change }).where(eq(testRuns.id, id));
+      expect((await review()).runs.find(run => run.id === id)?.verified, why).toBe(false);
+    }
+    await f.db.update(testRuns).set(ended).where(eq(testRuns.id, id));
+    expect((await review()).runs.find(run => run.id === id)?.verified).toBe(true);
   });
 });

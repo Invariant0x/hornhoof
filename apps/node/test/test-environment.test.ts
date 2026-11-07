@@ -46,10 +46,10 @@ describe('test environment discovery from pinned Git blobs', () => {
     expect(result.commitSha).toBe(f.sha); expect(result.manifestSource).toBe(original);
     expect(result.manifestHash).toBe(createHash('sha256').update(original).digest('hex'));
     expect(result.inputDigests).toEqual([
-      { path: 'migrations/001.sql', digest: createHash('sha256').update('create table one(id int);').digest('hex') },
+      { path: 'migrations/001.sql', digest: createHash('sha256').update('100644\0create table one(id int);').digest('hex') },
       { path: 'optional.json', digest: null },
-      { path: 'package-lock.json', digest: createHash('sha256').update('{"lockfileVersion":3}').digest('hex') },
-      { path: 'tests/fixture.ts', digest: createHash('sha256').update('// reset fixture').digest('hex') },
+      { path: 'package-lock.json', digest: createHash('sha256').update('100644\0{"lockfileVersion":3}').digest('hex') },
+      { path: 'tests/fixture.ts', digest: createHash('sha256').update('100644\0// reset fixture').digest('hex') },
     ]);
     expect(result.inventory.map(unit => unit.file)).toEqual(['app/test/-option.test.ts', 'app/test/a.test.ts']);
     expect(result.runtimeCapabilities).toContainEqual(expect.objectContaining({ id: 'node', version: process.versions.node }));

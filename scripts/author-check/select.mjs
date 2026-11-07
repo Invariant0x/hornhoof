@@ -102,8 +102,9 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const units = ports.listTestUnits(manifest, tracked);
   const environment = impactEnvironment(manifest, units);
   const later = laterTests(environment, units, manifest.mutation);
-  const documents = changes.filter(change => isDocument(change.path));
-  const kept = changes.filter(change => !isDocument(change.path) && !outsideFast(change, later));
+  const document = change => [change.path, change.previousPath ?? change.path].every(isDocument);
+  const documents = changes.filter(document);
+  const kept = changes.filter(change => !document(change) && !outsideFast(change, later));
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
   const rest = kept.filter(change => !opaqueOwner(suites, change.path));
   const selection = await adapterSelection(environment, rest, suites, ports);

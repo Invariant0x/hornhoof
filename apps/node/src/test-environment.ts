@@ -44,7 +44,8 @@ async function inputDigests(tree: CommitTree, manifest: TestEnvironmentV1): Prom
     if (!entries.length) inputs.set(pattern, null);
     for (const entry of entries) { regular(entry); wanted.add(entry.path); }
   }
-  await tree.readBlobs([...wanted], INPUT_BYTES, (path, bytes) => { if (lfsPointer(bytes)) pointers.push(path); inputs.set(path, digest(bytes)); });
+  const modes = new Map(tree.entries.map(entry => [entry.path, entry.mode]));
+  await tree.readBlobs([...wanted], INPUT_BYTES, (path, bytes) => { if (lfsPointer(bytes)) pointers.push(path); inputs.set(path, createHash('sha256').update(modes.get(path)!).update('\0').update(bytes).digest('hex')); });
   if (pointers.length) fail('environment_unsupported', `Git LFS materialization is not described for ${pointers[0]}.`);
   return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
 }

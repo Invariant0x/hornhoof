@@ -7,7 +7,7 @@ import { matchesPattern, namedAfter, selectAffectedTests, type ImpactEnvironment
 import { readCommit, type GitEntry } from './test-mirror.js';
 
 /* What a test file's result depends on, read from the pinned commit alone: nothing is installed and no repository code runs.
-   A git object id hashes a file's content, so a fingerprint is a digest of paths and ids. Whatever this cannot follow widens
+   A git object id hashes a file's content, so a fingerprint is a digest of paths, modes and ids. Whatever this cannot follow widens
    to the whole package, because a file skipped wrongly is the one real harm here. Reads at computed paths stay unseen, as in
    any import graph; the full run catches them. */
 export type FingerprintInput = {
@@ -24,10 +24,10 @@ type Scan = { edges: string[]; runs: string[]; opaque: boolean };
 /* opaque: the packages of what it reaches and cannot follow. */
 type Reach = { digest: string; opaque: string[] };
 
-const FORMAT = 'hornhoof-fingerprint-v1';
+const FORMAT = 'hornhoof-fingerprint-v2';
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const REGULAR = new Set(['100644', '100755']);
-const DOCUMENT = /^(?!templates\/).*\.md$/;
+const DOCUMENT = /^(?!templates\/|(?:AGENTS|CONTRIBUTING|CHANGELOG)\.md$)(?!.*(?:^|\/)(?:test|tests|__tests__)\/).*\.md$/;
 /* What holds data leads nowhere, as a file with no extension does unless it may run. Anything else this cannot read may be a program,
    and a program may load anything. */
 const DATA = /\.(?:json|jsonl|md|txt|csv|sql|ya?ml|toml|ini|css|svg|png|jpe?g|gif|webp|ico|ttf|otf|woff2?|pdf|ansi|patch|snap|lock)$/;
@@ -117,7 +117,7 @@ class Tree {
     return found;
   }
   pairsDigest(files: Iterable<string>): string {
-    return digest([...new Set(files)].sort(lexical).map(path => [path, this.oids.get(path) ?? '']));
+    return digest([...new Set(files)].sort(lexical).map(path => [path, this.modes.get(path) ?? '', this.oids.get(path) ?? '']));
   }
   /* A workspace package as what imports it reaches: its code and not its tests. */
   packageCode(root: string): string[] { return this.under(root).filter(path => !TEST_FOLDER.test(path)); }
@@ -449,10 +449,20 @@ export function fastTestsOf(input: FingerprintInput, mutation: Supported, files:
   const graph = new Graph(new Tree(input));
   return new Map(files.map(file => [file, reachingTests(graph, mutation, file)]));
 }
-/* A source file mutation checks depends on its own text, on the fast tests that reach it and on what runs them, the suite's own
-   folder. What it imports does not count: mutants are of its own functions, and the full run looks at the rest. */
+/* The same transitive judges for the server's result cache and the mutator's saved snapshot. An unreadable input widens
+   through inputsOf, just as it does for a test: the saved kills cannot outlive the code that judged them. */
+function mutationJudges(graph: Graph, mutation: Supported, suite: Suite, file: string): string {
+  const { tree } = graph, config = posix.join(suite.root, 'vitest.config.mjs');
+  const starts = [file, ...reachingTests(graph, mutation, file), ...(tree.oids.has(config) ? [config] : [])];
+  const installed = tree.pairsDigest(tree.matching(tree.input.description.manifest.dependencies.inputs));
+  return digest([FORMAT, mutation.tool, suite.run, installed, tree.folderDigest(suite.root), inputsOf(graph, suite, starts)]);
+}
+export function mutationJudgesOf(input: FingerprintInput, mutation: Supported, suite: Suite, files: string[]): Map<string, string> {
+  const graph = new Graph(new Tree(input));
+  return new Map(files.map(file => [file, mutationJudges(graph, mutation, suite, file)]));
+}
 function mutationPrint(graph: Graph, mutation: Supported, suite: Suite, environment: string, file: string): string {
-  return digest([FORMAT, environment, mutation.tool, graph.tree.folderDigest(suite.root), graph.tree.pairsDigest([file, ...reachingTests(graph, mutation, file)])]);
+  return digest([environment, mutationJudges(graph, mutation, suite, file)]);
 }
 
 function preparationPrint(tree: Tree, description: FingerprintInput['description'], installed: unknown): UnitFingerprint[] {

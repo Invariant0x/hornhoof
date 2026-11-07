@@ -75,13 +75,13 @@ test('what the tool runs says to mutate everything only when asked', () => {
 test('a source is judged again by tests that changed, and keeps what it was judged by only once it went well', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'hh-judges-'));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const source = 'apps/a/src/one.ts', oids = oid => new Map([['apps/a/test/one.test.ts', oid]]), tests = ['apps/a/test/one.test.ts'];
-  assert.equal(judgedAgain(folder, source, tests, oids('1')), true);
-  keepJudges(folder, source, tests, oids('1'));
-  assert.equal(judgedAgain(folder, source, tests, oids('1')), false);
-  assert.equal(judgedAgain(folder, source, tests, oids('2')), true);
-  assert.equal(judgedAgain(folder, source, [...tests, 'apps/a/test/two.test.ts'], oids('1')), true);
-  assert.equal(judgedAgain(folder, 'apps/a/src/two.ts', tests, oids('1')), true);
+  const source = 'apps/a/src/one.ts';
+  assert.equal(judgedAgain(folder, source, 'first-print'), true);
+  keepJudges(folder, source, 'first-print');
+  assert.equal(judgedAgain(folder, source, 'first-print'), false);
+  assert.equal(judgedAgain(folder, source, 'changed-print'), true);
+  assert.equal(judgedAgain(folder, source, undefined), true);
+  assert.equal(judgedAgain(folder, 'apps/a/src/two.ts', 'first-print'), true);
 });
 
 /* Run the real cache/runner with tiny command stand-ins. No mutants or database are needed to observe --mutate-all. */
