@@ -13,6 +13,6 @@ Any change affecting access, root, permissions or secrets must pass review by an
 
 Use direct fast tests for pure logic, narrow integration checks for boundaries and a few end-to-end flows for user-visible behavior. After a batch, check the affected result on one pinned commit. When a full candidate validation is assigned, give it one explicit owner, coordinate the complete required stages once and read the actual logs rather than asking each author for duplicate final metrics.
 
-Versioned model checks need examples labelled independently, a hidden subset where practical and an acceptance threshold chosen by the authorized owner. Run them when the model, prompt or examples change; until a model check has actual validation, say what it cannot prove and retain the required human decision.
+Versioned model checks need examples labelled independently, a hidden subset where practical and an acceptance threshold chosen by the authorized owner. Record false accepts and false rejects separately, and add real misses to the versioned examples. Run them when the model, prompt or examples change; until a model check has actual validation, say what it cannot prove and retain the required human decision.
 
 Use code for reproducible totals, access refusals, schema constraints and acceptance conditions. Record exact inputs, selection scope, version, command and observed outcome. A collected graph or cached summary without applicable completed receipts is not execution evidence. A skill neither creates a tester handoff nor waives a human release approval.

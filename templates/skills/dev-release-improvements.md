@@ -17,7 +17,7 @@ When an improvement lane is assigned, it produces proposals without holding unre
 
 For the assigned release measurement, pin its commit and record the environment and sample count. Use the project's own cheap benchmark to measure cold startup/readiness, key requests on a test database and memory (RSS and heap where available). Compare against the previous release under the same conditions, with an explicit relative regression threshold. Keep missing or incomparable metrics unknown; never report them as zero or claim an improvement without a comparable after measurement.
 
-Use only an authorized isolated measurement or a recorded baseline supplied by the owner. Never open a known-expensive live Tree/Speed/pipeline endpoint merely because this ability is enabled. Distinguish aggregate overlapping waits from the critical path and issue-to-acceptance from first submission. Agree a relative target with the task owner and keep unavailable baseline/after values unknown.
+Use only an authorized isolated measurement or a recorded baseline supplied by the owner. Do not run an expensive operation against production merely because a measurement ability is enabled. Distinguish aggregate overlapping waits from the critical path and issue-to-acceptance from first submission. Agree a relative target with the task owner and keep unavailable baseline/after values unknown.
 
 Track test speed: rank the slowest files and run parts, preserve setup/test/teardown costs, package medians and the scope of the sample. Read structured test timing lines when available. Distinguish summed file time from part wall time. Include reviewer usefulness by provider: confirmed findings, actionable fixes, review time and fix rounds; an unavailable source stays unknown.
 

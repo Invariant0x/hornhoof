@@ -8,7 +8,7 @@ import { deptName } from '../departments/templates.js';
 import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
-export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
+export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 /* The card's parts and its raw text with every skill whole; what the program is told, with its hash; the skills the node
    writes as files, which the program reads when it needs them; and whole, what a node that writes no skill files is told. */
 export type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[]; whole: string };
@@ -43,7 +43,7 @@ const skillFile = (id: string, skill: Skill | undefined, body: string): SkillFil
 function skillList(files: SkillFile[]): string {
   return [
     '## Skills',
-    'Your other skills are files in your folder: .claude/skills/<name>/SKILL.md when you run in Claude Code, .agents/skills/<name>/SKILL.md in the other programs, which list them for you too. Before a step one of them covers, read its file whole and follow it. A skill may name another skill; when that one is not on your list, go on without it.',
+    'Your skills are self-contained abilities, stored in your folder: .claude/skills/<name>/SKILL.md when you run in Claude Code, .agents/skills/<name>/SKILL.md in the other programs, which list them for you too. Read the whole file before using an ability. Your assignment and the task determine which work and checks you own.',
     files.map(f => `- ${f.name}: ${f.description}`).join('\n'),
   ].join('\n\n');
 }
@@ -72,12 +72,19 @@ function effectiveSkillIds(t: Templates, role: Role | undefined, agent: AgentRow
 }
 
 function basePart(role: Role | undefined, agent: AgentRow): Part | null {
-  const text = agent.overrides.base ?? role?.body;
-  if (text === undefined) return null;
-  const meta = role
-    ? { id: role.id, title: role.title, templateChanged: movedSinceHire(agent.templateHashes, role.id, role.hash) }
-    : { id: null, title: null, templateChanged: false };
-  return { kind: 'base', ...meta, text, overridden: agent.overrides.base !== undefined };
+  if (!role) return null;
+  return { kind: 'base', id: role.id, title: role.title, text: role.body, overridden: false, templateChanged: movedSinceHire(agent.templateHashes, role.id, role.hash) };
+}
+
+/* Existing personal base text is an assignment, never a replacement for role identity. */
+function assignmentPart(agent: AgentRow): Part | null {
+  const body = agent.overrides.base;
+  if (body === undefined) return null;
+  return {
+    kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' },
+    text: `<!-- hh:assignment -->\n## Assignment\n\n${body}\n<!-- /hh:assignment -->`,
+    overridden: true, templateChanged: false,
+  };
 }
 
 function resolveSkillBody(
@@ -120,13 +127,15 @@ function collectSkills(t: Templates, role: Role | undefined, agent: AgentRow): {
   return { parts, kept, files };
 }
 
-/* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
+/* Identity and assignment stay separate; only a skill's own text can replace its template. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
   const said = header(agent, role?.title.en ?? 'employee', place);
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
   const base = basePart(role, agent);
   if (base) parts.push(base);
+  const assignment = assignmentPart(agent);
+  if (assignment) parts.push(assignment);
   const initialKept = parts.map(p => p.text);
 
   const collected = collectSkills(t, role, agent);
@@ -151,7 +160,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 /* The orchestrator's skills, always on after his standing role: working in Hornhoof as everyone does, leading as every
    head does, then what only he does, and development's own way of leading for when he needs it. */
 export const ORCHESTRATOR_SKILLS = [
-  'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+  'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
   'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
 ] as const;
 

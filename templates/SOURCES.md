@@ -215,6 +215,9 @@ Development authors write a failing test before the change, run only affected te
 | `skills/orch-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
 | `skills/orch-trouble.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
+| `skills/orch-people.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
+| `skills/orch-resources.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
+| `skills/orch-staff.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
 | `skills/sal-account-research.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
 | `skills/sal-call-prep.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; msitarzewski/agency-agents sales/sales-discovery-coach.md | Hornhoof |
 | `skills/sal-call-summary.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
@@ -257,9 +260,3 @@ Development authors write a failing test before the change, run only affected te
 | `skills/home-shopping.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-bills.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-calendar.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
-
-| `skills/orch-staff.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
-
-| `skills/orch-people.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
-
-| `skills/orch-resources.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |

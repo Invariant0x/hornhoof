@@ -255,12 +255,14 @@ describe('the employee card', () => {
     expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
   });
 
-  it('resets an employee to its template', async () => {
+  it('resets template abilities while preserving the employee assignment', async () => {
     const { app, db, ceo, teamKey, brunoId, role } = await company();
     await patch(app, ceo, brunoId, { effort: 'max', base: 'Mine.', skills: { 'dev-debugging': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
     const res = await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(ceo) });
     expect(res.statusCode).toBe(200);
     expect(res.json().parts[1]).toMatchObject({ text: role.body, overridden: false });
+    expect(res.json().parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain('Mine.');
+    expect((await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!.overrides).toEqual({ base: 'Mine.' });
     expect(res.json().skills.filter((s: { on: boolean }) => s.on).map((s: { id: string }) => s.id)).toEqual(role.skills.filter(s => s.on).map(s => s.id));
     expect(res.json().effort).toBeNull();
     expect(res.json()).toMatchObject({ model: 'claude-sonnet-5-5', subscription: { id: teamKey } });
