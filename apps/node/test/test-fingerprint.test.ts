@@ -49,6 +49,30 @@ const suites = [suite('a', 'apps/a'), suite('b', 'apps/b')];
 const base = () => input(app, manifest(suites));
 const edit = (path: string, text: string, value = manifest(suites)) => input({ ...app, [path]: text }, value);
 
+describe('git modes in cached results', () => {
+  const value = manifest(suites, { execution: { version: 2, oncePreparation: { profiles: ['fast'], suiteIds: ['a'], commands: [run] } } });
+  const preparation = 'hornhoof-preparation:.hornhoof/test-environment.json';
+  const modes = (files: Files, path: string, mode: string) => {
+    const given = input(files, value);
+    given.tracked = given.tracked.map(entry => entry.path === path ? { ...entry, mode } : entry);
+    return given;
+  };
+
+  it.each(['apps/a/test/fixtures/tool.sh', 'scripts/tool.sh'])('invalidates executable mode changes at %s without changing its blob', async path => {
+    const files = { ...app, [path]: 'echo fixture\n' };
+    expect(await changed(modes(files, path, '100755'), modes(files, path, '100644'))).toContain(preparation);
+    expect(await changed(modes(files, path, '100755'), modes(files, path, '100644'))).toContain('a:apps/a/test/used.test.ts');
+    expect(await changed(modes(files, path, '100755'), modes(files, path, '100755'))).toEqual([]);
+  });
+
+  it('invalidates a data fixture replaced by a symlink with the same blob', async () => {
+    const path = 'apps/a/test/fixtures/tool.sh', files = { ...app, [path]: 'target' };
+    const before = modes(files, path, '100644'), after = modes(files, path, '120000');
+    expect(await changed(before, after)).toContain('a:apps/a/test/used.test.ts');
+    expect(await changed(before, after)).toContain(preparation);
+  });
+});
+
 describe('the fingerprint of a test file', () => {
   it('stays the same when nothing changed, in whatever order git lists the files', async () => {
     const shuffled = base(); shuffled.tracked = [...shuffled.tracked].reverse();
@@ -138,6 +162,18 @@ describe('what the graph does not see', () => {
     const files = { ...app, 'apps/a/test/install-script.test.ts': "import { it } from 'vitest';\nit('x', async () => {});\n" };
     const after = { ...files, 'apps/a/test/install-script.test.ts': `${files['apps/a/test/install-script.test.ts']}// more\n` };
     expect(await changed(input(files, manifest(suites)), input(after, manifest(suites)))).toEqual(['a:apps/a/test/install-script.test.ts']);
+  });
+});
+
+describe('checked Markdown inputs', () => {
+  it.each(['AGENTS.md', 'CONTRIBUTING.md', 'CHANGELOG.md'])('does not discard the checked root %s', async path => {
+    const files = { ...app, [path]: 'Before', 'apps/a/test/used.test.ts': `readFileSync('${path}');` };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, [path]: 'After' }, manifest(suites)))).toContain('a:apps/a/test/used.test.ts');
+  });
+
+  it('includes Markdown fixtures in the package fallback', async () => {
+    const path = 'apps/a/test/fixtures/deep/README.md', files = { ...app, [path]: 'Before' };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, [path]: 'After' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
   });
 });
 
@@ -433,6 +469,24 @@ describe('source files mutation checks', () => {
     expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([]);
   });
 
+  it.each(['apps/a/test/helper.ts', 'apps/a/test/deep-helper.ts', 'scripts/mutation/config-helper.mjs'])('follow transitive judges input %s', async path => {
+    const files = { ...app,
+      'apps/a/test/used.test.ts': `${app['apps/a/test/used.test.ts']}\nimport './helper.js';`,
+      'apps/a/test/helper.ts': "import './deep-helper.js';\nexport {};",
+      'apps/a/test/deep-helper.ts': 'export {};',
+      'scripts/mutation/vitest.config.mjs': "import './config-helper.mjs';\nexport default {};",
+      'scripts/mutation/config-helper.mjs': 'export {};',
+    };
+    expect(await changed(input(files, value), input({ ...files, [path]: 'export const weakened = true;' }, value))).toContain(key);
+  });
+
+  it('follows the mode of an imported helper with identical bytes', async () => {
+    const files = { ...app, 'apps/a/test/used.test.ts': `${app['apps/a/test/used.test.ts']}\nimport './helper.js';`, 'apps/a/test/helper.ts': 'export {};' };
+    const before = input(files, value), after = input(files, value);
+    after.tracked = after.tracked.map(entry => entry.path === 'apps/a/test/helper.ts' ? { ...entry, mode: '100755' } : entry);
+    expect(await changed(before, after)).toContain(key);
+  });
+
   it('follow what runs them', async () => {
     const files = { ...app, 'scripts/mutation/run.mjs': 'export {};\n' };
     expect(await changed(input(files, value), input({ ...files, 'scripts/mutation/run.mjs': 'export const x = 1;\n' }, value))).toEqual([key]);
@@ -453,6 +507,11 @@ describe('the one explicit preparation', () => {
     expect((await prints(input(app, value))).has(key)).toBe(true);
     expect(await changed(input(app, value), input({ ...app, 'apps/b/src/b.ts': 'export const b = 4;\n' }, value))).toContain(key);
     expect(await changed(input(app, value), input({ ...app, 'README.md': 'Other' }, value))).toEqual([]);
+  });
+
+  it.each(['CHANGELOG.md', 'AGENTS.md', 'CONTRIBUTING.md', 'apps/a/test/fixtures/README.md'])('includes checked Markdown %s in preparation', async path => {
+    const files = { ...app, [path]: 'Before' };
+    expect(await changed(input(files, value), input({ ...files, [path]: 'After' }, value))).toContain(key);
   });
 
   it('is absent where a manifest declares none', async () => {

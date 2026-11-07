@@ -654,3 +654,18 @@ test('the complexity of a commit is read at the path the file has now', { skip: 
 test('a missing tool for the plan is said, not taken for a simple commit', () => {
   assert.throws(() => complexityAt(() => 'x', 'no-such-tool-at-all')('.', BASE, [{ path: 'a.ts', from: 'a.ts' }]), /crapper_unavailable/);
 });
+
+for (const path of ['AGENTS.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'apps/server/test/fixtures/deep/README.md']) {
+  test(`checked Markdown ${path} participates in author selection`, async () => {
+    const ports = selector();
+    const result = await selectTests({ changes: [{ path, kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+    assert.ok(result.packages.length > 0);
+    assert.ok(!result.notes.some(note => note === `document without tests: ${path}`));
+  });
+}
+
+test('moving a checked fixture to ordinary docs still checks its former readers', async () => {
+  const ports = selector();
+  const result = await selectTests({ changes: [{ path: 'docs/moved.md', previousPath: 'apps/node/test/fixtures/README.md', kind: 'renamed' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.ok(result.packages.length > 0);
+});

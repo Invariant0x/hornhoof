@@ -61,6 +61,19 @@ describe('reading what a commit\'s harness is built from', () => {
     expect(described.inputDigests).toHaveLength(44);
   });
 
+  it('changes preparation input digests when only the Git executable mode changes', async () => {
+    const f = await fixture({ 'migrations/tool.sh': 'echo tool\n' });
+    const root = new URL(f.source.url).pathname;
+    const first = await readTestEnvironment(f.source, f.scope, f.sha, f.context);
+    git(root, 'update-index', '--chmod=+x', 'migrations/tool.sh');
+    git(root, 'commit', '--quiet', '-m', 'Executable input');
+    const sha = git(root, 'rev-parse', 'HEAD');
+    expect(git(root, 'rev-parse', `${f.sha}:migrations/tool.sh`)).toBe(git(root, 'rev-parse', `${sha}:migrations/tool.sh`));
+    const next = await readTestEnvironment(f.source, f.scope, sha, f.context);
+    expect(next.inputDigests.find(input => input.path === 'migrations/tool.sh')?.digest).not.toBe(first.inputDigests.find(input => input.path === 'migrations/tool.sh')?.digest);
+    expect((await readTestEnvironment(f.source, f.scope, sha, f.context)).inputDigests).toEqual(next.inputDigests);
+  });
+
   it('stops at a file over the limit, and hands each file over in the order asked', async () => {
     const f = await fixture({ 'small.txt': 'abc', 'large.txt': 'abcdefgh' }), tree = await readCommit(f.source, f.scope, f.sha, f.context), got: [string, string][] = [];
     await tree.readBlobs(['small.txt', 'large.txt'], 8, (path, bytes) => { got.push([path, bytes.toString('utf8')]); });

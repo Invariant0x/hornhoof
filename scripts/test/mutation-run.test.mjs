@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -81,3 +83,41 @@ test('a source is judged again by tests that changed, and keeps what it was judg
   assert.equal(judgedAgain(folder, source, [...tests, 'apps/a/test/two.test.ts'], oids('1')), true);
   assert.equal(judgedAgain(folder, 'apps/a/src/two.ts', tests, oids('1')), true);
 });
+
+/* Run the real cache/runner with tiny command stand-ins. No mutants or database are needed to observe --mutate-all. */
+for (const changed of ['helper', 'config', 'mode', 'source', 'unknown']) {
+  test(`saved mutation judges invalidate ${changed} changes without editing the test`, t => {
+    const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-judges-'));
+    t.after(() => rmSync(folder, { recursive: true, force: true }));
+    const root = join(folder, 'repo'), bin = join(folder, 'bin'), calls = join(folder, 'calls');
+    mkdirSync(root); mkdirSync(bin);
+    const write = (path, text) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); };
+    const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    const source = 'apps/a/src/one.ts', helper = 'apps/a/test/helper.ts', config = 'scripts/mutation/vitest.config.mjs';
+    const mutation = { status: 'supported', tool: join(bin, 'mutator'), sourcePaths: [source], fastTestPaths: ['apps/a/test/one.test.ts'] };
+    write('.hornhoof/test-environment.json', JSON.stringify({ mutation, dependencies: { inputs: [], install: [] }, prepare: [], suites: [{ id: 'a', root: 'apps/a' }, { id: 'mutation', root: 'scripts/mutation' }] }));
+    write('package.json', '{}');
+    write(source, 'export const one = 1;');
+    write('apps/a/test/one.test.ts', "import { one } from '../src/one.js';\nimport './helper.js';\nexport { one };");
+    write(helper, changed === 'unknown' ? "const name = './unknown.js';\nawait import(name);" : "import './deep.js';");
+    write('apps/a/test/deep.ts', 'export const allowed = true;');
+    write(config, "import './config-helper.mjs';\nexport default {};");
+    write('scripts/mutation/config-helper.mjs', 'export const strict = true;');
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'mutator'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nprintf 'Total 1 0 0 1 100.0%%\\n'\n`, { mode: 0o755 });
+    git('init', '--quiet'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test'); git('add', '.'); git('commit', '--quiet', '-m', 'First');
+    const run = () => {
+      execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url))], { cwd: root, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: '', HH_TEST_REPORT: '' }, stdio: 'pipe' });
+      return readFileSync(calls, 'utf8').trim().split('\n').at(-1).includes('--mutate-all');
+    };
+    assert.equal(run(), true);
+    assert.equal(run(), false, 'unchanged judges retain the saved snapshot');
+    if (changed === 'helper') write('apps/a/test/deep.ts', 'export const allowed = false;');
+    if (changed === 'config') write('scripts/mutation/config-helper.mjs', 'export const strict = false;');
+    if (changed === 'source') write(source, 'export const one = 2;');
+    if (changed === 'mode') chmodSync(join(root, helper), 0o755);
+    if (changed === 'unknown') write('apps/a/test/unknown.ts', 'export const skipped = true;');
+    git('add', '.'); git('commit', '--quiet', '-m', 'Judges changed');
+    assert.equal(run(), true, `${changed} invalidates the persisted judges receipt`);
+  });
+}
