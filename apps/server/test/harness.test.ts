@@ -10,6 +10,7 @@ vi.mock('node:fs/promises', async original => {
   const fs = await original<typeof import('node:fs/promises')>();
   return { ...fs,
     writeFile: async (...args: Parameters<typeof fs.writeFile>) => { await fs.writeFile(...args); await io.pause?.('write', String(args[0])); },
+    link: async (...args: Parameters<typeof fs.link>) => { await io.pause?.('rename', String(args[0])); return fs.link(...args); },
     rename: async (...args: Parameters<typeof fs.rename>) => { await io.pause?.('rename', String(args[0])); return fs.rename(...args); },
   };
 });
@@ -30,13 +31,25 @@ const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 async function shared(env: NodeJS.ProcessEnv = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'hh-harness-')); folders.push(dir);
   const c = await company({ HARNESS_DIR: dir, ...env });
-  const unit = (over: Partial<HarnessUnit> = {}): HarnessUnit => ({ repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(REPO) }, key: KEY, version: 'f'.repeat(64), unit: 'dependencies', commitSha: COMMIT, platform: 'linux-arm64', ...over });
-  const as = (key: string) => ({ authorization: `Bearer ${key}` });
-  const claim = (key: string, over: Partial<HarnessUnit> = {}) => c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: as(key), payload: unit(over) });
-  const part = (key: string, index: number, bytes: Buffer, build = KEY) => c.app.inject({ method: 'PUT', url: `/api/harness/${build}/parts/${index}`, headers: { ...as(key), 'content-type': 'application/octet-stream' }, payload: bytes });
-  const finish = (key: string, bytes: Buffer, build = KEY) => c.app.inject({ method: 'POST', url: `/api/harness/${build}/done`, headers: as(key), payload: { digest: sha(bytes), size: bytes.length } });
-  const failed = (key: string, error: string | null, build = KEY) => c.app.inject({ method: 'POST', url: `/api/harness/${build}/failed`, headers: as(key), payload: { error } });
-  const bundle = (key: string, range: string, build = KEY) => c.app.inject({ method: 'GET', url: `/api/harness/${build}/bundle`, headers: { ...as(key), range } });
+  const unit = (over: Partial<HarnessUnit> = {}): HarnessUnit => ({ fencing: 1, repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(REPO) }, key: KEY, version: 'f'.repeat(64), unit: 'dependencies', commitSha: COMMIT, platform: 'linux-arm64', ...over });
+  const leases = new Map<string, { companyId: string; attempt: string }>();
+  const as = (key: string, build = KEY) => {
+    const lease = leases.get(key + ':' + build) ?? leases.get(build);
+    return { authorization: 'Bearer ' + key, 'x-harness-company': c.dev.companyId, 'x-harness-attempt': lease?.attempt ?? '11111111-1111-4111-8111-111111111111' };
+  };
+  const claim = async (key: string, over: Partial<HarnessUnit> = {}) => {
+    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: as(key), payload: unit(over) });
+    const lease = response.json() as { companyId?: string; attempt?: string };
+    if (lease.companyId && lease.attempt) {
+      const value = { companyId: lease.companyId, attempt: lease.attempt }, build = over.key ?? KEY;
+      leases.set(key + ':' + build, value); leases.set(build, value);
+    }
+    return response;
+  };
+  const part = (key: string, index: number, bytes: Buffer, build = KEY) => c.app.inject({ method: 'PUT', url: '/api/harness/' + build + '/parts/' + index, headers: { ...as(key, build), 'content-type': 'application/octet-stream' }, payload: bytes });
+  const finish = (key: string, bytes: Buffer, build = KEY) => c.app.inject({ method: 'POST', url: '/api/harness/' + build + '/done', headers: as(key, build), payload: { digest: sha(bytes), size: bytes.length } });
+  const failed = (key: string, error: string | null, build = KEY) => c.app.inject({ method: 'POST', url: '/api/harness/' + build + '/failed', headers: as(key, build), payload: { error } });
+  const bundle = (key: string, range: string, build = KEY) => c.app.inject({ method: 'GET', url: '/api/harness/' + build + '/bundle', headers: { ...as(key, build), range } });
   const uploaded = async (key: string, bytes: Buffer, build = KEY) => { await part(key, 0, bytes, build); return finish(key, bytes, build); };
   return { ...c, dir, unit, claim, part, finish, failed, bundle, uploaded };
 }
@@ -55,7 +68,7 @@ afterEach(() => { io.pause = null; });
 describe('harness access and attempt fences', () => {
   it('lets an old node build locally without giving it an unfenced shared claim', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'old');
-    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: { authorization: 'Bearer ' + one.key }, payload: c.unit() });
+    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: { authorization: 'Bearer ' + one.key }, payload: c.unit({ fencing: undefined }) });
     expect(response.json()).toEqual({ state: 'local' });
     expect(await c.db.select().from(harnessBuilds)).toEqual([]);
   });
@@ -135,7 +148,7 @@ describe('harness access and attempt fences', () => {
     const c = await shared(); await c.builtin();
     await c.claim('builtin-node-key-0123456789abcdef');
     const bytes = Buffer.from('company one'); await c.uploaded('builtin-node-key-0123456789abcdef', bytes);
-    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': '33333333-3333-4333-8333-333333333333' } });
+    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': '33333333-3333-4333-8333-333333333333', 'x-harness-attempt': (await c.db.select().from(harnessBuilds))[0]!.id } });
     expect(response.statusCode).toBe(404);
   });
 });
@@ -166,7 +179,7 @@ describe('one build of a harness unit for all machines', () => {
     const first = await c.bundle(two.key, 'bytes=0-9'), rest = await c.bundle(two.key, `bytes=10-${bytes.length - 1}`);
     expect(first.statusCode).toBe(206);
     expect(Buffer.concat([first.rawPayload, rest.rawPayload]).equals(bytes)).toBe(true);
-    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${KEY}.zst`]);
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
   });
 
   it('says no to a machine that says it is done before anything came', async () => {
@@ -256,7 +269,7 @@ describe('one build of a harness unit for all machines', () => {
   it('builds a unit again when its bundle is gone', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), bytes = Buffer.from('a bundle');
     await c.claim(one.key); await c.uploaded(one.key, bytes);
-    await rm(join(c.dir, c.dev.companyId, `${KEY}.zst`));
+    await rm(join(c.dir, c.dev.companyId, KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst'));
     expect((await c.claim(one.key)).json().state).toBe('build');
   });
 
@@ -271,7 +284,7 @@ describe('one build of a harness unit for all machines', () => {
     await c.claim(one.key); await c.uploaded(one.key, big);
     await c.claim(one.key, { key: OTHER }); await c.uploaded(one.key, big, OTHER);
     expect((await c.db.select().from(harnessBuilds)).map(row => row.key)).toEqual([OTHER]);
-    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${OTHER}.zst`]);
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([OTHER + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
   });
 });
 

@@ -13,6 +13,7 @@ const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const KEY = 'a'.repeat(64), INPUT = 'd'.repeat(64);
+const LEASE = { companyId: '11111111-1111-4111-8111-111111111111', attempt: '33333333-3333-4333-8333-333333333333' };
 
 async function machine(): Promise<CacheContext & { dir: string }> {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-harness-')); folders.push(cacheRoot);
@@ -138,7 +139,7 @@ const failing = (message: string) => async (): Promise<never> => { throw new Err
 
 describe('one build for all the machines', () => {
   it('builds on the machine the registry names, and hands the result over', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded, failed } = registry([{ state: 'build', partBytes: 1024 }]);
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded, failed } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }]);
     const entry = await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
     expect(entry).toMatchObject({ hit: false, fetched: false });
     expect(uploaded.map(item => item.key)).toEqual([KEY]);
@@ -149,7 +150,7 @@ describe('one build for all the machines', () => {
 
   it('takes what another machine built, without building', async () => {
     const elsewhere = await machine(), file = join(elsewhere.cacheRoot, 'bundle'), packed = await packBundle(await built(elsewhere), file, elsewhere);
-    const here = await machine(), { remote } = registry([{ state: 'ready', digest: packed.digest, size: packed.size, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, await readFile(file)); } });
+    const here = await machine(), { remote } = registry([{ state: 'ready', ...LEASE, digest: packed.digest, size: packed.size, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, await readFile(file)); } });
     const entry = await prepareCache(here.dir, KEY, INPUT, here, failing('it must not build'), harnessShare(remote, UNIT));
     expect(entry).toMatchObject({ hit: true, fetched: true });
     expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
@@ -157,13 +158,13 @@ describe('one build for all the machines', () => {
 
   it('waits while another machine builds, then takes its result', async () => {
     const elsewhere = await machine(), file = join(elsewhere.cacheRoot, 'bundle'), packed = await packBundle(await built(elsewhere), file, elsewhere);
-    const here = await machine(), { remote, asked } = registry([{ state: 'wait', afterMs: 1 }, { state: 'wait', afterMs: 1 }, { state: 'ready', digest: packed.digest, size: packed.size, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, await readFile(file)); } });
+    const here = await machine(), { remote, asked } = registry([{ state: 'wait', afterMs: 1 }, { state: 'wait', afterMs: 1 }, { state: 'ready', ...LEASE, digest: packed.digest, size: packed.size, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, await readFile(file)); } });
     const entry = await prepareCache(here.dir, KEY, INPUT, here, failing('it must not build'), harnessShare(remote, UNIT));
     expect(entry.fetched).toBe(true); expect(asked).toEqual([KEY, KEY, KEY]);
   });
 
   it('builds here when the machine building it stopped answering and the registry hands it over', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded } = registry([{ state: 'wait', afterMs: 1 }, { state: 'build', partBytes: 1024 }]);
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded } = registry([{ state: 'wait', afterMs: 1 }, { state: 'build', ...LEASE, partBytes: 1024 }]);
     await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
     expect(uploaded).toHaveLength(1);
   });
@@ -175,7 +176,7 @@ describe('one build for all the machines', () => {
   });
 
   it('tells the registry what failed, with the output, and keeps the last good version', async () => {
-    const here = await machine(), old = await built(here), { remote, failed } = registry([{ state: 'build', partBytes: 1024 }]);
+    const here = await machine(), old = await built(here), { remote, failed } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }]);
     await expect(prepareCache(here.dir, 'b'.repeat(64), INPUT, here, failing('The product command failed with exit 1.'), harnessShare(remote, UNIT, { tail: () => 'npm ERR! ERESOLVE' }))).rejects.toThrow(/exit 1/);
     expect(failed).toEqual([{ key: 'b'.repeat(64), error: expect.stringContaining('ERESOLVE') }]);
     const kept = await prepareCache(here.dir, KEY, INPUT, here, failing('it must not build'));
@@ -183,14 +184,14 @@ describe('one build for all the machines', () => {
   });
 
   it('gives a stopped build back without calling it failed', async () => {
-    const here = await machine(), stop = new AbortController(), { remote, failed } = registry([{ state: 'build', partBytes: 1024 }]);
+    const here = await machine(), stop = new AbortController(), { remote, failed } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }]);
     const reason = new Error('stopped');
     await expect(prepareCache(here.dir, KEY, INPUT, { ...here, signal: stop.signal }, async () => { stop.abort(reason); throw reason; }, harnessShare(remote, UNIT))).rejects.toBe(reason);
     expect(failed).toEqual([{ key: KEY, error: null }]);
   });
 
   it('keeps its own build and gives the claim back when the upload fails', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, failed } = registry([{ state: 'build', partBytes: 1024 }], { upload: failing('Hornhoof answered 507.') });
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, failed } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }], { upload: failing('Hornhoof answered 507.') });
     const entry = await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
     expect(entry.hit).toBe(false);
     expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
@@ -201,13 +202,13 @@ describe('one build for all the machines', () => {
     ['cannot be reached', { claim: failing('connect ECONNREFUSED') }],
     ['keeps no bundles', { claim: async () => ({ state: 'local' as const }) }],
   ])('builds here for itself when Hornhoof %s', async (_name, over) => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded } = registry([{ state: 'build', partBytes: 1024 }], over);
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }], over);
     const entry = await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
     expect(entry.hit).toBe(false); expect(uploaded).toEqual([]);
   });
 
   it('builds here when the bundle it got cannot be used', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote } = registry([{ state: 'ready', digest: 'b'.repeat(64), size: 1, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, 'not a bundle'); } });
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote } = registry([{ state: 'ready', ...LEASE, digest: 'b'.repeat(64), size: 1, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, 'not a bundle'); } });
     const entry = await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
     expect(entry).toMatchObject({ hit: false, fetched: false });
     expect(await readFile(join(entry.path, 'payload', 'node_modules', 'dep'), 'utf8')).toBe('locked');
@@ -215,7 +216,7 @@ describe('one build for all the machines', () => {
   });
 
   it('keeps its claim while a long build runs', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, asked } = registry([{ state: 'build', partBytes: 1024 }]);
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, asked } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }]);
     await prepareCache(here.dir, KEY, INPUT, here, async () => { await new Promise(resolve => setTimeout(resolve, 60)); return source; }, harnessShare(remote, UNIT, { renewMs: 10 }));
     expect(asked.length).toBeGreaterThan(2);
     await chmod(join(here.dir, KEY), 0o700);
@@ -253,7 +254,7 @@ describe('the registry over HTTP', () => {
     const { heard, remote } = await server((_asked, response) => { send(response, 200, JSON.stringify({ state: 'wait', afterMs: 5 })); });
     expect(await remote.claim(unit, SIGNAL)).toEqual({ state: 'wait', afterMs: 5 });
     expect(heard[0]).toMatchObject({ method: 'POST', url: '/api/harness/claim', authorization: 'Bearer the-node-key' });
-    expect(JSON.parse(heard[0]!.body.toString())).toEqual(unit);
+    expect(JSON.parse(heard[0]!.body.toString())).toEqual({ ...unit, fencing: 1 });
   });
 
   it('says what the server refused, with its words when it has any', async () => {
@@ -267,7 +268,7 @@ describe('the registry over HTTP', () => {
     let refusals = 2;
     const { heard, remote } = await server(({ url }, response) => { if (url.endsWith('/parts/1') && refusals-- > 0) send(response, 503); else send(response, 200, '{}'); });
     const { path } = await file('abcdefgh');
-    await remote.upload(KEY, path, 'digest', 8, 3, SIGNAL);
+    await remote.upload(KEY, path, 'digest', 8, 3, SIGNAL, LEASE);
     expect(heard.map(asked => asked.url.split('/').slice(-2).join('/'))).toEqual(['parts/0', 'parts/1', 'parts/1', 'parts/1', 'parts/2', `${KEY}/done`]);
     expect(heard.filter(asked => asked.url.includes('/parts/')).map(asked => asked.body.toString())).toEqual(['abc', 'def', 'def', 'def', 'gh']);
     expect(JSON.parse(heard.at(-1)!.body.toString())).toEqual({ digest: 'digest', size: 8 });
@@ -276,14 +277,14 @@ describe('the registry over HTTP', () => {
   it('gives up on a part after three tries, and never says the bundle is whole', async () => {
     const { heard, remote } = await server((_asked, response) => { send(response, 503); });
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL)).rejects.toThrow('Hornhoof answered 503');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL, LEASE)).rejects.toThrow('Hornhoof answered 503');
     expect(heard.map(asked => asked.url.split('/').at(-1))).toEqual(['0', '0', '0']);
   });
 
   it('waits longer before each new try, as a link that dropped takes a while to come back', async () => {
     const at: number[] = [], { remote } = await server((_asked, response) => { at.push(Date.now()); send(response, 503); }, 100);
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL)).rejects.toThrow('Hornhoof answered 503');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL, LEASE)).rejects.toThrow('Hornhoof answered 503');
     expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(90);
     expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(190);
   });
@@ -291,14 +292,14 @@ describe('the registry over HTTP', () => {
   it('stops waiting when it is told to stop', async () => {
     const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { send(response, 503); setTimeout(() => { stop.abort(); }, 20); }, 60_000);
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal)).rejects.toThrow();
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal, LEASE)).rejects.toThrow();
     expect(heard).toHaveLength(1);
   });
 
   it('stops trying when it is told to stop', async () => {
     const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { stop.abort(); send(response, 503); });
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal)).rejects.toThrow();
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal, LEASE)).rejects.toThrow();
     expect(heard).toHaveLength(1);
   });
 
@@ -310,22 +311,22 @@ describe('the registry over HTTP', () => {
       response.writeHead(206); response.end(bytes.slice(Number(from), Number(to) + 1));
     });
     const { root } = await file('');
-    await remote.download(KEY, join(root, 'came'), { state: 'ready', digest: sha(bytes), size: 8, partBytes: 3 }, SIGNAL);
+    await remote.download(KEY, join(root, 'came'), { state: 'ready', ...LEASE, digest: sha(bytes), size: 8, partBytes: 3 }, SIGNAL);
     expect(await readFile(join(root, 'came'), 'utf8')).toBe(bytes);
     expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=3-5', 'bytes=3-5', 'bytes=6-7']);
-    await expect(remote.download(KEY, join(root, 'other'), { state: 'ready', digest: sha('other bytes'), size: 8, partBytes: 3 }, SIGNAL)).rejects.toThrow('differs from what Hornhoof holds');
+    await expect(remote.download(KEY, join(root, 'other'), { state: 'ready', ...LEASE, digest: sha('other bytes'), size: 8, partBytes: 3 }, SIGNAL)).rejects.toThrow('differs from what Hornhoof holds');
   });
 
   it('fails a download it cannot store, so the machine stays up and builds it itself', async () => {
     const { remote } = await server((_asked, response) => { response.writeHead(206); response.end('abc'); });
     const { root } = await file('');
-    await expect(remote.download(KEY, join(root, 'no such folder', 'came'), { state: 'ready', digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL)).rejects.toThrow(/ENOENT/);
+    await expect(remote.download(KEY, join(root, 'no such folder', 'came'), { state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL)).rejects.toThrow(/ENOENT/);
   });
 
   it('says a build failed, or was given up', async () => {
     const { heard, remote } = await server((_asked, response) => { send(response, 200, '{}'); });
-    await remote.failed(KEY, 'npm ci ended with 1');
-    await remote.failed(KEY, null);
+    await remote.failed(KEY, 'npm ci ended with 1', LEASE);
+    await remote.failed(KEY, null, LEASE);
     expect(heard.map(asked => [asked.url, JSON.parse(asked.body.toString())])).toEqual([[`/api/harness/${KEY}/failed`, { error: 'npm ci ended with 1' }], [`/api/harness/${KEY}/failed`, { error: null }]]);
   });
 });

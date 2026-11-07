@@ -63,10 +63,10 @@ function registry() {
       keysSeen.push(unit.key);
       const build = builds.get(unit.key);
       if (build?.failed) return { state: 'failed', error: build.failed, afterMs: 1000 };
-      if (build?.bundle) return { state: 'ready', digest: build.digest!, size: build.bundle.length, partBytes: 1024 * 1024 };
+      if (build?.bundle) return { state: 'ready', companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333', digest: build.digest!, size: build.bundle.length, partBytes: 1024 * 1024 };
       if (build && build.builder !== name) return { state: 'wait', afterMs: 5 };
       builds.set(unit.key, { builder: name });
-      return { state: 'build', partBytes: 1024 * 1024 };
+      return { state: 'build', companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333', partBytes: 1024 * 1024 };
     },
     async upload(key, file, digest) { builds.set(key, { builder: null, bundle: await readFile(file), digest }); },
     async download(key, file) { await writeFile(file, builds.get(key)!.bundle!); },
