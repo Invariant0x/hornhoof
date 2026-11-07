@@ -127,8 +127,9 @@ const go: Finder = seen => inTurn(foldersWith(seen, ['go.mod']), async root => {
   const file = under(root, 'go.mod'), text = await read(seen, file);
   /* A workspace reads all its modules, and a module can replace a dependency with one of this repository. */
   const reaches = seen.tracked.has('go.work') || /=>\s*\.\.?\//.test(text), others = reaches ? seen.paths.filter(path => /(?:^|\/)go\.(?:mod|sum)$/.test(path) && folderOf(path) !== root) : [];
+  const workspace = seen.tracked.has('go.work') ? goVersion(await read(seen, 'go.work')) : undefined;
   return {
-    language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(text) }],
+    language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(text) }, { tool: 'go' as const, version: workspace }],
     inputs: [...within(seen, root, ['go.mod', 'go.sum']), ...within(seen, '.', ['go.work', 'go.work.sum']), ...others],
     env: { GOMODCACHE: '.hornhoof/gomod', GOCACHE: '.hornhoof/gocache' }, shared: ['.hornhoof/gomod', '.hornhoof/gocache'],
     /* Go cleans a cache with no note of when it last did, of all that looks old, and what is stored does. So what it stores has
@@ -163,16 +164,20 @@ const RUST_STEPS = (manifests: string[]) => [
   String.raw`printf '%s' "$metadata" | jq -r '.packages[] | select(.source == null) | "\(.name)@\(.version)"' | while read -r own; do cargo clean --locked -p "$own"; done`,
   'rm -f "$CARGO_HOME/.package-cache" "$CARGO_HOME/.package-cache-mutate" "$CARGO_HOME/.global-cache"', 'rm -rf "$CARGO_HOME/git/checkouts"',
 ];
-const rustFiles = ['rust-toolchain.toml', 'rust-toolchain'];
+/* Rust obeys a toolchain file in a project's folder or any above it. */
+function rustFileFor(seen: Seen, root: string): string | undefined {
+  const here = within(seen, root, ['rust-toolchain.toml', 'rust-toolchain'])[0];
+  return here ?? (root === '.' ? undefined : rustFileFor(seen, folderOf(root)));
+}
 const rust: Finder = seen => inTurn(topMost(foldersWith(seen, ['Cargo.toml'])), async root => {
-  const lock = under(root, 'Cargo.lock'), own = parts(seen, root, 'Cargo.toml'), ownFile = within(seen, root, rustFiles)[0];
+  const lock = under(root, 'Cargo.lock'), own = parts(seen, root, 'Cargo.toml'), ownFile = rustFileFor(seen, root);
   if (!seen.tracked.has(lock)) return { orphan: under(root, 'Cargo.toml') };
   /* A crate outside its folder is read like its own, by every project that reaches for one. */
   const reaches = root !== '.' && (await inTurn(own, path => read(seen, path))).some(text => /path\s*=\s*"\.\.\//.test(text));
   const manifests = reaches ? parts(seen, '.', 'Cargo.toml') : own, local = manifests.map(path => posix.relative(root, path));
   return {
     language: 'rust', root, asks: [{ tool: 'rust' as const, ...(ownFile ? { ownFile } : {}) }],
-    inputs: [under(root, 'Cargo.toml'), lock, ...within(seen, root, ['.cargo/config.toml']), ...manifests.filter(path => path !== under(root, 'Cargo.toml'))],
+    inputs: [under(root, 'Cargo.toml'), lock, ...within(seen, root, ['.cargo/config.toml']), ...(ownFile ? [ownFile] : []), ...manifests.filter(path => path !== under(root, 'Cargo.toml'))],
     env: { CARGO_HOME: '.hornhoof/cargo' }, shared: ['.hornhoof/cargo'], own: ['target'], steps: RUST_STEPS(local), test: ['cargo test --locked'],
   };
 });
@@ -310,8 +315,8 @@ function namedAsks(named: Map<string, string>): Ask[] {
 function toolAsk(asks: Ask[], named: Map<string, string>, id: ToolId, programs: Program[]): ToolAsk {
   const ofTool = asks.filter(ask => ask.tool === id), chosen = Object.entries(NAMED_TOOLS).find(([name, tool]) => tool === id && named.has(name))?.[0];
   const version = chosen ? namedVersion(id, named.get(chosen)!) : newest(ofTool.flatMap(ask => (ask.version ? [ask.version] : [])));
-  const ownFile = programs.flatMap(program => program.asks.flatMap(ask => (ask.tool === id && ask.ownFile ? [{ root: program.root, path: ask.ownFile }] : [])));
-  return { version, packages: [...new Set(ofTool.flatMap(ask => ask.packages ?? []))], ownFile, noDefault: !chosen && ownFile.length === programs.filter(program => program.asks.some(ask => ask.tool === id)).length };
+  const using = programs.filter(program => program.asks.some(ask => ask.tool === id)), files = ofTool.flatMap(ask => (ask.ownFile ? [ask.ownFile] : []));
+  return { version, packages: [...new Set(ofTool.flatMap(ask => ask.packages ?? []))], ownFile: [...new Set(files)], noDefault: !chosen && files.length === using.length };
 }
 
 const ID_LIMIT = 50;
@@ -387,6 +392,6 @@ export async function discoverEnvironment(tree: Tracked): Promise<TestEnvironmen
   if (!programs.length && !asks.length && !machineTools) throw nothingFound(orphans, seen.named);
   const tools = TOOL_ORDER.filter(id => asks.some(ask => ask.tool === id)).map(id => makeTool(id, toolAsk(asks, seen.named, id, programs)));
   const manifest = manifestOf(programs, tools, seen.named);
-  if (JSON.stringify(manifest).length > TEST_ENVIRONMENT_BYTES) throw new DiscoveryProblem('environment_unsupported', `This repository holds more programs and packages than Hornhoof can describe by itself. Describe it in .hornhoof/test-environment.json, which can leave out what its tests do not need.`);
+  if (Buffer.byteLength(JSON.stringify(manifest)) > TEST_ENVIRONMENT_BYTES) throw new DiscoveryProblem('environment_unsupported', `This repository holds more programs and packages than Hornhoof can describe by itself. Describe it in .hornhoof/test-environment.json, which can leave out what its tests do not need.`);
   return manifest;
 }

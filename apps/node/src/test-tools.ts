@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { Command } from '@hornhoof/protocol';
 
 /* The tools of a language as part of a product's harness. A product gets them when its repository names that language, once
@@ -8,9 +9,9 @@ export const TOOLS = '.hornhoof/tools';
 export const TOOL_ORDER = ['c', 'go', 'rust', 'java', 'maven', 'gradle', 'php', 'ruby'] as const;
 export type ToolId = typeof TOOL_ORDER[number];
 export type Tool = { id: ToolId; install: Command[]; paths: string[]; inputs?: string[]; env?: Record<string, string>; bin: string[] };
-/* What a repository asks of a tool. ownFile: the projects that say their version in a file of their own, which the tool obeys
-   there. noDefault: all that use it do, and nobody chose a version, so no other is needed. */
-export type ToolAsk = { version: string | undefined; packages: string[]; ownFile: { root: string; path: string }[]; noDefault: boolean };
+/* What a repository asks of a tool. ownFile: the files in which projects say their version, which the tool obeys there. noDefault:
+   all that use it have one, and nobody chose a version, so no other is needed. */
+export type ToolAsk = { version: string | undefined; packages: string[]; ownFile: string[]; noDefault: boolean };
 
 const at = (program: string, ...args: string[]): Command => ({ program, args, cwd: '.' });
 const script = (text: string, ...args: string[]): Command => at('sh', '-c', `set -eu\n${text}`, 'sh', ...args);
@@ -78,9 +79,9 @@ chmod +x "$TMPDIR/rustup-init"
 CARGO_HOME="$PWD/$1" "$TMPDIR/rustup-init" -y --no-modify-path --default-toolchain none
 rm -f "$TMPDIR/rustup-init"`;
 function rustTool(version: string, ask: ToolAsk): Tool {
-  const own = ask.ownFile.map(({ root }): Command => ({ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: root }));
+  const own = ask.ownFile.map((path): Command => ({ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: posix.dirname(path) }));
   const common = ask.noDefault ? [] : [at('rustup', 'toolchain', 'install', version, '--no-self-update', '--profile', 'minimal', '--component', 'rustfmt', '--component', 'clippy'), at('rustup', 'default', version)];
-  return { id: 'rust', paths: [RUSTUP_HOME, CARGO_TOOLS], env: { RUSTUP_HOME }, bin: [`${CARGO_TOOLS}/bin`], inputs: ask.ownFile.map(({ path }) => path), install: [script(RUSTUP_INSTALL, CARGO_TOOLS), ...common, ...own] };
+  return { id: 'rust', paths: [RUSTUP_HOME, CARGO_TOOLS], env: { RUSTUP_HOME }, bin: [`${CARGO_TOOLS}/bin`], inputs: ask.ownFile, install: [script(RUSTUP_INSTALL, CARGO_TOOLS), ...common, ...own] };
 }
 
 const JAVA_PATH = `${TOOLS}/java`;

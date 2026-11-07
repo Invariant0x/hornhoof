@@ -95,8 +95,9 @@ const PROJECTS: Project[] = [
     broken: { 'crates/core/tests/json.rs': `#[test]\nfn names_an_item() { panic!("${BROKEN}"); }\n` },
   },
   {
-    name: 'rust-beside', tools: 'rust 1.99.1\n', lock: { command: '(cd api && cargo generate-lockfile) && (cd shared && cargo generate-lockfile)', files: ['api/Cargo.lock', 'shared/Cargo.lock'] },
+    name: 'rust-beside', tools: 'rust 1.90.0\n', lock: { command: '(cd api && cargo generate-lockfile) && (cd shared && cargo generate-lockfile)', files: ['api/Cargo.lock', 'shared/Cargo.lock'] },
     files: {
+      'rust-toolchain.toml': '[toolchain]\nchannel = "1.90.0"\nprofile = "minimal"\n',
       'api/Cargo.toml': '[package]\nname = "api"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nshared = { path = "../shared" }\n',
       'api/src/lib.rs': 'pub fn text() -> String { shared::text(7) }\n',
       'api/tests/text.rs': '#[test]\nfn writes_seven() { assert_eq!(api::text(), "7"); }\n',

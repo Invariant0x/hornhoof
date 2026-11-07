@@ -152,6 +152,11 @@ describe('a Go project', () => {
     expect(excluded.prepare[0]!.inputs).toEqual(['a/go.mod', 'go.work', 'examples/b/go.mod']);
   });
 
+  it('brings the Go a workspace asks for, when that is newer than its modules ask', async () => {
+    const manifest = await found({ 'go.work': 'go 1.25.0\nuse ./a\n', 'a/go.mod': 'module a\ngo 1.24.2\n' });
+    expect(manifest.dependencies.install[0]!.args.at(-2)).toBe('1.25.0');
+  });
+
   it('notes in each run that the prepared cache was just cleaned, or Go would drop it all at the first command', async () => {
     const manifest = await found({ 'go.mod': 'module shop\ngo 1.22.4\n' });
     expect(script(manifest.suites[0]!.run)).toContain('date +%s > "$GOCACHE/trim.txt"');
@@ -191,6 +196,22 @@ describe('a Rust project', () => {
     const manifest = await found({ ...cargo, 'rust-toolchain.toml': '[toolchain]\nchannel = "1.82.0"\n' });
     expect(manifest.dependencies.inputs).toEqual(['rust-toolchain.toml']);
     expect(manifest.dependencies.install).toContainEqual({ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: '.' });
+    expect(manifest.prepare[0]!.inputs).toEqual(['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml']);
+  });
+
+  it('takes a toolchain file in a folder above a project, which Rust obeys there as well, once for all it covers', async () => {
+    const toolchain = '[toolchain]\nchannel = "1.82.0"\n';
+    const manifest = await found({ 'rust-toolchain.toml': toolchain, 'a/Cargo.toml': '[package]\nname = "a"\n', 'a/Cargo.lock': '', 'b/Cargo.toml': '[package]\nname = "b"\n', 'b/Cargo.lock': '' });
+    expect(manifest.dependencies.inputs).toEqual(['rust-toolchain.toml']);
+    expect(manifest.dependencies.install.filter(command => command.args.join(' ') === 'toolchain install --no-self-update')).toEqual([{ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: '.' }]);
+    expect(manifest.dependencies.install.map(command => command.args.join(' '))).not.toContain('default 1.99.1');
+    expect(manifest.prepare[0]!.inputs).toContain('rust-toolchain.toml');
+  });
+
+  it('brings a toolchain beside what a file names when another project has no file', async () => {
+    const manifest = await found({ 'a/rust-toolchain': '1.82.0\n', 'a/Cargo.toml': '[package]\nname = "a"\n', 'a/Cargo.lock': '', 'b/Cargo.toml': '[package]\nname = "b"\n', 'b/Cargo.lock': '' });
+    expect(manifest.dependencies.install).toContainEqual({ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: 'a' });
+    expect(manifest.dependencies.install.map(command => command.args.join(' '))).toContain('default 1.99.1');
   });
 
   it('forgets every package of its own after compiling, so a run never takes the empty sources it compiled them from for its code', async () => {
