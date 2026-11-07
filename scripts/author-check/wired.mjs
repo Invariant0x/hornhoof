@@ -31,8 +31,10 @@ function makePlan({ sha, base }, ports) {
   return buildPlan({ sha, base, cwdOf: path => cwdOf(suites, path) }, { git: ports.git, complexity: complexityAt(ports.git) });
 }
 
+/* --ignore-scripts keeps the scripts of the dependencies off, and the repository's own prepare with them: a package needs what that links. */
 export async function prepare(ports) {
-  const steps = [...(ports.exists('node_modules') ? [] : [['ci', '--ignore-scripts']]), ['run', '-s', 'build', '-w', '@hornhoof/protocol'], ['run', '-s', 'build', '-w', '@hornhoof/node']];
+  const install = ports.exists('node_modules') ? [] : [['ci', '--ignore-scripts'], ['run', '-s', 'prepare']];
+  const steps = [...install, ['run', '-s', 'build', '-w', '@hornhoof/protocol'], ['run', '-s', 'build', '-w', '@hornhoof/node']];
   for (const args of steps) if ((await ports.exec('npm', args, { cwd: '.' })).code !== 0) return 'prepare_failed';
   return null;
 }
@@ -44,12 +46,16 @@ export function tracked(git) {
   });
 }
 
-async function selection(args, plan, manifest, ports, root) {
+export async function selectionPorts(root) {
   const { selectAffectedTests } = await import('../../apps/node/dist/test-impact.js');
   const { collectVitestImpact } = await import('../../apps/node/dist/test-impact-adapters.js');
   const { listTestUnits } = await import('../../apps/node/dist/test-environment.js');
   const collect = async changed => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', PROBE, JSON.stringify(changed)], { cwd: root, encoding: 'utf8', timeout: COLLECT_MS, maxBuffer: COLLECT_BYTES, stdio: ['ignore', 'pipe', 'inherit'] }));
-  return selectTests({ changes: plan.changes, manifest, tracked: tracked(ports.git), allowWhole: args.allowWhole }, { selectAffectedTests, collectVitestImpact, listTestUnits, collect });
+  return { selectAffectedTests, collectVitestImpact, listTestUnits, collect };
+}
+
+async function selection(args, plan, manifest, ports, root) {
+  return selectTests({ changes: plan.changes, manifest, tracked: tracked(ports.git), allowWhole: args.allowWhole }, await selectionPorts(root));
 }
 
 async function check(args, plan, ports, root) {

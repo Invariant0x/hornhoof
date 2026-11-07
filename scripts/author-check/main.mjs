@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { exitCodeOf } from './judge.mjs';
 import { decodePlan, encodePlan, PLAN_CHARS } from './plan.mjs';
@@ -23,7 +23,7 @@ export function parseArgs(argv) {
   return COMMIT.test(found.sha ?? '') && COMMIT.test(found.base ?? '') ? found : null;
 }
 
-function run(program, args, cwd, write) {
+function run(program, args, { cwd, env }, write) {
   write(`$ ${[program, ...args].join(' ')}\n`);
   return new Promise(done => {
     let output = '';
@@ -32,7 +32,7 @@ function run(program, args, cwd, write) {
       write(text);
       output = (output + text).slice(-OUTPUT_KEPT);
     };
-    const child = spawn(program, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', take);
     child.stderr.on('data', take);
     child.on('error', () => done({ code: null, output }));
@@ -52,7 +52,8 @@ export function realPorts(root, write = text => process.stdout.write(text)) {
     exists: path => existsSync(at(path)),
     read: path => quietly(() => readFileSync(at(path), 'utf8'), null),
     mkdir: path => mkdirSync(at(path), { recursive: true }),
-    exec: (program, args, options) => run(program, args, at(options.cwd), write),
+    write: (path, text) => writeFileSync(at(path), text),
+    exec: (program, args, options) => run(program, args, { cwd: at(options.cwd), env: options.env }, write),
   };
 }
 
