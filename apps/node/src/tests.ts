@@ -515,7 +515,7 @@ async function manualHarness(msg: TestRun, options: Options, part: { root: strin
   const started = performance.now();
   try {
     const deadline = Math.min(part.deadline, Date.now() + MANUAL_HARNESS_MS), state: PreparationState = { ...productUser(options.user), ...part, deadline, signal: productSignal(options.signal, deadline), options };
-    const context = preparationContext(state, '', [...options.hidden]);
+    const context = preparationContext(state, '', productSecrets(msg, options.hidden));
     const description = await readTestEnvironment(msg.repo!, msg.repositoryScope!, msg.commitSha!, context);
     if (description.manifest.dependencies.cache === 'none') {
       part.out.line('The command starts without the prepared harness: this repository keeps no prepared dependencies.');

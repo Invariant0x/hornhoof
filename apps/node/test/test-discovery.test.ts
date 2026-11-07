@@ -27,6 +27,18 @@ const paths = (manifest: TestEnvironmentV1) => manifest.prepare.flatMap(unit => 
 const toolsOf = (manifest: TestEnvironmentV1) => manifest.dependencies.adapter.split('.');
 
 describe('a JavaScript project', () => {
+  const unsupported: Record<string, string>[] = [
+    { 'yarn.lock': '__metadata:\n  version: 8\n' },
+    { 'yarn.lock': '# yarn lockfile v1\n', '.pnp.cjs': 'module.exports={}' },
+    { 'yarn.lock': '# yarn lockfile v1\n', '.yarnrc.yml': 'nodeLinker: pnp\n' },
+    { 'yarn.lock': '# yarn lockfile v1\n', 'package.json': pkg({ installConfig: { pnp: true } }) },
+    { 'yarn.lock': '# yarn lockfile v1\n', 'package.json': pkg({ packageManager: 'yarn@4.5.0' }) },
+    { 'yarn.lock': '# yarn lockfile v1\n', '.yarnrc': '--install.pnp true\n' },
+  ];
+  it.each(unsupported)('refuses an unsupported Yarn PnP environment before preparing it: %j', async files => {
+    await expect(discoverEnvironment(tree({ 'package.json': pkg(), ...files }))).rejects.toMatchObject({ code: 'environment_unsupported', message: expect.stringContaining('Yarn') });
+  });
+
   it('comes up from its lock file, its dependencies shared read-only and built apart from any tool', async () => {
     const manifest = await found({ 'package.json': pkg(), 'package-lock.json': '{}' });
     expect(manifest.dependencies).toMatchObject({ cache: 'link', inputs: [], install: [], paths: [] });
@@ -51,7 +63,6 @@ describe('a JavaScript project', () => {
   it.each([
     ['pnpm-lock.yaml', '', 'corepack pnpm install --frozen-lockfile --package-import-method=copy'],
     ['yarn.lock', '# yarn lockfile v1\n', 'corepack yarn install --frozen-lockfile'],
-    ['yarn.lock', '__metadata:\n  version: 8\n', 'corepack yarn install --immutable'],
   ])('uses the package manager of %s', async (lock, text, command) => {
     const manifest = await found({ 'package.json': pkg(), [lock]: text });
     expect(script(manifest.prepare[0]!.commands[0]!)).toContain(command);

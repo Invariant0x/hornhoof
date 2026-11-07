@@ -19,6 +19,7 @@ vi.mock('../../node/src/isolation.js', async original => {
   return { ...module, userFor: () => ({ uid: ids.builderUid, gid: ids.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
 });
 import { departments, harnessBuilds, harnessProducts, jobs, testParts, testRuns } from '../src/db/schema.js';
+import { hashToken } from '../src/crypto/tokens.js';
 import { harnessRound } from '../src/modules/testruns/harness.js';
 import { until, type FakeNode } from './helpers.js';
 import { company } from './test-runs-company.js';
@@ -67,7 +68,7 @@ async function repository(root: string) {
   const breaks = (lock: string) => commit({ '.hornhoof/test-environment.json': JSON.stringify(manifest("console.log('this version does not exist');process.exit(3)")), 'package-lock.json': lock });
   const builds = async () => (await readFile(log, 'utf8')).split('\n').filter(Boolean);
   const clearBuilds = () => writeFile(log, '');
-  return { url: pathToFileURL(source).href, first, commit, breaks, builds, clearBuilds };
+  return { url: pathToFileURL(source).href, first, commit, breaks, builds, clearBuilds, manifest };
 }
 
 async function world() {
@@ -118,6 +119,21 @@ const unitsOf = async (c: Awaited<ReturnType<typeof world>>) => c.db.select().fr
 const turnsOf = async (c: Awaited<ReturnType<typeof world>>, agentId: string) => (await c.db.select({ prompt: jobs.prompt }).from(jobs).where(eq(jobs.agentId, agentId))).map(job => job.prompt);
 
 describe('one harness for a product, across all its machines', () => {
+  it('masks a manual preparation token before its HTTP failure reaches the registry, product and head', async () => {
+    const c = await world(), one = await c.machine(c.ceo, 'manual-secret');
+    const marker = 'synthetic-private-repository-token-696';
+    const commitSha = await c.repo.commit({ '.hornhoof/test-environment.json': JSON.stringify(c.repo.manifest(`console.error('${marker}');process.exit(1)`)) });
+    const result = await runTests({ type: 'tests.run', partId: '33333333-3333-4333-8333-333333333333', repo: { url: c.repo.url, token: marker }, repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(c.repo.url) }, commitSha, branch: null, task: 1, command: 'true', part: 1, parts: 1, timeoutMs: 30_000 }, one.options);
+    const failure = (await unitsOf(c)).find(build => build.status === 'failed')!.error!;
+    const problem = (await c.product())!.problem!.detail;
+    const prompts = (await turnsOf(c, c.head.id)).join('\n');
+    for (const output of [failure, problem, prompts, result.log]) {
+      expect(output).not.toContain(marker);
+      expect(output).toContain('[hidden]');
+    }
+    c.stop();
+  });
+
   it('is built once and reaches every machine; a run on any of them starts without installing or building; a change updates only what it touches, once, everywhere', async () => {
     const c = await world(), one = await c.machine(c.ceo, 'one'), two = await c.machine(c.ann, 'two');
 

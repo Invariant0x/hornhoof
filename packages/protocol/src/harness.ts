@@ -5,6 +5,7 @@ import { EnvironmentDigest, EnvironmentProblem, ProductCommitSha, RepositoryScop
    machines of another architecture build their own. version: the same on every architecture, while nothing it is built from
    changed. */
 export const HarnessUnit = z.strictObject({
+  fencing: z.literal(1).optional(),
   repositoryScope: RepositoryScope,
   key: EnvironmentDigest,
   version: EnvironmentDigest,
@@ -17,8 +18,8 @@ export type HarnessUnit = z.infer<typeof HarnessUnit>;
 /* What Hornhoof says of a unit a machine lacks: take it, build it, wait for the machine building it, or it failed. local: it
    keeps nothing to share, so each machine builds for itself. */
 export const HarnessClaim = z.discriminatedUnion('state', [
-  z.strictObject({ state: z.literal('ready'), digest: EnvironmentDigest, size: z.number().int().nonnegative(), partBytes: z.number().int().positive() }),
-  z.strictObject({ state: z.literal('build'), partBytes: z.number().int().positive() }),
+  z.strictObject({ state: z.literal('ready'), companyId: z.uuid(), attempt: z.uuid(), digest: EnvironmentDigest, size: z.number().int().nonnegative(), partBytes: z.number().int().positive() }),
+  z.strictObject({ state: z.literal('build'), companyId: z.uuid(), attempt: z.uuid(), partBytes: z.number().int().positive() }),
   z.strictObject({ state: z.literal('wait'), afterMs: z.number().int().positive() }),
   z.strictObject({ state: z.literal('failed'), error: z.string().max(4000), afterMs: z.number().int().positive() }),
   z.strictObject({ state: z.literal('local') }),

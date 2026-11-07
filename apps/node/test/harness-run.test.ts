@@ -63,10 +63,10 @@ function registry() {
       keysSeen.push(unit.key);
       const build = builds.get(unit.key);
       if (build?.failed) return { state: 'failed', error: build.failed, afterMs: 1000 };
-      if (build?.bundle) return { state: 'ready', digest: build.digest!, size: build.bundle.length, partBytes: 1024 * 1024 };
+      if (build?.bundle) return { state: 'ready', companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333', digest: build.digest!, size: build.bundle.length, partBytes: 1024 * 1024 };
       if (build && build.builder !== name) return { state: 'wait', afterMs: 5 };
       builds.set(unit.key, { builder: name });
-      return { state: 'build', partBytes: 1024 * 1024 };
+      return { state: 'build', companyId: unit.repositoryScope.companyId, attempt: '33333333-3333-4333-8333-333333333333', partBytes: 1024 * 1024 };
     },
     async upload(key, file, digest) { builds.set(key, { builder: null, bundle: await readFile(file), digest }); },
     async download(key, file) { await writeFile(file, builds.get(key)!.bundle!); },
@@ -83,6 +83,18 @@ const manualPart = (f: Fixture, command: string): Extract<ServerMessage, { type:
 const asked = (f: Fixture, commitSha = f.head()): Extract<ServerMessage, { type: 'tests.harness' }> => ({ type: 'tests.harness', requestId: randomUUID(), repositoryScope: f.repositoryScope, repo: f.repo, commitSha });
 
 describe('a harness that reaches every machine', () => {
+  it('redacts the repository token before a manual preparation failure reaches the registry', async () => {
+    const marker = 'synthetic-repository-token-696';
+    const f = await fixture(manifest => { manifest.dependencies.install = [sh(`console.error('${marker}');process.exit(1)`)]; });
+    f.repo.token = marker;
+    const shared = registry(), options = machine(f, 'manual-secret', shared.remote('one'));
+    const result = await runTests(manualPart(f, 'true'), options);
+    const failures = [...shared.builds.values()].map(build => build.failed).filter(Boolean).join('\n');
+    expect(failures).toContain('[hidden]');
+    expect(failures).not.toContain(marker);
+    expect(result.log).not.toContain(marker);
+  });
+
   it('is built once however many machines get it ready, and a new run on any of them starts with no install and no build', async () => {
     const f = await fixture(), shared = registry();
     const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
