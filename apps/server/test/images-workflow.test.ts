@@ -13,6 +13,8 @@ import { parse } from 'yaml';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/images.yml'), 'utf8');
+/* The runners the repository variable names, GitHub's machines without it. */
+const TESTS_RUNS_ON = "${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}";
 const run = promisify(execFile);
 const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...IDENTITY } }).trim();
@@ -339,13 +341,14 @@ describe('.github/workflows/images.yml', () => {
     expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
-  it('runs the tests on GitHub’s machines in four parts, as before', () => {
-    expect(JOBS.test!['runs-on']).toBe('ubuntu-latest');
+  it('runs the tests in four parts, on GitHub’s machines unless the repository variable names other runners', () => {
+    expect(JOBS.test!['runs-on']).toBe(TESTS_RUNS_ON);
     expect(JOBS.test!.strategy!.matrix.part).toEqual([1, 2, 3, 4]);
   });
 
-  it('runs every job on GitHub’s machines, and names no machine of its own anywhere', () => {
-    for (const job of Object.values(JOBS)) expect(job['runs-on']).toBe('ubuntu-latest');
+  it('lets the variable move only the first job and the tests; images, publishing and the release stay on GitHub’s machines', () => {
+    expect(JOBS.mark!['runs-on']).toBe(TESTS_RUNS_ON);
+    for (const [name, job] of Object.entries(JOBS)) if (name !== 'mark' && name !== 'test') expect(job['runs-on']).toBe('ubuntu-latest');
     expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host/);
   });
 
