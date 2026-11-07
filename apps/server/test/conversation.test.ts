@@ -317,7 +317,8 @@ describe('the orchestrator\'s conversation', () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
-  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version. */
+  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version and, as every node
+     since skill files does, that it writes them. */
   async function onMac(version: string, provider = 'claude', hello: object = {}) {
     const { app, url, ceo } = await live();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
@@ -325,7 +326,7 @@ describe('the orchestrator\'s conversation', () => {
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
-    mac.send({ type: 'hello', version, loggedIn: true, running: [], ...hello });
+    mac.send({ type: 'hello', version, loggedIn: true, running: [], skillFiles: true, ...hello });
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
     return { app, url, ceo, mac, node };
   }
@@ -388,24 +389,42 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
-    const { app, ceo, mac } = await onMac('0.5.0');
+    const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
-    await say(app, ceo, 'Hello');
+    const [acme] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', skills: ['dev-tdd'] }).returning();
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
     const old = await nextRun(mac);
-    const plan = app.ctx.templates.skills.get('orch-plan-turn')!.body;
-    expect(old.instructions).toContain(plan);
+    expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-tdd')!.body);
     expect(old.instructions).not.toContain('superpowers');
     expect(old.skills).toBeUndefined();
-    const fresh = await onMac('0.5.0', 'claude', { skillFiles: true });
+    const fresh = await onMac('0.5.0');
     await until(async () => (await state(fresh.app, fresh.ceo)).ready);
     await say(fresh.app, fresh.ceo, 'Hello');
     const run = await nextRun(fresh.mac);
+    const plan = fresh.app.ctx.templates.skills.get('orch-plan-turn')!.body;
     expect(run.instructions).not.toContain(plan);
     expect(run.skills?.map(s => s.name)).toContain('orch-plan-turn');
   });
 
+  it("ends the orchestrator's turn at once on a machine that writes no skill files, as his skills come whole there and take more than it does", async () => {
+    const { app, ceo, mac } = await onMac('0.5.0', 'claude', { skillFiles: false });
+    const { db } = app.ctx;
+    await until(async () => (await state(app, ceo)).ready);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await say(app, ceo, 'Hello');
+    const failed = async () => (await db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id))).find(j => j.status === 'failed');
+    await until(async () => Boolean(await failed()));
+    const job = await failed();
+    expect(job!.error).toBe('node_too_old');
+    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
+    expect(await quiet(mac)).toBe(0);
+  });
+
   it("ends a turn too long for a machine from before skill files at once, saying its node needs an update", async () => {
-    const { app, ceo, mac, node } = await onMac('0.5.0');
+    const { app, ceo, mac, node } = await onMac('0.5.0', 'claude', { skillFiles: false });
     const { db } = app.ctx;
     await until(async () => (await state(app, ceo)).ready);
     const [acme] = await db.select().from(companies);

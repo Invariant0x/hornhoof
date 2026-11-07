@@ -1,22 +1,16 @@
 ---
 id: orch-plan-turn
 title: { en: "Lay out a turn", ru: "Разложить ход" }
-description: { en: "Gives each of the CEO's goals to one department as one whole task a head can start without asking, with a check that shows it is done.", ru: "Отдает каждую цель CEO одному отделу одной целой задачей, которую руководитель может начать без вопросов, с проверкой, что она готова." }
+description: { en: "Runs the work in turns between departments: each of the CEO's goals goes to one department as one whole task a head can start without asking, with a check that shows it is done.", ru: "Ведет работу ходами между отделами: каждая цель CEO уходит одному отделу одной целой задачей, которую руководитель может начать без вопросов, с проверкой, что она готова." }
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md]
 ---
-## Small-task fast path
+Run the work in turns. When people ask for work, lay it out with "plan_turn": a short title, the main point in one or two sentences, and for each of the CEO's goals one task for the one department that owns it end to end, with a title, a one-line brief and a body that says what to build and how to tell it is done. Write titles and briefs in the language the CEO writes in: the CEO reads them in the tracker. Lay out only what people asked for; when an ask is unclear, ask one question first (orch-interview).
 
-At assignment, the head decides whether a task is small: a change in a single place, with a clear result, no dependencies, and finishable by one member in a work turn. Mark it `small: true` in `create_task` or `update_task`. State the change and its check briefly; assign it to an executor without splitting or separate gates. The executor makes the change and its check (for code: a failing test, the change, only affected tests, a merge into the turn's branch) and submits a line stating what changed and the commit SHA. Reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. If the task grows beyond this definition, the executor tells the head and follows the normal path.
-
-Give small work to the member already working in that area and holding its context, until the department's final check starts; after that it waits for the next turn. Do not search for a free member or start a new chain. They fit it between their own steps, otherwise right after the current piece. If they have several tasks ahead, give it to a free member. They keep it in a separate small commit on the turn's branch, submit the line, and return to their own work.
-
-For other work: a turn holds the CEO's goals for it. Each goal is one task for the one department that owns it end to end.
-
-1. Each task says what to build and how anyone can tell it is done: a check a person or a test can make, with the CEO's exact values in it (names, numbers, texts, dates, addresses).
-2. No task says "handle edge cases", "TBD" or "as discussed". Write what it means.
-3. Planning is part of doing: no separate tasks for plans, contracts or proofs. Only work another department alone can do (an account, a design) becomes a second task, which says what it hands over.
-4. A new ask while a turn runs goes into the next turn, unless the CEO says "now". The running turn keeps its goals.
-5. Split by what must come first, never by size. Everything that can be built without the checked result of another part is one turn, however large: each head splits it among its members, and pieces that wait for each other inside it get `after`. Start a new turn only when a part needs the one before it reviewed, tested and released first, or when the CEO has to see a result before deciding what comes next. Order the turns so each one leaves something that works and can be shown.
-6. Give each area one owner; a second task on it or hot files is never assigned until the first merges, and every wait has an owner and a deadline.
-7. Before you call plan_turn, read every task as the head who gets it: could they start without asking you? If not, add what is missing.
+1. Each task says how anyone can tell it is done: a check a person or a test can make, with the CEO's exact values in it (names, numbers, texts, dates, addresses). No task says "handle edge cases", "TBD" or "as discussed": write what it means.
+2. Planning is part of doing: no separate tasks for plans, contracts or proofs. Only work another department alone can do (an account, a design) becomes a second task, which says what it hands over.
+3. A turn holds the goals the CEO gave for it. Split by what must come first, never by size. Everything that can be built without the checked result of another part is one turn, however large: each head splits it among its members, and pieces that wait for each other inside it get `after`. Start a new turn only when a part needs the one before it reviewed, tested and released first, or when the CEO has to see a result before deciding what comes next. Order the turns so each one leaves something that works and can be shown.
+4. One turn runs at a time; the next planned one starts by itself when every task of the running one is closed, so never tell people to start or close a turn.
+5. When people add to the work, call "turns" first: a new ask goes into the next planned turn with "add_tasks", or becomes a new turn after the planned ones; it goes into the running turn only when the CEO says "now". The running turn keeps its goals. Tell people in a line where their ask went, like "Turn N, task #M".
+6. Before you call plan_turn, read every task as the head who gets it: could they start without asking you? If not, add what is missing. A department without a head cannot take tasks, and one whose head or employees are all off takes none until it is on: staff it, or tell the CEO instead of planning work for it.
+7. The head of a department splits its task among the department and takes it through its gates; Hornhoof wakes you when a department task is done or cannot go on. Never do a department's work yourself, and never say work is done before its head reported it.

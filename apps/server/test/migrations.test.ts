@@ -559,7 +559,7 @@ describe('migration 0081', () => {
       await db.execute(sql`insert into agents (company_id, kind, name, model, skills) values (${C}, 'worker', ${name}, '', ${JSON.stringify(skills)}::jsonb)`);
     }
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0081_testing_policy_skill') });
 
     const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents`);
     const after = Object.fromEntries(rows.rows.map(r => [r.name, r.skills]));
@@ -576,6 +576,56 @@ describe('migration 0081', () => {
       Screens: ['dev-frontend-ui', 'dev-browser-check', 'dev-testing-policy'],
       Sales: ['sal-prospecting'],
       Writer: ['dev-docs', 'hh-work-fast'],
+    });
+  });
+});
+
+describe('migration 0084', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('gives what leading and working on code took out of the common skills to every card that leads or works on code, and nothing to the others', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0083_harness') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const cards: [name: string, kind: 'head' | 'worker', role: string | null, skills: string[]][] = [
+      /* Leading code left the skill every head carries. */
+      ['Lead', 'head', 'DEV-HEAD', ['dev-work-pipeline', 'dev-gates']],
+      ['Lead of its own', 'head', null, ['dev-work-pipeline']],
+      ['Design lead', 'head', 'DSN-HEAD', ['dsn-work-pipeline']],
+      /* Working on code left the skill every member carries: a role of development, a card that holds code skills, or Operations fixing code. */
+      ['Developer', 'worker', 'DEV-ENG', ['dev-implement', 'dev-tdd']],
+      ['Trimmed', 'worker', 'DEV-REV', []],
+      ['Designer', 'worker', 'DEV-FE', ['dev-frontend-ui']],
+      ['Writer of its own', 'worker', null, ['dev-docs']],
+      ['Fixer', 'worker', 'OPS-FIX', ['ops-runbook']],
+      ['Integrator', 'worker', 'OPS-INTEG', ['ops-api-connector']],
+      ['Already', 'worker', 'DEV-ENG', ['dev-task-flow', 'dev-tdd']],
+      /* These hold no code, so nothing changes. */
+      ['Seller', 'worker', 'SAL-SDR', ['sal-prospecting']],
+      ['Watchdog', 'worker', 'OPS-WATCH', ['ops-task-watch']],
+    ];
+    for (const [name, kind, role, skills] of cards) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, role_key, skills) values (${C}, ${kind}, ${name}, '', ${role}, ${JSON.stringify(skills)}::jsonb)`);
+    }
+
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0084_skill_bricks') });
+
+    const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents`);
+    expect(Object.fromEntries(rows.rows.map(r => [r.name, r.skills]))).toEqual({
+      Lead: ['dev-work-pipeline', 'dev-gates', 'dev-lead'],
+      'Lead of its own': ['dev-work-pipeline', 'dev-lead'],
+      'Design lead': ['dsn-work-pipeline'],
+      Developer: ['dev-implement', 'dev-tdd', 'dev-task-flow'],
+      Trimmed: ['dev-task-flow'],
+      Designer: ['dev-frontend-ui', 'dev-task-flow'],
+      'Writer of its own': ['dev-docs', 'dev-task-flow'],
+      Fixer: ['ops-runbook', 'dev-task-flow'],
+      Integrator: ['ops-api-connector', 'dev-task-flow'],
+      Already: ['dev-task-flow', 'dev-tdd'],
+      Seller: ['sal-prospecting'],
+      Watchdog: ['ops-task-watch'],
     });
   });
 });

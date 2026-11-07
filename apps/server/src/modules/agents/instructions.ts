@@ -2,7 +2,7 @@ import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornho
 import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
-import { ANSWER_IN_HORNHOOF, ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
+import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
@@ -16,44 +16,16 @@ export type Rendered = { parts: Part[]; raw: string; text: string; hash: string;
 type AgentRow = typeof agents.$inferSelect;
 type Place = { company: string; department: string; product: string | null };
 
-/* Who the employee is and where it works. Always English; it answers in the language people write in. */
+/* Who the employee is and where it works: the one line of its instructions that is no skill. Everything else it knows,
+   down to working in Hornhoof, comes in skills its card holds. Always English; it answers in the language people write in. */
 function header(agent: AgentRow, role: string, place: Place): string {
   const where = `the ${role} of the ${place.department} department at ${place.company}${place.product ? `, working on ${place.product}` : ''}`;
-  return [
-    `You are ${agent.name}, ${where}.`,
-    'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
-    `Work comes to you as tasks: Hornhoof wakes you with a task's number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done. ${ANSWER_IN_HORNHOOF}`,
-    ...(agent.kind === 'head'
-      ? [
-          'You answer to the orchestrator, who runs the company with the CEO. Tell it with "tell_orchestrator" what it needs from you outside the tasks it gives you: what came of a timer round, what you need decided, work another department has to do. Put what you find worth improving in how the company works under Improvements with "propose_improvement".',
-        ]
-      : []),
-    agent.kind === 'head'
-      ? 'When your conversation was compacted and you see a summary instead of it, read "tasks", the task you were on with "task" and your department notebook again with "notebook" before you go on.'
-      : 'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',
-    'Answer in the language the person writes in. Keep answers short and plain.',
-  ].join('\n\n');
+  return `You are ${agent.name}, ${where}.`;
 }
 
-/* Who the superpowers skills mean by your human partner, and what they need not wait for in Hornhoof. */
-function partner(giver: string, head: boolean): string {
-  return [
-    'You also have the superpowers skills (obra/superpowers), such as test-driven-development, systematic-debugging, writing-plans and verification-before-completion. Use them as they say, under these rules, which come first as all your instructions do:',
-    `- Your human partner, as the skills call the person you work for, is whoever gave you the task: ${giver}, or the person who wrote to you. Reach them through Hornhoof's tools, never by waiting for an answer in your terminal, which nobody watches.`,
-    `- A task ${giver} gave you is already approved: plan inside it and go on without asking anyone to approve a design or a plan.`,
-    '- A small task needs no written plan: test, code, check, submit. writing-plans and executing-plans are for a new or large feature only.',
-    head
-      ? '- Brainstorming with people belongs to the orchestrator and the CEO; you and your architects use it only when a task asks for a design.'
-      : '- Brainstorming with people belongs to the orchestrator and the CEO. Use it only when your task asks for a design, and put its questions to your head in one message.',
-    '- Finish a branch the way your task says, not by asking which way.',
-  ].join('\n');
-}
-
-/* The orchestrator's human partner is the CEO in the orchestrator's window. */
-const ORCHESTRATOR_PARTNER = [
-  'You also have the superpowers skills (obra/superpowers). Your human partner, as they call the person you work for, is the CEO in this window.',
-  'Brainstorm with the CEO when a goal is still unclear, one question at a time, before you lay out a turn. What you give the departments is approved when you give it: their heads and employees do not come back to have it approved.',
-].join(' ');
+/* The superpowers skills come with the skill files, so a node that writes none has nothing for these to speak of. */
+const WITH_SKILL_FILES: ReadonlySet<string> = new Set(['hh-superpowers']);
+const forOldNode = (parts: Part[]): string[] => parts.filter(p => !(p.id && WITH_SKILL_FILES.has(p.id))).map(p => p.text);
 
 /* A skill as instructions carry it, between markers the card finds it by. */
 const skillBlock = (id: string, title: string, body: string) => `<!-- hh:skill ${id} -->\n## ${title}\n\n${body}\n<!-- /hh:skill -->`;
@@ -151,9 +123,7 @@ function collectSkills(t: Templates, role: Role | undefined, agent: AgentRow): {
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
-  const plain = header(agent, role?.title.en ?? 'employee', place);
-  const head = agent.kind === 'head';
-  const said = `${plain}\n\n${partner(head ? 'the orchestrator' : 'your head', head)}`;
+  const said = header(agent, role?.title.en ?? 'employee', place);
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
   const base = basePart(role, agent);
   if (base) parts.push(base);
@@ -163,7 +133,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   parts.push(...collected.parts);
 
   const text = told([...initialKept, ...collected.kept], collected.files);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole(forOldNode(parts)) };
 }
 
 /* The names an employee's header uses: its company, department and product. */
@@ -178,14 +148,17 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
   return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) };
 }
 
-/* The orchestrator's own skills, always on after his standing role. */
-export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
+/* The orchestrator's skills, always on after his standing role: working in Hornhoof as everyone does, leading as every
+   head does, then what only he does, and development's own way of leading for when he needs it. */
+export const ORCHESTRATOR_SKILLS = [
+  'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+  'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
+] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
 export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
-  const base = `${ORCHESTRATOR_INSTRUCTIONS}\n\n${ORCHESTRATOR_PARTNER}`;
-  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: base, overridden: false, templateChanged: false }];
-  const kept = [base];
+  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false }];
+  const kept = [ORCHESTRATOR_INSTRUCTIONS];
   const skills: SkillFile[] = [];
   for (const id of ORCHESTRATOR_SKILLS) {
     const skill = t.skills.get(id);
@@ -195,7 +168,7 @@ export function orchestratorSteady(t: Templates): { parts: Part[]; text: string;
     if (inline(skill)) kept.push(text);
     else skills.push(skillFile(id, skill, skill.body));
   }
-  return { parts, text: told(kept, skills), skills, whole: whole([ORCHESTRATOR_INSTRUCTIONS, ...parts.slice(1).map(p => p.text)]) };
+  return { parts, text: told(kept, skills), skills, whole: whole(forOldNode(parts)) };
 }
 
 const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';

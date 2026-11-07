@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
+import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
@@ -20,31 +21,36 @@ describe('templates', () => {
     expect(role.body).toMatch(/fast path/);
   });
 
-  it.each(['hh-lead-tasks', 'orch-plan-turn'])('defines the complete small-task path in %s', id => {
-    const body = templates.skills.get(id)!.body;
+  it('defines the small-task path once, for every head and the orchestrator, and its check for code in development alone', () => {
+    const body = templates.skills.get('hh-lead-tasks')!.body;
     expect(body).toMatch(/small: true/);
     expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
     expect(body).toMatch(/change and (its|the) check/);
     expect(body).toMatch(/without splitting or separate gates/);
-    expect(body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
     expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
     expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
+    expect(body).not.toMatch(/failing test|affected tests|branch|commit|SHA/);
+    expect(templates.skills.get('dev-lead')!.body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
+    for (const id of ['orch-plan-turn', 'orch-company']) expect(templates.skills.get(id)!.body, id).not.toMatch(/small: true/);
   });
 
-  it.each(['hh-lead-tasks', 'orch-plan-turn'])('keeps small work in the developer context in %s', id => {
-    const body = templates.skills.get(id)!.body;
+  it('keeps small work with whoever holds its context, in the skill every head and the orchestrator lead by', () => {
+    const body = templates.skills.get('hh-lead-tasks')!.body;
     expect(body).toMatch(/already working in that area[\s\S]*context/);
     expect(body).toMatch(/[Dd]o not search for a free member or start a new chain/);
     expect(body).toMatch(/until the department's final check starts; after that it waits for the next turn/);
     expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
     expect(body).toMatch(/several tasks ahead[\s\S]*free member/);
-    expect(body).toMatch(/separate small commit[\s\S]*return to their own work/);
+    expect(templates.skills.get('dev-lead')!.body).toMatch(/separate small commit[\s\S]*back to its own work/);
   });
 
-  it('keeps each connected block with one owner in the head skill and in the developer role', () => {
+  it('keeps each connected block with one owner in the head skill, with one generalist developer for code, and in the developer role', () => {
     const lead = templates.skills.get('hh-lead-tasks')!.body;
-    expect(lead).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
+    expect(lead).toMatch(/one member owns each connected block end to end/i);
     expect(lead).toMatch(/no chains or `after` between members when one can do it/i);
+    const code = templates.skills.get('dev-lead')!.body;
+    expect(code).toMatch(/connected block[\s\S]*one generalist developer end to end/i);
+    expect(code).toMatch(/no chains or `after` between developers when one can do it/i);
     const developer = templates.roles.get('DEV-ENG')!.body;
     expect(developer).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
     expect(developer).toMatch(/no chains or `after` between developers when one can do it/i);
@@ -67,7 +73,7 @@ describe('templates', () => {
     }
   });
   it('teaches heads and members to end a turn with wait_for for external events, and the orchestrator to bind readiness messages to a task', () => {
-    for (const id of ['hh-lead-tasks', 'hh-task-flow']) {
+    for (const id of ['hh-head', 'hh-task-flow']) {
       const body = templates.skills.get(id)!.body;
       expect(body, id).toContain('wait_for');
       expect(body, id).toMatch(/external event/);
@@ -133,13 +139,17 @@ describe('templates', () => {
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
-    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(ORCHESTRATOR_SKILLS).toEqual([
+      'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
+    ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
-    expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
-    expect(steady.text).toContain('<!-- hh:skill hh-run-checks -->');
+    for (const id of ['hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
+      expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
+    }
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */
@@ -220,10 +230,13 @@ describe('templates', () => {
   });
 
   it('teaches the task tools by their names', () => {
-    const flow = templates.skills.get('hh-task-flow')!.body;
-    for (const tool of ['task', 'submit', 'verdict', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
+    /* What every member carries of working through tasks, and what every head carries of leading. */
+    const flow = ['hh-tasks', 'hh-task-flow'].map(id => templates.skills.get(id)!.body).join('\n');
+    for (const tool of ['task', 'tasks', 'submit', 'verdict', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
     const lead = templates.skills.get('hh-lead-tasks')!.body;
-    for (const tool of ['create_task', 'update_task', 'report', 'cancel_task', 'ask_person']) expect(lead, tool).toContain(`"${tool}"`);
+    for (const tool of ['create_task', 'update_task', 'cancel_task', 'ask_person', 'message_employee', 'comment']) expect(lead, tool).toContain(`"${tool}"`);
+    const head = templates.skills.get('hh-head')!.body;
+    for (const tool of ['report', 'tell_orchestrator', 'wait_for', 'propose_improvement']) expect(head, tool).toContain(`"${tool}"`);
   });
 
   it('has English and Russian titles and descriptions', () => {
@@ -529,7 +542,7 @@ describe('templates', () => {
   it('lays each goal out whole, for one department, with new asks in the next turn', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
-    expect(body('orch-plan-turn')).toMatch(/next turn[\s\S]*"now"/);
+    expect(body('orch-plan-turn')).toMatch(/next (?:planned )?turn[\s\S]*"now"/);
     for (const id of ['orch-plan-turn', 'hh-break-down']) expect(body(id), id).toMatch(/plans, contracts or proofs/);
     expect(body('hh-break-down')).toMatch(/whole blocks as hh-lead-tasks says/);
     expect(body('hh-break-down')).not.toMatch(/two to four/);
@@ -544,8 +557,8 @@ describe('templates', () => {
     for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/"comment"/);
     for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/only when the goal (itself )?changes/);
     expect(body('hh-lead-tasks')).not.toMatch(/rewrite the body as the current truth/);
-    expect(body('hh-lead-tasks')).toMatch(/switches off members with no work in the turn/);
-    expect(body('hh-lead-tasks')).toMatch(/notebook only when something it holds changes/);
+    expect(body('hh-head')).toMatch(/switches off members with no work in the turn/);
+    expect(body('hh-notebook')).toMatch(/notebook only when something it holds changes/);
     expect(body('hh-status-update')).toMatch(/one line/);
     for (const r of roles.filter(x => x.kind === 'head')) expect(r.body, r.id).not.toMatch(/status to the orchestrator|keep the orchestrator informed/);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/all at once/);
@@ -663,8 +676,9 @@ describe('templates', () => {
 
   it('starts work that waits for another by itself, and has each executor merge into the turn branch', () => {
     for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(templates.skills.get(id)!.body, id).toContain('`after`');
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/each work area has one owner until its task merges/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/Same-file dependencies stay one batch with that owner/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/each work area has one owner until its task is done/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/work that depends on the same place stays one batch with that owner/);
+    expect(templates.skills.get('dev-lead')!.body).toMatch(/keeps its owner until that task merges; same-file dependencies stay one batch with that owner/);
     expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/moves or stays with the one it waits on, including when handing work to new employees/);
     for (const id of ['dev-gates', 'dev-ci-release', 'dev-worktrees']) expect(templates.skills.get(id)!.body, id).toContain("the turn's branch");
     expect(templates.roles.get('DEV-OPS')!.body).toContain("the turn's branch");
@@ -693,7 +707,7 @@ describe('templates', () => {
     for (const example of ['@vitest/coverage-v8', 'same version as vitest', 'pytest-cov', 'cargo-llvm-cov', 'Go has coverage built in', 'typescript-eslint', 'ruff', 'clippy', 'golangci-lint']) {
       expect(text, example).toContain(example);
     }
-    const lead = templates.skills.get('hh-lead-tasks')!.body;
+    const lead = templates.skills.get('dev-lead')!.body;
     expect(lead).toMatch(/first turn on a new project and when a new repository arrives/);
     expect(lead).toMatch(/one task that adds everything missing to the project itself/);
   });
@@ -900,6 +914,9 @@ describe('templates', () => {
   describe('shared remote check route, reconciled skill sources and head operational hold rules', () => {
     const runChecksBody = () => templates.skills.get('hh-run-checks')!.body;
     const leadTasksBody = () => templates.skills.get('hh-lead-tasks')!.body;
+    /* A head carries the rules of leading, which the orchestrator shares, and those of a department's head, which come first. */
+    const headBodies = () => `${templates.skills.get('hh-head')!.body}\n${leadTasksBody()}`;
+    const orchestratorOutage = (): OrchestratorOutageSkills => ({ lead: leadTasksBody(), trouble: templates.skills.get('orch-trouble')!.body });
     const checkSources = (): ReconciledCheckSkills => ({
       tdd: templates.skills.get('dev-tdd')!.body,
       policy: templates.skills.get('dev-testing-policy')!.body,
@@ -954,7 +971,8 @@ describe('templates', () => {
     });
 
     it('teaches every department head abstract external-outage hold recovery and orchestrator-authority forwarding', () => {
-      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, leadTasksBody())).toEqual([]);
+      expect(HEAD_SKILLS).toEqual(expect.arrayContaining(['hh-head', 'hh-lead-tasks']));
+      expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, headBodies())).toEqual([]);
       for (const role of roles.filter(r => r.kind === 'head')) {
         const rendered = renderInstructions(
           templates,
@@ -963,11 +981,12 @@ describe('templates', () => {
         );
         expect(Buffer.byteLength(rendered.text), role.id).toBeLessThan(24_000);
         expect(rendered.text, role.id).toContain(leadTasksBody());
+        expect(rendered.text, role.id).toContain(templates.skills.get('hh-head')!.body);
       }
     });
 
     it('rejects head instructions that prolong holds after recovery, freeze unrelated work or leak incident history', () => {
-      const base = leadTasksBody();
+      const base = headBodies();
       expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, base)).toEqual([]);
       expect(failedRuleIds(HEAD_OUTAGE_AND_AUTHORITY_RULES, `${base}\nKeep a general hold active after the external service recovers until each task asks again.`)).toContain(
         'outage-does-not-prolong-hold-and-lifts-at-once',
@@ -987,7 +1006,8 @@ describe('templates', () => {
       const trouble = templates.skills.get('orch-trouble')!;
       expect(trouble.kind).toBe('procedure');
       expect(trouble.description.en).toMatch(/external service failures/i);
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, trouble.body)).toEqual([]);
+      expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['hh-lead-tasks', 'orch-trouble']));
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, orchestratorOutage())).toEqual([]);
       expect(leadTasksBody().split('External outages and holds:').length - 1).toBe(1);
       expect(templates.skills.get('ops-api-connector')!.body).toContain('Never retry a payment or a send without first checking it did not already happen.');
       expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
@@ -1002,21 +1022,22 @@ describe('templates', () => {
     });
 
     it('rejects orchestrator outage instructions that prolong holds, serialize recovery through a head queue, demand permission for ordinary retries, promise unshipped automation or leak incident history', () => {
-      const base = templates.skills.get('orch-trouble')!.body;
+      const base = orchestratorOutage();
       expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, base)).toEqual([]);
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nKeep a general hold active after the external service recovers.`)).toContain(
+      const told = (line: string): OrchestratorOutageSkills => ({ ...base, trouble: `${base.trouble}\n${line}` });
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Keep a general hold active after the external service recovers.'))).toContain(
         'outage-not-grounds-for-longer-general-hold',
       );
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nSend hold-lifting decisions one by one through a department head's queue.`)).toContain(
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told("Send hold-lifting decisions one by one through a department head's queue."))).toContain(
         'orchestrator-decides-and-communicates-in-one-action',
       );
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRequire permission before any ordinary retry, allow at most one attempt with no retries, and do not declare recovery.`)).toContain(
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Require permission before any ordinary retry, allow at most one attempt with no retries, and do not declare recovery.'))).toContain(
         'ordinary-retry-needs-no-permission-or-diagnosis-chain',
       );
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRemember the GitHub outage from Ivan on #551 on 05.11.`)).toContain(
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('Remember the GitHub outage from Ivan on #551 on 05.11.'))).toContain(
         'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
       );
-      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nThe server automatically retries git push in the background and blocks task creation in SQL.`)).toContain(
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, told('The server automatically retries git push in the background and blocks task creation in SQL.'))).toContain(
         'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
       );
     });
@@ -1464,16 +1485,21 @@ const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => bo
   },
 ];
 
-const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean }[] = [
+/* The orchestrator leads by the skill every head leads by, which holds the one rule for holds, and his own skill for trouble
+   adds what only he decides. */
+type OrchestratorOutageSkills = { lead: string; trouble: string };
+
+const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (s: OrchestratorOutageSkills) => boolean }[] = [
   {
     id: 'outage-not-grounds-for-longer-general-hold',
-    holds: text =>
-      matchesAll(text, [/\bexternal service failure\b[^.!?]*\bnot grounds for a general hold lasting longer than the failure itself\b/i]) &&
-      forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
+    holds: ({ lead, trouble }) =>
+      matchesAll(lead, [/\bexternal service failure\b[^.!?]*\bnever prolongs a general hold once the service recovers\b/i]) &&
+      matchesAll(trouble, [/\brule for holds is in hh-lead-tasks\b/i]) &&
+      forbids(`${lead}\n${trouble}`, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
   },
   {
     id: 'orchestrator-decides-and-communicates-in-one-action',
-    holds: text =>
+    holds: ({ trouble: text }) =>
       matchesAll(text, [
         /\bdecide\b[^.!?]*\byourself\b[^.!?]*\bcommunicate\b[^.!?]*\bat once in one action to every affected holder\b/i,
         /\bnever\b[^.!?]*\bdepartment head's queue\b/i,
@@ -1481,7 +1507,7 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean 
   },
   {
     id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
-    holds: text =>
+    holds: ({ trouble: text }) =>
       matchesAll(text, [
         /\bsame internal fix fails a second time\b/i,
         /\btransient external service failure\b[^.!?]*\bneeds no diagnosis task\b/i,
@@ -1496,7 +1522,7 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean 
   },
   {
     id: 'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
-    holds: text => {
+    holds: ({ trouble: text }) => {
       const idx = text.indexOf('External outages and holds:');
       if (idx === -1) return false;
       const section = text.slice(idx);
@@ -1928,5 +1954,103 @@ describe('skills are independent cubes: any can be on for any role and together 
     expect(policy).toMatch(/flaw in logic goes back to its author as a task/);
     expect(policy).toMatch(/fixes a flaky or outdated test or an obvious trifle itself, in a separate commit/);
     for (const id of ['DEV-TEST', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/fix a flaky or outdated test or an obvious trifle yourself in a separate commit/);
+  });
+});
+
+describe('a role is a short line and bricks: what every head and the orchestrator share is one skill, and what a department knows is its own', () => {
+  const body = (id: string) => templates.skills.get(id)!.body;
+  const PLACE = { company: 'Acme', department: 'Work', product: null };
+  const rendered = (role: (typeof roles)[number], skills = role.skills.filter(s => s.on).map(s => s.id)) =>
+    renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Bruno', roleKey: role.id, skills, overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], PLACE);
+  const heads = roles.filter(r => r.kind === 'head');
+  const marker = (id: string) => `<!-- hh:skill ${id} -->`;
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+  /* The rules every head and the orchestrator lead by, each said once. */
+  const LEADING = [
+    'whoever gives out the work answers for keeping the department loaded',
+    'Members standing free while work in the department can run are a fault',
+    'one member owns each connected block end to end',
+    'Give small work to the member already working in that area',
+    'To reach someone, write to them with "message_employee"',
+    'A report that claims success without evidence is treated as not done',
+    'only what only they can decide, as one clear question',
+    'An external service failure never prolongs a general hold once the service recovers',
+  ];
+  /* What only development knows: code, its branches and commits, its tests and its developers. */
+  const CODE = /\b(?:code|branch(?:es)?|commits?|SHA|merge[sd]?|repositor(?:y|ies)|failing tests?|affected tests|developers?|architects?|security review)\b/i;
+
+  it('gives every head and the orchestrator the one skill of leading, whole and once, whatever its card holds', () => {
+    expect(HEAD_SKILLS).toContain('hh-lead-tasks');
+    expect(ORCHESTRATOR_SKILLS).toContain('hh-lead-tasks');
+    expect(templates.skills.get('hh-lead-tasks')!.kind).toBe('core');
+    for (const role of heads) {
+      for (const skills of [role.skills.filter(s => s.on).map(s => s.id), []]) {
+        const { text } = rendered(role, skills);
+        expect(count(text, marker('hh-lead-tasks')), role.id).toBe(1);
+        expect(text, role.id).toContain(body('hh-lead-tasks'));
+      }
+    }
+    const steady = orchestratorSteady(templates);
+    expect(count(steady.text, marker('hh-lead-tasks'))).toBe(1);
+    expect(steady.text).toContain(body('hh-lead-tasks'));
+  });
+
+  it('says each rule of leading in that skill alone, and no other skill or role says it again', () => {
+    for (const rule of LEADING) {
+      expect(body('hh-lead-tasks'), rule).toContain(rule);
+      for (const x of [...roles, ...skills].filter(x => x.id !== 'hh-lead-tasks')) expect(x.body, `${x.id}: ${rule}`).not.toContain(rule);
+      expect(ORCHESTRATOR_INSTRUCTIONS, rule).not.toContain(rule);
+    }
+  });
+
+  it('keeps development out of the skills every head, member and the orchestrator shares, and in the bricks development connects', () => {
+    const shared = ['hh-hornhoof', 'hh-tasks', 'hh-lead-tasks', 'hh-head', 'hh-notebook', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'hh-task-flow', 'hh-report-to-head'];
+    /* Claude Code is a program the agent may run in, not code it works on. */
+    for (const id of shared) expect(body(id).replaceAll('Claude Code', ''), id).not.toMatch(CODE);
+    expect(body('dev-lead')).toMatch(/one generalist developer/);
+    expect(body('dev-lead')).toMatch(/access, root, secrets or permissions[^.]*security review of its own before it merges/);
+    expect(body('dev-lead')).toMatch(/exact 40-character commit/);
+    expect(body('dev-task-flow')).toMatch(/branch named after the task[\s\S]*Never commit to the main branch/);
+    for (const role of roles) {
+      const on = (id: string) => role.skills.find(k => k.id === id)?.on ?? false;
+      expect(on('dev-lead'), role.id).toBe(role.id === 'DEV-HEAD');
+      if (role.department === 'development' && role.kind === 'member') expect(on('dev-task-flow'), role.id).toBe(true);
+      if (!['development', 'operations'].includes(role.department)) expect(on('dev-task-flow'), role.id).toBe(false);
+    }
+    expect(ORCHESTRATOR_SKILLS).toContain('dev-lead');
+    expect(orchestratorSteady(templates).skills.map(f => f.name)).toContain('dev-lead');
+  });
+
+  it('gives a head of any department the shared bricks and its own department, so a department changes by its bricks alone', () => {
+    const departmentOf = (id: string) => /^([a-z]+)-/.exec(id)![1]!;
+    const prefixes: Record<string, string> = { operations: 'ops', development: 'dev', design: 'dsn', marketing: 'mkt', sales: 'sal', business_development: 'biz', support: 'sup', finance: 'fin', home_devices: 'home', household: 'home' };
+    for (const role of heads) {
+      const ids = role.skills.filter(s => s.on).map(s => s.id);
+      for (const id of [...CORE_SKILLS, ...HEAD_SKILLS]) expect(ids, `${role.id} ${id}`).toContain(id);
+      /* Beyond what every head shares, a head holds its own department's bricks, and Operations a check environment. */
+      const own = ids.filter(id => !id.startsWith('hh-'));
+      for (const id of own) expect([prefixes[role.department], ...(role.id === 'OPS-HEAD' ? ['dev'] : [])], `${role.id} ${id}`).toContain(departmentOf(id));
+    }
+  });
+
+  it('starts every role with one line that says who it is, and every rule it follows comes from a brick', () => {
+    for (const role of roles) {
+      const { parts } = rendered(role);
+      expect(parts[0]!.kind, role.id).toBe('header');
+      expect(parts[0]!.text, role.id).toBe(`You are Bruno, the ${role.title.en} of the Work department at Acme.`);
+      expect(parts.slice(2).every(p => p.kind === 'skill'), role.id).toBe(true);
+      for (const id of ['hh-hornhoof', 'hh-tasks', 'hh-superpowers']) expect(parts.some(p => p.id === id), `${role.id} ${id}`).toBe(true);
+      if (role.kind === 'head') for (const id of ['hh-head', 'hh-notebook']) expect(parts.some(p => p.id === id), `${role.id} ${id}`).toBe(true);
+    }
+  });
+
+  it('keeps the standing role of the orchestrator to who he is, much shorter than the prompt it replaces, with how he works in his skills', () => {
+    /* The standing role it replaces was 9,973 characters of numbered steps. */
+    expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThan(9_973);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/^\d+\. /m);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are the Orchestrator of a company that runs in Hornhoof/);
+    const steady = orchestratorSteady(templates);
+    expect(steady.parts.map(p => p.kind)).toEqual(['base', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
+    for (const id of ['orch-company', 'hh-notebook', 'hh-hornhoof']) expect(steady.text, id).toContain(body(id));
   });
 });

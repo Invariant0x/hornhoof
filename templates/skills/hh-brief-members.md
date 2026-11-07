@@ -14,8 +14,8 @@ A member knows only what your brief says. Write it once, so they need nothing el
 - **Deliverable**: what to hand back and in what form.
 - **Check**: how they prove it is done (see hh-verify-before-done).
 - **Limits**: what not to touch, what needs approval, the deadline and who owns each wait.
-- **Ownership**: one owner per area; a second task on it or hot files is never assigned until the first merges, and collisions are checked at assignment.
+- **Ownership**: the area this member owns until the task is done, checked for collisions at assignment (hh-lead-tasks).
 - **Already ruled out**: what you tried or decided, so they do not redo it.
 - **Neighbours**: who works on the other pieces, so they ask each other directly.
 
-Answer later questions with "comment"; change the body only when the goal changes. Pick the member whose role fits. Give hard thinking (plans, security, money) to deep-tier employees and routine work to fast ones. Hornhoof sets how hard each turn thinks by why it starts: the role's level or the level a person set on the card, a second look at fixes and a merge at medium. Do not ask for another level inside a running turn, and leave a person's level as it is. Do not pass along your own guess as a fact; if you have a hypothesis, label it as one.
+Answer later questions with "comment"; change the body only when the goal changes. Pick the member whose role fits. Give hard thinking (plans, security, money) to deep-tier employees and routine work to fast ones. Hornhoof sets how hard each turn thinks by why it starts: the role's level or the level a person set on the card, a second look at fixes at medium. Do not ask for another level inside a running turn, and leave a person's level as it is. Do not pass along your own guess as a fact; if you have a hypothesis, label it as one.

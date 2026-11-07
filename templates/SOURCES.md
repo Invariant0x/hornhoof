@@ -104,6 +104,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-i18n-en-ru.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-implement.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/source-driven-development/SKILL.md | Hornhoof |
 | `skills/dev-language-rules.md` | Written for Hornhoof | affaan-m/ECC rules | Hornhoof |
+| `skills/dev-lead.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-migrations.md` | Written for Hornhoof | affaan-m/ECC skills/database-migrations/SKILL.md | Hornhoof |
 | `skills/dev-release-improvements.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure; semantic test variations requested by the company | Hornhoof |
 | `skills/dev-performance.md` | Written for Hornhoof | affaan-m/ECC agents/performance-optimizer.md; addyosmani/agent-skills skills/performance-optimization/SKILL.md; garrytan/gstack review/specialists/performance.md | Hornhoof |
@@ -113,6 +114,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-review-diff.md` | Written for Hornhoof | affaan-m/ECC agents/code-reviewer.md; obra/superpowers skills/requesting-code-review/code-reviewer.md; anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md; garrytan/gstack review/checklist.md | Hornhoof |
 | `skills/dev-review-verdict.md` | Written for Hornhoof | obra/superpowers skills/requesting-code-review/code-reviewer.md | Hornhoof |
 | `skills/dev-security-review.md` | Written for Hornhoof | affaan-m/ECC agents/security-reviewer.md; addyosmani/agent-skills skills/security-and-hardening/SKILL.md; garrytan/gstack review/specialists/security.md; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
+| `skills/dev-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-tdd.md` | Written for Hornhoof | obra/superpowers skills/test-driven-development/SKILL.md; obra/superpowers skills/test-driven-development/writing-good-tests.md | Hornhoof |
 | `skills/dev-test-environment.md` | Written for Hornhoof | No outside source: product test-environment discovery and ownership procedure | Hornhoof |
 | `skills/dev-test-gaps.md` | Written for Hornhoof | anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md; garrytan/gstack review/specialists/testing.md; anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md | Hornhoof |
@@ -158,14 +160,19 @@ Development authors write a failing test before the change, run only affected te
 | `skills/hh-brief-members.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
 | `skills/hh-fix-loop.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
 | `skills/hh-handle-reports.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
+| `skills/hh-head.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-hornhoof.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-lead-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-notebook.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/hh-questions.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-report-to-head.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
 | `skills/hh-run-checks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
+| `skills/hh-superpowers.md` | Written for Hornhoof | obra/superpowers | Hornhoof |
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
 | `skills/hh-work-fast.md` | Written for Hornhoof | unclebob/ub-mode SKILL.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/context-engineering/SKILL.md; affaan-m/ECC skills/iterative-retrieval/SKILL.md; affaan-m/ECC skills/search-first/SKILL.md; affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md; affaan-m/ECC skills/agentic-engineering/SKILL.md; obra/superpowers skills/subagent-driven-development/SKILL.md; garrytan/gstack ETHOS.md | Hornhoof |
 | `skills/home-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -204,11 +211,11 @@ Development authors write a failing test before the change, run only affected te
 | `skills/ops-tool-install.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-vendor-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/vendor-review/SKILL.md; anthropics/knowledge-work-plugins legal/skills/vendor-check/SKILL.md | Hornhoof |
 | `skills/ops-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/orch-company.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/orch-interview.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md | Hornhoof |
 | `skills/orch-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
 | `skills/orch-trouble.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
-| `skills/orch-verify.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
 | `skills/sal-account-research.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
 | `skills/sal-call-prep.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; msitarzewski/agency-agents sales/sales-discovery-coach.md | Hornhoof |
 | `skills/sal-call-summary.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |

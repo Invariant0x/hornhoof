@@ -52,12 +52,12 @@ export type Role = {
 };
 export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; roster(key: TemplateKey): Role[] };
 
-/* Every employee has these, locked on. */
-export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope', 'hh-run-checks'] as const;
+/* Every employee has these, locked on: what working in Hornhoof takes, whatever the department. */
+export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-superpowers', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope', 'hh-run-checks'] as const;
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
-/* Every head has these too, locked on. */
-export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop'] as const;
+/* Every head has these too, locked on; what a department knows comes with its own skills. */
+export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-head', 'hh-notebook', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop'] as const;
 
 /* Strict, so a value that YAML split on a comma fails instead of loading half. */
 const LangText = z.object({ en: z.string().trim().min(1), ru: z.string().trim().min(1) }).strict();

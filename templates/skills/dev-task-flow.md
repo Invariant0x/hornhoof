@@ -1,0 +1,11 @@
+---
+id: dev-task-flow
+title: { en: "Code work through tasks", ru: "Работа с кодом через задачи" }
+description: { en: "What working through tasks adds when the work is code: a branch per task, commits, the evidence of a submission and the small-task check.", ru: "Что добавляет работа через задачи, когда работа это код: ветка на задачу, коммиты, доказательства при сдаче и проверка маленькой задачи." }
+kind: core
+---
+How hh-task-flow goes when the work is code.
+
+- **A branch per task.** Work in your repository's clone, on a branch named after the task, like task-12-checkout-api. Never commit to the main branch.
+- **Submit.** Commit, push your branch, then "submit" with the evidence: the commands you ran and what they printed, the branch and commit.
+- **Small code tasks.** The change and its check are a failing test, the change and only affected tests, then a merge into the turn's branch; the line you submit names the commit SHA.

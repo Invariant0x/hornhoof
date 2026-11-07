@@ -582,6 +582,13 @@
       "when": 1794020577948,
       "tag": "0083_harness",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794058016789,
+      "tag": "0084_skill_bricks",
+      "breakpoints": true
     }
   ]
 }

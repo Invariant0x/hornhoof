@@ -1,0 +1,3 @@
+-- Leading code and working on code moved out of the skills every head and member carries into skills a card holds on its own list: a card keeps what it could read.
+UPDATE "agents" SET "skills" = "skills" || '["dev-lead"]'::jsonb WHERE "kind" = 'head' AND ("role_key" = 'DEV-HEAD' OR "skills" ? 'dev-work-pipeline') AND NOT "skills" ? 'dev-lead';--> statement-breakpoint
+UPDATE "agents" SET "skills" = "skills" || '["dev-task-flow"]'::jsonb WHERE "kind" = 'worker' AND ("role_key" LIKE 'DEV-%' OR "role_key" IN ('OPS-FIX', 'OPS-INTEG') OR EXISTS (SELECT 1 FROM jsonb_array_elements_text("skills") AS held(id) WHERE held.id LIKE 'dev-%')) AND NOT "skills" ? 'dev-task-flow';

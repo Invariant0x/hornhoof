@@ -5,10 +5,10 @@ description: { en: "Finds out what the CEO wants and why before a turn or a chan
 kind: procedure
 sources: [obra/superpowers skills/brainstorming/SKILL.md]
 ---
-Before you lay out a turn or change the company, make sure you know what the CEO wants and why.
+Before you lay out a turn or change the company, make sure you know what the CEO wants and why. In a new company, find out first what it does, which products it makes or plans, and what matters most right now.
 
 1. Read what was said, the notebook and the turns first. Never ask what they already tell.
-2. When something that changes what gets built is missing, ask one question in plain words. A guess the CEO can correct, like "I take it this is for the school release?", often beats an open question.
+2. When something that changes what gets built is missing, ask one question at a time in plain words, one or two follow-ups at most, then move on. A guess the CEO can correct, like "I take it this is for the school release?", often beats an open question.
 3. Ask about the result and why it matters, not about how to build it: the heads decide how.
 4. Stop asking as soon as you could write each task's "done when" line.
 5. Say back in one or two lines what you understood, then act. Write each decision into the notebook with remember.

@@ -81,13 +81,19 @@ describe('what a node from before skill files takes', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
 
-  it('holds what every shipped role always carries, or its agent gets no turn there at all', () => {
-    const over = [...shipped.roles.values()].filter(role => always(role).whole.length > OLD_NODE_INSTRUCTIONS).map(role => [role.id, always(role).whole.length]);
-    expect(over).toEqual([]);
-  });
-
-  it('holds what the orchestrator always carries', () => {
-    expect(orchestratorSteady(shipped).whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+  /* A role is built of as many bricks as it needs: how much such a node takes bounds none of them, and a turn too long for
+     it ends saying the node needs an update. It still gets every brick but superpowers, which come with skill files. */
+  it('gets every brick of a role and of the orchestrator whole, but superpowers', () => {
+    for (const role of shipped.roles.values()) {
+      const { parts, whole, text } = always(role);
+      for (const p of parts.filter(p => p.id !== 'hh-superpowers')) expect(whole, `${role.id} ${p.id}`).toContain(p.text);
+      expect(text, role.id).toContain('<!-- hh:skill hh-superpowers -->');
+      expect(whole, role.id).not.toContain('superpowers');
+    }
+    const steady = orchestratorSteady(shipped);
+    for (const p of steady.parts.filter(p => p.id !== 'hh-superpowers')) expect(steady.whole, p.id ?? 'base').toContain(p.text);
+    expect(steady.text).toContain('<!-- hh:skill hh-superpowers -->');
+    expect(steady.whole).not.toContain('superpowers');
   });
 });
 
@@ -100,11 +106,8 @@ describe('renderInstructions', () => {
       ['skill', 'hh-report-to-head'],
       ['skill', 'dev-tdd'],
     ]);
-    expect(parts[0]!.text).toContain('You are Bruno, the Backend engineer of the Development department at Acme, working on Mascot.');
-    expect(parts[0]!.text).toContain('Hornhoof');
-    expect(parts[0]!.text).toContain('Work comes to you as tasks');
-    expect(parts[0]!.text).toContain('When your conversation was compacted');
-    expect(parts[0]!.text).not.toContain('later version');
+    /* Who it is is the one line that is no skill: working in Hornhoof and with tasks comes in skills, as all else does. */
+    expect(parts[0]!.text).toBe('You are Bruno, the Backend engineer of the Development department at Acme, working on Mascot.');
     expect(parts[1]!.text).toBe('You own the server side.');
     expect(parts[3]!.text).toBe('<!-- hh:skill dev-tdd -->\n## Test first\n\nWrite the test first.\n<!-- /hh:skill -->');
     expect(raw).toBe(parts.map(p => p.text).join('\n\n'));
@@ -135,22 +138,30 @@ describe('renderInstructions', () => {
     expect(off.text).not.toContain('## Skills');
   });
 
-  it('names the human partner the superpowers skills speak of and says a task from the head is approved', () => {
-    const member = renderInstructions(T, agent(), PLACE).parts[0]!.text;
+  it('names the human partner the superpowers skills speak of, for a member, a head and the orchestrator, in one brick', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const partnerOf = (parts: { id: string | null; text: string }[]) => parts.find(p => p.id === 'hh-superpowers')!.text;
+    const member = partnerOf(renderInstructions(shipped, agent(), PLACE).parts);
+    const head = partnerOf(renderInstructions(shipped, agent({ kind: 'head', roleKey: 'DSN-HEAD' }), PLACE).parts);
+    const orchestrator = partnerOf(orchestratorSteady(shipped).parts);
+    expect(head).toBe(member);
+    expect(orchestrator).toBe(member);
     expect(member).toContain('superpowers');
-    expect(member).toContain('is whoever gave you the task: your head, or the person who wrote to you');
-    expect(member).toContain('A task your head gave you is already approved');
+    expect(member).toContain('is whoever gave you the task, or the person who wrote to you');
+    expect(member).toContain("the orchestrator's is the CEO in its window");
+    expect(member).toContain('A task given to you is already approved');
+    expect(member).toContain('What the orchestrator gives the departments is approved when it gives it');
     expect(member).toContain('never by waiting for an answer in your terminal');
-    expect(member).toContain('Use it only when your task asks for a design');
-    expect(member).toContain('A small task needs no written plan: test, code, check, submit. writing-plans and executing-plans are for a new or large feature only.');
-    const head = renderInstructions(T, agent({ kind: 'head' }), PLACE).parts[0]!.text;
-    expect(head).toContain('is whoever gave you the task: the orchestrator, or the person who wrote to you');
-    expect(head).toContain('A task the orchestrator gave you is already approved');
-    expect(head).toContain('you and your architects use it only when a task asks for a design');
+    expect(member).toContain('the orchestrator brainstorms with the CEO when a goal is still unclear, one question at a time');
+    expect(member).toContain('Anyone else uses it only when a task asks for a design');
+    expect(member).toContain('A small task needs no written plan: do it, check it, submit. writing-plans and executing-plans are for new or large work only.');
+    /* A head of any department reads it, so it names no role of one department. */
+    expect(member).not.toMatch(/architect|developer/i);
   });
 
   it("tells employees and the orchestrator that Claude Code's SendMessage reaches no one in Hornhoof", () => {
-    const told = [renderInstructions(T, agent(), PLACE).text, renderInstructions(T, agent({ kind: 'head' }), PLACE).text, orchestratorSteady(T).text];
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text];
     for (const text of told) {
       expect(text).toContain('When you run in Claude Code, never answer with its SendMessage tool: what it sends reaches no one in Hornhoof.');
       expect(text).toContain("Answer in your reply or with Hornhoof's tools.");
@@ -376,14 +387,15 @@ describe('renderInstructions', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const steady = orchestratorSteady(shipped);
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
-    expect(steady.whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
     expect(steady.text).toMatch(/\n- orch-trouble: When work goes wrong\.[^\n]*external service failures/i);
+    /* The rule for holds is the one every head leads by, in his instructions whole. */
+    expect(steady.text).toContain('An external service failure never prolongs a general hold once the service recovers');
     const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
     expect(troubleFile).toBeDefined();
     expect(Buffer.byteLength(troubleFile!.body)).toBeLessThan(22_000);
     for (const delivered of [troubleFile!.body, steady.whole]) {
-      expect(delivered).toContain('An external service failure is not grounds for a general hold lasting longer than the failure itself.');
-      expect(delivered).toContain("Decide any such hold or its lifting yourself and communicate it at once in one action to every affected holder, never through a department head's queue.");
+      expect(delivered).toContain('The rule for holds is in hh-lead-tasks.');
+      expect(delivered).toContain("Decide any hold over an external failure, and its lifting, yourself and communicate it at once in one action to every affected holder, never through a department head's queue.");
       expect(delivered).toContain('An agent needs no permission for an ordinary retry of a transient external failure.');
       expect(delivered).toMatch(/force pushes[\s\S]*alternate refs[\s\S]*permission changes[\s\S]*irreversible actions[\s\S]*dangerous or non-idempotent actions/);
     }
