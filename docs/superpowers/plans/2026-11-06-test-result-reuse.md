@@ -29,7 +29,19 @@
 - [x] Server: recording green, full run on the due turn, mismatch report, `selectionMisses`.
 - [x] Node: per-file report of the runner, kept files in and out.
 - [x] Repository: manifest profiles and suites, Playwright projects, `scripts/mutation/run.mjs`.
-- [ ] Rules in templates, docs, measurement of two runs in a row on one machine.
+- [x] Rules in templates, docs, measurement of two runs in a row on one machine.
+
+## Measured
+
+`scripts/test/measure-reuse.mjs apps/node/src/tests.ts fast` at d502e73b, three passes in a row on one machine (run 1284), over the 563 test files of the fast profile. Nothing failed in any pass.
+
+| Pass | Ran | Reused | Time |
+| --- | --- | --- | --- |
+| Everything | 563 | 0 | 1211.4 s |
+| Same commit | 0 | 563 | 3.8 s, all of it fingerprints |
+| After an edit of `apps/node/src/tests.ts` | 33 | 530 | 250 s |
+
+Mutation of the nine risky files on one commit, twice in a row on one machine (run 1286): 121 s, then 40 s with the mutator's own memory. In a run of Hornhoof the second does not start: the same fingerprint reuses the result and its note.
 
 ## Review focus
 
