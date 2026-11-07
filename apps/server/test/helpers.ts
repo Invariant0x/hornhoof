@@ -112,6 +112,10 @@ export async function nextOf<T extends ServerMessage['type']>(node: FakeNode, ty
   }
 }
 
+/* Every node since skill files says in its hello that it writes them, so a stand-in says so too unless its test says
+   otherwise. */
+const withSkillFiles = (msg: NodeMessage): NodeMessage => (msg.type === 'hello' && msg.skillFiles === undefined ? { ...msg, skillFiles: true } : msg);
+
 /* A stand-in for a node: connects with a key and collects what the server sends. */
 export function connectNode(url: string, key: string, opts: { autoPong?: boolean } = {}): Promise<FakeNode> {
   return new Promise((resolve, reject) => {
@@ -132,7 +136,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
     ws.on('open', () =>
       resolve({
         ws,
-        send: msg => ws.send(JSON.stringify(msg)),
+        send: msg => ws.send(JSON.stringify(withSkillFiles(msg))),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
         acks,
         queued: () => queue.length,

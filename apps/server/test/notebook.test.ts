@@ -238,7 +238,7 @@ describe("a department's notebook", () => {
     expect(now.parts.at(-1)).toMatchObject({ kind: 'notebook' });
     expect(now.text).toContain('## Department notebook');
     expect(now.text).toContain('[#1] Tests first.');
-    expect(now.text).toContain('your department notebook again with "notebook"');
+    expect(now.text).toContain('When your conversation was compacted, read the notebook again with "notebook"');
     /* A note does not start its program again: it reads the notebook with its tool. */
     expect(now.hash).toBe(before.hash);
     expect((await instructionsOf(app.ctx, bruno)).text).not.toContain('notebook');

@@ -16,6 +16,7 @@ export async function failureCompany(env: NodeJS.ProcessEnv = {}) {
   vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'isOnline').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(true);
+  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const sent = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [ops] = await db.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();

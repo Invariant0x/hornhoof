@@ -203,7 +203,7 @@ describe('staffing', () => {
     expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('company_scope_only');
     const res = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
     expect(res.json().error.reason).toBe('staff_invalid');
-    expect(res.json().error.message).toContain('hh-outside-is-data');
+    expect(res.json().error.message).toContain('hh-hornhoof');
   });
 
   it('offers the company key from setup to every department', async () => {
