@@ -516,7 +516,10 @@ async function manualHarness(msg: TestRun, options: Options, part: { root: strin
     const deadline = Math.min(part.deadline, Date.now() + MANUAL_HARNESS_MS), state: PreparationState = { ...productUser(options.user), ...part, deadline, signal: productSignal(options.signal, deadline), options };
     const context = preparationContext(state, '', [...options.hidden]);
     const description = await readTestEnvironment(msg.repo!, msg.repositoryScope!, msg.commitSha!, context);
-    if (description.manifest.dependencies.cache === 'none') return {};
+    if (description.manifest.dependencies.cache === 'none') {
+      part.out.line('The command starts without the prepared harness: this repository keeps no prepared dependencies.');
+      return {};
+    }
     const profiled = { ...context, profile: description.manifest.defaultProfile }, dependencies = await prepareDependencies(description, profiled);
     const { env } = await prepareEnvironment(description, dependencies, profiled, { serviceUnits: false, freshServices: false });
     part.out.line(`The harness is in place after ${within(performance.now() - started)}.`);
@@ -663,13 +666,20 @@ function restoreProductKept(msg: TestRun, execution: TestExecution, state: Produ
   const { suites } = execution.snapshot.description.manifest;
   for (const { suiteId, files } of msg.kept ?? []) restoreKept(state.repo, suites.find(suite => suite.id === suiteId)?.keep ?? [], files);
 }
+/* What each suite that ran leaves for its next run. */
+function keptBySuites(execution: TestExecution, state: ProductState, checkout: string, restored: KeptFiles): KeptFiles {
+  const ran = execution.snapshot.description.manifest.suites.filter(suite => suite.keep?.length && state.reports.some(report => report.suiteId === suite.id));
+  return KeptFiles.safeParse(ran.flatMap(suite => {
+    const files = collectKept(checkout, suite.keep!, state.user.uid, restored.find(kept => kept.suiteId === suite.id)?.files);
+    return files.length ? [{ suiteId: suite.id, files }] : [];
+  })).data ?? [];
+}
 /* Read once the job's processes have stopped, so nothing changes under the reading. What cannot be read only means less is reused. */
 function collectProductResults(execution: TestExecution, state: ProductState, restored: KeptFiles): void {
   try {
-    const checkout = realpathSync(state.repo), { suites } = execution.snapshot.description.manifest;
+    const checkout = realpathSync(state.repo);
     state.files = state.reports.flatMap(report => parseFileReport(readJobFile(report.path, state.user.uid, REPORT_BYTES), { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
-    const ran = suites.filter(suite => suite.keep?.length && state.reports.some(report => report.suiteId === suite.id));
-    state.kept = KeptFiles.safeParse(ran.flatMap(suite => { const files = collectKept(checkout, suite.keep!, state.user.uid, restored.find(kept => kept.suiteId === suite.id)?.files); return files.length ? [{ suiteId: suite.id, files }] : []; })).data ?? [];
+    state.kept = keptBySuites(execution, state, checkout, restored);
   } catch (error) { state.out.line(`The results of the part's test files could not be read: ${error instanceof Error ? error.message : String(error)}`); }
 }
 function rememberProductFailure(error: unknown, firstFailure: ProductCommandFailure | undefined, state: ProductState): ProductCommandFailure | undefined {

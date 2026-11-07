@@ -355,6 +355,8 @@ describe('a manual command', () => {
     const f = await fixture(manifest => { manifest.dependencies.cache = 'none'; manifest.prepare = []; }), one = machine(f, 'one', registry().remote('one'));
     const part = await runTests(manualPart(f, 'echo own install'), one);
     expect(part, part.log).toMatchObject({ ok: true }); expect(await installed(f)).toBe(0);
+    /* An author installs only when the log says so, and here nothing else would. */
+    expect(part.log).toContain('starts without the prepared harness');
   });
 });
 

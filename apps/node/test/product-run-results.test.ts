@@ -86,6 +86,12 @@ it('hands a checkout to the job user with what came back into it', async () => {
   expect(there).toEqual([true]);
 });
 
+/* What cannot be read only means less is reused: how the run went stands. */
+it('says how the run went when its checkout is gone before the results are read', async () => {
+  const done = await (await fixture("require('fs').rmSync(process.cwd(), { recursive: true });", { keep: ['.metrics/mutate'] })).run();
+  expect(done).toMatchObject({ ok: true }); expect(done.files).toBeUndefined(); expect(done.kept).toBeUndefined();
+});
+
 it('takes nothing from a suite that keeps nothing', async () => {
   const done = await (await fixture("const f=require('fs');f.mkdirSync('.metrics');f.writeFileSync('.metrics/a','left');")).run();
   expect(done.kept).toBeUndefined();

@@ -65,17 +65,21 @@ class Bytes {
 
 const inOneForm = (path: string) => path !== '.' && !path.endsWith('/') && posix.normalize(path) === path;
 
-/* What makes the tree safe to lay out in order: every path comes once, in one form, right after a folder that is really a folder,
-   so nothing ever goes through a link, and no link leads out. And a machine restores its roots by name, giving their parents to
-   the part, so those are only what it lays out: never the checkout itself, whose parent holds what the node does as root. */
+/* Every path comes once, in one form, right after a folder that is really a folder, so nothing ever goes through a link. */
+function checkPlace(path: string, seen: Set<string>, folders: Set<string>): void {
+  if (!inOneForm(path)) throw new Error(`A bundle lays out ${path}, which is not in its one form.`);
+  if (seen.has(path) || !folders.has(dirname(path))) throw new Error(`A bundle lays out ${path} out of order.`);
+  seen.add(path);
+}
+
+/* What makes the tree safe to lay out in order: each path in its place, and no link that leads out. And a machine restores its
+   roots by name, giving their parents to the part, so those are only what it lays out: never the checkout itself, whose parent
+   holds what the node does as root. */
 function checkEntries(ready: CacheReady, root: string): void {
   const folders = new Set(['.']), seen = new Set<string>();
   let bytes = 0;
   for (const item of ready.entries) {
-    const parent = dirname(item.path);
-    if (!inOneForm(item.path)) throw new Error(`A bundle lays out ${item.path}, which is not in its one form.`);
-    if (seen.has(item.path) || !folders.has(parent)) throw new Error(`A bundle lays out ${item.path} out of order.`);
-    seen.add(item.path);
+    checkPlace(item.path, seen, folders);
     if (item.kind === 'directory') folders.add(item.path);
     if (item.kind === 'symlink') safeLink(root, item.path, item.target);
     if (item.kind === 'file') bytes += item.size;
