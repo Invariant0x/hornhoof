@@ -22,18 +22,17 @@ describe('pipeline guidance', () => {
   });
 
   it('wakes waiters when remote tests or work finish and keeps every wait bounded', () => {
-    for (const id of ['hh-task-flow', 'hh-lead-tasks']) {
+    for (const id of ['hh-task-flow', 'hh-head']) {
       expect(body(id), id).toMatch(/run_tests[\s\S]*run_work/);
       expect(body(id), id).toMatch(/deadline/);
       expect(body(id), id).toMatch(/owner|holder/);
     }
   });
 
-  it('assigns each area to one owner and refuses a second task until it merges', () => {
-    for (const id of ['hh-lead-tasks', 'hh-brief-members', 'orch-plan-turn']) {
-      expect(body(id), id).toMatch(/one owner|same member/);
-      expect(body(id), id).toMatch(/hot files?/);
-      expect(body(id), id).toMatch(/second task[\s\S]*(not|never)[\s\S]*until[\s\S]*merg/i);
-    }
+  it('assigns each area to one owner and refuses a second task until it is done, in code until it merges', () => {
+    /* The rule is one, in the skill every head and the orchestrator lead by; a brief points to it, and code adds what an area is. */
+    expect(body('hh-lead-tasks')).toMatch(/each work area has one owner until its task is done, a second task on it is never given out before that/);
+    expect(body('hh-brief-members')).toMatch(/area this member owns until the task is done[\s\S]*hh-lead-tasks/);
+    expect(body('dev-lead')).toMatch(/[Hh]ot files are one area, and it keeps its owner until that task merges/);
   });
 });
