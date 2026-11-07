@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { HarnessClaim, type HarnessUnit } from '@hornhoof/protocol';
 import { bundleName, packBundle, unpackBundle } from './test-bundle.js';
-import { checkCacheContext, type CacheContext, type CacheEntry, type CacheReady, type CacheShare } from './test-cache.js';
+import { checkCacheContext, fileDigest, type CacheContext, type CacheEntry, type CacheReady, type CacheShare } from './test-cache.js';
 
 /* Hornhoof's registry of what is built: one machine builds a unit, every other takes it. */
 export type HarnessRemote = {
@@ -112,13 +111,6 @@ async function again<T>(signal: AbortSignal, run: () => Promise<T>): Promise<T> 
   }
 }
 
-async function digestOf(path: string): Promise<string> {
-  const file = await open(path, 'r'), hash = createHash('sha256');
-  try { for await (const chunk of file.createReadStream({ autoClose: false })) hash.update(chunk as Buffer); }
-  finally { await file.close(); }
-  return hash.digest('hex');
-}
-
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
 export function harnessRemote(server: string, nodeKey: string): HarnessRemote {
@@ -149,7 +141,7 @@ export function harnessRemote(server: string, nodeKey: string): HarnessRemote {
           if (!out.write(part)) await new Promise<void>(resolve => { out.once('drain', () => { resolve(); }); });
         }
       } finally { await new Promise<void>(resolve => { out.end(() => { resolve(); }); }); }
-      if (await digestOf(path) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
+      if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
     },
     async failed(key, error) {
       await answered(await fetch(at(`/${key}/failed`), json({ error })));

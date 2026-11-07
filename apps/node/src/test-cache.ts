@@ -7,14 +7,14 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
-import { checkDeadline } from './test-context.js';
+import { checkDeadline, type DeadlineContext } from './test-context.js';
 
 const lockDescriptors = new AsyncLocalStorage<number[]>();
 export const cacheLockDescriptors = (): number[] => lockDescriptors.getStore() ?? [];
 
 export type CacheContext = { cacheRoot: string; deadline: number; signal: AbortSignal; log: (line: string) => void };
 
-export function checkCacheContext(context: CacheContext): void {
+export function checkCacheContext(context: DeadlineContext): void {
   checkDeadline(context, 'The preparation deadline expired.');
 }
 
@@ -109,7 +109,7 @@ async function noLinkedParents(root: string, path: string): Promise<string> {
 export function safeLink(root: string, path: string, target: string): void {
   if (isAbsolute(target) || target.includes('\\') || relative(root, resolve(dirname(within(root, path)), target)).startsWith('..')) throw new Error('A payload symlink escapes the repository.');
 }
-export async function fileDigest(path: string, context: CacheContext): Promise<string> {
+export async function fileDigest(path: string, context: DeadlineContext): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) { checkCacheContext(context); hash.update(chunk); }
   return hash.digest('hex');
