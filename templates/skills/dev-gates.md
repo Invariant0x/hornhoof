@@ -26,7 +26,7 @@ One review per turn, on what the turn changed. When the department's last work o
 
 ## Testing
 
-Once per turn, with the turn's branch frozen: nothing enters it now but the fixes this gate returns. The head assigns a test engineer or QA to run the final check once per turn on the final pinned commit, as T3 in dev-testing-policy lists it. Coordinate ownership so each check runs once, through run_tests on a compatible free machine, in parts when its runner can split. After fixes run only what failed and the tests around it; do not repeat the whole suite for each fix. Acceptance and QA run once per turn, on the turn's branch, against these results.
+Once per turn, with the turn's branch frozen: nothing enters it now but the fixes this gate returns. The head assigns a test engineer or QA to run the final check once per turn on the final pinned commit, as T3 in dev-testing-policy lists it. Coordinate ownership so each check runs once, through run_tests on a compatible free machine, in parts when its runner can split. After fixes run only what failed and the tests around it; do not repeat the whole suite for each fix. Where the manifest declares a full run, `run_tests` without a command on the final profile and the turn's branch is this check and does the choosing itself: it runs the groups in parallel on free machines, a test file proved green on the main branch or the turn's at the same fingerprint does not run again, and on the turns the manifest names everything runs. Read its result for failed files and for any mismatch with the kept results; a mismatch is a finding. Acceptance and QA run once per turn, on the turn's branch, against these results.
 
 ## Release
 

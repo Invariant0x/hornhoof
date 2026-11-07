@@ -1,8 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { KeptFiles, TestExecution, supportsTestProfile, validateEnvironmentDescription, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
@@ -11,6 +11,7 @@ import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, stat as
 import { fileDigest, privateCacheRoot, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
 import { EnvironmentFailure, buildTestInvocation, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, type PreparationBuilder, type PreparationContext } from './test-environment.js';
 import { checkoutCommit } from './test-mirror.js';
+import { collectKept, parseFileReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -495,9 +496,11 @@ async function checkoutForPart(checkout: Checkout, options: { dir: string; user:
 }
 
 const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean };
 type ProductState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
   base: Record<string, string>; options: Options; receipt: TestEnvironmentReceipt; exitCode: number | null;
+  reports: SuiteReport[]; files: FileOutcome[]; kept: KeptFiles;
 };
 type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
 function environmentError(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail: `${code}: ${detail}` }); }
@@ -615,7 +618,24 @@ async function productSuite(execution: TestExecution, operation: Extract<Product
   const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 } });
   if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
   await productResets(execution, suite.id, state, env);
-  await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env });
+  const report: SuiteReport = { suiteId: suite.id, selected: operation.files, path: join(state.root, 'reports', `${index}.json`), failed: false };
+  state.reports.push(report);
+  try { await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env, HH_TEST_REPORT: report.path }); }
+  catch (error) { report.failed = true; throw error; }
+}
+/* What a suite kept from its last run goes back before anything of this one runs. */
+function restoreProductKept(msg: TestRun, execution: TestExecution, state: ProductState): void {
+  const { suites } = execution.snapshot.description.manifest;
+  for (const { suiteId, files } of msg.kept ?? []) restoreKept(state.repo, suites.find(suite => suite.id === suiteId)?.keep ?? [], files);
+}
+/* Read once the job's processes have stopped, so nothing changes under the reading. What cannot be read only means less is reused. */
+function collectProductResults(execution: TestExecution, state: ProductState, restored: KeptFiles): void {
+  try {
+    const checkout = realpathSync(state.repo), { suites } = execution.snapshot.description.manifest;
+    state.files = state.reports.flatMap(report => parseFileReport(readJobFile(report.path, state.user.uid, REPORT_BYTES), { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
+    const ran = suites.filter(suite => suite.keep?.length && state.reports.some(report => report.suiteId === suite.id));
+    state.kept = KeptFiles.safeParse(ran.flatMap(suite => { const files = collectKept(checkout, suite.keep!, state.user.uid, restored.find(kept => kept.suiteId === suite.id)?.files); return files.length ? [{ suiteId: suite.id, files }] : []; })).data ?? [];
+  } catch (error) { state.out.line(`The results of the part's test files could not be read: ${error instanceof Error ? error.message : String(error)}`); }
 }
 function rememberProductFailure(error: unknown, firstFailure: ProductCommandFailure | undefined, state: ProductState): ProductCommandFailure | undefined {
   if (error instanceof ProductCommandFailure) firstFailure ??= error;
@@ -645,13 +665,17 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
   let services: Awaited<ReturnType<typeof openEnvironment>> | undefined;
   try {
     const description = await timedPhase(state.receipt, 'checkoutMs', () => productCheckout(msg, state, context));
+    restoreProductKept(msg, execution, state);
     const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
     await timedPhase(state.receipt, 'servicesMs', () => (state.options.prepareRepoBrowser ?? (repo => ensureRepoBrowser(state.options.dir, repo, state.user)))(state.repo));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     giveCheckout(state, state.repo, state.user);
     services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
     await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
-  } finally { await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } }); }
+  } finally {
+    await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
+    collectProductResults(execution, state, msg.kept ?? []);
+  }
 }
 function productFailure(error: unknown, signal: AbortSignal): TestError {
   if (signal.aborted) return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError' ? 'timeout' : 'cancelled';
@@ -662,11 +686,11 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
   await productDescription(description);
   const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
-  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], kept: [], base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
 }
 async function productFolders(state: ProductState): Promise<void> {
   await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
-  for (const path of ['home', 'tmp']) prepareFolder(join(state.root, path), state.user);
+  for (const path of ['home', 'tmp', 'reports']) prepareFolder(join(state.root, path), state.user);
   ensurePasswd(state.user, partsFolder(state.options.dir));
 }
 const productSecrets = (msg: TestRun, hidden: string[]): string[] => [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
@@ -681,8 +705,13 @@ async function cleanupProduct(state: ProductState | undefined, out: Output): Pro
     }); return null;
   } catch (error) { out.line(error instanceof Error ? error.message : String(error)); return 'failed'; }
 }
+/* How a part's files went and what its suites leave, when it has any of that to say. */
+function partResults(state: ProductState | undefined): Pick<TestsDone, 'files' | 'kept'> {
+  if (!state) return {};
+  return { ...(state.files.length ? { files: state.files } : {}), ...(state.kept.length ? { kept: state.kept } : {}) };
+}
 function productDone(msg: TestRun, state: ProductState | undefined, error: TestError | null, out: Output, hidden: string[]): TestsDone {
-  return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}) };
+  return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}), ...partResults(state) };
 }
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
   const out = new Output(), hidden = productSecrets(msg, options.hidden);

@@ -4,7 +4,7 @@ import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { BindingPart } from '../modules/model-checks/lifecycle.js';
-import type { IntegrationTarget, NodeRef, WorkspaceProblemCode } from '@hornhoof/protocol';
+import type { IntegrationTarget, NodeRef, UnitFingerprint, WorkspaceProblemCode } from '@hornhoof/protocol';
 import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -1004,6 +1004,13 @@ export type TestEnvironmentRequest = {
   sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
 };
 export type TestEnvironmentSelection = { selection: TestExecution['selection']; after: number[] };
+export type TestFileKey = { suiteId: string; file: string };
+/* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
+   to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
+export type TestRunFileCache = {
+  mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
+  wouldSkip: TestFileKey[]; compared: number; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
+};
 
 export const testRuns = pgTable(
   'test_runs',
@@ -1030,6 +1037,7 @@ export const testRuns = pgTable(
     environmentHash: text('environment_hash'),
     /* The assigned authenticated metadata request, persisted without a repository credential. */
     environmentRequest: jsonb('environment_request').$type<TestEnvironmentRequest>(),
+    fileCache: jsonb('file_cache').$type<TestRunFileCache>(),
     /* The task's files a part of work takes in, by name. */
     files: jsonb('files').$type<string[]>().notNull().default([]),
     /* The free memory a part of work needs; tests need what their repository says. */
@@ -1062,6 +1070,8 @@ export const testParts = pgTable(
     part: integer('part').notNull(),
     environmentSelection: jsonb('environment_selection').$type<TestEnvironmentSelection>(),
     environmentReceipt: jsonb('environment_receipt').$type<TestEnvironmentReceipt>(),
+    /* The files its runner named as failed. */
+    failedFiles: jsonb('failed_files').$type<TestFileKey[]>(),
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
     nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
@@ -1099,6 +1109,42 @@ export const testPartTimings = pgTable(
     createdAt: createdAt(),
   },
   t => [index('test_part_timings_run_id').on(t.runId)],
+);
+
+/* A test file that passed, by what its result depended on: at the same fingerprint in the same repository it need not run again. */
+export const testFileResults = pgTable(
+  'test_file_results',
+  {
+    companyId: companyId(),
+    repositoryOwnerId: uuid('repository_owner_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+    repoUrlHash: text('repo_url_hash').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    suiteId: text('suite_id').notNull(),
+    file: text('file').notNull(),
+    runId: uuid('run_id').notNull().references(() => testRuns.id, { onDelete: 'cascade' }),
+    commitSha: text('commit_sha').notNull(),
+    ms: integer('ms'),
+    /* What the result came to, as its runner put it. */
+    note: text('note'),
+    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    mainLine: boolean('main_line').notNull().default(false),
+    createdAt: createdAt(),
+  },
+  t => [primaryKey({ name: 'test_file_results_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.fingerprint, t.suiteId, t.file] }), index('test_file_results_age').on(t.companyId, t.createdAt)],
+);
+
+/* What a suite's last run left for its next, as its manifest's keep names it. */
+export const testSuiteMemory = pgTable(
+  'test_suite_memory',
+  {
+    companyId: companyId(),
+    repositoryOwnerId: uuid('repository_owner_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+    repoUrlHash: text('repo_url_hash').notNull(),
+    suiteId: text('suite_id').notNull(),
+    files: jsonb('files').$type<{ path: string; text: string }[]>().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [primaryKey({ name: 'test_suite_memory_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.suiteId] })],
 );
 
 /* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules

@@ -20,7 +20,7 @@ const dump = template ? readPgliteTemplate(template) : await migratedPgliteDump(
 if (!dump) throw new Error('Invalid HH_PGLITE_TEMPLATE for the browser access server');
 const client = new PGlite({ loadDataDir: new Blob([new Uint8Array(dump)]) });
 const db = drizzle(client, { schema }) as unknown as Db;
-const app = await buildApp({ db, config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', NODE_KEY: key, STREAM_PING_MS: '100' }) });
+const app = await buildApp({ db, config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', NODE_KEY: key, STREAM_PING_MS: '100', WEB_DIST: process.env.WEB_DIST }) });
 const origin = await app.listen({ host: '127.0.0.1', port: 0 });
 const c = await aclCompanyOn(app, db, origin.replace('http://', 'ws://') + '/api/nodes/socket');
 await c.db.update(subscriptions).set({ kind: 'api_key', targetKind: 'any' });

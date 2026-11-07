@@ -19,7 +19,7 @@ export type EnvironmentPartPlan = {
   ports: { suiteBatch: 'required' | 'not-required'; finalPreparation: 'missing' | 'not-required' };
 };
 
-const keyOf = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => `${unit.suiteId}\0${unit.file}`;
+export const unitKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => `${unit.suiteId}\0${unit.file}`;
 
 async function pinnedSnapshot(input: PreparedEnvironmentPlanInput): Promise<EnvironmentSnapshot> {
   const snapshot = EnvironmentSnapshot.parse(input.snapshot);
@@ -28,9 +28,9 @@ async function pinnedSnapshot(input: PreparedEnvironmentPlanInput): Promise<Envi
   return snapshot;
 }
 function canonicalUnits(snapshot: EnvironmentSnapshot, selected: TestUnit[]): TestUnit[] {
-  const inventory = new Map(snapshot.description.inventory.map(unit => [keyOf(unit), unit]));
+  const inventory = new Map(snapshot.description.inventory.map(unit => [unitKey(unit), unit]));
   return selected.map(unit => {
-    const canonical = inventory.get(keyOf(unit));
+    const canonical = inventory.get(unitKey(unit));
     if (!canonical || canonical.selectionUnit !== unit.selectionUnit) throw new Error('The selection differs from the canonical environment inventory.');
     return canonical;
   });
@@ -51,8 +51,8 @@ function suiteSelections(snapshot: EnvironmentSnapshot, units: TestUnit[]): Suit
 function finalInventory(snapshot: EnvironmentSnapshot, units: TestUnit[]): void {
   const required = snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
   const expected = snapshot.description.inventory.filter(unit => required.includes(unit.suiteId));
-  const actual = new Set(units.map(keyOf));
-  if (expected.length !== units.length || expected.some(unit => !actual.has(keyOf(unit)))) throw new Error('A final candidate needs the complete required profile inventory.');
+  const actual = new Set(units.map(unitKey));
+  if (expected.length !== units.length || expected.some(unit => !actual.has(unitKey(unit)))) throw new Error('A final candidate needs the complete required profile inventory.');
 }
 function postSuiteChecks(snapshot: EnvironmentSnapshot, units: TestUnit[]): EnvironmentPartPlan['postSuiteChecks'] {
   const selected = new Set(units.map(unit => unit.suiteId));

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { Reporter, TestCase, TestModule, Vitest } from 'vitest/node';
 import { SLOWEST_TESTS, timingLine, type TestFileTiming, type TestPackageTiming } from './pipeline-report.js';
@@ -44,6 +44,10 @@ export function packageTiming(modules: readonly TestModule[], name: string): Tes
   return { package: name, tests: times.length, medianTestMs: Math.round(middle), slowerThanMedian: times.filter(t => t > middle).length };
 }
 
+/* How a file went, for the report a part of a run asks for. A file that ran no test says nothing: a run that passed proves it with
+   the others, and one that failed or stopped early leaves it unknown. */
+const fileOutcomes = (module: TestModule) => module.state() === 'skipped' ? [] : [{ file: module.moduleId, status: module.state() === 'passed' ? 'passed' : 'failed', ms: Math.round(module.diagnostic().duration) }];
+
 /* In a part of a run, each test file's time goes into the log for the pipeline report, ahead of the runner's own summary:
    the last lines of a log are what the agent reads of a failed part. */
 export default class TestTimings implements Reporter {
@@ -55,6 +59,7 @@ export default class TestTimings implements Reporter {
   }
 
   onTestRunEnd(modules: readonly TestModule[]): void {
+    if (process.env.HH_TEST_REPORT) writeFileSync(process.env.HH_TEST_REPORT, JSON.stringify({ files: modules.flatMap(fileOutcomes) }));
     if (!process.env.HH_TEST_PART) return;
     const lines = [...modules.map(m => timingLine({ kind: 'file', ...fileTiming(m, this.name) })), timingLine({ kind: 'package', ...packageTiming(modules, this.name) })];
     process.stdout.write(`${lines.join('\n')}\n`);

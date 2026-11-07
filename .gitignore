@@ -5,3 +5,5 @@ dist/
 .DS_Store
 coverage/
 apps/web/e2e/results/
+.metrics/
+target/

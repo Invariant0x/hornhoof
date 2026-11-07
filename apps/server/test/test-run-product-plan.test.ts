@@ -53,6 +53,16 @@ describe('versioned product execution planning', () => {
     await expect(planProductParts({ ...input, expectedCommitSha: 'f'.repeat(40) })).rejects.toThrow(/commit/i);
     await expect(planProductParts({ ...input, purpose: 'final', units: [input.units[2]!] })).rejects.toThrow(/final.*inventory/i);
   });
+  it('keeps the final checks of a suite whose files were all reused: no file proves them', async () => {
+    const input = await fixture(), reused = new Set(input.units.map(unit => `${unit.suiteId}\0${unit.file}`));
+    const plan = await planProductParts({ ...input, reuse: { reused, preparation: false } });
+    expect(plan.leaves).toEqual([{ selection: { kind: 'final', suiteId: 'vitest', files: [] }, after: [] }]);
+  });
+  it('waits for no preparation that was reused, also for the final checks of its suites', async () => {
+    const input = await fixture(true), reused = new Set(input.units.map(unit => `${unit.suiteId}\0${unit.file}`));
+    const plan = await planProductParts({ ...input, reuse: { reused, preparation: true } });
+    expect(plan.leaves).toEqual([{ selection: { kind: 'final', suiteId: 'vitest', files: [] }, after: [] }]);
+  });
   it('reserves the ten-part budget for preparation and all existing final leaves', async () => {
     const input = await fixture(true), manifest = input.snapshot.description.manifest, base = manifest.suites[0]!;
     manifest.suites = Array.from({ length: 8 }, (_, index) => ({ ...base, id: `suite-${index}`, profiles: ['fast'], files: [`web/test/${index}.test.ts`] }));

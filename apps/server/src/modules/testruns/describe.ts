@@ -1,9 +1,9 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
-import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection } from '../../db/schema.js';
+import { departments, testParts, testRuns, type TestEnvironmentRequest, type TestEnvironmentSelection, type TestRunFileCache } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
@@ -14,6 +14,7 @@ import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
 import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
+import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
 export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string; profile?: string };
@@ -91,12 +92,16 @@ function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): Envi
 function planningCosts(history: PlanningHistory | null | undefined) {
   return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000 };
 }
-async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
+function planningPurpose(snapshot: EnvironmentSnapshot, requested: string | undefined): 'final' | 'affected' {
+  if (requested) return 'affected';
+  return snapshot.profile === 'final' || snapshot.profile === snapshot.description.manifest.execution?.fullRun?.profile ? 'final' : 'affected';
+}
+async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
   const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
-  const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: !requested && snapshot.profile === 'final' ? 'final' : 'affected', units,
+  const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: planningPurpose(snapshot, requested), units, reuse,
     ...planningCosts(history),
     availableMachines: await freeProductMachines(ctx, run, snapshot) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
@@ -113,23 +118,30 @@ async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDes
 async function descriptionProblem(ctx: Ctx, run: Run, message: TestsDescribed, problem: EnvironmentProblem): Promise<void> {
   await ctx.db.update(testRuns).set({ environmentRequest: { ...run.environmentRequest!, problem } }).where(requestMatches(run.id, message.requestId));
 }
-async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null): Promise<boolean> {
+/* A run whose every file was reused has no part to add. */
+async function addParts(tx: Pick<Ctx['db'], 'insert'>, run: Run, leaves: TestEnvironmentSelection[]): Promise<void> {
+  if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
+}
+async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null, fileCache: TestRunFileCache | null): Promise<boolean> {
   const description = snapshot.description;
   return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
-    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length }).where(eq(testRuns.id, run.id));
-    await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
+    await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache }).where(eq(testRuns.id, run.id));
+    await addParts(tx, run, leaves);
     return true;
   });
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription): Promise<void> {
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[]): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const snapshot = snapshotFor(description, request), { leaves, plan } = await plannedLeaves(ctx, run, snapshot);
-  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan);
+  const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
+  const snapshot = snapshotFor(description, mode ? { ...request, profile: mode.profile } : request);
+  const reuse = await reuseFor(ctx, mode, snapshot, mode ? requestedUnits(snapshot, request.suite) : [], prints);
+  const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
+  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
 }
 export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<void> {
@@ -139,7 +151,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     if (await retryDescription(ctx, run, message, message.result.problem)) return;
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
-  try { await saveDescription(ctx, run, message, message.result.description); }
+  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? []); }
   catch { await descriptionProblem(ctx, run, message, { code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }); }
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {

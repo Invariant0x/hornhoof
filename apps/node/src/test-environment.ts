@@ -2,12 +2,13 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join, matchesGlob, relative, resolve } from 'node:path';
-import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
+import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, UnitFingerprints, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext } from './test-cache.js';
 import { withCheckSlot } from './check-queue.js';
 import { prepareServiceArtifacts, openServices, type OpenedServices, type ServiceArtifacts, type ServiceContext, type ServiceDefinition, type ServiceDefinitions } from './test-services.js';
 import type { JobUser } from './isolation.js';
 import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
+import { readTestFingerprints } from './test-fingerprint.js';
 
 type Source = Parameters<typeof readCommit>[0];
 type DescriptionContext = CacheContext & { runtimes?: RuntimeCapability[] };
@@ -70,6 +71,12 @@ export async function readTestEnvironment(source: Source, repositoryScope: Repos
   const bytes = await blob(tree, MANIFEST, TEST_ENVIRONMENT_BYTES), manifest = manifestFrom(bytes);
   fixtureInputs(tree, manifest);
   return validateEnvironmentDescription({ version: 1, repositoryScope, commitSha, manifestSource: bytes.toString('utf8'), manifestHash: await hashTestEnvironment(bytes), manifest, inputDigests: await inputDigests(tree, manifest), inventory: listTestUnits(manifest, tree.entries), runtimeCapabilities: context.runtimes ?? await trustedTestRuntimes(context) });
+}
+/* A description with what lets the server reuse results. Only the description is needed for a run: without fingerprints, everything runs. */
+export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[] }> {
+  const description = await readTestEnvironment(source, repositoryScope, commitSha, context);
+  try { return { description, fingerprints: UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, context)) }; }
+  catch { context.signal.throwIfAborted(); return { description }; }
 }
 
 async function runtimeOutput(program: string, args: string[], context: CacheContext): Promise<string | null> {
@@ -234,11 +241,12 @@ export class NodeTestMessages {
     let executionSignal = signal, result: TestsDescribed['result'];
     try {
       if (this.options.capabilities.testEnvironmentVersion !== 1) fail('isolation_missing', 'Product tests require an isolated job user and a private preparation cache.');
-      const description = await withCheckSlot(async granted => {
+      const described = await withCheckSlot(async granted => {
         executionSignal = granted;
-        return (this.options.describe ?? readTestEnvironment)(message.repo, message.repositoryScope, message.commitSha, { cacheRoot: join(this.options.dir, 'cache'), deadline: Date.now() + 60_000, signal: granted, runtimes: this.options.capabilities.testRuntimes, log: () => {} });
+        const context = { cacheRoot: join(this.options.dir, 'cache'), deadline: Date.now() + 60_000, signal: granted, runtimes: this.options.capabilities.testRuntimes, log: () => {} };
+        return this.options.describe ? { description: await this.options.describe(message.repo, message.repositoryScope, message.commitSha, context) } : describeTestEnvironment(message.repo, message.repositoryScope, message.commitSha, context);
       }, { signal, label: 'Describe product test environment' });
-      result = { status: 'ready', description };
+      result = { status: 'ready', ...described };
     } catch (error) { result = { status: 'error', problem: descriptionProblem(error, executionSignal) }; }
     const reply: TestsDescribed = { type: 'tests.described', requestId: message.requestId, commitSha: message.commitSha, result };
     this.describing.delete(message.requestId);
