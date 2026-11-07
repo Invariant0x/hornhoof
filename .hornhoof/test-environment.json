@@ -502,8 +502,7 @@
           "package-lock.json",
           "tsconfig.base.json",
           "eslint.config.js",
-          ".hornhoof/test-environment.json",
-          ".github/workflows/**"
+          ".hornhoof/test-environment.json"
         ],
         "suiteIds": [
           "protocol",
@@ -572,6 +571,56 @@
         "suiteIds": [
           "browser",
           "browser-matrix"
+        ]
+      },
+      {
+        "globs": [
+          "packages/protocol/test/**"
+        ],
+        "suiteIds": [
+          "protocol"
+        ]
+      },
+      {
+        "globs": [
+          "packages/protocol/test/fixtures/**"
+        ],
+        "suiteIds": [
+          "protocol",
+          "server"
+        ]
+      },
+      {
+        "globs": [
+          "apps/node/src/test-impact*.ts",
+          "apps/node/src/test-environment.ts"
+        ],
+        "suiteIds": [
+          "node",
+          "release-scripts"
+        ]
+      },
+      {
+        "globs": [
+          "templates/**"
+        ],
+        "suiteIds": [
+          "server",
+          "node"
+        ]
+      },
+      {
+        "globs": [
+          ".github/workflows/**",
+          "scripts/install.sh",
+          "apps/updater/**",
+          "Dockerfile",
+          "compose.yaml",
+          ".dockerignore"
+        ],
+        "suiteIds": [
+          "release-scripts",
+          "server"
         ]
       }
     ],

@@ -8,6 +8,7 @@ import { ESLint } from 'eslint';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const eslint = resolve(root, 'node_modules/eslint/bin/eslint.js');
+/* The files this test writes into test folders are not named *.test.ts: a test running beside it collects the real tests from those folders. */
 
 /* These flags leave out the TypeScript programs and the rules that need them, so that eslint reads its files in seconds. */
 const withoutPrograms = [
@@ -25,7 +26,7 @@ const wholeRepository = () => filesOfEachProcess(
 test('ESLint rejects an unused variable in a server test instead of ignoring the file', t => {
   const dir = mkdtempSync(join(root, 'apps/server/test/eslint-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const file = join(dir, 'unused.test.ts');
+  const file = join(dir, 'unused.ts');
   writeFileSync(file, 'const unused = 1;\nexport {};\n');
   const result = spawnSync(process.execPath, [eslint, file, '--format=json'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 1, result.stdout + result.stderr);
@@ -38,7 +39,7 @@ const DDL_RULE = 'hornhoof/no-ddl-on-shared-database';
 function ddlFindings(t, folder, source) {
   const dir = mkdtempSync(join(root, folder, 'eslint-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const file = join(dir, 'ddl.test.ts');
+  const file = join(dir, 'ddl.ts');
   writeFileSync(file, source);
   const result = spawnSync(process.execPath, [eslint, file, ...withoutPrograms], { cwd: root, encoding: 'utf8' });
   return JSON.parse(result.stdout)[0].messages.filter(message => message.ruleId === DDL_RULE).map(message => message.line);
@@ -61,7 +62,7 @@ test('tests and TypeScript configs keep every rule in server, node and protocol'
     const dir = mkdtempSync(join(root, workspace, 'test/eslint-'));
     const config = join(root, workspace, `${basename(dir)}.config.ts`);
     t.after(() => { rmSync(dir, { recursive: true, force: true }); rmSync(config, { force: true }); });
-    for (const file of [join(dir, 'rules.test.ts'), config]) {
+    for (const file of [join(dir, 'rules.ts'), config]) {
       writeFileSync(file, `const unused = 1;
 Promise.resolve();
 await 42;
@@ -116,10 +117,10 @@ test('npm run lint runs every part in a process of its own even when one fails, 
 test("a workspace's own lint finds the rules of the repository and fails on what it finds", t => {
   const dir = mkdtempSync(join(root, 'packages/protocol/test/eslint-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  writeFileSync(join(dir, 'unused.test.ts'), 'const unused = 1;\nexport {};\n');
+  writeFileSync(join(dir, 'unused.ts'), 'const unused = 1;\nexport {};\n');
   const result = spawnSync('npm', ['run', '--silent', 'lint:part', '-w', '@hornhoof/protocol', '--', '--format=json'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   const reports = JSON.parse(result.stdout).filter(report => report.messages.length > 0);
-  assert.deepEqual(reports.map(report => basename(report.filePath)), ['unused.test.ts']);
+  assert.deepEqual(reports.map(report => basename(report.filePath)), ['unused.ts']);
   assert.deepEqual(reports[0].messages.map(message => message.ruleId), ['@typescript-eslint/no-unused-vars']);
 });
