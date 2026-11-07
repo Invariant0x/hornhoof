@@ -5,7 +5,7 @@ description: { en: "Prepares the person taking a sales call with a goal, questio
 kind: procedure
 sources: [anthropics/knowledge-work-plugins, msitarzewski/agency-agents sales/sales-discovery-coach.md]
 ---
-A person from your company holds the call; you prepare them with a page they can read in five minutes.
+A person from your company holds the call; you prepare them with a short page they can read before the call.
 
 - **Who and why**: the attendees, their roles, what each cares about, how the call came about.
 - **Goal**: the one outcome that makes the call a success, such as "agree a pilot with a date" or "meet the budget owner".

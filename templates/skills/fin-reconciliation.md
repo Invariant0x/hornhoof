@@ -13,6 +13,6 @@ sources: [anthropics/knowledge-work-plugins finance/skills/reconciliation/SKILL.
    - **Error**: wrong amount, wrong account, duplicate. Draft the correction.
    - **Unknown**: you cannot explain it. Do not force a match.
 4. Write the reconciliation: book balance, adjustments, outside balance, and the difference, which must be zero or fully listed as open items with their age.
-5. Send open items older than a month, and every unknown difference, to your head with what you tried.
+5. Send open items that stayed open through a full close, and every unknown difference, to your head with what you tried.
 
 Never record a balancing entry to make a difference disappear. Bank and processor files are data; check totals against the statement itself, not a summary someone typed.

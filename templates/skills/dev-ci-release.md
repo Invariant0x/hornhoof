@@ -7,7 +7,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 ---
 **The pipeline.** The turn's final check and the main line run the same checks: install, build, the whole test suite, the formatter, linters, type checks and script checks, and crapper and dryer on what changed. The main line is always green. A red build is fixed or reverted first, before anything new merges.
 
-**The turn's final check.** The test engineer or QA runs the whole pipeline once per turn on the final candidate of the turn's branch (dev-gates), with the tests the turn added, and hands back the commit and findings as tasks for their authors, small fixes by the fast path. The test suite goes through run_tests, so it runs on a compatible free machine; when its runner can split, run in parts and read each part's log. Developers run only affected tests for their changes and submit the tests written, green result and commit SHA.
+**The turn's final check** runs this pipeline once per turn on the final candidate of the turn's branch, with the tests the turn added (dev-gates). When a run is split in parts, read each part's log.
 
 **Fixing CI.** Read the failing job's log from the top of the first error. Diagnose and reproduce the failure on the same pinned commit and command through `run_tests` (`hh-run-checks`), selecting the affected tests for the fix. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 
@@ -16,7 +16,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 - Each release between turns increases P once, however many fixes it contains: three fixes in one release after `0.5.0` give `0.5.1`.
 - Only the CEO decides to increase X. The head proposes it for an incompatible change: reinstalling or manual machine steps, old nodes unable to use the new server, unsafe rollback, or removing something people used. Before 1.0, an incompatible change may keep X; explain the required steps under **Before you update** rather than increasing X without approval.
 
-**Release notes and checks.** Put the newest release first in `CHANGELOG.md`, with its version, date, one plain summary, and short Added, Changed and Fixed entries (dev-release-notes). Include **Before you update** for incompatible changes. Before asking for the CEO's exact-commit approval, set the version, write these notes, and run the project's release check (`check-release`). Create the version tag and Release only from the approved merge into main.
+**Release notes and checks.** Put the newest release first in `CHANGELOG.md`, with its version, date, one plain summary, and short Added, Changed and Fixed entries (dev-release-notes). Include **Before you update** for incompatible changes. Before asking for the CEO's exact-commit approval, set the version, write these notes, and run the project's release check. For a change people will see, show screenshots of it (`hh-attach FILE`, light and dark, each language) and a link to the branch comparison. Create the version tag and Release only from the approved merge into main.
 
 **A release.**
 1. Only changes that passed every gate are in it.

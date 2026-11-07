@@ -516,13 +516,67 @@ describe('migration 0020', () => {
       (${C}, 'worker', 'Red team', '', 'DEV-RED', ${red}::jsonb),
       (${C}, 'worker', 'Security engineer', '', 'DEV-SEC', ${sec}::jsonb)`);
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0020_red_team_skills') });
 
     const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents order by name`);
     expect(rows.rows).toEqual([
       { name: 'Red team', skills: ['hh-task-flow', 'dev-adversarial'] },
       { name: 'Security engineer', skills: ['hh-task-flow', 'dev-security-review', 'dev-threat-model'] },
     ]);
+  });
+});
+
+describe('migration 0081', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('keeps on every card the text that moved out of a skill it holds, and adds nothing else', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0080_live_stuck_recipients') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const cards: Record<string, string[]> = {
+      /* What the testing policy took from the engineering rules and from the path of a turn. */
+      Developer: ['hh-task-flow', 'dev-engineering-rules'],
+      Head: ['dev-work-pipeline', 'dev-gates'],
+      Tester: ['dev-engineering-rules', 'dev-testing-policy'],
+      /* What to do before asking for a release moved from the department's map to the release pipeline. */
+      Lead: ['dev-work-pipeline', 'dev-ci-release', 'dev-testing-policy'],
+      /* The four kinds of task moved from implementing a task to test-driven work: a card trimmed by hand held one and not the other. */
+      Builder: ['dev-engineering-rules', 'dev-language-rules', 'dev-implement', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check'],
+      Whole: ['dev-implement', 'dev-tdd', 'dev-testing-policy'],
+      /* What a gate adds moved out of both review checks into the verdict. */
+      Security: ['dev-security-review'],
+      Reader: ['dev-review-diff'],
+      Reviewer: ['dev-security-review', 'dev-review-verdict', 'dev-testing-policy'],
+      /* The checks of a view moved from the interface skill to the check of the running product. */
+      Screens: ['dev-frontend-ui'],
+      /* These held none of the moved text, so nothing changes. */
+      Sales: ['sal-prospecting'],
+      Writer: ['dev-docs', 'hh-work-fast'],
+    };
+    for (const [name, skills] of Object.entries(cards)) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, skills) values (${C}, 'worker', ${name}, '', ${JSON.stringify(skills)}::jsonb)`);
+    }
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents`);
+    const after = Object.fromEntries(rows.rows.map(r => [r.name, r.skills]));
+    expect(after).toEqual({
+      Developer: ['hh-task-flow', 'dev-engineering-rules', 'dev-testing-policy'],
+      Head: ['dev-work-pipeline', 'dev-gates', 'dev-ci-release', 'dev-testing-policy'],
+      Tester: ['dev-engineering-rules', 'dev-testing-policy'],
+      Lead: ['dev-work-pipeline', 'dev-ci-release', 'dev-testing-policy'],
+      Builder: [...cards.Builder!, 'dev-tdd', 'dev-testing-policy'],
+      Whole: ['dev-implement', 'dev-tdd', 'dev-testing-policy'],
+      Security: ['dev-security-review', 'dev-review-verdict', 'dev-testing-policy'],
+      Reader: ['dev-review-diff', 'dev-review-verdict', 'dev-testing-policy'],
+      Reviewer: ['dev-security-review', 'dev-review-verdict', 'dev-testing-policy'],
+      Screens: ['dev-frontend-ui', 'dev-browser-check', 'dev-testing-policy'],
+      Sales: ['sal-prospecting'],
+      Writer: ['dev-docs', 'hh-work-fast'],
+    });
   });
 });
 

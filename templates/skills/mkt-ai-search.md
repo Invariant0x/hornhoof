@@ -7,7 +7,7 @@ sources: [coreyhaines31/marketingskills skills/ai-seo/SKILL.md, msitarzewski/age
 ---
 Many people ask AI assistants instead of searching. Make our pages the ones they quote.
 
-1. **Questions**: list 20 to 30 questions our buyers ask, in English and Russian, from sales notes, support tickets and search queries.
+1. **Questions**: list 20 to 30 questions our buyers ask, in every language the company sells in, from sales notes, support tickets and search queries.
 2. **Baseline**: ask several assistants these questions, with web search on where they have it. Record who is cited, whether we appear, and what is said about us. Repeat each turn with the same list.
 3. **Answer pages**: for each question where we deserve a citation and lack one, make sure one page answers it directly: the answer in the first two sentences, then details, facts with sources, and the date of the last update.
 4. **Easy to quote**: headings phrased as questions, short paragraphs, tables for comparisons, one-sentence definitions, the product named in full.

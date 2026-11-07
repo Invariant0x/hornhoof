@@ -7,12 +7,12 @@ sources: [obra/superpowers skills/writing-plans/SKILL.md, wshobson/agents plugin
 ---
 For `small: true`, use the fast path in hh-lead-tasks; planning and reports belong to the shared turn review. What follows is for other work.
 
-When a goal reaches your department, whoever gives out the work answers for keeping the department loaded, not only for ordering tasks. Members standing free while work can run are a fault, not a normal wait:
+When a goal reaches your department:
 
 1. Restate the goal and what "done" means in one or two sentences a person could check. If you cannot, ask before you give anything out.
-2. One generalist developer owns each connected block end to end. No chains or `after` between developers when one can do it. Give independent blocks to different members at once, each with one check that shows it is done; pieces that touch the same files or records go to one member. A small goal is one piece. Each piece is a whole result, not a step of preparation: planning is part of doing, so no tasks for plans, contracts or proofs before the real work. The one exception is a short step your department's rules name for a new or large piece, such as an architect's design note: give it at the same time, with the piece waiting on it in `after`.
+2. Cut it into whole blocks as hh-lead-tasks says, each with one check that shows it is done; pieces that touch the same files or records go to one member. A small goal is one piece. Each piece is a whole result, not a step of preparation: planning is part of doing, so no tasks for plans, contracts or proofs before the real work. The one exception is a short step your department's rules name for a new or large piece, such as an architect's design note: give it at the same time, with the piece waiting on it in `after`.
 3. When two pieces must fit together, their owners agree how they fit directly, in the task's comments or by message, and both start at once: no separate task for that.
-4. For each piece write: the owner, what it receives, what it hands back and how the result is checked; never assign non-urgent work to an urgent-only team (`urgentOnly`). A piece that truly needs another's result names that task in `after` with `independentPart` or `independentNone` (single file ownership, genuine dependencies or release boundaries), as hh-lead-tasks says; pass neither when `after` is empty, and start all other pieces at once.
+4. For each piece write: the owner, what it receives, what it hands back and how the result is checked. A piece that truly needs another's result names that task in `after` as hh-lead-tasks says, and all other pieces start at once.
 5. Give each piece only the gates it needs (hh-lead-tasks): one review for other normal work, more only where your department's rules ask for them. The one who did the work never passes its own gate.
 6. A new ask that comes while the work runs goes to the next turn, unless the CEO says "now".
 

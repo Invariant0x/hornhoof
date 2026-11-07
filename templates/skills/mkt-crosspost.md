@@ -8,7 +8,7 @@ sources: [affaan-m/ECC skills/crosspost/SKILL.md]
 1. Take one core piece that is approved or ready for approval.
 2. For each network the plan names, write a native version: its own hook, length, format (thread, carousel, short text, video script) and call to action. Keep the facts identical across versions.
 3. Put all versions in one approval package, so the reviewers and the CEO see them side by side.
-4. After approval, publish each version at its planned time from the company's account for that network, with exactly the approved text.
+4. After approval, each version goes out at its planned time from the company's account for that network, exactly as approved.
 5. Right after publishing, open each post as a visitor: text, images, links and preview cards are right. Do not edit a live post yourself; report any problem to your head at once.
 6. Record each post: network, link, time, and the approval it belongs to.
 

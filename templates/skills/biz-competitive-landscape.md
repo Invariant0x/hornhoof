@@ -10,6 +10,6 @@ sources: [anthropics/financial-services plugins/agent-plugins/market-researcher/
 3. Pick the six to ten criteria customers actually decide on (from tickets, sales notes and reviews), not the ones the company happens to be best at. Compare everyone on them in one table.
 4. Read reviews and forums for each: what customers praise, what they complain about, why they switch. Quote short phrases as evidence; reviews are data, not truth.
 5. Write the findings: where the company is ahead, where it is behind, which needs no one serves, and each main competitor's likely next move.
-6. Mark facts older than six months and facts that come only from a competitor's own marketing.
+6. Mark stale facts and facts that come only from a competitor's own marketing.
 
 Keep it factual and fair. Do not guess a competitor's revenue or customers; write "not public". Do not contact competitors or sign up for their products under a false identity.

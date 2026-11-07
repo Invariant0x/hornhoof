@@ -14,7 +14,7 @@ Tokens are the named values the whole system is built from. Build them in layers
 Rules:
 
 - Every meaning token has a value in the light and the dark theme.
-- Text and background pairs meet WCAG AA contrast: 4.5:1 for body text, 3:1 for large text and interface parts. Check every pair and record the ratio.
+- Text and background pairs meet WCAG AA contrast. Check every pair and record the ratio.
 - Keep scales short. If two values are rarely told apart, merge them.
 - Name by purpose, never by look: `danger`, not `red`.
 - Export the tokens from one source into the formats development uses (CSS variables, JSON). Never edit the same value by hand in two places.

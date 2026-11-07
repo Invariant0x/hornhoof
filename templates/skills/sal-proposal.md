@@ -13,4 +13,4 @@ sources: [msitarzewski/agency-agents sales/sales-proposal-strategist.md, alireza
 6. **Price and terms**: from the price list or the quote the CEO approved. Discounts, payment terms, legal terms and service levels are never your call; ask your head, who asks the CEO.
 7. **Next step**: how to accept, by when, and who to talk to.
 
-Keep it short: a decision maker should get it in two pages, in their own language. A proposal is an outbound message: it passes outbound approval, and the CEO sees the price section every time.
+Keep it short: a decision maker should get it in two pages, in their own language. A proposal is an outbound message: it passes outbound approval, and its price and terms need that approval too.

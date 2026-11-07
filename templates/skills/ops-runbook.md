@@ -17,4 +17,4 @@ Each runbook has:
 - **Rollback**: how to undo the steps.
 - **Owner and last tested**: role and date.
 
-Commands name secret store entries, never their values. Test a new runbook once on the real problem or a safe copy before you mark it ready. When a runbook was wrong during an incident, fix it the same day.
+Commands name secret store entries, never their values. Test a new runbook once on the real problem or a safe copy before you mark it ready. When a runbook was wrong during an incident, fix it before the next incident.

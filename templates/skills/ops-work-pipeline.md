@@ -9,7 +9,7 @@ How work moves through operations. Check each item only where a mistake cannot b
 
 ## Item by item
 
-- Every change others depend on has a rollback plan and a check written before it runs (ops-change-request). No rollback means it waits.
+- Every change others depend on has a rollback plan and a check written before it runs (ops-change-request).
 - Approval goes by blast radius: a reversible change inside the department is approved by someone other than its author; one that costs money, changes access for other departments or cannot be rolled back goes, item by item, to the person who decides it.
 
 ## In a batch

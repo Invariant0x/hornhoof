@@ -21,6 +21,6 @@ Approval:
 
 1. Low risk, reversible, inside Operations: you approve it, and the member who wrote the request is not the one who approves it.
 2. Anything that costs money, changes access for other departments or cannot be rolled back: ask the CEO through the orchestrator, with the request above.
-3. An emergency fix during an incident may run first, but its request is written the same day.
+3. An emergency fix during an incident may run first, but its request is written right after it.
 
 After the change, run the check, record the result next to the request, and tell the departments affected through the orchestrator. A failed check means rollback first, investigation second.

@@ -14,7 +14,7 @@ Write a spec for each shared component before development builds it:
 - **Tokens**: the meaning tokens each part uses.
 - **Behaviour**: keyboard use, what a click or tap does, how it handles long text, overflow and narrow screens.
 - **Accessibility**: role, accessible name, how its state is announced, a touch target of at least 44 by 44 px.
-- **Content**: rules for its labels and messages in English and Russian. Russian text often runs 20 to 30 percent longer.
+- **Content**: rules for its labels and messages in every language the product supports. A translation often runs longer than its source.
 - **Do and don't**: two or three examples of each.
 
 Show every variant and state on one mockup page. When an existing component almost fits, propose a variant before a new component.

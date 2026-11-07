@@ -26,20 +26,19 @@ describe('development check ownership', () => {
     expect(implement).toMatch(/only affected tests[\s\S]*run_tests/);
     expect(implement).toMatch(/tests (written|you wrote)[\s\S]*green[\s\S]*SHA/);
     expect(implement).not.toMatch(/Finish[^\n]*(formatter|linter|type checker|crapper|dryer)/);
-    const selection = body('dev-engineering-rules').split('\n').find(line => line.startsWith('- T2.'))!;
+    const selection = body('dev-testing-policy').split('\n').find(line => line.startsWith('- T2.'))!;
     expect(selection).toContain('run_tests');
     expect(selection).not.toMatch(/types|lint|crapper|dryer|whole package/);
-    for (const id of ['dev-gates', 'dev-engineering-rules']) {
-      const ordinary = body(id).split('\n').find(line => line.startsWith('| In work'))!;
-      expect(ordinary).toContain('affected tests');
-      expect(ordinary).not.toMatch(/types|lint|crapper|dryer/);
-    }
+    const ordinary = body('dev-testing-policy').split('\n').find(line => line.startsWith('| In work'))!;
+    expect(ordinary).toContain('affected tests');
+    expect(ordinary).not.toMatch(/types|lint|crapper|dryer/);
   });
 
   it('keeps final checks with testers instead of restoring author or reviewer runs', () => {
-    for (const id of ['dev-gates', 'dev-work-pipeline', 'dev-language-rules', 'dev-frontend-ui', 'dev-browser-check', 'dev-review-diff']) {
-      expect(body(id), id).toMatch(/test engineer|QA/i);
+    for (const id of ['dev-gates', 'dev-testing-policy', 'dev-work-pipeline', 'dev-review-diff']) {
+      expect(body(id), id).toMatch(/test engineer|QA/);
     }
+    for (const id of ['dev-language-rules', 'dev-browser-check']) expect(body(id), id).toContain('dev-testing-policy');
     expect(body('dev-review-diff')).not.toMatch(/developer runs them before submitting|one reviewer[^.]*runs mutator/);
     expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
     expect(body('dev-qa-acceptance')).toMatch(/findings[\s\S]*authors[\s\S]*tasks[\s\S]*small[\s\S]*fast path/);

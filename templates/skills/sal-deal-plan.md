@@ -14,4 +14,4 @@ For each deal past the first meeting, keep a short plan in the CRM:
 - **Close date**: worked back from the date they need it live, not from our quarter.
 - **Walk-away line**: what would make this a bad deal for us. Terms beyond it go to the CEO.
 
-Update the plan after every contact. If a step slips, say so in your report the same day, with the new date and the reason.
+Update the plan after every contact. If a step slips, say so in your next report, with the new date and the reason.

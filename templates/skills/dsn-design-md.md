@@ -15,7 +15,7 @@ It holds, in this order:
 4. **Layout**: grid, breakpoints, page widths, spacing between sections.
 5. **Components**: one short entry each, with a link to its full spec.
 6. **Patterns**: forms, tables, empty states, errors, confirmations, navigation.
-7. **Writing**: voice, a glossary of terms in English and Russian, formats for dates, numbers and money.
+7. **Writing**: voice, a glossary of terms in every language the product supports, formats for dates, numbers and money.
 8. **Accessibility rules** every screen must meet.
 
 Keep it short and current: update it in the same piece of work as any system change, and mark it with the system's version number. What is not written here does not exist for the agents who build from it.

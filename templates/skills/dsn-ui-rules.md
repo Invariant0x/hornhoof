@@ -28,6 +28,6 @@ Go through this list for every screen before you hand it over.
 - [ ] Forms keep what the user typed after an error and mark the field that failed.
 
 **Content**
-- [ ] Real text in both languages fits; numbers, dates and money follow each language's format.
+- [ ] Real text in every language fits; numbers, dates and money follow each language's format.
 
 A box you cannot tick is either fixed or written into the handoff as a known gap.

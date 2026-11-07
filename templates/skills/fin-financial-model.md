@@ -13,4 +13,4 @@ sources: [anthropics/financial-services plugins/agent-plugins/model-builder/skil
 6. **Scenarios**: base, downside and upside made by changing drivers, never by editing results. Show the runway in months for each.
 7. **Hygiene**: inputs in one place and one colour, no typed numbers inside formulas, one formula per row across all months, units and currency in every label.
 
-Add a one-page summary: what the model says, the three assumptions that matter most, and what would prove them wrong. The finance auditor checks the model with fin-spreadsheet-audit before it leaves the company.
+Add a one-page summary: what the model says, the three assumptions that matter most, and what would prove them wrong. The model is checked independently before it leaves the company.

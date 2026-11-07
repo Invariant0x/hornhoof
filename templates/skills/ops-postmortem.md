@@ -5,7 +5,7 @@ description: { en: "Writes a blameless account of an incident with its cause and
 kind: procedure
 sources: [wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md]
 ---
-Write one within two days for every incident that stopped a department, lost data, exposed a secret or cost money.
+Write one once the incident is closed for every incident that stopped a department, lost data, exposed a secret or cost money.
 
 - **Summary**: what happened, in three sentences someone outside Operations understands.
 - **Impact**: who was stopped, for how long, what was lost or spent.

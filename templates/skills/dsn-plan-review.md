@@ -12,7 +12,7 @@ Mark each point pass, gap or not needed:
 - [ ] **User and task**: who uses it, the main job they do, how often, on which devices.
 - [ ] **Screens and flow**: every screen and how the user moves between them, including the way back and the way out.
 - [ ] **States**: empty, loading, error, success, no access, partial data.
-- [ ] **Content**: real text in English and Russian, not placeholder text; the longest likely values.
+- [ ] **Content**: real text in every language the product supports, not placeholder text; the longest likely values.
 - [ ] **System fit**: which existing components it uses; anything new is named and justified.
 - [ ] **Accessibility**: keyboard path, contrast, readable text sizes, labels for screen readers.
 - [ ] **Edge cases**: many items, no items, a slow network, two people changing the same thing.

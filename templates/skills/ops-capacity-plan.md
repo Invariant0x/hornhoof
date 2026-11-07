@@ -5,7 +5,7 @@ description: { en: "Tracks nodes and subscriptions against the work planned and 
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/capacity-plan/SKILL.md]
 ---
-Capacity in Hornhoof is two things: nodes, the machines agents run on, and subscriptions, the Claude, Codex, Kimi and other plans people bring. A subscription belongs to its owner and serves wherever its owner works; you report on it, you never move it.
+Capacity in Hornhoof is two things: nodes, the machines agents run on, and subscriptions, the AI provider plans people bring. A subscription belongs to its owner and serves wherever its owner works; you report on it, you never move it.
 
 Once per turn, and before any big piece of work starts:
 

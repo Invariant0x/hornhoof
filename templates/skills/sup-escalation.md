@@ -7,8 +7,8 @@ sources: [anthropics/knowledge-work-plugins customer-support/skills/customer-esc
 ---
 When a member escalates a ticket, or you see one that must go up:
 
-1. Confirm the level: P1 (outage, data loss, security or privacy, legal threat, wrong charges at scale), P2, or a relationship risk (a large account about to leave, a public complaint).
-2. For P1, act within the hour: tell the orchestrator what is happening, how many customers are hit, and what you need from which department. Security and privacy issues also go to the people your company named for them, never into public channels.
+1. Confirm the level by the urgency scale of ticket triage, or a relationship risk (a large account about to leave, a public complaint).
+2. For P1, act before any other work: tell the orchestrator what is happening, how many customers are hit, and what you need from which department. Security and privacy issues also go to the people your company named for them, never into public channels.
 3. Name one owner for the case and one person who talks to the customer. The customer hears one voice.
 4. Decide what the customer hears now: that you know, what you are doing, when the next update comes. Never a cause you have not confirmed, a fix date, or compensation a human has not approved.
 5. Route the work through the orchestrator: bug reports to Development, billing cases to Finance, account and access issues to Operations, each with the reproducible report and the ticket ids.

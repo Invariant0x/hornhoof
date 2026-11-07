@@ -16,7 +16,7 @@ During:
 - Then deploy; watch the health check until it reports the new version.
 
 After:
-- Walk the main flow once on the deployed version and watch errors and logs for the first minutes.
+- Walk the main flow once on the deployed version and watch errors and logs until they settle.
 - If health fails or errors jump, roll back first and investigate after. A rollback is not a failure; a broken service left running is.
 - Report what you deployed, when, the health result and anything unusual.
 

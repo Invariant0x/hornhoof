@@ -71,7 +71,7 @@ const skillFile = (id: string, skill: Skill | undefined, body: string): SkillFil
 function skillList(files: SkillFile[]): string {
   return [
     '## Skills',
-    'Your other skills are files in your folder: .claude/skills/<name>/SKILL.md when you run in Claude Code, .agents/skills/<name>/SKILL.md in the other programs, which list them for you too. Before a step one of them covers, read its file whole and follow it.',
+    'Your other skills are files in your folder: .claude/skills/<name>/SKILL.md when you run in Claude Code, .agents/skills/<name>/SKILL.md in the other programs, which list them for you too. Before a step one of them covers, read its file whole and follow it. A skill may name another skill; when that one is not on your list, go on without it.',
     files.map(f => `- ${f.name}: ${f.description}`).join('\n'),
   ].join('\n\n');
 }
