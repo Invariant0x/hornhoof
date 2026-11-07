@@ -40,6 +40,23 @@ const fileItem = (path: string, text: string, mode = 0o644) => ({ path, kind: 'f
 const target = (context: CacheContext & { dir: string }) => ({ path: join(context.dir, KEY), key: KEY, inputDigest: INPUT });
 
 describe('a stored tree as one file for another machine', () => {
+  it.each([
+    ['the checkout itself', ['.']],
+    ['a path in another form', ['./t']],
+    ['a path with a part that says nothing', ['t/./x']],
+    ['a path it does not lay out', ['elsewhere']],
+  ])('takes no bundle whose roots name %s, as a machine restores those and gives their parents to a part', async (_what, roots) => {
+    const there = await machine(), file = await crafted(there, [{ path: 't', kind: 'directory' }, { path: 't/x', kind: 'directory' }], '', { roots });
+    await mkdir(there.dir, { mode: 0o700 });
+    await expect(unpackBundle(file, target(there), there)).rejects.toThrow(/root/);
+  });
+
+  it.each([['t//x'], ['t/./x'], ['.'], ['t/']])('takes no bundle that lays out %s, a path not in its one form', async path => {
+    const there = await machine(), file = await crafted(there, [{ path: 't', kind: 'directory' }, { path, kind: 'directory' }], '');
+    await mkdir(there.dir, { mode: 0o700 });
+    await expect(unpackBundle(file, target(there), there)).rejects.toThrow(/form/);
+  });
+
   it('gives every file one time wherever it was stored, taken from or copied to, so a tool comparing times finds all of it up to date', async () => {
     const here = await machine(), there = await machine(), entry = await built(here), file = join(here.cacheRoot, 'bundle');
     const times = async (root: string) => Promise.all(['node_modules/dep', 'node_modules/.bin/tool'].map(async path => (await stat(join(root, path))).mtimeMs));
@@ -98,7 +115,7 @@ describe('a stored tree as one file for another machine', () => {
   it('never makes a file that runs as its owner', async () => {
     const there = await machine(); await mkdir(there.dir);
     await expect(unpackBundle(await crafted(there, [fileItem('f', 'x', 0o4755)], 'x'), target(there), there)).rejects.toThrow();
-    await unpackBundle(await crafted(there, [fileItem('f', 'x', 0o755)], 'x'), target(there), there);
+    await unpackBundle(await crafted(there, [fileItem('f', 'x', 0o755)], 'x', { roots: ['f'] }), target(there), there);
     expect((await stat(join(there.dir, KEY, 'payload', 'f'))).mode & 0o7777).toBe(0o555);
   });
 });

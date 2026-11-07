@@ -13,6 +13,16 @@ async function context() {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-prepared-')); folders.push(cacheRoot);
   return { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} };
 }
+describe('restoring a stored tree', () => {
+  it('never takes a root for the checkout itself, whose parent would go to the part', async () => {
+    const ctx = await context(), destination = join(ctx.cacheRoot, 'part', 'repo'), key = 'a'.repeat(64);
+    await mkdir(destination, { recursive: true }); await writeFile(join(destination, 'kept'), 'still here');
+    const ready = { format: 2 as const, key, inputDigest: key, roots: ['.'], entries: [] };
+    await expect(cache.restoreCache({ path: join(ctx.cacheRoot, key), key, inputDigest: key, hit: true, ready }, destination, ctx)).rejects.toThrow(/root/);
+    expect(await readFile(join(destination, 'kept'), 'utf8')).toBe('still here');
+  });
+});
+
 describe('cache writer locking', () => {
   it('holds a process lock through the callback and lets another writer proceed after failure', async () => {
     const ctx = await context(), entered = deferred(), release = deferred();

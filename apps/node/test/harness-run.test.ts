@@ -12,7 +12,7 @@ vi.mock('node:child_process', async original => {
   const module = await original<typeof import('node:child_process')>();
   return { ...module, spawn: (bin: string, args: string[], options: import('node:child_process').SpawnOptions) => module.spawn(bin, args, { ...options, uid: undefined, gid: undefined }) };
 });
-vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>(), chownSync: () => {} }));
+vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>(), chownSync: () => {}, fchownSync: () => {} }));
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async (path: string) => { ids.chowned.push(path); } }));
 vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();

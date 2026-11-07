@@ -2,7 +2,8 @@ import type { Command } from '@hornhoof/protocol';
 
 /* The tools of a language as part of a product's harness. A product gets them when its repository names that language, once
    per architecture, and no other product does, so the machines' image holds no compiler a company does not use. Each comes from
-   where it is published, and what comes is checked against the digest published beside it. */
+   where it is published, and what comes is checked against the digest published beside it. PHP's builds alone have none, and come
+   by TLS only. */
 export const TOOLS = '.hornhoof/tools';
 export const TOOL_ORDER = ['c', 'go', 'rust', 'java', 'maven', 'gradle', 'php', 'ruby'] as const;
 export type ToolId = typeof TOOL_ORDER[number];

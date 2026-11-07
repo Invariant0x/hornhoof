@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, open, rm, symlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { constants, createZstdCompress, createZstdDecompress } from 'node:zlib';
@@ -63,13 +63,17 @@ class Bytes {
   async ended(): Promise<boolean> { return !this.held.length && !await this.more(); }
 }
 
-/* What makes the tree safe to lay out in order: every path comes once, right after a folder that is really a folder, so
-   nothing ever goes through a link, and no link leads out. */
+const inOneForm = (path: string) => path !== '.' && !path.endsWith('/') && posix.normalize(path) === path;
+
+/* What makes the tree safe to lay out in order: every path comes once, in one form, right after a folder that is really a folder,
+   so nothing ever goes through a link, and no link leads out. And a machine restores its roots by name, giving their parents to
+   the part, so those are only what it lays out: never the checkout itself, whose parent holds what the node does as root. */
 function checkEntries(ready: CacheReady, root: string): void {
   const folders = new Set(['.']), seen = new Set<string>();
   let bytes = 0;
   for (const item of ready.entries) {
     const parent = dirname(item.path);
+    if (!inOneForm(item.path)) throw new Error(`A bundle lays out ${item.path}, which is not in its one form.`);
     if (seen.has(item.path) || !folders.has(parent)) throw new Error(`A bundle lays out ${item.path} out of order.`);
     seen.add(item.path);
     if (item.kind === 'directory') folders.add(item.path);
@@ -77,6 +81,7 @@ function checkEntries(ready: CacheReady, root: string): void {
     if (item.kind === 'file') bytes += item.size;
   }
   if (bytes > MAX_BYTES) throw new Error('A bundle is too large.');
+  for (const path of ready.roots) if (!seen.has(path)) throw new Error(`A bundle names ${path} as a root and does not lay it out.`);
 }
 
 async function unpackFile(bytes: Bytes, payload: string, item: Extract<PayloadItem, { kind: 'file' }>): Promise<void> {

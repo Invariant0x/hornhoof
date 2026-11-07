@@ -21,7 +21,7 @@ vi.mock('node:child_process', async original => {
 });
 vi.mock('node:fs', async original => {
   const module = await original<typeof import('node:fs')>();
-  return { ...module, chownSync: () => {},
+  return { ...module, chownSync: () => {}, fchownSync: () => {},
     readdirSync: (path: import('node:fs').PathLike) => {
       const folder = String(path);
       if (['/tmp', '/var/tmp', '/dev/shm'].includes(folder)) return [...sharedState.builderFiles].filter(file => file.startsWith(folder + '/') && !file.slice(folder.length + 1).includes('/')).map(file => file.slice(folder.length + 1));

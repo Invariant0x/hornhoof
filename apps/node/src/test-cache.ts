@@ -276,8 +276,10 @@ async function restoredFolder(path: string, owner: JobUser | undefined): Promise
   if (owner) await chown(path, owner.uid, owner.gid);
 }
 async function restoredParents(root: string, path: string, owner: JobUser | undefined): Promise<void> {
+  const full = within(root, path);
+  if (full === resolve(root)) throw new Error('A stored root is the checkout itself.');
   let parent = root;
-  for (const part of relative(root, dirname(within(root, path))).split('/').filter(Boolean)) { parent = join(parent, part); await restoredFolder(parent, owner); }
+  for (const part of relative(root, dirname(full)).split('/').filter(Boolean)) { parent = join(parent, part); await restoredFolder(parent, owner); }
 }
 async function copiedFile(from: string, to: string, item: Extract<PayloadItem, { kind: 'file' }>, owner: JobUser | undefined): Promise<void> {
   await copyFile(from, to, constants.COPYFILE_EXCL);
