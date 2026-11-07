@@ -239,6 +239,13 @@ export async function storeStaged(entry: Pick<CacheEntry, 'path' | 'key' | 'inpu
   await rename(staging, entry.path); await syncPath(dirname(entry.path));
   return ready;
 }
+/* A copy keeps the owner of what it was copied from, and whoever built a tree runs again with it linked in: its owner could rewrite
+   it for every later run. So a stored file is the node's, as one that came from another machine is. */
+async function storedFile(path: string, mode: number): Promise<void> {
+  await chown(path, process.getuid!(), process.getgid!());
+  await atStoredTime(path);
+  await chmod(path, storedMode(mode));
+}
 async function publish(entry: CacheEntry, context: CacheContext, build: CacheBuild): Promise<CacheReady> {
   const staging = await mkdtemp(join(dirname(entry.path), '.staging-'));
   try {
@@ -247,7 +254,7 @@ async function publish(entry: CacheEntry, context: CacheContext, build: CacheBui
     await mkdir(payload, { mode: 0o700 }); await copyItems(source.root, payload, entries, context);
     const copied = await scanTree(payload, ['.'], context, false);
     if (!importMatches(entries, copied)) throw new Error('A preparation payload changed during import.');
-    await inBatches(copied, context, async item => { if (item.kind === 'file') { await atStoredTime(join(payload, item.path)); await chmod(join(payload, item.path), storedMode(item.mode)); } });
+    await inBatches(copied, context, item => (item.kind === 'file' ? storedFile(join(payload, item.path), item.mode) : Promise.resolve()));
     return await storeStaged(entry, staging, { format: 2, key: entry.key, inputDigest: entry.inputDigest, roots, entries: copied }, context);
   } finally { await rm(staging, { recursive: true, force: true }); }
 }

@@ -244,7 +244,8 @@ describe('what a part gets of a shared tree', () => {
     expect(ids.handedOver.some(({ path }) => /\/builders\/unit-[^/]+$/.test(path))).toBe(true);
     expect(ids.handedOver.filter(({ dependencies }) => dependencies)).toEqual([]);
     expect(ids.chowned.filter(path => path.endsWith('/node_modules')).length).toBeGreaterThan(0);
-    expect(ids.chowned.filter(path => path.endsWith('/node_modules/ready'))).toEqual([]);
+    /* Stored, it becomes the node's; linked into a part, it stays so. */
+    expect(ids.chowned.filter(path => path.endsWith('/node_modules/ready') && !path.includes('/payload/'))).toEqual([]);
     expect(ids.chowned.filter(path => path.endsWith('/template/ready')).length).toBeGreaterThan(0);
   });
 
