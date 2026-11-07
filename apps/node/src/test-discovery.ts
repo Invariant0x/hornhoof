@@ -117,7 +117,7 @@ const GO_MODULES = String.raw`go list -m -f '{{if not .Main}}{{.Path}}{{end}}' a
 const go: Finder = seen => Promise.all(foldersWith(seen, ['go.mod']).map(async root => {
   const file = under(root, 'go.mod'), text = await read(seen, file);
   /* A workspace reads all its modules, and a module can replace a dependency with one beside it. */
-  const reaches = seen.tracked.has('go.work') || /=>\s*\.\.\//.test(text), others = reaches ? foldersWith(seen, ['go.mod']).map(folder => under(folder, 'go.mod')).filter(path => path !== file) : [];
+  const reaches = seen.tracked.has('go.work') || /=>\s*\.\.\//.test(text), others = reaches ? foldersWith(seen, ['go.mod']).filter(folder => folder !== root).flatMap(folder => within(seen, folder, ['go.mod', 'go.sum'])) : [];
   return {
     language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(text) }],
     inputs: [...within(seen, root, ['go.mod', 'go.sum']), ...within(seen, '.', ['go.work', 'go.work.sum']), ...others],
@@ -282,10 +282,8 @@ function namedAsks(named: Map<string, string>): Ask[] {
 function toolAsk(asks: Ask[], named: Map<string, string>, id: ToolId, programs: Program[]): ToolAsk {
   const ofTool = asks.filter(ask => ask.tool === id), chosen = Object.entries(NAMED_TOOLS).find(([name, tool]) => tool === id && named.has(name))?.[0];
   const version = chosen ? namedVersion(id, named.get(chosen)!) : newest(ofTool.flatMap(ask => (ask.version ? [ask.version] : [])));
-  const packages = [...new Set(ofTool.flatMap(ask => ask.packages ?? []))];
-  if (chosen) return { version, chosen: true, packages, ownFile: [], noDefault: false };
   const ownFile = programs.flatMap(program => program.asks.flatMap(ask => (ask.tool === id && ask.ownFile ? [{ root: program.root, path: ask.ownFile }] : [])));
-  return { version, chosen: false, packages, ownFile, noDefault: ownFile.length === programs.filter(program => program.asks.some(ask => ask.tool === id)).length };
+  return { version, packages: [...new Set(ofTool.flatMap(ask => ask.packages ?? []))], ownFile, noDefault: !chosen && ownFile.length === programs.filter(program => program.asks.some(ask => ask.tool === id)).length };
 }
 
 const ID_LIMIT = 50;

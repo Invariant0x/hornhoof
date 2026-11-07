@@ -44,6 +44,18 @@ const PROJECTS: Project[] = [
   { name: 'python', files: PYTHON, broken: PYTHON_BROKEN },
   { name: 'go', tools: 'golang 1.25.4\n', lock: { command: 'go mod tidy', files: ['go.mod', 'go.sum'] }, files: GO, broken: GO_BROKEN },
   {
+    name: 'go-workspace', tools: 'golang 1.25.4\n', lock: { command: '(cd b && go mod tidy)', files: ['b/go.mod', 'b/go.sum'] },
+    files: {
+      'go.work': 'go 1.25.4\n\nuse (\n\t./a\n\t./b\n)\n',
+      'a/go.mod': 'module example.test/a\n\ngo 1.25.4\n',
+      'a/a.go': 'package a\n\nimport "example.test/b"\n\nfunc Title(s string) string { return b.Title(s) }\n',
+      'a/a_test.go': 'package a\n\nimport "testing"\n\nfunc TestTitle(t *testing.T) {\n\tif Title("hello") != "Hello" {\n\t\tt.Fatal(Title("hello"))\n\t}\n}\n',
+      'b/go.mod': 'module example.test/b\n\ngo 1.25.4\n\nrequire golang.org/x/text v0.20.0\n',
+      'b/b.go': GO['shop.go']!.replace('package shop', 'package b'),
+    },
+    broken: { 'a/a_test.go': GO_BROKEN['shop_test.go']!.replace('package shop', 'package a') },
+  },
+  {
     name: 'rust', tools: 'rust 1.90.0\n', lock: { command: 'cargo generate-lockfile', files: ['Cargo.lock'] },
     files: {
       'rust-toolchain.toml': '[toolchain]\nchannel = "1.90.0"\nprofile = "minimal"\n',
@@ -55,6 +67,17 @@ const PROJECTS: Project[] = [
       'crates/app/src/main.rs': 'fn main() { println!("{}", shop_core::json("a")); }\n',
     },
     broken: { 'crates/core/tests/json.rs': `#[test]\nfn names_an_item() { panic!("${BROKEN}"); }\n` },
+  },
+  {
+    name: 'rust-beside', tools: 'rust 1.99.1\n', lock: { command: '(cd api && cargo generate-lockfile) && (cd shared && cargo generate-lockfile)', files: ['api/Cargo.lock', 'shared/Cargo.lock'] },
+    files: {
+      'api/Cargo.toml': '[package]\nname = "api"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nshared = { path = "../shared" }\n',
+      'api/src/lib.rs': 'pub fn text() -> String { shared::text(7) }\n',
+      'api/tests/text.rs': '#[test]\nfn writes_seven() { assert_eq!(api::text(), "7"); }\n',
+      'shared/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nitoa = "1"\n',
+      'shared/src/lib.rs': 'pub fn text(n: u32) -> String { itoa::Buffer::new().format(n).to_string() }\n',
+    },
+    broken: { 'api/tests/text.rs': `#[test]\nfn writes_seven() { panic!("${BROKEN}"); }\n` },
   },
   {
     name: 'maven', files: { ...JAVA_SOURCES, 'pom.xml': '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>a</groupId><artifactId>shop</artifactId><version>1</version><properties><maven.compiler.release>21</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties><dependencies><dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.11.3</version><scope>test</scope></dependency></dependencies><build><plugins><plugin><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version></plugin></plugins></build></project>\n' },

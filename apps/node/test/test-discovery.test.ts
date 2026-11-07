@@ -126,7 +126,7 @@ describe('a Go project', () => {
 
   it('gives a program what it reaches outside its folder: a workspace, or another module it replaces a dependency with', async () => {
     const workspace = await found({ 'go.work': 'go 1.25.0\nuse (\n\t./a\n\t./b\n)\n', 'a/go.mod': 'module a\n', 'b/go.mod': 'module b\n', 'b/go.sum': '' });
-    expect(workspace.prepare[0]!.inputs).toEqual(['a/go.mod', 'go.work', 'b/go.mod']);
+    expect(workspace.prepare[0]!.inputs).toEqual(['a/go.mod', 'go.work', 'b/go.mod', 'b/go.sum']);
     expect(workspace.prepare[1]!.inputs).toEqual(['b/go.mod', 'b/go.sum', 'go.work', 'a/go.mod']);
     const replaced = await found({ 'a/go.mod': 'module a\nreplace b => ../b\n', 'b/go.mod': 'module b\n' });
     expect(replaced.prepare[0]!.inputs).toEqual(['a/go.mod', 'b/go.mod']);
@@ -321,11 +321,12 @@ describe('what the head and the owner chose', () => {
     expect(installs.some(text => text.startsWith(command))).toBe(true);
   });
 
-  it('wins over a Rust toolchain file too, which Rust would otherwise obey in every run', async () => {
+  it('also brings what a Rust toolchain file names, as Rust obeys that file in its project whatever else was chosen', async () => {
     const manifest = await found({ '.tool-versions': 'rust 1.90.0\n', 'Cargo.toml': '[package]\nname = "a"\n', 'Cargo.lock': '', 'rust-toolchain.toml': '[toolchain]\nchannel = "1.82.0"\n' });
-    expect(manifest.dependencies).toMatchObject({ env: { RUSTUP_TOOLCHAIN: '1.90.0' }, inputs: [] });
-    expect(manifest.dependencies.install.map(command => command.args.join(' '))).toContain('toolchain install 1.90.0 --no-self-update --profile minimal --component rustfmt --component clippy');
-    expect(manifest.dependencies.install.map(command => command.args.join(' '))).not.toContain('toolchain install --no-self-update');
+    expect(manifest.dependencies.inputs).toEqual(['rust-toolchain.toml']);
+    const installs = manifest.dependencies.install.map(command => command.args.join(' '));
+    expect(installs).toContain('toolchain install 1.90.0 --no-self-update --profile minimal --component rustfmt --component clippy');
+    expect(installs).toContain('toolchain install --no-self-update');
   });
 
   it('adds a C compiler to a project only when it is named, as most need none', async () => {

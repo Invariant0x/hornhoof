@@ -28,7 +28,7 @@ No language's tools are in the machines' image, and a product gets only those of
 
 Node and Python are the machines' own, so a key holds their version and a run gets the version its machine has.
 
-The head of development and the owner choose the languages when they choose the architecture, and name them in `.tool-versions` at the root of the repository, in the format asdf reads (`golang 1.25.4`, `java 21`). The harness then comes up before there is any code, with one suite, `tools`, that shows each of them runs. What that file names wins. Without it a version comes from the project's own files (`go.mod`, `rust-toolchain.toml`, `pom.xml`, `build.gradle`, `composer.json`, `.ruby-version` and the like), and with no word on it, from the newest version known when the code was written.
+The head of development and the owner choose the languages when they choose the architecture, and name them in `.tool-versions` at the root of the repository, in the format asdf reads (`golang 1.25.4`, `java 21`). The harness then comes up before there is any code, with one suite, `tools`, that shows each of them runs. What that file names wins, but for a Rust toolchain file, which Rust obeys in its project: both then come. Without it a version comes from the project's own files (`go.mod`, `rust-toolchain.toml`, `pom.xml`, `build.gradle`, `composer.json`, `.ruby-version` and the like), and with no word on it, from the newest version known when the code was written.
 
 ## Several programs
 

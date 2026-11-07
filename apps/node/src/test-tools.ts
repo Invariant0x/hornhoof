@@ -7,9 +7,9 @@ export const TOOLS = '.hornhoof/tools';
 export const TOOL_ORDER = ['c', 'go', 'rust', 'java', 'maven', 'gradle', 'php', 'ruby'] as const;
 export type ToolId = typeof TOOL_ORDER[number];
 export type Tool = { id: ToolId; install: Command[]; paths: string[]; inputs?: string[]; env?: Record<string, string>; bin: string[] };
-/* What a repository asks of a tool. chosen: its version is the one .tool-versions names. ownFile: the projects that say their
-   version in a file of their own. noDefault: all that use it do, so no other version is needed. */
-export type ToolAsk = { version: string | undefined; chosen: boolean; packages: string[]; ownFile: { root: string; path: string }[]; noDefault: boolean };
+/* What a repository asks of a tool. ownFile: the projects that say their version in a file of their own, which the tool obeys
+   there. noDefault: all that use it do, and nobody chose a version, so no other is needed. */
+export type ToolAsk = { version: string | undefined; packages: string[]; ownFile: { root: string; path: string }[]; noDefault: boolean };
 
 const at = (program: string, ...args: string[]): Command => ({ program, args, cwd: '.' });
 const script = (text: string, ...args: string[]): Command => at('sh', '-c', `set -eu\n${text}`, 'sh', ...args);
@@ -79,9 +79,7 @@ rm -f "$TMPDIR/rustup-init"`;
 function rustTool(version: string, ask: ToolAsk): Tool {
   const own = ask.ownFile.map(({ root }): Command => ({ program: 'rustup', args: ['toolchain', 'install', '--no-self-update'], cwd: root }));
   const common = ask.noDefault ? [] : [at('rustup', 'toolchain', 'install', version, '--no-self-update', '--profile', 'minimal', '--component', 'rustfmt', '--component', 'clippy'), at('rustup', 'default', version)];
-  /* A toolchain file in a project would otherwise overrule what was chosen, in every run. */
-  const env = { RUSTUP_HOME, ...(ask.chosen ? { RUSTUP_TOOLCHAIN: version } : {}) };
-  return { id: 'rust', paths: [RUSTUP_HOME, CARGO_TOOLS], env, bin: [`${CARGO_TOOLS}/bin`], inputs: ask.ownFile.map(({ path }) => path), install: [script(RUSTUP_INSTALL, CARGO_TOOLS), ...common, ...own] };
+  return { id: 'rust', paths: [RUSTUP_HOME, CARGO_TOOLS], env: { RUSTUP_HOME }, bin: [`${CARGO_TOOLS}/bin`], inputs: ask.ownFile.map(({ path }) => path), install: [script(RUSTUP_INSTALL, CARGO_TOOLS), ...common, ...own] };
 }
 
 const JAVA_PATH = `${TOOLS}/java`;
