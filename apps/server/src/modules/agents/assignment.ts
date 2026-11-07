@@ -20,7 +20,8 @@ export async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof
       companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'applied',
       data: { action: 'set_employee_assignment', employee: body.employee },
     }, async tx => {
-      const [head] = await tx.select().from(agents).where(and(eq(agents.id, job.agentId), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('update');
+      /* The audit FK already holds KEY SHARE. Serialize ACL changes without deadlocking parallel audit inserts. */
+      const [head] = await tx.select().from(agents).where(and(eq(agents.id, job.agentId), eq(agents.companyId, job.companyId), isNull(agents.removedAt))).for('no key update');
       if (!head || head.kind !== 'head' || !head.departmentId) throw forbidden();
       const [department] = await tx.select().from(departments).where(and(eq(departments.id, head.departmentId), eq(departments.companyId, job.companyId), isNull(departments.parentId)));
       if (!department) throw forbidden();

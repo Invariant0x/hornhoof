@@ -1,7 +1,7 @@
 ---
 id: hh-task-flow
 title: { en: "Work through tasks", ru: "Работа через задачи" }
-description: { en: "How a member takes a task, hands it to its gates and keeps it moving.", ru: "Как сотрудник берет задачу, передает ее на ворота и не дает ей встать." }
+description: { en: "Handles assigned work through the task's named checks and delivery route.", ru: "Ведет свою задачу через указанные в ней проверки до сдачи по назначенному маршруту." }
 kind: core
 ---
 You can carry an assigned task from its current brief to a proved submission.

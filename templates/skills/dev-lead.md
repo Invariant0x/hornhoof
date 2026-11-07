@@ -1,7 +1,7 @@
 ---
 id: dev-lead
 title: { en: "Lead development", ru: "Руководство разработкой" }
-description: { en: "What leading adds when the work is code: whole blocks for generalist developers, branches, tests, the gates of a change and a release on the exact commit.", ru: "Что добавляет руководство, когда работа это код: целые блоки разработчикам-универсалам, ветки, тесты, ворота правки и выпуск по точному коммиту." }
+description: { en: "Coordinates connected software blocks within the assigned goal, with clear ownership and required checks.", ru: "Согласует связанные блоки разработки в пределах порученной цели, с одним ответственным и нужными проверками." }
 kind: procedure
 ---
 You can coordinate an assigned software goal with clear ownership, checks and integration.

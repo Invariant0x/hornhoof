@@ -1,7 +1,7 @@
 ---
 id: dev-gates
 title: { en: "Choose development checks", ru: "Выбирать проверки разработки" }
-description: { en: "Moves each turn through four gates in order: development, review, testing and release. Review and testing run once per turn.", ru: "Проводит каждый ход через четыре ворот по порядку: разработка, ревью, тестирование и выпуск. Ревью и тестирование идут один раз за ход." }
+description: { en: "Chooses checks from the assignment, task and risk, preserving independent approval before protected integration.", ru: "Выбирает проверки по назначению, задаче и риску, сохраняя независимое одобрение перед слиянием защищенных изменений." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m/ECC skills/council-multi-model/SKILL.md, affaan-m/ECC skills/santa-method/SKILL.md]
 ---
