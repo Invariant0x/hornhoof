@@ -32,6 +32,8 @@ describe('a JavaScript project', () => {
     { 'yarn.lock': '# yarn lockfile v1\n', '.pnp.cjs': 'module.exports={}' },
     { 'yarn.lock': '# yarn lockfile v1\n', '.yarnrc.yml': 'nodeLinker: pnp\n' },
     { 'yarn.lock': '# yarn lockfile v1\n', 'package.json': pkg({ installConfig: { pnp: true } }) },
+    { 'yarn.lock': '# yarn lockfile v1\n', 'package.json': pkg({ packageManager: 'yarn@4.5.0' }) },
+    { 'yarn.lock': '# yarn lockfile v1\n', '.yarnrc': '--install.pnp true\n' },
   ])('refuses an unsupported Yarn PnP environment before preparing it: %j', async files => {
     await expect(discoverEnvironment(tree({ 'package.json': pkg(), ...files }))).rejects.toMatchObject({ code: 'environment_unsupported', message: expect.stringContaining('Yarn') });
   });
