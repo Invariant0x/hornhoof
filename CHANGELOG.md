@@ -22,6 +22,7 @@ agent's instructions from shared skills and the skills of its department.
 - Choose affected test groups by changed paths; a shared protocol change also selects its consumers.
 - Load common instructions, leadership rules and department knowledge as separate skills. Existing heads and employees
   receive the speed skill without replacing their role text.
+- Give heads one shared rule for fitting small work into a turn before its final check and choosing the check it needs.
 
 ### Fixed
 
@@ -47,6 +48,7 @@ agent's instructions from shared skills and the skills of its department.
 - Группы тестов выбираются по измененным путям. Правка общего протокола выбирает также его потребителей.
 - Общие инструкции, правила руководителя и знания отдела подключаются отдельными навыками. Действующие главы и сотрудники
   получают навык быстрой работы без замены текста их роли.
+- Главы получают общее правило, как включать мелкую работу в ход до итоговой проверки и выбирать нужную ей проверку.
 - Копия сохраненного состояния сервиса доступна тестовому заданию на запись с сохранением защиты от подмены ссылками.
 - Для маршрутов общей среды явно заданы правила доступа, а ее инструмент включен в списки инструментов сотрудников.
 
