@@ -38,6 +38,8 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
   if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, assignment_epoch: 0, workspace_id: null, workspace_spec_version: null } }));
+  /* Every head and member gets the speed skill its role lists. */
+  if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
   if (table !== 'tasks') return rows;
   return rows.map(({ row }) => ({ row: {
     ...row, assignment_epoch: 0,
