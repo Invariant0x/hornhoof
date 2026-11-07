@@ -14,7 +14,7 @@ const Assignment = z.strictObject({ employee: z.uuid(), assignment: z.string().m
 const forbidden = () => new ApiError(403, 'forbidden', 'A head can set only the assignment of a current worker in its own department.', 'not_your_department');
 
 /* This authority changes text alone. It never delegates the employee-card PATCH surface. */
-async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof Assignment>): Promise<void> {
+export async function setAssignment(ctx: Ctx, job: ToolJob, body: z.infer<typeof Assignment>): Promise<void> {
   await onAgent(ctx, body.employee, async () => {
     await appendEvent(ctx, {
       companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'applied',

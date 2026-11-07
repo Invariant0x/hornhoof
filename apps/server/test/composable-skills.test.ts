@@ -17,6 +17,13 @@ describe('standalone employee abilities', () => {
     expect(edges).toEqual([]);
   });
 
+  it('defines any numbered local policy label within the ability that uses it', () => {
+    for (const skill of templates.skills.values()) {
+      const labels = new Set(skill.body.match(/\bT\d+\b/g) ?? []);
+      for (const label of labels) expect(skill.body, `${skill.id}: ${label}`).toMatch(new RegExp(`\\*\\*${label}:`));
+    }
+  });
+
   it('gives every department short identities instead of role workflows', () => {
     expect(new Set([...templates.roles.values()].map(r => r.department)).size).toBe(10);
     for (const role of templates.roles.values()) {
