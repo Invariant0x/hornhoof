@@ -427,6 +427,7 @@ test('arguments need exact commits', () => {
 const MANIFEST = {
   defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['node', 'scripts', 'ruby'] }, { id: 'final', requiredSuiteIds: ['node', 'scripts', 'ruby', 'pg'] }],
   impact: { adapter: 'typescript', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'x' } },
+  mutation: { status: 'unsupported', language: 'typescript', reason: 'x' },
   suites: [vitestSuite, { id: 'scripts', root: 'scripts', files: ['scripts/test/*.test.mjs'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, finalChecks: [] }, opaqueSuite,
     { id: 'pg', root: 'apps/node', files: ['apps/node/test/**/*.pg.ts'], run: { program: 'npx', args: ['--no-install', 'vitest', 'run'], cwd: 'apps/node' }, split: { kind: 'argv-files' }, finalChecks: [] }],
 };
