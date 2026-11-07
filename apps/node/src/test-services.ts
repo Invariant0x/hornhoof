@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, constants, cpSync, existsSync, fchmodSync, fchownSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { redact } from './redact.js';
 import type { JobUser } from './isolation.js';
 import { checkDeadline } from './test-context.js';
 import { signalProcessGroup } from './process-group.js';
-import { copyServiceTree, withServiceDirectory, writeServiceFile } from './test-service-files.js';
+import { copyServiceSource, copyServiceTree, withServiceDirectory, writeServiceFile } from './test-service-files.js';
 
 export interface ServiceCommand { program: string; args: string[]; cwd: string }
 interface ServiceBase { id: string; runtime: string; profiles: string[] }
@@ -458,14 +458,15 @@ async function prepareCommands(definitions: ServiceDefinitions, checkout: string
 }
 function copyDeclaredState(service: ServiceDefinition, source: string, destination: string): void {
   if (service.driver === 'postgres') {
-    cpSync(source, destination, { recursive: true, dereference: false, errorOnExist: true });
+    copyServiceSource(source, destination);
     return;
   }
   mkdirSync(destination, { mode: 0o700 });
-  for (const path of service.options.statePaths) {
-    const target = inside(destination, path);
+  const paths = [...new Set(service.options.statePaths.map(path => inside(source, path)))];
+  for (const path of paths.filter(path => !paths.some(parent => path.startsWith(parent + sep)))) {
+    const target = inside(destination, path.slice(resolve(source).length + 1));
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-    cpSync(inside(source, path), target, { recursive: true, dereference: false, errorOnExist: true });
+    copyServiceSource(path, target);
   }
 }
 async function buildArtifacts(definitions: ServiceDefinitions, checkout: string, root: string, context: ServicePrepareContext, fingerprint: string): Promise<void> {
@@ -480,7 +481,6 @@ async function buildArtifacts(definitions: ServiceDefinitions, checkout: string,
     mkdirSync(join(stage, 'payload'), { recursive: true, mode: 0o700 });
     for (const service of definitions.services) {
       const source = join(work, service.id);
-      payloadFiles(source);
       copyDeclaredState(service, source, join(stage, 'payload', service.id));
     }
     const ready: Receipt = { format: FORMAT, inputDigest: context.inputDigest, definitions: hash(JSON.stringify(definitions)), runtime: fingerprint, checksums: payloadFiles(join(stage, 'payload')) };

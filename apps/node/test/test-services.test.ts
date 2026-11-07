@@ -221,6 +221,15 @@ describe('managed process services', () => {
     await opened.close();
     expect(existsSync(opened.env.HH_SERVICE_STATE!)).toBe(false);
   });
+  it('copies overlapping and repeated declared paths only once', async () => {
+    const defs = processDefinitions();
+    const service = defs.services[0]!;
+    if (service.driver !== 'process') throw new Error('Expected a process fixture');
+    service.options.statePaths = ['data/./', 'data', 'data/nested'];
+    const artifacts = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) });
+    expect(readFileSync(join(artifacts.paths.worker!, 'data', 'value'), 'utf8')).toBe('prepared');
+    expect(readFileSync(join(artifacts.paths.worker!, 'data', 'stopped'), 'utf8')).toBe('yes');
+  });
   it('waits for descendant writers before snapshotting declared process state', async () => {
     const defs = processDefinitions(1000);
     const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'child-stopped'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER,'yes');process.exit(0)},500));fs.writeFileSync(p.join(d,'child-ready'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER+'.ready','yes');setInterval(()=>{},100)";
