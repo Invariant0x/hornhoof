@@ -62,7 +62,7 @@ npx tsc -p apps/node/tsconfig.json --noEmit
 
 Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
 
-Coverage for crapper is `npx vitest run --coverage` in the part's folder after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
+Coverage for crapper is `npx vitest run --coverage` in the part's folder, on the dependencies its harness put there or after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
 
 What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
 

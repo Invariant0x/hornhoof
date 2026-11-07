@@ -12,12 +12,9 @@ The Python helper under `impact-python/` parses a complete package file list wit
 
 ## Standalone report
 
-Run these commands through the shared test runner, with the expected candidate SHA checked first:
+Run this through the shared test runner, with the expected candidate SHA checked first. The harness of the run has dependencies and the builds in place; when its log says it started without the harness, run `npm ci` and build `@hornhoof/protocol` and `@hornhoof/node` first:
 
 ```sh
-npm ci
-npm run build -w @hornhoof/protocol
-npm run build -w @hornhoof/node
 node scripts/test/replay-impact.mjs request.json > replay.json
 ```
 
@@ -27,4 +24,4 @@ Use a fresh immutable checkout for the candidate; this reporting port does not l
 
 The JSON scope is `historical-diffs-at-candidate`. Width uses canonical test units as its denominator, including separate project variants. Without a suitable full comparator, omitted failures are `unavailable`, not zero. With one, an omitted observed failure is reported without claiming the change caused it. Exit codes are 0 for a recorded report, 2 for observed omitted failures, 3 for blocked selection, and 1 for collection/input failure before a report can be produced. Exit 0 does not mean the selected tests passed.
 
-Production environment/runner integration (#280/#222), selection-miss storage (#308), and timing against turn 7 are separate unfinished ports. They are not implemented by this script.
+This script only reports. The selector runs on real changes in the author's check (`.hornhoof/author-check.md`), the fingerprints of test files read its rules (`apps/node/src/test-fingerprint.ts`), and what a full run finds red that kept results called green counts as a selection miss in the pipeline report.
