@@ -8,6 +8,7 @@ import type { CompareResult } from '../testruns/compare.js';
 import type { RepoAddress } from '../testruns/refs.js';
 import type { Task, Tx } from './engine.js';
 import { authorQuality, CheckReceiptPart, checkReceiptPart, QualityEvidence, unavailableQuality } from './review-quality.js';
+import { verifiedReuse } from './review-reuse.js';
 import { ReviewSha } from './review-schema.js';
 
 export { ReviewSha } from './review-schema.js';
@@ -44,22 +45,23 @@ export async function authorVendor(db: Store, authorId: string): Promise<string 
   return row?.provider ? reviewVendor(row.provider) : null;
 }
 
-function verifiedRun(run: TestRun, parts: Part[], commit: string | null): boolean {
-  return commit !== null && run.commitSha === commit && run.status === 'passed' && parts.length === run.parts && parts.every(part => part.status === 'passed' && part.commit === commit && part.exitCode === 0 && !part.error);
+async function verifiedRun(run: TestRun, parts: Part[], commit: string | null): Promise<boolean> {
+  if (commit === null || run.commitSha !== commit || run.status !== 'passed' || parts.length !== run.parts) return false;
+  return parts.length ? parts.every(part => part.status === 'passed' && part.commit === commit && part.exitCode === 0 && !part.error) : verifiedReuse(run);
 }
 
-function runRecord(run: TestRun, allParts: Part[], commit: string | null): Review['runs'][number] {
+async function runRecord(run: TestRun, allParts: Part[], commit: string | null): Promise<Review['runs'][number]> {
   const parts = allParts.filter(part => part.runId === run.id);
   const passed = parts.filter(part => part.status === 'passed').length;
   const failed = parts.filter(part => part.status === 'failed').length;
-  return { id: run.id, number: run.number, authorId: run.agentId, commit: run.commitSha, command: run.command, status: run.status, parts: { passed, failed, other: parts.length - passed - failed }, receipts: parts.map(checkReceiptPart), verified: verifiedRun(run, parts, commit) };
+  return { id: run.id, number: run.number, authorId: run.agentId, commit: run.commitSha, command: run.command, status: run.status, parts: { passed, failed, other: parts.length - passed - failed }, receipts: parts.map(checkReceiptPart), verified: await verifiedRun(run, parts, commit) };
 }
 
 async function authorRuns(db: Store, task: Task, commit: string | null, branch?: string): Promise<Review['runs']> {
   const scope = branch ? and(eq(testRuns.branch, branch), inArray(testRuns.departmentId, [task.productId, task.departmentId].filter((id): id is string => id !== null))) : and(eq(testRuns.taskId, task.id), eq(testRuns.agentId, task.executorAgentId!));
   const runs = await db.select().from(testRuns).where(and(eq(testRuns.companyId, task.companyId), scope, eq(testRuns.kind, 'tests'))).orderBy(desc(testRuns.number));
   const parts = runs.length ? await db.select().from(testParts).where(inArray(testParts.runId, runs.map(run => run.id))) : [];
-  return runs.map(run => runRecord(run, parts, commit));
+  return Promise.all(runs.map(run => runRecord(run, parts, commit)));
 }
 
 export async function turnReviewContext(db: Tx, task: Task, head: string, branch: string, comparison: CompareResult): Promise<Review> {

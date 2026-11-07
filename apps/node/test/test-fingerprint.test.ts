@@ -469,13 +469,13 @@ describe('source files mutation checks', () => {
     expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([key]);
   });
 
-  it.each(['apps/a/test/helper.ts', 'apps/a/test/deep-helper.ts', 'scripts/mutation/config-helper.mjs'])('follow transitive judges input %s', async path => {
+  it.each(['apps/a/test/helper.ts', 'apps/a/test/deep-helper.ts', 'apps/b/src/config-helper.ts'])('follow transitive judges input %s', async path => {
     const files = { ...app,
       'apps/a/test/used.test.ts': `${app['apps/a/test/used.test.ts']}\nimport './helper.js';`,
       'apps/a/test/helper.ts': "import './deep-helper.js';\nexport {};",
       'apps/a/test/deep-helper.ts': 'export {};',
-      'scripts/mutation/vitest.config.mjs': "import './config-helper.mjs';\nexport default {};",
-      'scripts/mutation/config-helper.mjs': 'export {};',
+      'scripts/mutation/vitest.config.mjs': "import '../../apps/b/src/config-helper.js';\nexport default {};",
+      'apps/b/src/config-helper.ts': 'export {};',
     };
     expect(await changed(input(files, value), input({ ...files, [path]: 'export const weakened = true;' }, value))).toContain(key);
   });
