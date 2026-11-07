@@ -55,7 +55,7 @@ describe('employee assignment authority', () => {
 
   it('refuses other departments, other companies, heads, removed employees and unrelated patch fields', async () => {
     const { db, company, head, worker, other, connect } = await fixture();
-    const [foreignCompany] = await db.insert(companies).values({ name: 'Other' }).returning();
+    const [foreignCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [foreign] = await db.insert(agents).values({ companyId: foreignCompany!.id, kind: 'worker', name: 'Foreign', model: '' }).returning();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const [removed] = await db.insert(agents).values({ ...worker, id: undefined, name: 'Removed', removedAt: new Date() }).returning();

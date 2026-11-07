@@ -59,6 +59,21 @@ describe('hiring', () => {
 });
 
 describe('the employee card', () => {
+  it('stores an orchestrator assignment separately from its standing identity', async () => {
+    const { app, db, ceo } = await company();
+    const assignment = '\nCoordinate the named company goals.  \n';
+    const res = await patch(app, ceo, 'orchestrator', { base: assignment });
+    expect(res.statusCode).toBe(200);
+    const card = res.json();
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'base')).toMatchObject({ text: 'You are the Orchestrator who runs the company with its CEO.', overridden: false });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain(assignment);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect((await instructionsOf(app.ctx, orchestrator!)).text).toContain(assignment);
+    expect((await instructionsOf(app.ctx, orchestrator!, false)).text).toContain(assignment);
+    expect((await patch(app, ceo, 'orchestrator', { base: null })).statusCode).toBe(200);
+    expect((await open(app, ceo, 'orchestrator')).json().parts.find((p: { kind: string }) => p.kind === 'assignment').text).not.toContain(assignment);
+  });
+
   it("opens an employee's card with its skills, prompt parts and raw text", async () => {
     const { app, db, ceo, dev, teamKey, codex, brunoId, role } = await company();
     const res = await open(app, ceo, brunoId);
