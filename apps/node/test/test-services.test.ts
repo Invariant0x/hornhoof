@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,7 +37,7 @@ function executable(name: string, body: string): void {
 function fakePostgres(): void {
   const common = `const fs=require('node:fs'); const p=require('node:path'); const a=process.argv.slice(2); if(a.includes('--version')) { console.log(p.basename(process.argv[1])+' (PostgreSQL) 17.4'); process.exit(0); }`;
   executable('initdb', `${common} if(process.env.INIT_MARKER) fs.appendFileSync(process.env.INIT_MARKER,'init\\n'); const dir=a[a.indexOf('-D')+1]; fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(p.join(dir,'PG_VERSION'),'17'); fs.writeFileSync(p.join(dir,'pg_hba.conf'),''); fs.writeFileSync(p.join(dir,'postgresql.conf'),'');`);
-  executable('postgres', `${common} if(a.includes('--single')) {process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
+  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs[fs.existsSync(swap+'.hard')?'linkSync':'symlinkSync'](fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
   executable('pg_ctl', `${common} const dir=a[a.indexOf('-D')+1]; const file=p.join(dir,'postmaster.pid'); if(fs.existsSync(file)) process.kill(Number(fs.readFileSync(file,'utf8')),'SIGTERM');`);
   executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.SOCKET_TRACE) fs.writeFileSync(process.env.SOCKET_TRACE,process.env.PGHOST); if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
 }
@@ -96,10 +96,48 @@ describe('prepared native services', () => {
     expect(existsSync(one.env.PGHOST!)).toBe(false);
     expect(existsSync(join(root, 'runs', 'one', 'state', 'pg'))).toBe(false);
   });
+  it.each(['symlink', 'hardlink'])('writes access rules without changing an outside file reached by a %s', async kind => {
+    const artifacts = await prep(), outside = join(root, 'outside');
+    writeFileSync(outside, 'untouched');
+    writeFileSync(join(bin, 'link-hba-to'), outside);
+    if (kind === 'hardlink') writeFileSync(join(bin, 'link-hba-to.hard'), '');
+    const opened = await openServices(definitions, artifacts, part('one'));
+    try {
+      expect(readFileSync(outside, 'utf8')).toBe('untouched');
+      const file = join(root, 'runs', 'one', 'state', 'pg', 'pg_hba.conf');
+      expect(lstatSync(file).isFile()).toBe(true);
+      expect(readFileSync(file, 'utf8')).toContain('scram-sha-256');
+    } finally { await opened.close(); }
+  });
+  it.each(['one', '.'])('gives no folder away through a link at %s', async target => {
+    const artifacts = await prep(), elsewhere = join(root, 'elsewhere');
+    mkdirSync(join(elsewhere, 'one'), { recursive: true, mode: 0o755 });
+    if (target === 'one') mkdirSync(join(root, 'runs'));
+    symlinkSync(elsewhere, join(root, 'runs', target));
+    const opening = openServices(definitions, artifacts, part('one'));
+    try { await expect(opening).rejects.toThrow(/link/); }
+    finally { await opening.then(opened => opened.close(), () => {}); }
+    expect(statSync(elsewhere).mode & 0o777).toBe(0o755);
+  });
   it('rejects modified immutable payload before opening a server', async () => {
     const artifacts = await prep();
     writeFileSync(join(artifacts.paths.pg!, 'PG_VERSION'), '16');
     await expect(openServices(definitions, artifacts, part('bad'))).rejects.toThrow(/checksum|integrity/);
+  });
+  it('keeps cache publication in its opened directory when preparation replaces the cache path', async () => {
+    const cache = join(root, 'cache'), moved = join(root, 'moved-cache'), outside = join(root, 'outside');
+    mkdirSync(outside);
+    const defs: ServiceDefinitions = { ...definitions, prepare: [{ id: 'swap', serviceIds: ['pg'], commands: [{ program: process.execPath,
+      args: ['-e', `const fs=require('node:fs');fs.renameSync(${JSON.stringify(cache)},${JSON.stringify(moved)});fs.symlinkSync(${JSON.stringify(outside)},${JSON.stringify(cache)});`], cwd: '.' }] }] };
+    await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: cache, envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
+    expect(existsSync(join(outside, 'a'.repeat(64)))).toBe(false);
+    expect(existsSync(join(moved, 'a'.repeat(64), 'READY.json'))).toBe(true);
+  });
+  it('never creates a lock target through a link in the cache', async () => {
+    const cache = join(root, 'cache'), outside = join(root, 'outside');
+    mkdirSync(cache); symlinkSync(outside, join(cache, 'a'.repeat(64) + '.lock'));
+    await expect(prep()).rejects.toThrow();
+    expect(existsSync(outside)).toBe(false);
   });
   it('cleans a failed preparation and never publishes READY', async () => {
     await expect(prepareServiceArtifacts(definitions, root, { ...context, env: { FAIL_SQL: '1' }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/SQL failed/);
