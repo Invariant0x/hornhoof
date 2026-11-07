@@ -11,7 +11,8 @@ import { buildPlan, decodePlan, encodePlan, grownFunctions, isCode, isDocument, 
 import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
-import { complexityAt, prepare, tracked } from '../author-check/wired.mjs';
+import { complexityAt, prepare } from '../author-check/wired.mjs';
+import { tracked } from './tracked-files.mjs';
 
 const SHA = '1'.repeat(40), BASE = '2'.repeat(40);
 const edn = (...rows) => `{:entries [\n${rows.map(([name, namespace, complexity, coverage, crap]) => `  {:name "${name.replaceAll('"', '\\"')}", :namespace "${namespace}", :complexity ${complexity}, :coverage ${coverage ?? 'nil'}, :crap ${crap ?? 'nil'}}`).join('\n')}\n]}\n`;

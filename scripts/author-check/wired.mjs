@@ -7,6 +7,7 @@ import { buildPlan, cwdOf } from './plan.mjs';
 import { fastSuites, selectTests } from './select.mjs';
 import { realPorts } from './main.mjs';
 import { runStages } from './stages.mjs';
+import { tracked } from '../test/tracked-files.mjs';
 
 const MANIFEST = '.hornhoof/test-environment.json';
 const COLLECT_MS = 5 * 60 * 1000;
@@ -41,13 +42,6 @@ export async function prepare(ports) {
   const builds = BUILDS.filter(([output]) => !ports.exists(output)).map(([, workspace]) => ['run', '-s', 'build', '-w', workspace]);
   for (const args of [...install, ...builds]) if ((await ports.exec('npm', args, { cwd: '.' })).code !== 0) return 'prepare_failed';
   return null;
-}
-
-export function tracked(git) {
-  return git(['ls-files', '-s', '-z']).split('\0').filter(Boolean).map(line => {
-    const [info, path] = line.split('\t'), [mode, oid] = info.split(' ');
-    return { path, mode, oid };
-  });
 }
 
 export async function selectionPorts(root) {

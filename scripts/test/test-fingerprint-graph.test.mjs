@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { before, test } from 'node:test';
 import { fileURLToPath, URL } from 'node:url';
+import { trackedIn } from './tracked-files.mjs';
 
 /* The real repository, its real manifest and the real Vitest graph. A file wrongly reused is the one real harm of reuse, so whatever
    Vitest would run for a change must have a fingerprint that changes with it. */
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
 const PROBE = "const {probe}=await import('./scripts/test/related-probe.mjs');process.stdout.write(JSON.stringify(await probe({root:process.cwd()},JSON.parse(process.argv[1]))));";
 const BUILT = ['packages/protocol/dist/index.js', 'apps/node/dist/test-fingerprint.js'];
 const SOURCE = /^(?:apps\/[^/]+|packages\/[^/]+)\/src\/.+\.tsx?$/;
@@ -23,10 +23,7 @@ before(async () => {
   const { listTestUnits } = await import('../../apps/node/dist/test-environment.js');
   fingerprint = await import('../../apps/node/dist/test-fingerprint.js');
   manifest = parseTestEnvironment(readFileSync(`${root}.hornhoof/test-environment.json`, 'utf8'));
-  const tracked = git(['ls-files', '--stage', '--full-name', '-z']).split('\0').filter(Boolean).map(line => {
-    const [head, path] = line.split('\t'), [mode, oid] = head.split(' ');
-    return { path, mode, oid };
-  });
+  const tracked = trackedIn(root);
   inventory = listTestUnits(manifest, tracked);
   input = { description: { manifest, inventory, inputDigests: [], runtimeCapabilities: [{ id: 'node', version: process.versions.node, fingerprint: 'a'.repeat(64) }] }, tracked, texts: new Map(fingerprint.codeFilesOf(tracked).map(path => [path, readFileSync(root + path, 'utf8')])) };
   prints = await fingerprint.fingerprintUnits(input);

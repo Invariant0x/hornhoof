@@ -83,7 +83,7 @@ type CacheBuild = () => Promise<{ root: string; paths: string[] }>;
 export type CacheShare = (entry: CacheEntry, context: CacheContext, publish: () => Promise<CacheReady>) => Promise<CacheEntry>;
 /* link: the part gets read-only links to the one stored file instead of copies, for all of it or for these paths. owner: who
    gets what is restored. */
-export type RestoreOptions = { link?: boolean | string[]; owner?: JobUser; except?: string };
+type RestoreOptions = { link?: boolean | string[]; owner?: JobUser; except?: string };
 /* Stored files nobody may write. A part that holds a link to one can read it and replace it, and never change it. */
 export const storedMode = (mode: number): number => (mode & 0o111 ? 0o555 : 0o444);
 /* The one time every stored file carries, on any machine. A tree that was moved here has no times of its own worth reading, and
@@ -174,19 +174,19 @@ async function copyItems(source: string, target: string, entries: PayloadItem[],
     else if (item.kind === 'file') await copyFile(join(source, item.path), join(target, item.path), constants.COPYFILE_EXCL);
   });
 }
-export async function syncPath(path: string): Promise<void> {
+async function syncPath(path: string): Promise<void> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try { await file.sync(); } finally { await file.close(); }
 }
 /* Everything written so far reaches the disk at once: one call, where syncing each file of a dependency tree takes minutes. */
-export function syncFileSystem(path: string): Promise<void> {
+function syncFileSystem(path: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('sync', ['--file-system', path], { stdio: 'ignore', env: { PATH: '/usr/bin:/bin' } });
     child.once('error', reject);
     child.once('close', code => { if (code === 0) resolve(); else reject(new Error('The prepared files could not reach the disk.')); });
   });
 }
-export async function inBatches<T>(items: T[], context: CacheContext, run: (item: T) => Promise<void>): Promise<void> {
+async function inBatches<T>(items: T[], context: CacheContext, run: (item: T) => Promise<void>): Promise<void> {
   for (let at = 0; at < items.length; at += BATCH) {
     checkCacheContext(context);
     await Promise.all(items.slice(at, at + BATCH).map(run));

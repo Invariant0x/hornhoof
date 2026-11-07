@@ -356,7 +356,7 @@ type PreparedUnit = { definitions: ServiceDefinitions; artifacts: ServiceArtifac
 export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean; fetched?: boolean }[]; services: PreparedUnit[] };
 /* What a run needs, by default. A machine getting ready ahead of a run keeps services for it, and starts none of them; a
    manual command gets no services at all. */
-export type PreparationScope = { serviceUnits?: boolean; freshServices?: boolean };
+type PreparationScope = { serviceUnits?: boolean; freshServices?: boolean };
 const SERVICE_PAYLOAD = '.hornhoof-services';
 const builderSetup = (description: EnvironmentDescription): BuilderSetup => ({ link: description.manifest.dependencies.cache === 'link', env: description.manifest.dependencies.env ?? {}, bin: description.manifest.dependencies.bin ?? [] });
 const withBin = (folders: string[], path: string | undefined): string => [...folders, path].filter(Boolean).join(':');

@@ -16,7 +16,7 @@ export type FingerprintInput = {
   texts: ReadonlyMap<string, string>;
 };
 /* Called between batches of work: lets the node's other work through, and throws when the work must stop. */
-export type Pause = () => Promise<void>;
+type Pause = () => Promise<void>;
 type Manifest = TestEnvironmentV1;
 type Suite = Manifest['suites'][number];
 /* edges: all a file may read. runs: what it imports and the files it names one by one. */

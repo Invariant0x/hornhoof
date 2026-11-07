@@ -36,7 +36,7 @@ export function chooseRunMode(manifest: TestEnvironmentV1, request: { profile?: 
 }
 
 export type ReuseDecision = { reused: ReadonlySet<string>; preparation: boolean };
-export const NO_REUSE: ReuseDecision = { reused: new Set(), preparation: false };
+const NO_REUSE: ReuseDecision = { reused: new Set(), preparation: false };
 
 function completeGroups(units: TestUnit[], known: (unit: TestUnit) => boolean): TestUnit[] {
   const missing = new Set(units.filter(unit => !known(unit)).map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
@@ -61,7 +61,7 @@ function selectedFiles(snapshot: EnvironmentSnapshot, selection: Selection): Tes
   return selection.kind === 'suite' ? selection.files.map(file => ({ suiteId: selection.suiteId, file })) : [];
 }
 
-export type GreenFile = TestFileKey & { ms?: number; note?: string };
+type GreenFile = TestFileKey & { ms?: number; note?: string };
 /* What a runner said of each file. Two projects of a suite may run the same file, and one failure is a failure. */
 function saidOfEach(reported: FileOutcome[] | undefined): Map<string, FileOutcome> {
   const said = new Map<string, FileOutcome>();
@@ -133,7 +133,7 @@ async function lastFullTurnOf(db: Db, run: Pick<Run, 'id' | 'companyId'>, scope:
   return last?.turn ?? null;
 }
 
-export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
+type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
   if (!fullRun) return null;
@@ -143,12 +143,12 @@ export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEn
   return chosen && { ...chosen, turn, mainLine };
 }
 
-const ofRepository = (scope: RepositoryScope) => and(eq(testFileResults.companyId, scope.companyId), eq(testFileResults.repositoryOwnerId, scope.repositoryOwnerId), eq(testFileResults.repoUrlHash, scope.repoUrlHash));
+const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
 /* What was green at these fingerprints in this one repository, with what each result came to. */
 async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, string | null>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
   return new Map(rows.map(row => [printKey(row, row.fingerprint), row.note]));
 }
 /* The profiles of a release, which take a result only from its own line. */
@@ -165,7 +165,7 @@ function notesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<string
   });
 }
 
-export type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
+type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
 /* A full run decides as well, reuses nothing and remembers what it would have reused. */
 export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
   if (!mode) return { decision: NO_REUSE, fileCache: null };
@@ -200,7 +200,7 @@ async function forgetFailed(db: Db, cache: TestRunFileCache, scope: RepositorySc
   const prints = printsOf(cache);
   for (const file of failed) {
     const fingerprint = prints.get(keyOf(file));
-    if (fingerprint) await db.delete(testFileResults).where(and(ofRepository(scope), eq(testFileResults.fingerprint, fingerprint), eq(testFileResults.suiteId, file.suiteId), eq(testFileResults.file, file.file)));
+    if (fingerprint) await db.delete(testFileResults).where(and(ofRepository(testFileResults, scope), eq(testFileResults.fingerprint, fingerprint), eq(testFileResults.suiteId, file.suiteId), eq(testFileResults.file, file.file)));
   }
 }
 
@@ -226,14 +226,13 @@ export async function closeFileCache(tx: Pick<Db, 'select' | 'update'>, run: Run
   const parts = await tx.select({ status: testParts.status, failedFiles: testParts.failedFiles }).from(testParts).where(eq(testParts.runId, run.id));
   const failed = new Set(parts.flatMap(part => part.failedFiles ?? []).map(keyOf));
   const toldAll = parts.every(part => part.status === 'passed' || part.failedFiles);
-  const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(scope), eq(testFileResults.runId, run.id), isNotNull(testFileResults.note)));
+  const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), eq(testFileResults.runId, run.id), isNotNull(testFileResults.note)));
   const notes = [...cache.notes, ...ran.map(({ file, note }) => ({ file, note: note! }))].sort((a, b) => a.file.localeCompare(b.file));
   const fileCache: TestRunFileCache = { ...cache, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
   await tx.update(testRuns).set({ fileCache }).where(eq(testRuns.id, run.id));
   return { ...run, fileCache };
 }
 
-const memoryOf = (scope: RepositoryScope) => and(eq(testSuiteMemory.companyId, scope.companyId), eq(testSuiteMemory.repositoryOwnerId, scope.repositoryOwnerId), eq(testSuiteMemory.repoUrlHash, scope.repoUrlHash));
 function suitesThatKeep(snapshot: EnvironmentSnapshot, selection: Selection): string[] {
   const selected = new Set(selectedFiles(snapshot, selection).map(file => file.suiteId));
   return snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.keep?.length).map(suite => suite.id);
@@ -244,7 +243,7 @@ export async function keptFor(ctx: Pick<Ctx, 'db'>, run: Run, part: Part): Promi
   if (!snapshot || !selection || run.fileCache?.mode !== 'cached') return undefined;
   const keeping = suitesThatKeep(snapshot, selection);
   if (!keeping.length) return undefined;
-  const rows = await ctx.db.select({ suiteId: testSuiteMemory.suiteId, files: testSuiteMemory.files }).from(testSuiteMemory).where(and(memoryOf(snapshot.description.repositoryScope), inArray(testSuiteMemory.suiteId, keeping)));
+  const rows = await ctx.db.select({ suiteId: testSuiteMemory.suiteId, files: testSuiteMemory.files }).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, snapshot.description.repositoryScope), inArray(testSuiteMemory.suiteId, keeping)));
   const kept = KeptFiles.safeParse(rows);
   return kept.success && kept.data.length ? kept.data : undefined;
 }
@@ -255,7 +254,7 @@ const fitsOneMessage = (suiteId: string, files: KeptFile[]): boolean => KeptFile
    longer fits one message the part's own go on alone: to a tool, no memory only costs time. */
 async function mergeKept(db: Db, scope: RepositoryScope, suiteId: string, files: KeptFile[]): Promise<void> {
   await db.transaction(async tx => {
-    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(memoryOf(scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
+    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(ofRepository(testSuiteMemory, scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
     const paths = new Set(files.map(file => file.path)), merged = [...(kept?.files ?? []).filter(file => !paths.has(file.path)), ...files];
     const value = fitsOneMessage(suiteId, merged) ? merged : files;
     await tx.insert(testSuiteMemory).values({ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, suiteId, files: value })

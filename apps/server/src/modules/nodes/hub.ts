@@ -31,7 +31,7 @@ export const nodeIdentity = (nodeId: string): NodeIdentity => ({ kind: 'node', n
 export const identityOf = (sub: { kind: 'personal' | 'api_key' }, nodeId: string | null): NodeIdentity | null =>
   sub.kind === 'api_key' ? BUILTIN : nodeId ? nodeIdentity(nodeId) : null;
 
-const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.nodeId);
+export const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.nodeId);
 
 export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf(b);
 

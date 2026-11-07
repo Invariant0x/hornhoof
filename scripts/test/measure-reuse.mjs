@@ -9,6 +9,7 @@ import { codeFilesOf, fingerprintUnits } from '../../apps/node/src/test-fingerpr
 import { parseFileReport } from '../../apps/node/src/test-report.ts';
 import { unitKey } from '../../apps/server/src/modules/testruns/plan-environment.ts';
 import { decideReuse, partFileResults, printKey } from '../../apps/server/src/modules/testruns/reuse.ts';
+import { trackedIn } from './tracked-files.mjs';
 
 /* Measures runs in a row on this one machine, in a clone it may change: the real fingerprints, the real suite commands, the real
    reports and the server's own decision, with the green results kept here instead of in a database. The first run takes it all,
@@ -23,14 +24,8 @@ const folder = join(root, '.metrics/measure-reuse');
 rmSync(folder, { recursive: true, force: true }); mkdirSync(folder, { recursive: true });
 const green = new Set();
 
-function trackedFiles() {
-  return execFileSync('git', ['ls-files', '--stage', '--full-name', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0').filter(Boolean).map(line => {
-    const [head, path] = line.split('\t'), [mode, oid] = head.split(' ');
-    return { path, mode, oid };
-  });
-}
 async function fingerprints() {
-  const tracked = trackedFiles(), units = listTestUnits(manifest, tracked).filter(unit => wanted.includes(unit.suiteId));
+  const tracked = trackedIn(root), units = listTestUnits(manifest, tracked).filter(unit => wanted.includes(unit.suiteId));
   const texts = new Map(codeFilesOf(tracked).map(path => [path, readFileSync(join(root, path), 'utf8')]));
   const runtimeCapabilities = [{ id: 'node', version: process.versions.node, fingerprint: 'a'.repeat(64) }];
   return { units, prints: await fingerprintUnits({ description: { manifest, inventory: units, inputDigests: [], runtimeCapabilities }, tracked, texts }) };

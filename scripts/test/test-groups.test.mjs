@@ -8,11 +8,11 @@ import { fileURLToPath, URL } from 'node:url';
 import { realPorts } from '../author-check/main.mjs';
 import { fastSuites, selectTests } from '../author-check/select.mjs';
 import { runStages } from '../author-check/stages.mjs';
-import { selectionPorts, tracked } from '../author-check/wired.mjs';
+import { selectionPorts } from '../author-check/wired.mjs';
+import { trackedIn } from './tracked-files.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
 const ALL = ['node', 'protocol', 'release-scripts', 'server', 'web'];
 const BUILT = ['packages/protocol/dist/index.js', 'apps/node/dist/test-impact.js'];
 let manifest, ports;
@@ -24,7 +24,7 @@ before(async () => {
   ports = await selectionPorts(root);
 });
 
-const select = (changes, added = []) => selectTests({ changes, manifest, tracked: [...tracked(git), ...added], allowWhole: false }, ports);
+const select = (changes, added = []) => selectTests({ changes, manifest, tracked: [...trackedIn(root), ...added], allowWhole: false }, ports);
 const runs = path => select([{ path, kind: 'modified' }]);
 const suites = selection => (selection.packages ?? []).map(item => item.packageId).sort();
 

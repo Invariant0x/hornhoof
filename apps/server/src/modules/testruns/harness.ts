@@ -15,7 +15,7 @@ import { ApiError } from '../../errors.js';
 import { enqueueTurn, orchestratorOf } from '../conversation/queue.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt } from '../departments/repository.js';
-import { sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { keyOf as who, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { identify } from '../nodes/socket.js';
 import { repositoryScope } from './describe.js';
@@ -34,7 +34,7 @@ type Repo = NonNullable<Workspace['repo']>;
 const LEASE_MS = 3 * 60_000;
 const WAIT_MS = 5_000;
 /* A bundle travels in parts, each sent again by itself, as a whole one would not get through a slow link. */
-export const PART_BYTES = 32 * 1024 ** 2;
+const PART_BYTES = 32 * 1024 ** 2;
 /* A build that failed is tried again after this long, twice that after the next failure, and at most this long apart. */
 const RETRY_MS = 5 * 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
@@ -46,7 +46,6 @@ const OLD_ROWS_MS = 30 * 24 * 60 * 60_000;
 /* These pass by themselves and say nothing of the product. */
 const PASSING: string[] = ['cancelled', 'timeout', 'commit_unavailable'];
 
-const who = (node: NodeIdentity): string => (node.kind === 'builtin' ? 'builtin' : node.nodeId);
 const bundleFile = (dir: string, build: Pick<Build, 'companyId' | 'key'>) => join(dir, build.companyId, `${build.key}.zst`);
 const partsFolder = (dir: string, build: Pick<Build, 'companyId' | 'key'>) => join(dir, build.companyId, `${build.key}.parts`);
 const exists = (path: string) => access(path).then(() => true, () => false);
@@ -54,7 +53,7 @@ const exists = (path: string) => access(path).then(() => true, () => false);
 /* What a machine asking for a unit does next, by the unit's row: the one decision of who builds. */
 const stillFailed = (build: Build, now: Date): build is Build & { nextTryAt: Date } => build.status === 'failed' && !!build.nextTryAt && build.nextTryAt > now;
 const builtElsewhere = (build: Build, me: string, now: Date): boolean => build.status === 'building' && build.builder !== me && !!build.leaseUntil && build.leaseUntil > now;
-export function decideClaim(build: Build, me: string, now: Date, stored: boolean): { answer: HarnessClaim; set?: Partial<Build> } {
+function decideClaim(build: Build, me: string, now: Date, stored: boolean): { answer: HarnessClaim; set?: Partial<Build> } {
   if (build.status === 'ready' && stored) return { answer: { state: 'ready', digest: build.digest!, size: build.size!, partBytes: PART_BYTES }, set: { usedAt: now } };
   if (stillFailed(build, now)) return { answer: { state: 'failed', error: build.error ?? '', afterMs: build.nextTryAt.getTime() - now.getTime() } };
   if (builtElsewhere(build, me, now)) return { answer: { state: 'wait', afterMs: WAIT_MS } };
@@ -84,7 +83,7 @@ const ofNode = (node: NodeIdentity, key: string) => {
   return and(eq(harnessBuilds.key, key), eq(harnessBuilds.companyId, sql`(select ${nodes.companyId} from ${nodes} where ${nodes.id} = ${node.nodeId})`));
 };
 
-export async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now = new Date()): Promise<HarnessClaim> {
+async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now = new Date()): Promise<HarnessClaim> {
   const department = await departmentFor(ctx, node, unit.repositoryScope), dir = ctx.config.harnessDir;
   if (!dir) return { state: 'local' };
   const me = who(node);

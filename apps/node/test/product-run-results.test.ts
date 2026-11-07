@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
-const shared = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000, handedOver: (_path: string): void => {} }));
+const shared = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000, handedOver: (() => {}) as (path: string) => void }));
 import type { TestEnvironmentV1, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
 vi.mock('node:child_process', async original => {

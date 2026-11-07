@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trackedIn } from '../test/tracked-files.mjs';
 
 /* The mutation suite of a test run: mutator on each selected risky source file, against the fast tests that reach it. Its own
    snapshot, which the suite keeps between runs, leaves it only survivors and rewritten functions. From that snapshot the tool skips
@@ -93,11 +94,6 @@ function mutate(tool, args) {
   });
 }
 
-const trackedFiles = () => execFileSync('git', ['ls-files', '--stage', '--full-name', '-z'], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0').filter(Boolean).map(line => {
-  const [head, path] = line.split('\t'), [mode, oid] = head.split(' ');
-  return { path, mode, oid };
-});
-
 /* The same fast tests a source's fingerprint reads: what they reach decides both. */
 async function fastTestsOf(manifest, tracked, sources) {
   const fingerprint = await import('../../apps/node/dist/test-fingerprint.js');
@@ -108,7 +104,7 @@ async function fastTestsOf(manifest, tracked, sources) {
 async function main() {
   const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')), { mutation } = manifest;
   const sources = selectedSources(process.env.HH_TEST_FILES && readFileSync(process.env.HH_TEST_FILES, 'utf8'), mutation);
-  const tracked = trackedFiles(), oids = new Map(tracked.map(entry => [entry.path, entry.oid]));
+  const tracked = trackedIn('.'), oids = new Map(tracked.map(entry => [entry.path, entry.oid]));
   const files = await mutateSources(sources, await fastTestsOf(manifest, tracked, sources), {
     testsPass,
     mutate: async (source, tests) => {
