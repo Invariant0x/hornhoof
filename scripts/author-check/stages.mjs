@@ -22,7 +22,7 @@ function fromCodes(name, codes) {
 
 async function runAll(context, commands) {
   const codes = [];
-  for (const command of commands) codes.push((await context.ports.exec(command.program, command.args, { cwd: command.cwd })).code);
+  for (const command of commands) codes.push((await context.ports.exec(command.program, command.args, { cwd: command.cwd, env: command.env })).code);
   return codes;
 }
 
@@ -62,14 +62,23 @@ function nodeTestFlags(sources, report) {
 
 const FLAGS = { vitest: vitestFlags, 'node-test': nodeTestFlags };
 
+/* How a suite is told its files: by arguments, or, as on a node, by the file its Vitest sequencer reads, which also asks for a shard. */
+function chosenFiles(context, suite, paths) {
+  if (suite.split.kind === 'argv-files') return { files: paths };
+  if (suite.split.kind !== 'vitest-shard') return {};
+  const filesPath = join(context.tmp, `files-${suite.id}.json`);
+  context.ports.write(filesPath, JSON.stringify(paths));
+  return { shard: ['--shard=1/1'], env: { HH_TEST_FILES: filesPath } };
+}
+
 function testCommand(context, suite, units) {
   const adapter = adapterOf(suite.run);
   if (!adapter) return { command: suite.run, report: null };
   const { cwd } = suite.run;
   const sources = context.paths.filter(path => isSource(path) && ownerOf(context.suites, path) === suite).map(path => posix.relative(cwd, path));
-  const files = suite.split.kind === 'argv-files' ? units.map(unit => `./${posix.relative(cwd, unit.file)}`) : [];
+  const { shard = [], files = [], env } = chosenFiles(context, suite, units.map(unit => `./${posix.relative(cwd, unit.file)}`));
   const report = join(context.tmp, `tests-${suite.id}.${REPORT_READER[adapter].extension}`);
-  return { command: { ...suite.run, args: [...suite.run.args, ...FLAGS[adapter](sources, report), ...files] }, report, reader: REPORT_READER[adapter].read };
+  return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](sources, report), ...files], env }, report, reader: REPORT_READER[adapter].read };
 }
 
 function sumCounts(counts) {

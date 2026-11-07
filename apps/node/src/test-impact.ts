@@ -79,9 +79,11 @@ function add(state: SelectionState, pkg: ImpactPackage, mode: Choice['mode'], un
 function whole(state: SelectionState, packages: ImpactPackage[], reason: ImpactReason): void {
   for (const pkg of packages) add(state, pkg, 'whole-package', state.environment.inventory.filter(unit => pkg.suiteIds.includes(unit.suiteId)), reason);
 }
-function broadPackages(state: SelectionState, path: string): ImpactPackage[] {
-  const owner = ownerOf(state.environment, path);
-  return owner ? [owner] : state.environment.packages;
+/* A file of no one package reaches everyone, unless a rule of the repository's manifest names who reads it. */
+function defaultTargets(state: SelectionState, rule: FullRule, path: string, named: boolean): ImpactPackage[] {
+  const owner = rule.global ? undefined : ownerOf(state.environment, path);
+  if (owner) return [owner];
+  return named ? [] : state.environment.packages;
 }
 function matchesPolicy(path: string, pattern: string): boolean {
   return path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`) || matchesGlob(path, pattern);
@@ -108,7 +110,7 @@ function policy(state: SelectionState, graphs: ImpactGraph[], path: string): boo
   const rules = DEFAULT_FULL_PACKAGE_RULES.filter(value => value.globs.some(glob => matchesPolicy(path, glob)));
   for (const rule of rules) {
     if (rule.code === 'migration') state.migration = true;
-    whole(state, rule.global ? state.environment.packages : broadPackages(state, path), { code: rule.code, path });
+    whole(state, defaultTargets(state, rule, path, targets.length > 0), { code: rule.code, path });
   }
   if (!targets.length && !rules.length) return false;
   const consumers = graphPackages(state, graphs, ownerOf(state.environment, path)).filter(pkg => state.choices.get(pkg.id)?.mode !== 'whole-package');

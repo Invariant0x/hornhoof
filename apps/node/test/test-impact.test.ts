@@ -27,6 +27,18 @@ const mode = (result: ImpactSelection, id: string) => result.packages.find(value
 const nodeFiles = ['apps/node/test/a.test.ts', 'apps/node/test/b.test.ts', 'apps/node/test/new.test.ts'];
 
 describe('pure commit impact selection', () => {
+  it('lets a rule of the manifest name who reads a file no package owns, and takes everyone without one', () => {
+    const input = fixture();
+    input.graphs[0]!.units = [];
+    for (const path of ['templates/roles/a.md', 'Dockerfile']) {
+      input.changes = [{ path, kind: 'modified' }];
+      input.environment.impact.fullPackageGlobs = [];
+      expect(selectAffectedTests(input).packages.map(value => value.packageId)).toEqual(['native', 'node', 'python', 'server']);
+      input.environment.impact.fullPackageGlobs = [{ globs: ['templates/**', 'Dockerfile'], suiteIds: ['server'] }];
+      expect(selectAffectedTests(input).packages.map(value => value.packageId)).toEqual(['server']);
+    }
+  });
+
   it('selects exactly the graph dependencies of file X', () => {
     const result = selectAffectedTests(fixture());
     expect(result.status).toBe('ready'); expect(files(result)).toEqual(['apps/node/test/a.test.ts']);
