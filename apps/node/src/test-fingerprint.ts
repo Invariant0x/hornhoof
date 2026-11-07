@@ -450,12 +450,12 @@ export function fastTestsOf(input: FingerprintInput, mutation: Supported, files:
   return new Map(files.map(file => [file, reachingTests(graph, mutation, file)]));
 }
 /* The same transitive judges for the server's result cache and the mutator's saved snapshot. An unreadable input widens
-   through inputsOf, just as it does for a test: the saved kills cannot outlive the code that judged them. */
+   through inputsOf to the repository: an unknown helper or executable configuration may read across package boundaries. */
 function mutationJudges(graph: Graph, mutation: Supported, suite: Suite, file: string): string {
   const { tree } = graph, config = posix.join(suite.root, 'vitest.config.mjs');
   const starts = [file, ...reachingTests(graph, mutation, file), ...(tree.oids.has(config) ? [config] : [])];
   const installed = tree.pairsDigest(tree.matching(tree.input.description.manifest.dependencies.inputs));
-  return digest([FORMAT, mutation.tool, suite.run, installed, tree.folderDigest(suite.root), inputsOf(graph, suite, starts)]);
+  return digest([FORMAT, mutation.tool, suite.run, installed, tree.folderDigest(suite.root), inputsOf(graph, { ...suite, root: '.' }, starts)]);
 }
 export function mutationJudgesOf(input: FingerprintInput, mutation: Supported, suite: Suite, files: string[]): Map<string, string> {
   const graph = new Graph(new Tree(input));
