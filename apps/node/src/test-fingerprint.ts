@@ -452,7 +452,7 @@ export function fastTestsOf(input: FingerprintInput, mutation: Supported, files:
 /* The same transitive judges for the server's result cache and the mutator's saved snapshot. An unreadable input widens
    through inputsOf to the repository: an unknown helper or executable configuration may read across package boundaries. */
 function mutationJudges(graph: Graph, mutation: Supported, suite: Suite, file: string): string {
-  const { tree } = graph, config = posix.join(suite.root, 'vitest.config.mjs');
+  const { tree } = graph, config = `${suite.root}/vitest.config.mjs`;
   const starts = [file, ...reachingTests(graph, mutation, file), ...(tree.oids.has(config) ? [config] : [])];
   const installed = tree.pairsDigest(tree.matching(tree.input.description.manifest.dependencies.inputs));
   return digest([FORMAT, mutation.tool, suite.run, installed, tree.folderDigest(suite.root), inputsOf(graph, { ...suite, root: '.' }, starts)]);

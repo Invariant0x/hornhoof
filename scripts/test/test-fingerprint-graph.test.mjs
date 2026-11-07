@@ -121,13 +121,15 @@ test('all risky sources retain mode-bound judges at both reuse levels', async ()
   assert.equal(mutation.sourcePaths.length, 9);
   const judges = fingerprint.mutationJudgesOf(input, mutation, suite, mutation.sourcePaths);
   const selected = fingerprint.fastTestsOf(input, mutation, mutation.sourcePaths);
+  const tests = new Set(mutation.sourcePaths.map(source => selected.get(source)[0]));
+  const tracked = input.tracked.map(entry => tests.has(entry.path) ? { ...entry, mode: '100755' } : entry);
+  const next = { ...input, tracked };
+  const nextJudges = fingerprint.mutationJudgesOf(next, mutation, suite, mutation.sourcePaths);
+  const nextPrints = await fingerprint.fingerprintUnits(next);
   for (const source of mutation.sourcePaths) {
-    const test = selected.get(source)[0];
-    const tracked = input.tracked.map(entry => entry.path === test ? { ...entry, mode: '100755' } : entry);
-    const next = { ...input, tracked };
-    assert.notEqual(fingerprint.mutationJudgesOf(next, mutation, suite, [source]).get(source), judges.get(source), `${source} lost saved judges protection`);
+    assert.notEqual(nextJudges.get(source), judges.get(source), `${source} lost saved judges protection`);
     const before = prints.find(unit => unit.suiteId === 'mutation' && unit.file === source).fingerprint;
-    const after = (await fingerprint.fingerprintUnits(next)).find(unit => unit.suiteId === 'mutation' && unit.file === source).fingerprint;
+    const after = nextPrints.find(unit => unit.suiteId === 'mutation' && unit.file === source).fingerprint;
     assert.notEqual(after, before, `${source} lost upper reuse protection`);
   }
 });
