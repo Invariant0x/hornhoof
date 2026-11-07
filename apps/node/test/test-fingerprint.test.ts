@@ -480,6 +480,14 @@ describe('source files mutation checks', () => {
     expect(await changed(input(files, value), input({ ...files, [path]: 'export const weakened = true;' }, value))).toContain(key);
   });
 
+  it('cannot reuse mutation judges when an opaque config may load a changed file outside its package', async () => {
+    const files = { ...app,
+      'scripts/mutation/vitest.config.mjs': 'const config = process.env.JUDGE_CONFIG;\nexport default await import(config);',
+      'apps/b/judge-options.json': '{"strict":true}',
+    };
+    expect(await changed(input(files, value), input({ ...files, 'apps/b/judge-options.json': '{"strict":false}' }, value))).toContain(key);
+  });
+
   it('follows the mode of an imported helper with identical bytes', async () => {
     const files = { ...app, 'apps/a/test/used.test.ts': `${app['apps/a/test/used.test.ts']}\nimport './helper.js';`, 'apps/a/test/helper.ts': 'export {};' };
     const before = input(files, value), after = input(files, value);

@@ -85,7 +85,7 @@ test('a source is judged again by tests that changed, and keeps what it was judg
 });
 
 /* Run the real cache/runner with tiny command stand-ins. No mutants or database are needed to observe --mutate-all. */
-for (const changed of ['helper', 'config', 'mode', 'source', 'unknown']) {
+for (const changed of ['helper', 'config', 'mode', 'source', 'unknown', 'unknown-config']) {
   test(`saved mutation judges invalidate ${changed} changes without editing the test`, t => {
     const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-judges-'));
     t.after(() => rmSync(folder, { recursive: true, force: true }));
@@ -101,7 +101,8 @@ for (const changed of ['helper', 'config', 'mode', 'source', 'unknown']) {
     write('apps/a/test/one.test.ts', "import { one } from '../src/one.js';\nimport './helper.js';\nexport { one };");
     write(helper, changed === 'unknown' ? "const name = './unknown.js';\nawait import(name);" : "import './deep.js';");
     write('apps/a/test/deep.ts', 'export const allowed = true;');
-    write(config, "import './config-helper.mjs';\nexport default {};");
+    write(config, changed === 'unknown-config' ? 'const config = process.env.JUDGE_CONFIG;\nexport default await import(config);' : "import './config-helper.mjs';\nexport default {};");
+    write('apps/b/judge-options.json', '{"strict":true}');
     write('scripts/mutation/config-helper.mjs', 'export const strict = true;');
     writeFileSync(join(bin, 'npx'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(bin, 'mutator'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nprintf 'Total 1 0 0 1 100.0%%\\n'\n`, { mode: 0o755 });
@@ -117,6 +118,7 @@ for (const changed of ['helper', 'config', 'mode', 'source', 'unknown']) {
     if (changed === 'source') write(source, 'export const one = 2;');
     if (changed === 'mode') chmodSync(join(root, helper), 0o755);
     if (changed === 'unknown') write('apps/a/test/unknown.ts', 'export const skipped = true;');
+    if (changed === 'unknown-config') write('apps/b/judge-options.json', '{"strict":false}');
     git('add', '.'); git('commit', '--quiet', '-m', 'Judges changed');
     assert.equal(run(), true, `${changed} invalidates the persisted judges receipt`);
   });
