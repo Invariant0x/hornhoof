@@ -261,6 +261,20 @@ describe('the harness reaching every machine', () => {
     expect((await asked(two.node)).commitSha).toBe(NEXT);
   });
 
+  it('asks a machine once while it is at it, however many programs came ready', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two');
+    atHead(c);
+    await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-go-api' }); await c.uploaded(one.key, Buffer.from('new lock'));
+    const first = await asked(two.node);
+    await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-python-ml', key: OTHER }); await c.uploaded(one.key, Buffer.from('another lock'), OTHER);
+    expect(await gets(two.node, 'tests.harness')).toBe(false);
+    two.node.send(synced(first));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const third = 'd'.repeat(64);
+    await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-web', key: third }); await c.uploaded(one.key, Buffer.from('a third lock'), third);
+    expect((await asked(two.node)).commitSha).toBe(NEXT);
+  });
+
   it('keeps a harness per program of a company, each on every machine that takes it', async () => {
     const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two');
     atHead(c);

@@ -4,7 +4,7 @@ import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdir
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
 import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RuntimeCapability, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
-import { browserEnv, ensureRepoBrowser } from './browser.js';
+import { browserEnv, ensureRepoBrowser, playwrightVersionIn } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
@@ -679,13 +679,20 @@ async function versionedProductSelection(execution: TestExecution, state: Produc
   }
   if (firstFailure) { state.exitCode = firstFailure.exitCode; throw firstFailure; }
 }
+/* Each program of a repository can pin a browser of its own, in its own folder. */
+async function prepareBrowsers(description: EnvironmentDescription, repo: string, prepare: (folder: string) => Promise<void>): Promise<void> {
+  await prepare(repo);
+  for (const folder of new Set(description.manifest.suites.map(suite => join(repo, suite.root)))) {
+    if (folder !== repo && playwrightVersionIn(folder)) await prepare(folder);
+  }
+}
 async function executeProduct(msg: TestRun, state: ProductState, hidden: string[]): Promise<void> {
   const execution = TestExecution.parse(msg.environment), context = preparationContext(state, execution.snapshot.profile, hidden);
   let services: Awaited<ReturnType<typeof openEnvironment>> | undefined;
   try {
     const description = await timedPhase(state.receipt, 'checkoutMs', () => productCheckout(msg, state, context));
     const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
-    await timedPhase(state.receipt, 'servicesMs', () => (state.options.prepareRepoBrowser ?? (repo => ensureRepoBrowser(state.options.dir, repo, state.user)))(state.repo));
+    await timedPhase(state.receipt, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
     await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
@@ -782,7 +789,7 @@ async function syncedHarness(msg: HarnessRequest, state: PreparationState, hidde
   await checkoutCommit(msg.repo, msg.repositoryScope, msg.commitSha, state.repo, context);
   prepareFolder(state.repo, state.user);
   const dependencies = await prepareDependencies(description, context);
-  await prepareRepoBrowser(state.repo);
+  await prepareBrowsers(description, state.repo, prepareRepoBrowser);
   const keys = new Set([dependencies.receipt.key]);
   for (const { id } of profiles.filter(profile => supportsTestProfile({ description, profile: profile.id }, description.runtimeCapabilities))) {
     const prepared = await prepareEnvironment(description, dependencies, { ...context, profile: id }, { freshServices: false });

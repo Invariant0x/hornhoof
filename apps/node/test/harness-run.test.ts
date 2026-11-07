@@ -171,6 +171,16 @@ describe('a harness that reaches every machine', () => {
     expect(await keys('set -e\ngo mod download')).toEqual({ node: false, python: false });
   });
 
+  it('gets the browser a program in a folder pins, ahead of any run', async () => {
+    const f = await fixture(manifest => { const [suite] = manifest.suites; suite!.root = 'web'; suite!.files = ['web/test.js']; manifest.prepare[0]!.commands[0] = sh("require('fs').mkdirSync('template')"); });
+    await mkdir(join(f.source, 'web')); await writeFile(join(f.source, 'web/test.js'), '');
+    await f.commit('web/package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/playwright': { version: '1.50.0' } } }));
+    const folders: string[] = [], one = { ...machine(f, 'one', registry().remote('one')), prepareRepoBrowser: async (folder: string) => { folders.push(folder); } };
+    const done = await syncHarness(asked(f), one);
+    expect(done.result, JSON.stringify(done.result)).toMatchObject({ status: 'ready' });
+    expect(folders.map(folder => folder.split('/repo').at(-1))).toEqual(['', '/web']);
+  });
+
   it('answers at once for a version it holds, without a checkout', async () => {
     const f = await fixture(), shared = registry();
     let checkouts = 0;

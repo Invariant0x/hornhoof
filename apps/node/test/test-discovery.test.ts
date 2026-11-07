@@ -72,6 +72,21 @@ describe('a JavaScript project', () => {
     await expect(discoverEnvironment(tree(files))).rejects.toMatchObject({ code: 'environment_unsupported', message: expect.stringContaining('.hornhoof/test-environment.json') as string });
   });
 
+  it('takes the tests of the workspaces when the root\'s script is the one npm init writes', async () => {
+    const manifest = await found({ 'package.json': pkg({ workspaces: ['apps/*'], scripts: { test: 'echo "Error: no test specified" && exit 1' } }), 'package-lock.json': '{}', 'apps/web/package.json': '{}' });
+    expect(script(manifest.suites[0]!.run)).toContain('npm test --workspaces --if-present');
+  });
+
+  it('goes through pnpm\'s workspaces one by one, as npm does not know them', async () => {
+    const manifest = await found({ 'package.json': JSON.stringify({ name: 'a' }), 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n", 'apps/web/package.json': '{}', 'apps/api/package.json': '{}' });
+    expect(script(manifest.suites[0]!.run)).toContain(`for folder in 'apps/web' 'apps/api'; do (cd "$folder" && npm test --if-present); done`);
+  });
+
+  it('reads a workspace pattern written from the current folder', async () => {
+    const manifest = await found({ 'package.json': pkg({ workspaces: ['./apps/*'] }), 'package-lock.json': '{}', 'apps/web/package.json': '{}' });
+    expect(paths(manifest)).toEqual(['node_modules', 'apps/web/node_modules']);
+  });
+
   it('reads a large lock file', async () => {
     const manifest = await found({ 'package.json': pkg(), 'yarn.lock': `# yarn lockfile v1\n${'x'.repeat(4 * 1024 * 1024)}` });
     expect(script(manifest.prepare[0]!.commands[0]!)).toContain('--frozen-lockfile');
@@ -131,6 +146,16 @@ describe('a Go project', () => {
     const replaced = await found({ 'a/go.mod': 'module a\nreplace b => ../b\n', 'b/go.mod': 'module b\n' });
     expect(replaced.prepare[0]!.inputs).toEqual(['a/go.mod', 'b/go.mod']);
     expect(replaced.prepare[1]!.inputs).toEqual(['b/go.mod']);
+    const nested = await found({ 'go.mod': 'module a\nreplace x => ./libs/x\n', 'libs/x/go.mod': 'module x\n' });
+    expect(nested.prepare[0]!.inputs).toEqual(['go.mod', 'libs/x/go.mod']);
+    const excluded = await found({ 'go.work': 'go 1.25.0\nuse (\n\t./a\n\t./examples/b\n)\n', 'a/go.mod': 'module a\n', 'examples/b/go.mod': 'module b\n' });
+    expect(excluded.prepare[0]!.inputs).toEqual(['a/go.mod', 'go.work', 'examples/b/go.mod']);
+  });
+
+  it('notes in each run that the prepared cache was just cleaned, or Go would drop it all at the first command', async () => {
+    const manifest = await found({ 'go.mod': 'module shop\ngo 1.22.4\n' });
+    expect(script(manifest.suites[0]!.run)).toContain('date +%s > "$GOCACHE/trim.txt"');
+    expect(script(manifest.prepare[0]!.commands[0]!)).toContain('rm -f "$GOCACHE/trim.txt"');
   });
 
   it('counts a changed lock file for the project and leaves its tool alone', async () => {
@@ -183,6 +208,12 @@ describe('a Rust project', () => {
     expect(manifest.prepare[0]!.inputs).toEqual(['api/Cargo.toml', 'api/Cargo.lock', 'shared/Cargo.toml']);
     expect(script(manifest.prepare[0]!.commands[0]!)).toContain("'Cargo.toml' '../shared/Cargo.toml'");
     expect(manifest.prepare[1]!.inputs).toEqual(['shared/Cargo.toml', 'shared/Cargo.lock']);
+  });
+
+  it('passes over a manifest it cannot read, as a repository keeps broken and templated ones for its tests', async () => {
+    const manifest = await found({ ...cargo, 'tests/fixtures/bad/Cargo.toml': 'not = = toml' });
+    expect(manifest.suites.map(suite => suite.id)).toEqual(['rust']);
+    expect(script(manifest.prepare[0]!.commands[0]!)).toContain('except (OSError, tomllib.TOMLDecodeError):');
   });
 
   it('refuses a project with no lock file', async () => {
@@ -246,6 +277,22 @@ describe('a PHP project', () => {
     expect(script(manifest.suites[0]!.run)).toContain('composer test');
   });
 
+  it.each([
+    ['^8.2', '8.5'], ['>=8.0', '8.5'], ['~8.2', '8.5'], ['^8.2 || ^7.4', '7.4'], ['^7.4 || ^8.0', '8.5'],
+    ['~8.2.0', '8.2'], ['8.2.*', '8.2'], ['8.3.1', '8.3'],
+    ['^7.4', '7.4'], ['~7.4', '7.4'], ['>=8.0 <8.3', '8.2'], ['>=8.0 <9.0', '8.5'], ['>=7.4 <8.0', '7.4'],
+  ])('takes %s to mean PHP %s', async (constraint, series) => {
+    const manifest = await found({ 'composer.json': JSON.stringify({ require: { php: constraint } }), 'composer.lock': lock });
+    expect(manifest.dependencies.install[0]!.args.at(-2)).toBe(series);
+  });
+
+  it('takes a test script written as a list of steps', async () => {
+    const manifest = await found({ 'composer.json': JSON.stringify({ scripts: { test: ['@lint', 'codecept run'] } }), 'composer.lock': JSON.stringify({ packages: [] }) });
+    expect(script(manifest.suites[0]!.run)).toContain('composer test');
+    const beside = await found({ 'go.mod': 'module a\n', 'php/composer.json': JSON.stringify({ scripts: { test: ['codecept run'] } }), 'php/composer.lock': '{}' });
+    expect(beside.suites.map(suite => suite.id)).toEqual(['go', 'php-php']);
+  });
+
   it('writes the class map again before a run when the project keeps one, as its classes were not there at install', async () => {
     const manifest = await found({ 'composer.json': JSON.stringify({ autoload: { classmap: ['database/'] } }), 'composer.lock': lock });
     expect(script(manifest.suites[0]!.run)).toContain('composer dump-autoload');
@@ -269,6 +316,11 @@ describe('a Ruby project', () => {
     expect(manifest.prepare).toMatchObject([{ id: 'dependencies-ruby', inputs: ['Gemfile', 'Gemfile.lock', '.ruby-version'], artifacts: [{ path: '.hornhoof/gems', link: true, env: 'BUNDLE_PATH' }] }]);
     expect(script(manifest.prepare[0]!.commands[0]!)).toContain('bundle install');
     expect(script(manifest.suites[0]!.run)).toContain('bundle exec rake test');
+  });
+
+  it('gives a gem what its gemspec commonly loads', async () => {
+    const manifest = await found({ Gemfile: 'gemspec\n', 'Gemfile.lock': lock(), 'shop.gemspec': '', 'lib/shop/version.rb': '', 'lib/shop.rb': '', VERSION: '1' });
+    expect(manifest.prepare[0]!.inputs).toEqual(['Gemfile', 'Gemfile.lock', 'shop.gemspec', 'lib/shop/version.rb', 'VERSION']);
   });
 
   it('runs rspec when the project has it', async () => {
@@ -441,6 +493,16 @@ describe('several programs in one repository', () => {
   it('skips a folder with a manifest and no lock when other programs stand, and refuses when none does', async () => {
     expect((await found({ 'go.mod': 'module a\n', 'site/package.json': pkg() })).suites.map(suite => suite.id)).toEqual(['go']);
     await expect(discoverEnvironment(tree({ 'site/package.json': pkg() }))).rejects.toMatchObject({ code: 'environment_unsupported' });
+  });
+
+  it.each([
+    ['one folder holding both Maven and Gradle', { 'pom.xml': '<project/>', 'build.gradle': '' }],
+    ['folders that read alike', { 'services/api-v2/go.mod': 'module a\n', 'services/api/v2/go.mod': 'module b\n' }],
+    ['folders that differ by case', { 'Api/go.mod': 'module a\n', 'api/go.mod': 'module b\n' }],
+  ])('tells apart %s', async (_what, files) => {
+    const { suites, prepare } = await found(files);
+    expect(new Set(suites.map(suite => suite.id)).size).toBe(2);
+    expect(new Set(prepare.map(unit => unit.id)).size).toBe(2);
   });
 
   it('keeps ids within what the schema allows however deep a folder lies', async () => {

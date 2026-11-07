@@ -17,8 +17,9 @@ import { ids, network, registry, stopwatch, type Timing } from './measure-machin
    HH_MEASURE_OUT names the file that gets the results. */
 type Files = Record<string, string>;
 /* tools: what the head and the owner name in .tool-versions, before there is any code. lock: what writes the lock files with them.
-   says: what a failing test prints, when its runner leaves out its message. */
-type Project = { name: string; tools?: string; lock?: { command: string; files: string[] }; files: Files; broken: Files; says?: string; changed?: { files: Files; rebuilds: string[] } };
+   says: what a failing test prints, when its runner leaves out its message. also: a command that must pass on a machine that took
+   the harness, with the network closed. */
+type Project = { name: string; tools?: string; lock?: { command: string; files: string[] }; files: Files; broken: Files; says?: string; also?: string; changed?: { files: Files; rebuilds: string[] } };
 
 const BROKEN = 'THIS TEST WAS BROKEN ON PURPOSE';
 const GO: Files = {
@@ -41,8 +42,32 @@ const inFolder = (folder: string, files: Files): Files => Object.fromEntries(Obj
 
 const PROJECTS: Project[] = [
   { name: 'javascript', tools: 'nodejs 22\n', lock: { command: 'npm install --package-lock-only --no-audit --no-fund', files: ['package-lock.json'] }, files: JAVASCRIPT, broken: JAVASCRIPT_BROKEN },
+  {
+    name: 'npm-workspace', tools: 'nodejs 22\n', lock: { command: 'npm install --package-lock-only --no-audit --no-fund', files: ['package-lock.json'] },
+    files: { 'package.json': JSON.stringify({ name: 'shop', private: true, workspaces: ['./apps/*'] }), ...inFolder('apps/web', { ...JAVASCRIPT, 'package.json': JAVASCRIPT['package.json']!.replace('"shop"', '"web"') }), 'apps/site/package.json': JSON.stringify({ name: 'site', private: true }) },
+    broken: inFolder('apps/web', JAVASCRIPT_BROKEN),
+  },
+  {
+    name: 'pnpm-workspace', tools: 'nodejs 22\n', lock: { command: 'corepack pnpm install --lockfile-only', files: ['pnpm-lock.yaml'] },
+    files: { 'package.json': JSON.stringify({ name: 'shop', private: true }), 'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n", ...inFolder('apps/web', { ...JAVASCRIPT, 'package.json': JAVASCRIPT['package.json']!.replace('"shop"', '"web"') }), 'apps/site/package.json': JSON.stringify({ name: 'site', private: true }) },
+    broken: inFolder('apps/web', JAVASCRIPT_BROKEN),
+  },
+  { name: 'pnpm', tools: 'nodejs 22\n', lock: { command: 'corepack pnpm install --lockfile-only', files: ['pnpm-lock.yaml'] }, files: JAVASCRIPT, broken: JAVASCRIPT_BROKEN },
+  { name: 'yarn', tools: 'nodejs 22\n', lock: { command: 'corepack yarn install --no-progress', files: ['yarn.lock'] }, files: JAVASCRIPT, broken: JAVASCRIPT_BROKEN },
   { name: 'python', files: PYTHON, broken: PYTHON_BROKEN },
-  { name: 'go', tools: 'golang 1.25.4\n', lock: { command: 'go mod tidy', files: ['go.mod', 'go.sum'] }, files: GO, broken: GO_BROKEN },
+  {
+    name: 'pyproject', files: {
+      'pyproject.toml': '[project]\nname = "shop"\nversion = "1"\ndependencies = ["six==1.16.0"]\n',
+      'src/shop/__init__.py': 'import six\n\nNAME = six.ensure_str("shop")\n',
+      'tests/test_shop.py': 'from shop import NAME\n\n\ndef test_name():\n    assert NAME == "shop"\n',
+    },
+    broken: { 'tests/test_shop.py': `def test_name():\n    assert False, '${BROKEN}'\n` },
+  },
+  {
+    name: 'go', tools: 'golang 1.25.4\n', lock: { command: 'go mod tidy', files: ['go.mod', 'go.sum'] }, files: GO, broken: GO_BROKEN,
+    // A run writes the note of the last cleaning; with it, one Go command after another finds all of the prepared cache still there.
+    also: 'before="$(find "$GOCACHE" -type f | wc -l)"; date +%s > "$GOCACHE/trim.txt"; go test ./... && go vet ./... && after="$(find "$GOCACHE" -type f | wc -l)" && echo "cache files: $before, then $after" && [ "$after" -ge "$before" ]',
+  },
   {
     name: 'go-workspace', tools: 'golang 1.25.4\n', lock: { command: '(cd b && go mod tidy)', files: ['b/go.mod', 'b/go.sum'] },
     files: {
@@ -65,6 +90,7 @@ const PROJECTS: Project[] = [
       'crates/core/tests/json.rs': '#[test]\nfn names_an_item() { assert_eq!(shop_core::json("a"), r#"{"name":"a"}"#); }\n',
       'crates/app/Cargo.toml': '[package]\nname = "shop-app"\nversion = "0.1.0"\nedition = "2021"\n\n[[bin]]\nname = "shop"\npath = "src/main.rs"\n\n[dependencies]\nshop-core = { path = "../core" }\n',
       'crates/app/src/main.rs': 'fn main() { println!("{}", shop_core::json("a")); }\n',
+      'crates/core/tests/fixtures/bad/Cargo.toml': 'not = = toml\n',
     },
     broken: { 'crates/core/tests/json.rs': `#[test]\nfn names_an_item() { panic!("${BROKEN}"); }\n` },
   },
@@ -108,6 +134,18 @@ const PROJECTS: Project[] = [
       'test/shop_test.rb': 'require "minitest/autorun"\nrequire "openssl"\nrequire "yaml"\nrequire "zlib"\nrequire "racc/cparse"\n\nclass ShopTest < Minitest::Test\n  def test_digest = assert_equal(32, OpenSSL::Digest::SHA256.digest("a").bytesize)\nend\n',
     },
     broken: { 'test/shop_test.rb': `require "minitest/autorun"\n\nclass ShopTest < Minitest::Test\n  def test_digest = flunk("${BROKEN}")\nend\n` },
+  },
+  {
+    name: 'gem', tools: 'ruby 4.0\n', lock: { command: 'bundle lock', files: ['Gemfile.lock'] },
+    files: {
+      'Gemfile': 'source "https://rubygems.org"\ngemspec\ngem "rake"\ngem "minitest"\n',
+      'shop.gemspec': 'require_relative "lib/shop/version"\n\nGem::Specification.new do |spec|\n  spec.name = "shop"\n  spec.version = Shop::VERSION\n  spec.summary = "A shop"\n  spec.authors = ["A"]\n  spec.files = Dir["lib/**/*"]\nend\n',
+      'lib/shop/version.rb': 'module Shop\n  VERSION = "1.0.0"\nend\n',
+      'lib/shop.rb': 'require_relative "shop/version"\n',
+      'Rakefile': 'require "rake/testtask"\nRake::TestTask.new { |t| t.pattern = "test/*_test.rb" }\ntask default: :test\n',
+      'test/shop_test.rb': 'require "minitest/autorun"\nrequire "shop"\n\nclass ShopTest < Minitest::Test\n  def test_version = assert_equal("1.0.0", Shop::VERSION)\nend\n',
+    },
+    broken: { 'test/shop_test.rb': `require "minitest/autorun"\n\nclass ShopTest < Minitest::Test\n  def test_version = flunk("${BROKEN}")\nend\n` },
   },
   {
     name: 'several', tools: 'golang 1.25.4\nnodejs 22\n', lock: { command: '(cd web && npm install --package-lock-only --no-audit --no-fund) && (cd api && go mod tidy)', files: ['web/package-lock.json', 'api/go.mod', 'api/go.sum'] },
@@ -184,6 +222,7 @@ async function proveProject(project: Project) {
     await timed('another machine takes it', () => syncHarness(on.asked(commitSha), b), ready);
     expect([...on.shared.builds.values()].filter(build => build.builder !== 'a')).toEqual([]);
     await runSuites(on, commitSha, b, timed);
+    if (project.also) console.log(passed(await offline(() => runTests(on.manual(commitSha, project.also!), b))).log.slice(-800));
     let head = commitSha;
     if (project.changed) {
       const before = new Set(on.shared.builds.keys());

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { dirname, matchesGlob, posix } from 'node:path';
 import { TEST_ENVIRONMENT_BYTES, type Command, type TestArtifact, type TestEnvironmentV1, type TestPrepare, type TestSuite } from '@hornhoof/protocol';
 import type { CommitTree } from './test-mirror.js';
-import { makeTool, RUBY_PACKAGES, TOOL_ORDER, type Tool, type ToolAsk, type ToolId } from './test-tools.js';
+import { makeTool, RUBY_PACKAGES, TOOL_DEFAULTS, TOOL_ORDER, type Tool, type ToolAsk, type ToolId } from './test-tools.js';
 
 type Tracked = Pick<CommitTree, 'entries' | 'readBlob'>;
 
@@ -39,7 +39,14 @@ const foldersWith = (seen: Seen, names: string[]): string[] => [...new Set(progr
 const topMost = (folders: string[]): string[] => folders.filter(folder => !folders.some(other => other !== folder && (other === '.' || folder.startsWith(`${other}/`))));
 const quoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 const newest = (versions: string[]): string | undefined => versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
-const parts = (seen: Seen, root: string, name: string) => seen.paths.filter(path => posix.basename(path) === name && (root === '.' || path.startsWith(`${root}/`)));
+const inside = (root: string, path: string) => root === '.' || path.startsWith(`${root}/`);
+const parts = (seen: Seen, root: string, name: string) => seen.paths.filter(path => posix.basename(path) === name && inside(root, path));
+/* One at a time: a large repository has hundreds of these, and each read of a file starts a program. */
+async function inTurn<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
+  const done: R[] = [];
+  for (const item of items) done.push(await work(item));
+  return done;
+}
 
 function readJson(text: string, path: string): Record<string, unknown> {
   try {
@@ -62,11 +69,13 @@ function workspacePatterns(pkg: PackageFile, pnpm: string | null): string[] {
   return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
 }
 function workspaceFolders(seen: Seen, root: string, patterns: string[]): string[] {
-  const positive = patterns.filter(pattern => !pattern.startsWith('!')).map(pattern => pattern.replace(/\/$/, ''));
+  const positive = patterns.filter(pattern => !pattern.startsWith('!')).map(pattern => pattern.replace(/^\.\//, '').replace(/\/$/, ''));
   return parts(seen, root, 'package.json').map(path => posix.relative(root, folderOf(path))).filter(folder => folder && !folder.includes('node_modules/') && positive.some(pattern => matchesGlob(folder, pattern)));
 }
 /* What npm init writes for a project with no tests says so and fails. */
 const testScript = (pkg: PackageFile) => (typeof pkg.scripts?.test === 'string' && !pkg.scripts.test.includes('no test specified') ? pkg.scripts.test : null);
+/* npm knows workspaces from package.json, and none from pnpm's own list. */
+const workspaceTests = (manager: string, folders: string[]) => (manager === 'pnpm' ? `for folder in ${folders.map(quoted).join(' ')}; do (cd "$folder" && npm test --if-present); done` : 'npm test --workspaces --if-present');
 async function javascriptProject(seen: Seen, root: string): Promise<Program | Orphan> {
   const lock = LOCKS.find(([file]) => seen.tracked.has(under(root, file)));
   if (!lock) return { orphan: under(root, 'package.json') };
@@ -77,10 +86,10 @@ async function javascriptProject(seen: Seen, root: string): Promise<Program | Or
   return {
     language: 'javascript', root, asks: [], steps: [install], shared: ['node_modules', ...folders.map(folder => `${folder}/node_modules`)],
     inputs: [under(root, 'package.json'), under(root, lock[0]), ...within(seen, root, ['.npmrc', '.yarnrc.yml', 'pnpm-workspace.yaml']), ...folders.map(folder => under(root, `${folder}/package.json`))],
-    test: [`npm test${typeof pkg.scripts?.test !== 'string' && folders.length ? ' --workspaces --if-present' : ''}`], idle: !testScript(pkg) && !folders.length,
+    test: [testScript(pkg) || !folders.length ? 'npm test' : workspaceTests(lock[1], folders)], idle: !testScript(pkg) && !folders.length,
   };
 }
-const javascript: Finder = seen => Promise.all(foldersWith(seen, ['package.json']).map(root => javascriptProject(seen, root))).then(found => {
+const javascript: Finder = seen => inTurn(foldersWith(seen, ['package.json']), root => javascriptProject(seen, root)).then(found => {
   /* A workspace package has no lock of its own, and is no project of its own when another holds it. */
   const held = new Set(found.flatMap(item => ('orphan' in item ? [] : item.shared.map(path => folderOf(under(item.root, path))))));
   return found.filter(item => !('orphan' in item) || !held.has(folderOf(item.orphan)));
@@ -98,7 +107,7 @@ PYTHON`;
 const python: Finder = async seen => foldersWith(seen, [...REQUIREMENTS, 'pyproject.toml']).map(root => {
   const files = within(seen, root, REQUIREMENTS), wanted = files.length ? files.flatMap(path => ['-r', posix.relative(root, path)]) : ['-r', '.hornhoof/requirements.txt'];
   const src = seen.paths.some(path => path.startsWith(`${under(root, 'src')}/`) && path.endsWith('.py'));
-  const ownPaths = seen.paths.filter(path => (root === '.' || path.startsWith(`${root}/`))).map(path => posix.basename(path));
+  const ownPaths = seen.paths.filter(path => inside(root, path)).map(path => posix.basename(path));
   return {
     language: 'python', root, asks: [], inputs: files.length ? files : [under(root, 'pyproject.toml')], shared: [PYTHON_TARGET], env: { PYTHONPATH: PYTHON_TARGET },
     steps: ['python3 -m venv "$TMPDIR/pip"', ...(files.length ? [] : [PYPROJECT_REQUIREMENTS]), `"$TMPDIR/pip/bin/python" -m pip install --no-cache-dir --target ${PYTHON_TARGET} ${wanted.join(' ')} pytest`],
@@ -114,18 +123,19 @@ function goVersion(text: string): string | undefined {
   return Number(version.split('.')[1]) >= 21 ? `${version}.0` : version;
 }
 const GO_MODULES = String.raw`go list -m -f '{{if not .Main}}{{.Path}}{{end}}' all | while read -r module; do [ -z "$module" ] || go build "$module/..." > /dev/null 2>&1 || true; done`;
-const go: Finder = seen => Promise.all(foldersWith(seen, ['go.mod']).map(async root => {
+const go: Finder = seen => inTurn(foldersWith(seen, ['go.mod']), async root => {
   const file = under(root, 'go.mod'), text = await read(seen, file);
-  /* A workspace reads all its modules, and a module can replace a dependency with one beside it. */
-  const reaches = seen.tracked.has('go.work') || /=>\s*\.\.\//.test(text), others = reaches ? foldersWith(seen, ['go.mod']).filter(folder => folder !== root).flatMap(folder => within(seen, folder, ['go.mod', 'go.sum'])) : [];
+  /* A workspace reads all its modules, and a module can replace a dependency with one of this repository. */
+  const reaches = seen.tracked.has('go.work') || /=>\s*\.\.?\//.test(text), others = reaches ? seen.paths.filter(path => /(?:^|\/)go\.(?:mod|sum)$/.test(path) && folderOf(path) !== root) : [];
   return {
     language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(text) }],
     inputs: [...within(seen, root, ['go.mod', 'go.sum']), ...within(seen, '.', ['go.work', 'go.work.sum']), ...others],
     env: { GOMODCACHE: '.hornhoof/gomod', GOCACHE: '.hornhoof/gocache' }, shared: ['.hornhoof/gomod', '.hornhoof/gocache'],
-    /* What it has compiled stays, with no note of when it last cleaned up: that file is rewritten, and each part gets a new one. */
-    steps: ['go mod download', 'go build std', GO_MODULES, 'rm -f "$GOCACHE/trim.txt"'], test: ['go test ./...'],
+    /* Go cleans a cache with no note of when it last did, of all that looks old, and what is stored does. So what it stores has
+       none, as that file is written over, and each run writes one. */
+    steps: ['go mod download', 'go build std', GO_MODULES, 'rm -f "$GOCACHE/trim.txt"'], test: ['date +%s > "$GOCACHE/trim.txt"', 'go test ./...'],
   };
-}));
+});
 
 /* Rust: cargo reads every package before it does anything, and a package needs a source to read, so each gets an empty one. What
    is compiled from those is forgotten at the end, or a run would take it for its code. */
@@ -134,7 +144,10 @@ import os, sys, tomllib
 folders = {'bin': 'src/bin', 'example': 'examples', 'test': 'tests', 'bench': 'benches'}
 for manifest in sys.argv[1:]:
     top = os.path.dirname(manifest) or '.'
-    data = tomllib.load(open(manifest, 'rb'))
+    try:
+        data = tomllib.load(open(manifest, 'rb'))
+    except (OSError, tomllib.TOMLDecodeError):
+        continue
     wanted = [target.get('path') or f"{folder}/{target['name']}.rs" for kind, folder in folders.items() for target in data.get(kind, [])]
     if data.get('lib', {}).get('path'): wanted.append(data['lib']['path'])
     if 'package' in data: wanted.append('src/lib.rs')
@@ -151,18 +164,18 @@ const RUST_STEPS = (manifests: string[]) => [
   'rm -f "$CARGO_HOME/.package-cache" "$CARGO_HOME/.package-cache-mutate" "$CARGO_HOME/.global-cache"', 'rm -rf "$CARGO_HOME/git/checkouts"',
 ];
 const rustFiles = ['rust-toolchain.toml', 'rust-toolchain'];
-const rust: Finder = seen => Promise.all(topMost(foldersWith(seen, ['Cargo.toml'])).map(async root => {
+const rust: Finder = seen => inTurn(topMost(foldersWith(seen, ['Cargo.toml'])), async root => {
   const lock = under(root, 'Cargo.lock'), own = parts(seen, root, 'Cargo.toml'), ownFile = within(seen, root, rustFiles)[0];
   if (!seen.tracked.has(lock)) return { orphan: under(root, 'Cargo.toml') };
   /* A crate outside its folder is read like its own, by every project that reaches for one. */
-  const reaches = root !== '.' && (await Promise.all(own.map(path => read(seen, path)))).some(text => /path\s*=\s*"\.\.\//.test(text));
+  const reaches = root !== '.' && (await inTurn(own, path => read(seen, path))).some(text => /path\s*=\s*"\.\.\//.test(text));
   const manifests = reaches ? parts(seen, '.', 'Cargo.toml') : own, local = manifests.map(path => posix.relative(root, path));
   return {
     language: 'rust', root, asks: [{ tool: 'rust' as const, ...(ownFile ? { ownFile } : {}) }],
     inputs: [under(root, 'Cargo.toml'), lock, ...within(seen, root, ['.cargo/config.toml']), ...manifests.filter(path => path !== under(root, 'Cargo.toml'))],
     env: { CARGO_HOME: '.hornhoof/cargo' }, shared: ['.hornhoof/cargo'], own: ['target'], steps: RUST_STEPS(local), test: ['cargo test --locked'],
   };
-}));
+});
 
 /* Java: the newest version any file of the project names, in whichever way it is written. */
 const JAVA_NAMES = [/<maven\.compiler\.(?:release|source)>([\d.]+)</g, /<java\.version>([\d.]+)</g, /<release>([\d.]+)</g, /JavaLanguageVersion\.of\((\d+)\)/g, /(?:source|target)Compatibility\s*=\s*(?:JavaVersion\.VERSION_|["']?)([\d._]+)/g];
@@ -174,14 +187,14 @@ const javaIn = (texts: string[]) => newest(texts.flatMap(text => JAVA_NAMES.flat
 const javaAsk = async (seen: Seen, paths: string[], root: string) => {
   const files = [...paths, ...within(seen, root, ['.java-version'])], versionFile = within(seen, root, ['.java-version'])[0];
   const own = versionFile ? javaFeature(await read(seen, versionFile)) : undefined;
-  return own ?? javaIn(await Promise.all(files.map(path => read(seen, path))));
+  return own ?? javaIn(await inTurn(files, path => read(seen, path)));
 };
 const MAVEN_STEPS = [
   /* A test of nothing, so what runs tests is downloaded too: Maven asks for it only when it finds a test folder. */
   `find . -name pom.xml -not -path './.hornhoof/*' | while read -r pom; do folder="$(dirname "$pom")/src/test/java"; mkdir -p "$folder"; echo 'class HornhoofPreparedTest {}' > "$folder/HornhoofPreparedTest.java"; done`,
   'mvn -B -ntp -q -Dmaven.test.failure.ignore=true test || echo "Some of it did not come down: a run takes it itself."',
 ];
-const maven: Finder = seen => Promise.all(topMost(foldersWith(seen, ['pom.xml'])).map(async root => {
+const maven: Finder = seen => inTurn(topMost(foldersWith(seen, ['pom.xml'])), async root => {
   const poms = parts(seen, root, 'pom.xml'), wrapper = under(root, '.mvn/wrapper/maven-wrapper.properties');
   const version = seen.tracked.has(wrapper) ? /apache-maven-(\d+\.\d+\.\d+)-bin/.exec(await read(seen, wrapper))?.[1] : undefined;
   return {
@@ -189,7 +202,7 @@ const maven: Finder = seen => Promise.all(topMost(foldersWith(seen, ['pom.xml'])
     inputs: [under(root, 'pom.xml'), ...poms.filter(path => path !== under(root, 'pom.xml')), ...seen.paths.filter(path => path.startsWith(`${under(root, '.mvn')}/`))],
     env: { HORNHOOF_MAVEN_REPOSITORY: '.hornhoof/m2' }, shared: ['.hornhoof/m2'], steps: MAVEN_STEPS, test: ['mvn -B -ntp test'],
   };
-}));
+});
 const GRADLE_FILES = ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'];
 const GRADLE_RESOLVE = `cat > "$TMPDIR/resolve.gradle" <<'GRADLE'
 allprojects { tasks.register('hornhoofResolve') { doLast { project.configurations.findAll { it.canBeResolved }.each { try { it.resolve() } catch (Exception e) { logger.warn(e.message) } } } } }
@@ -200,7 +213,7 @@ const GRADLE_STEPS = [
   'gradle --no-daemon --no-configuration-cache --init-script "$TMPDIR/resolve.gradle" hornhoofResolve || echo "Some of it did not come down: a run takes it itself."',
   'mkdir -p .hornhoof/gradle/caches/modules-2', "find .hornhoof/gradle/caches -mindepth 1 -maxdepth 1 ! -name modules-2 -exec rm -rf {} +", "find .hornhoof/gradle/caches -name '*.lock' -delete", 'rm -f .hornhoof/gradle/caches/modules-2/gc.properties',
 ];
-const gradle: Finder = seen => Promise.all(topMost(foldersWith(seen, GRADLE_FILES)).map(async root => {
+const gradle: Finder = seen => inTurn(topMost(foldersWith(seen, GRADLE_FILES)), async root => {
   const builds = GRADLE_FILES.flatMap(name => parts(seen, root, name)), wrapper = under(root, 'gradle/wrapper/gradle-wrapper.properties');
   const version = seen.tracked.has(wrapper) ? /gradle-([\d.]+)-(?:bin|all)\.zip/.exec(await read(seen, wrapper))?.[1] : undefined;
   return {
@@ -208,20 +221,30 @@ const gradle: Finder = seen => Promise.all(topMost(foldersWith(seen, GRADLE_FILE
     inputs: [...builds, ...within(seen, root, ['gradle.properties']), ...seen.paths.filter(path => path.startsWith(`${under(root, 'gradle')}/`) || path.startsWith(`${under(root, 'buildSrc')}/`))],
     env: { GRADLE_RO_DEP_CACHE: '.hornhoof/gradle/caches' }, shared: ['.hornhoof/gradle/caches'], steps: GRADLE_STEPS, test: ['gradle --no-daemon test'],
   };
-}));
+});
 
 /* PHP: a class map names classes that are not there at install, so a project that keeps one writes it again before a run. */
 type ComposerFile = { scripts?: Record<string, unknown>; config?: { platform?: { php?: unknown } }; require?: Record<string, unknown>; autoload?: { classmap?: unknown[] }; 'autoload-dev'?: { classmap?: unknown[] } };
+/* The newest series of PHP a constraint allows, as what is locked may need more than its lowest; none when that is the newest of all. */
+function phpSeries(constraint: string): string | undefined {
+  const last = constraint.split('|').at(-1)!.trim(), exact = /^[~=]?(\d+\.\d+)(?:\.\*|\.\d+)$/.exec(last)?.[1];
+  if (exact) return exact;
+  const lower = /\d+\.\d+/.exec(last)?.[0], below = /<\s*(\d+)\.(\d+)/.exec(last);
+  if (below && below[2] !== '0') return `${below[1]}.${Number(below[2]) - 1}`;
+  if (last.startsWith('>') && !below) return undefined;
+  const major = below ? String(Number(below[1]) - 1) : lower?.split('.')[0];
+  return major === TOOL_DEFAULTS.php.split('.')[0] ? undefined : lower;
+}
 function phpVersion(composer: ComposerFile, own: string | null): string | undefined {
   const platform = composer.config?.platform?.php;
   if (typeof platform === 'string') return platform;
   if (own) return own.trim();
-  return /^(?:~|=)?(\d+\.\d+)(?:\.\*|\.\d+)$/.exec(typeof composer.require?.php === 'string' ? composer.require.php : '')?.[1];
+  return typeof composer.require?.php === 'string' ? phpSeries(composer.require.php) : undefined;
 }
 const CLASS_MAP = 'rm -f vendor/autoload.php vendor/composer/autoload_*.php vendor/composer/installed.php vendor/composer/platform_check.php && composer dump-autoload --no-scripts --quiet';
 const keepsClassMap = (composer: ComposerFile) => [composer.autoload, composer['autoload-dev']].some(autoload => autoload?.classmap?.length);
 function phpTests(composer: ComposerFile, locked: string): Pick<Program, 'test' | 'idle'> {
-  const script = typeof composer.scripts?.test === 'string', phpunit = locked.includes('phpunit/phpunit');
+  const script = composer.scripts?.test !== undefined, phpunit = locked.includes('phpunit/phpunit');
   return { test: [...(keepsClassMap(composer) ? [CLASS_MAP] : []), script || !phpunit ? 'composer test' : 'vendor/bin/phpunit'], idle: !script && !phpunit };
 }
 async function phpProject(seen: Seen, root: string): Promise<Program | Orphan> {
@@ -233,10 +256,10 @@ async function phpProject(seen: Seen, root: string): Promise<Program | Orphan> {
     steps: ['composer install --no-interaction --no-progress --no-scripts'], ...phpTests(composer, await read(seen, lock)),
   };
 }
-const php: Finder = seen => Promise.all(foldersWith(seen, ['composer.json']).map(root => phpProject(seen, root)));
+const php: Finder = seen => inTurn(foldersWith(seen, ['composer.json']), root => phpProject(seen, root));
 
 /* Ruby: a lock file written elsewhere may not name this machine's platform, and bundler adds it to its own copy. */
-const RUBY_PLATFORM = `bundle lock --add-platform "$(ruby -e 'print Gem::Platform.local')" ${'--local'} > /dev/null 2>&1 || true`;
+const RUBY_PLATFORM = `bundle lock --add-platform "$(ruby -e 'print Gem::Platform.local')"`;
 async function rubyVersion(seen: Seen, root: string): Promise<string | undefined> {
   const own = within(seen, root, ['.ruby-version'])[0];
   if (own) return /(\d+\.\d+(?:\.\d+)?)/.exec(await read(seen, own))?.[1];
@@ -247,15 +270,17 @@ async function rubyProject(seen: Seen, root: string): Promise<Program | Orphan> 
   const file = under(root, 'Gemfile'), lock = under(root, 'Gemfile.lock');
   if (!seen.tracked.has(lock)) return { orphan: file };
   const gemspecs = seen.paths.filter(path => folderOf(path) === root && path.endsWith('.gemspec')), locked = await read(seen, lock);
+  /* A gem's gemspec commonly loads its version from where the gem keeps it. */
+  const versions = gemspecs.length ? [...seen.paths.filter(path => inside(root, path) && /(?:^|\/)lib\/(?:.*\/)?version\.rb$/.test(path)), ...within(seen, root, ['VERSION'])] : [];
   const rspec = /^\s+rspec \(/m.test(locked), rake = /^\s+rake \(/m.test(locked) && seen.tracked.has(under(root, 'Rakefile'));
   return {
     language: 'ruby', root, asks: [{ tool: 'ruby', version: await rubyVersion(seen, root) }],
-    inputs: [file, lock, ...within(seen, root, ['.ruby-version']), ...gemspecs], env: { BUNDLE_PATH: '.hornhoof/gems' }, shared: ['.hornhoof/gems'],
-    steps: [`bundle lock --add-platform "$(ruby -e 'print Gem::Platform.local')" > /dev/null 2>&1 || true`, 'bundle install'],
-    test: [RUBY_PLATFORM, `bundle exec ${rspec ? 'rspec' : 'rake test'}`], idle: !rspec && !rake,
+    inputs: [file, lock, ...within(seen, root, ['.ruby-version']), ...gemspecs, ...versions], env: { BUNDLE_PATH: '.hornhoof/gems' }, shared: ['.hornhoof/gems'],
+    steps: [`${RUBY_PLATFORM} > /dev/null 2>&1 || true`, 'bundle install'],
+    test: [`${RUBY_PLATFORM} --local > /dev/null 2>&1 || true`, `bundle exec ${rspec ? 'rspec' : 'rake test'}`], idle: !rspec && !rake,
   };
 }
-const ruby: Finder = seen => Promise.all(foldersWith(seen, ['Gemfile']).map(root => rubyProject(seen, root)));
+const ruby: Finder = seen => inTurn(foldersWith(seen, ['Gemfile']), root => rubyProject(seen, root));
 
 const FINDERS: Finder[] = [javascript, python, go, rust, maven, gradle, php, ruby];
 
@@ -287,10 +312,16 @@ function toolAsk(asks: Ask[], named: Map<string, string>, id: ToolId, programs: 
 }
 
 const ID_LIMIT = 50;
+const withDigest = (name: string, text: string) => `${name.slice(0, ID_LIMIT - 9)}-${createHash('sha256').update(text).digest('hex').slice(0, 8)}`;
 function slug(program: Program): string {
   if (program.root === '.') return program.language;
   const name = `${program.language}-${program.root.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-  return name.length <= ID_LIMIT ? name : `${name.slice(0, ID_LIMIT - 9)}-${createHash('sha256').update(program.root).digest('hex').slice(0, 8)}`;
+  return name.length <= ID_LIMIT ? name : withDigest(name, program.root);
+}
+/* Two programs can read alike: Maven and Gradle in one folder, or api-v2 beside api/v2. */
+function slugs(programs: Program[]): string[] {
+  const names = programs.map(slug);
+  return names.map((name, index) => (names.indexOf(name) === names.lastIndexOf(name) ? name : withDigest(name, `${programs[index]!.root}:${programs[index]!.asks.map(ask => ask.tool).join()}`)));
 }
 const inProgram = (root: string, env: Record<string, string>, lines: string[]): Command => ({
   program: 'sh', args: ['-c', ['set -e', ...Object.entries(env).map(([name, path]) => `export ${name}="$PWD/${path}"`), ...lines].join('\n')], cwd: root,
@@ -321,7 +352,7 @@ function toolsUnit(tools: Tool[]): TestEnvironmentV1['dependencies'] {
   return { adapter: tools.map(tool => tool.id).join('.') || 'none', inputs: tools.flatMap(tool => tool.inputs ?? []), install: tools.flatMap(tool => tool.install), paths: tools.flatMap(tool => tool.paths), cache: 'link', ...(Object.keys(env).length ? { env } : {}), ...(bin.length ? { bin } : {}) };
 }
 function manifestOf(programs: Program[], tools: Tool[], named: Map<string, string>): TestEnvironmentV1 {
-  const ids = programs.map(slug), names = programs.flatMap(program => Object.keys(program.env ?? {}));
+  const ids = slugs(programs), names = programs.flatMap(program => Object.keys(program.env ?? {}));
   const sharedNames = new Set(names.filter((name, index) => names.indexOf(name) !== index));
   const suites = programs.length ? programs.map((program, index) => suiteOf(program, ids[index]!)) : [toolsSuite(named, tools)];
   return {

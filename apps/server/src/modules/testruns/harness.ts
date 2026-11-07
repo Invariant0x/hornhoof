@@ -235,7 +235,7 @@ export function harnessRoutes(app: FastifyInstance, ctx: Ctx): void {
 }
 
 type Sync = { requestId: string; commitSha: string; at: number; answered: boolean; problem: boolean };
-type Request = { departmentId: string; node: NodeIdentity; name: string; head: boolean };
+type Request = { commitSha: string; departmentId: string; node: NodeIdentity; name: string; head: boolean };
 const syncs = new WeakMap<Ctx, Map<string, Sync>>(), requests = new WeakMap<Ctx, Map<string, Request>>(), rounds = new WeakMap<Ctx, Promise<void>>();
 const syncsOf = (ctx: Ctx) => { const known = syncs.get(ctx) ?? new Map<string, Sync>(); syncs.set(ctx, known); return known; };
 const requestsOf = (ctx: Ctx) => { const known = requests.get(ctx) ?? new Map<string, Request>(); requests.set(ctx, known); return known; };
@@ -250,9 +250,12 @@ function ask(ctx: Ctx, place: Place, department: Department, repo: Repo, commitS
   const requestId = randomUUID();
   const sent = ctx.hub.send(place.node, { type: 'tests.harness', requestId, repositoryScope: repositoryScope(department.companyId, department.id, repo.url), repo: { url: repo.url, token: repo.token }, commitSha });
   if (!sent) return;
-  requestsOf(ctx).set(requestId, { departmentId: department.id, node: place.node, name: place.name, head });
+  requestsOf(ctx).set(requestId, { commitSha, departmentId: department.id, node: place.node, name: place.name, head });
   if (head) syncsOf(ctx).set(syncKey(department.id, place.node), { requestId, commitSha, at: now.getTime(), answered: false, problem: false });
 }
+
+/* A machine that was asked for a commit takes all of it: the other programs that come ready meanwhile need no word of their own. */
+const asking = (ctx: Ctx, build: Build, node: NodeIdentity): boolean => [...requestsOf(ctx).values()].some(request => request.commitSha === build.commitSha && request.departmentId === build.departmentId && sameNode(request.node, node));
 
 /* A changed lock file, on whichever branch, came ready on one machine: the others take it now, not at their first run. */
 async function spread(ctx: Ctx, build: Build, builder: NodeIdentity): Promise<void> {
@@ -262,7 +265,7 @@ async function spread(ctx: Ctx, build: Build, builder: NodeIdentity): Promise<vo
   const now = new Date(), places = await harnessPlaces(ctx, await placesOf(ctx, build.companyId));
   for (const place of places) {
     if (sameNode(place.node, builder) || !mayTake(place, { kind: 'tests' }, found.department)) continue;
-    if (syncsOf(ctx).get(syncKey(build.departmentId, place.node))?.commitSha === build.commitSha) continue;
+    if (syncsOf(ctx).get(syncKey(build.departmentId, place.node))?.commitSha === build.commitSha || asking(ctx, build, place.node)) continue;
     ask(ctx, place, found.department, found.repo, build.commitSha, false, now);
   }
 }
