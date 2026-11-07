@@ -94,7 +94,8 @@ function mutate(tool, args) {
 
 /* The same fast tests a source's fingerprint reads: what they reach decides both. */
 async function judgesFor(manifest, tracked, sources) {
-  const fingerprint = await import('../../apps/node/dist/test-fingerprint.js');
+  const { tsImport } = await import('tsx/esm/api');
+  const fingerprint = await tsImport('../../apps/node/src/test-fingerprint.ts', import.meta.url);
   const texts = new Map(fingerprint.codeFilesOf(tracked).map(path => [path, readFileSync(path, 'utf8')]));
   const input = { description: { manifest, inventory: [], inputDigests: [], runtimeCapabilities: [] }, tracked, texts };
   const suite = manifest.suites.find(suite => suite.id === 'mutation');

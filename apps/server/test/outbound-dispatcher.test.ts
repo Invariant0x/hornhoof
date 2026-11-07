@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { agents, modelChecks, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundEvents, outboundMessageRevisions, outboundMessages, waitNotices } from '../src/db/schema.js';
 import { minuteRound, startTimers } from '../src/modules/agents/timers.js';
@@ -20,7 +20,7 @@ import { sha } from './outbound-fixture.js';
 const SMTP: SmtpSettings = { host: 'smtp.acme.example', port: 465, security: 'tls', username: 'sender@acme.example', password: PASSWORD, from: 'sender@acme.example', eventKey: `${PASSWORD}-events-0123456789abcdef` };
 const EVENT_KEY = SMTP.eventKey!;
 const ACCEPTED: SendOutcome = { kind: 'accepted', providerReceipt: '250 ok', acceptedAt: new Date().toISOString() };
-const LATER = new Date(Date.now() + 6 * 60_000);
+const later = () => new Date(Date.now() + 6 * 60_000);
 
 type Sent = { attemptId: string; recipient: string; subject: string; text: string; settings: SmtpSettings };
 
@@ -64,7 +64,7 @@ describe('sending what is due', () => {
     const { messageId } = await w.submit();
     const { sent, use } = senders();
     await dispatchDue(w.ctx, new Date(), use);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ recipient: 'ann@shop.example', subject: 'Hello', settings: SMTP });
     expect(sent[0]!.text).toContain('10.00');
@@ -110,8 +110,8 @@ describe('sending what is due', () => {
     const { sent, use } = senders(async () => ({ kind: 'unknown', safeCode: 'timeout' }));
     await dispatchDue(w.ctx, new Date(), use);
     const second = await w.submit();
-    await dispatchDue(w.ctx, LATER, use);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent.map(s => s.attemptId)).toEqual([(await attemptsOf(w, first.messageId))[0]!.id]);
     expect(await w.messageOf(first.messageId)).toMatchObject({ status: 'unknown', reasonCodes: ['delivery_unknown'] });
     expect(await w.messageOf(second.messageId)).toMatchObject({ status: 'reserved' });
@@ -123,7 +123,7 @@ describe('sending what is due', () => {
     const { messageId } = await w.submit();
     const { sent, use } = senders(async () => { throw new Error(`refused ${PASSWORD}`); });
     await dispatchDue(w.ctx, new Date(), use);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toHaveLength(1);
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'unknown', safeCode: 'connection_lost' }]);
   });
@@ -368,7 +368,7 @@ describe('what waits for a check of its words', () => {
     expect(sent).toEqual([]);
     await allowed(w, messageId, contentDigest, certified);
     await dispatchDue(w.ctx, new Date(), use);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toHaveLength(1);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'sent' });
   });
@@ -387,7 +387,7 @@ describe('what waits for a check of its words', () => {
     await allowed(w, messageId, contentDigest, { check: certified.check, bindingDigest });
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'scheduled', reasonCodes: [] });
     await dispatchDue(w.ctx, new Date(), use);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toHaveLength(1);
   });
 
@@ -408,6 +408,13 @@ describe('what waits for a check of its words', () => {
 });
 
 describe('finding out how an attempt ended', () => {
+  /* Model a file that started over six minutes before these attempts, without waiting. */
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 7 * 60_000));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
   const stuck = async (w: World) => {
     const { messageId } = await w.submit();
     const begun = await dispatched(w, messageId);
@@ -421,9 +428,9 @@ describe('finding out how an attempt ended', () => {
     const { sent, use } = senders();
     await reconcileOutbound(w.ctx, new Date(Date.now() + 60_000), use);
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'sending' }]);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
     expect(await attemptsOf(w, messageId)).toMatchObject([{ id: attemptId, status: 'unknown', safeCode: 'timeout' }]);
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toEqual([]);
     expect(await attemptsOf(w, messageId)).toHaveLength(1);
   });
@@ -432,8 +439,8 @@ describe('finding out how an attempt ended', () => {
     const w = await ready();
     await stuck(w);
     const { use } = senders();
-    await reconcileOutbound(w.ctx, LATER, use);
-    await dispatchDue(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
+    await dispatchDue(w.ctx, later(), use);
     await reconcileOutbound(w.ctx, new Date(Date.now() + 30 * 86_400_000), use);
     expect(await w.c.db.select().from(outboundBindings).where(eq(outboundBindings.accountId, w.account.id))).toMatchObject([{ agentId: w.c.worker.id, generation: 1, status: 'active' }]);
   });
@@ -442,12 +449,12 @@ describe('finding out how an attempt ended', () => {
     const w = await ready();
     const { messageId, attemptId } = await stuck(w);
     const { asked, use } = senders(undefined, async () => ACCEPTED);
-    await reconcileOutbound(w.ctx, LATER, use);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
+    await reconcileOutbound(w.ctx, later(), use);
     expect(asked).toContain(attemptId);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'sent' });
     const next = await w.submit();
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(await w.messageOf(next.messageId)).toMatchObject({ status: 'sent' });
   });
 
@@ -455,8 +462,8 @@ describe('finding out how an attempt ended', () => {
     const w = await ready();
     const { messageId } = await stuck(w);
     const { use } = senders(undefined, async () => ({ kind: 'definitely_not_accepted', safeCode: 'receiver_refused' }));
-    await reconcileOutbound(w.ctx, LATER, use);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
+    await reconcileOutbound(w.ctx, later(), use);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'definitely_failed' });
   });
 
@@ -468,8 +475,8 @@ describe('finding out how an attempt ended', () => {
     const w = await ready();
     const { messageId } = await stuck(w);
     const { use } = senders(undefined, ask);
-    await reconcileOutbound(w.ctx, LATER, use);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
+    await reconcileOutbound(w.ctx, later(), use);
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'unknown', safeCode: 'timeout' }]);
   });
 
@@ -478,8 +485,8 @@ describe('finding out how an attempt ended', () => {
     const { messageId, attemptId } = await stuck(w);
     await w.c.db.update(outboundAccounts).set({ status: 'revoked', configEnc: encryptSecret('{}', w.ctx.config.secret) }).where(eq(outboundAccounts.id, w.account.id));
     const { asked, use } = senders(undefined, async () => ACCEPTED);
-    await reconcileOutbound(w.ctx, LATER, use);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
+    await reconcileOutbound(w.ctx, later(), use);
     expect(asked).not.toContain(attemptId);
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'unknown' }]);
   });
@@ -491,13 +498,13 @@ describe('finding out how an attempt ended', () => {
     const { sent, use } = senders(() => new Promise(resolve => { answer = resolve; }), undefined, 60_000);
     const worker = dispatchDue(w.ctx, new Date(), use);
     await expect.poll(() => sent.length).toBe(1);
-    await reconcileOutbound(w.ctx, LATER, use);
+    await reconcileOutbound(w.ctx, later(), use);
     await stopByPerson(w.ctx, w.channel.id);
     answer(ACCEPTED);
     await worker;
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'accepted' }]);
     expect((await channelOf(w)).status).toBe('stopped');
-    await dispatchDue(w.ctx, LATER, use);
+    await dispatchDue(w.ctx, later(), use);
     expect(sent).toHaveLength(1);
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Shell } from '../src/screens/Shell';
@@ -96,6 +96,7 @@ describe('one agent window', () => {
       'GET /api/requests': [200, decisions([])],
       'GET /api/machines': [200, { machines: MACHINES }],
       'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, id: 'a1', name: 'Orchestrator' }] }] }],
+      'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
       'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
       'GET /api/tasks?status=open': [200, { tasks: [] }],
@@ -104,8 +105,12 @@ describe('one agent window', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await openList(user, 'Subscriptions');
     await user.click(screen.getByRole('button', { name: 'Open Orchestrator' }));
-    answer([200, ORG]);
+    await act(async () => {
+      answer([200, ORG]);
+      await pending;
+    });
     expect(await screen.findByRole('complementary', { name: 'Orchestrator' })).toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'GET', path: '/api/agents/orchestrator', body: undefined });
     expect(calls.some(c => c.path === '/api/agents/a1')).toBe(false);
   });
 
