@@ -114,13 +114,18 @@ function goVersion(text: string): string | undefined {
   return Number(version.split('.')[1]) >= 21 ? `${version}.0` : version;
 }
 const GO_MODULES = String.raw`go list -m -f '{{if not .Main}}{{.Path}}{{end}}' all | while read -r module; do [ -z "$module" ] || go build "$module/..." > /dev/null 2>&1 || true; done`;
-const go: Finder = seen => Promise.all(foldersWith(seen, ['go.mod']).map(async root => ({
-  language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(await read(seen, under(root, 'go.mod'))) }],
-  inputs: [...within(seen, root, ['go.mod', 'go.sum']), ...within(seen, '.', ['go.work', 'go.work.sum'])],
-  env: { GOMODCACHE: '.hornhoof/gomod', GOCACHE: '.hornhoof/gocache' }, shared: ['.hornhoof/gomod', '.hornhoof/gocache'],
-  /* What it has compiled stays, with no note of when it last cleaned up: that file is rewritten, and each part gets a new one. */
-  steps: ['go mod download', 'go build std', GO_MODULES, 'rm -f "$GOCACHE/trim.txt"'], test: ['go test ./...'],
-})));
+const go: Finder = seen => Promise.all(foldersWith(seen, ['go.mod']).map(async root => {
+  const file = under(root, 'go.mod'), text = await read(seen, file);
+  /* A workspace reads all its modules, and a module can replace a dependency with one beside it. */
+  const reaches = seen.tracked.has('go.work') || /=>\s*\.\.\//.test(text), others = reaches ? foldersWith(seen, ['go.mod']).map(folder => under(folder, 'go.mod')).filter(path => path !== file) : [];
+  return {
+    language: 'go', root, asks: [{ tool: 'go' as const, version: goVersion(text) }],
+    inputs: [...within(seen, root, ['go.mod', 'go.sum']), ...within(seen, '.', ['go.work', 'go.work.sum']), ...others],
+    env: { GOMODCACHE: '.hornhoof/gomod', GOCACHE: '.hornhoof/gocache' }, shared: ['.hornhoof/gomod', '.hornhoof/gocache'],
+    /* What it has compiled stays, with no note of when it last cleaned up: that file is rewritten, and each part gets a new one. */
+    steps: ['go mod download', 'go build std', GO_MODULES, 'rm -f "$GOCACHE/trim.txt"'], test: ['go test ./...'],
+  };
+}));
 
 /* Rust: cargo reads every package before it does anything, and a package needs a source to read, so each gets an empty one. What
    is compiled from those is forgotten at the end, or a run would take it for its code. */
@@ -146,16 +151,18 @@ const RUST_STEPS = (manifests: string[]) => [
   'rm -f "$CARGO_HOME/.package-cache" "$CARGO_HOME/.package-cache-mutate" "$CARGO_HOME/.global-cache"', 'rm -rf "$CARGO_HOME/git/checkouts"',
 ];
 const rustFiles = ['rust-toolchain.toml', 'rust-toolchain'];
-const rust: Finder = async seen => topMost(foldersWith(seen, ['Cargo.toml'])).map(root => {
-  const lock = under(root, 'Cargo.lock'), manifests = parts(seen, root, 'Cargo.toml'), ownFile = within(seen, root, rustFiles)[0];
+const rust: Finder = seen => Promise.all(topMost(foldersWith(seen, ['Cargo.toml'])).map(async root => {
+  const lock = under(root, 'Cargo.lock'), own = parts(seen, root, 'Cargo.toml'), ownFile = within(seen, root, rustFiles)[0];
   if (!seen.tracked.has(lock)) return { orphan: under(root, 'Cargo.toml') };
-  const local = manifests.map(path => posix.relative(root, path));
+  /* A crate outside its folder is read like its own, by every project that reaches for one. */
+  const reaches = root !== '.' && (await Promise.all(own.map(path => read(seen, path)))).some(text => /path\s*=\s*"\.\.\//.test(text));
+  const manifests = reaches ? parts(seen, '.', 'Cargo.toml') : own, local = manifests.map(path => posix.relative(root, path));
   return {
     language: 'rust', root, asks: [{ tool: 'rust' as const, ...(ownFile ? { ownFile } : {}) }],
     inputs: [under(root, 'Cargo.toml'), lock, ...within(seen, root, ['.cargo/config.toml']), ...manifests.filter(path => path !== under(root, 'Cargo.toml'))],
     env: { CARGO_HOME: '.hornhoof/cargo' }, shared: ['.hornhoof/cargo'], own: ['target'], steps: RUST_STEPS(local), test: ['cargo test --locked'],
   };
-});
+}));
 
 /* Java: the newest version any file of the project names, in whichever way it is written. */
 const JAVA_NAMES = [/<maven\.compiler\.(?:release|source)>([\d.]+)</g, /<java\.version>([\d.]+)</g, /<release>([\d.]+)</g, /JavaLanguageVersion\.of\((\d+)\)/g, /(?:source|target)Compatibility\s*=\s*(?:JavaVersion\.VERSION_|["']?)([\d._]+)/g];
@@ -212,10 +219,10 @@ function phpVersion(composer: ComposerFile, own: string | null): string | undefi
   return /^(?:~|=)?(\d+\.\d+)(?:\.\*|\.\d+)$/.exec(typeof composer.require?.php === 'string' ? composer.require.php : '')?.[1];
 }
 const CLASS_MAP = 'rm -f vendor/autoload.php vendor/composer/autoload_*.php vendor/composer/installed.php vendor/composer/platform_check.php && composer dump-autoload --no-scripts --quiet';
+const keepsClassMap = (composer: ComposerFile) => [composer.autoload, composer['autoload-dev']].some(autoload => autoload?.classmap?.length);
 function phpTests(composer: ComposerFile, locked: string): Pick<Program, 'test' | 'idle'> {
-  const mapped = composer.autoload?.classmap?.length || composer['autoload-dev']?.classmap?.length;
   const script = typeof composer.scripts?.test === 'string', phpunit = locked.includes('phpunit/phpunit');
-  return { test: [...(mapped ? [CLASS_MAP] : []), script || !phpunit ? 'composer test' : 'vendor/bin/phpunit'], idle: !script && !phpunit };
+  return { test: [...(keepsClassMap(composer) ? [CLASS_MAP] : []), script || !phpunit ? 'composer test' : 'vendor/bin/phpunit'], idle: !script && !phpunit };
 }
 async function phpProject(seen: Seen, root: string): Promise<Program | Orphan> {
   const file = under(root, 'composer.json'), lock = under(root, 'composer.lock');
@@ -260,8 +267,8 @@ function readNamed(text: string): Map<string, string> {
   return new Map(text.split('\n').map(line => line.replace(/#.*/, '').trim().split(/\s+/)).filter(([name, version]) => name && version).map(([name, version]) => [name!, version!]));
 }
 function namedVersion(tool: ToolId, version: string): string | undefined {
-  if (tool === 'java') return javaFeature(version.replace(/^[a-z]+-/i, ''));
-  return tool === 'c' ? undefined : version.replace(/^[a-z]+-/i, '');
+  if (tool === 'java') return javaFeature(version);
+  return tool === 'c' ? undefined : version;
 }
 /* What a tool cannot work without, chosen or not: what links or builds it, what runs it. */
 const NEEDS: Partial<Record<ToolId, Ask[]>> = { rust: [{ tool: 'c' }], ruby: [{ tool: 'c', packages: RUBY_PACKAGES }], maven: [{ tool: 'java' }], gradle: [{ tool: 'java' }] };

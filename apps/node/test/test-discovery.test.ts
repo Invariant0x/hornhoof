@@ -124,6 +124,15 @@ describe('a Go project', () => {
     expect(manifest.dependencies.install[0]!.args.at(-2)).toBe(version);
   });
 
+  it('gives a program what it reaches outside its folder: a workspace, or another module it replaces a dependency with', async () => {
+    const workspace = await found({ 'go.work': 'go 1.25.0\nuse (\n\t./a\n\t./b\n)\n', 'a/go.mod': 'module a\n', 'b/go.mod': 'module b\n', 'b/go.sum': '' });
+    expect(workspace.prepare[0]!.inputs).toEqual(['a/go.mod', 'go.work', 'b/go.mod']);
+    expect(workspace.prepare[1]!.inputs).toEqual(['b/go.mod', 'b/go.sum', 'go.work', 'a/go.mod']);
+    const replaced = await found({ 'a/go.mod': 'module a\nreplace b => ../b\n', 'b/go.mod': 'module b\n' });
+    expect(replaced.prepare[0]!.inputs).toEqual(['a/go.mod', 'b/go.mod']);
+    expect(replaced.prepare[1]!.inputs).toEqual(['b/go.mod']);
+  });
+
   it('counts a changed lock file for the project and leaves its tool alone', async () => {
     const before = await found({ 'go.mod': 'module shop\ngo 1.22.4\n', 'go.sum': 'a' }), after = await found({ 'go.mod': 'module shop\ngo 1.22.4\nrequire x v1\n', 'go.sum': 'b' });
     expect(after.dependencies).toEqual(before.dependencies);
@@ -167,6 +176,13 @@ describe('a Rust project', () => {
     expect(steps).toContain("'Cargo.toml' 'crates/a/Cargo.toml' 'crates/b/Cargo.toml'");
     expect(steps).toContain('cargo clean --locked -p');
     expect(steps).toContain('metadata="$(cargo metadata --locked --format-version=1)"');
+  });
+
+  it('gives a project the crates it reaches outside its folder, whose sources it also needs empty ones of', async () => {
+    const manifest = await found({ 'api/Cargo.toml': '[package]\nname = "api"\n[dependencies]\nshared = { path = "../shared" }\n', 'api/Cargo.lock': '', 'shared/Cargo.toml': '[package]\nname = "shared"\n', 'shared/Cargo.lock': '' });
+    expect(manifest.prepare[0]!.inputs).toEqual(['api/Cargo.toml', 'api/Cargo.lock', 'shared/Cargo.toml']);
+    expect(script(manifest.prepare[0]!.commands[0]!)).toContain("'Cargo.toml' '../shared/Cargo.toml'");
+    expect(manifest.prepare[1]!.inputs).toEqual(['shared/Cargo.toml', 'shared/Cargo.lock']);
   });
 
   it('refuses a project with no lock file', async () => {
@@ -295,6 +311,14 @@ describe('what the head and the owner chose', () => {
   it('lets what it names win over what a project\'s own files say', async () => {
     const manifest = await found({ '.tool-versions': 'golang 1.25.1\n', 'go.mod': 'module shop\ngo 1.22.4\n' });
     expect(manifest.dependencies.install[0]!.args.at(-2)).toBe('1.25.1');
+  });
+
+  it.each([
+    ['rust nightly-2025-01-01', 'toolchain install nightly-2025-01-01'],
+    ['rust stable', 'toolchain install stable'],
+  ])('takes %s as it is written', async (line, command) => {
+    const installs = (await found({ '.tool-versions': `${line}\n` })).dependencies.install.map(item => item.args.join(' '));
+    expect(installs.some(text => text.startsWith(command))).toBe(true);
   });
 
   it('wins over a Rust toolchain file too, which Rust would otherwise obey in every run', async () => {
