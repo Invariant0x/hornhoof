@@ -1039,6 +1039,24 @@ describe('a fetch by the settings of the remote', () => {
       expect(calls(s, 'fetch').map(call => call.argv)).toEqual([['fetch', 'origin']]);
     });
 
+    /* The one test where the git of this machine says what it is. A clone without origin/HEAD is what sets 2.48 apart: from then on
+       plain git writes it, and a fetch through the service remote would not. */
+    it('goes by what the real git says about itself and gives what it gives', async () => {
+      const s = stand();
+      const withoutRemoteHead: Prepare = work => { realGit(work, 'remote', 'set-head', 'origin', '--delete'); tracking(work); };
+      const { agent, plain, moveRemote } = clones(s, withoutRemoteHead);
+      moveRemote();
+      const plainRan = plainFetch(s, plain, ['fetch', 'origin']);
+      planFor(s, { '--version': [{ do: 'real' }] });
+      const port = new FakePort();
+      const { env } = await serve(s, port);
+      const ran = await runShim(['fetch', 'origin'], agent, env);
+      expectSameAsPlain(ran, plainRan, agent, plain);
+      const [major, minor] = /(\d+)\.(\d+)/.exec(realGit(s.dir, '--version'))!.slice(1).map(Number) as [number, number];
+      const belowTheChange = major < 2 || (major === 2 && minor < 48);
+      expect(port.registered).toHaveLength(belowTheChange ? 1 : 0);
+    });
+
     it('takes the last git before the change and settings that do not touch a fetch', async () => {
       const s = stand();
       const { agent } = clones(s, tracking);
