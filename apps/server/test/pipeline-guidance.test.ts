@@ -7,7 +7,9 @@ const body = (id: string) => templates.skills.get(id)!.body;
 
 describe('pipeline guidance', () => {
   it('separates author checks, shared turn checks and nonblocking improvements', () => {
-    expect(body('dev-gates')).toMatch(/affected tests[\s\S]*pinned commit/);
+    expect(body('dev-gates')).toMatch(/Who runs which check is in dev-testing-policy/);
+    expect(body('dev-testing-policy')).toMatch(/- T2\. Developers run only affected tests through run_tests[^\n]*green result and commit SHA/);
+    expect(body('dev-gates')).toMatch(/final check once per turn on the final pinned commit/);
     expect(body('dev-gates')).toMatch(/Improvement lanes[\s\S]*ordinary next-turn tasks/i);
     expect(body('dev-implement')).toMatch(/next independent piece of work/i);
   });
