@@ -4,11 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessUnit, ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+const io = vi.hoisted(() => ({ pause: null as null | ((operation: string, path: string) => Promise<void>) }));
+vi.mock('node:fs/promises', async original => {
+  const fs = await original<typeof import('node:fs/promises')>();
+  return { ...fs,
+    writeFile: async (...args: Parameters<typeof fs.writeFile>) => { await fs.writeFile(...args); await io.pause?.('write', String(args[0])); },
+    rename: async (...args: Parameters<typeof fs.rename>) => { await io.pause?.('rename', String(args[0])); return fs.rename(...args); },
+  };
+});
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, harnessBuilds, harnessProducts, jobs, machines } from '../src/db/schema.js';
-import { harnessRound } from '../src/modules/testruns/harness.js';
+import { companies, departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
+import { harnessGreeted, harnessRound, harnessSynced } from '../src/modules/testruns/harness.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { nextOf, type FakeNode } from './helpers.js';
 import { company, gets } from './test-runs-company.js';
 
@@ -32,6 +41,98 @@ async function shared(env: NodeJS.ProcessEnv = {}) {
   return { ...c, dir, unit, claim, part, finish, failed, bundle, uploaded };
 }
 type Shared = Awaited<ReturnType<typeof shared>>;
+
+function pauseIO(operation: string) {
+  const entered = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>();
+  io.pause = async (kind, path) => {
+    if (kind !== operation || !path.includes('.parts') && !path.includes('.staging-')) return;
+    io.pause = null; entered.resolve(); await resume.promise;
+  };
+  return { entered: entered.promise, resume: () => resume.resolve() };
+}
+afterEach(() => { io.pause = null; });
+
+describe('harness access and attempt fences', () => {
+  it.each(['subscription', 'access', 'lending', 'machine'])('rejects every write after revoking %s, without publication or a head wake', async revoked => {
+    const c = await shared(), one = await c.machine(c.ann, 'builder'), bytes = Buffer.from('private');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    if (revoked === 'subscription') await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, one.subscriptionId));
+    if (revoked === 'lending') await c.db.update(machines).set({ lendsTests: false }).where(eq(machines.id, one.machineId));
+    if (revoked === 'machine') await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, one.machineId));
+    if (revoked === 'access') {
+      const [machine] = await c.db.select().from(machines).where(eq(machines.id, one.machineId));
+      await c.db.delete(personAccess).where(eq(personAccess.personId, machine!.personId));
+    }
+    expect((await c.part(one.key, 1, bytes)).statusCode).toBe(403);
+    expect((await c.finish(one.key, bytes)).statusCode).toBe(403);
+    expect((await c.failed(one.key, 'untrusted failure')).statusCode).toBe(403);
+    expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'building', error: null });
+    expect((await turnsOf(c, c.head.id)).join('\n')).not.toContain('untrusted failure');
+    expect((await c.claim(one.key)).statusCode).toBe(403);
+  });
+
+  it('rejects writes after lease expiry even before another builder claims it', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'builder'), bytes = Buffer.from('private');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+    expect((await c.part(one.key, 1, bytes)).statusCode).toBe(409);
+    expect((await c.finish(one.key, bytes)).statusCode).toBe(409);
+    expect((await c.failed(one.key, 'expired')).statusCode).toBe(409);
+  });
+
+  it('renews the same attempt, and replaces it after expiry even for the same builder', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'builder');
+    await c.claim(one.key); const [first] = await c.db.select().from(harnessBuilds);
+    await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).toBe(first!.id);
+    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+    await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).not.toBe(first!.id);
+  });
+
+  it.each(['write', 'rename'])('fences a delayed %s after another builder has published', async operation => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one'), two = await c.machine(c.ann, 'two');
+    const old = Buffer.from('old bundle'), current = Buffer.from('current bundle');
+    await c.claim(one.key); await c.part(one.key, 0, old);
+    const gate = pauseIO(operation);
+    const pending = (operation === 'write' ? c.part(one.key, 0, old) : c.finish(one.key, old)).then(response => response.statusCode);
+    await gate.entered;
+    try {
+      await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+      await c.claim(two.key); expect((await c.uploaded(two.key, current)).statusCode).toBe(204);
+    } finally { gate.resume(); }
+    expect(await pending).toBe(409);
+    expect((await c.bundle(two.key, 'all')).rawPayload).toEqual(current);
+    expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'ready', digest: sha(current) });
+  });
+
+  it('rechecks authorization after assembling a bundle', async () => {
+    const c = await shared(), one = await c.machine(c.ann, 'one'), bytes = Buffer.from('bundle');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    const gate = pauseIO('rename'), pending = c.finish(one.key, bytes).then(response => response.statusCode);
+    await gate.entered;
+    try { await c.db.update(machines).set({ lendsTests: false }).where(eq(machines.id, one.machineId)); }
+    finally { gate.resume(); }
+    expect(await pending).toBe(403);
+    expect((await c.db.select().from(harnessBuilds))[0]!.status).toBe('building');
+    expect((await c.db.select().from(harnessProducts))).toEqual([]);
+  });
+
+  it('keeps an old row whose reclaimed lease is still live when pruning', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one');
+    await c.claim(one.key);
+    await c.db.update(harnessBuilds).set({ createdAt: new Date(Date.now() - 31 * 86400_000) });
+    await c.claim(one.key, { key: OTHER }); await c.uploaded(one.key, Buffer.from('other'), OTHER);
+    expect((await c.db.select().from(harnessBuilds)).map(build => build.key)).toContain(KEY);
+  });
+
+  it('scopes builtin bundle reads to the explicitly named company', async () => {
+    const c = await shared(); await c.builtin();
+    await c.claim('builtin-node-key-0123456789abcdef');
+    const bytes = Buffer.from('company one'); await c.uploaded('builtin-node-key-0123456789abcdef', bytes);
+    const [other] = await c.db.insert(companies).values({ name: 'Other' }).returning();
+    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': other!.id } });
+    expect(response.statusCode).toBe(404);
+  });
+});
 
 const takesHarnesses = (node: FakeNode) => { node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [], testHarness: 1 }); };
 /* A machine that says it takes harnesses. */
@@ -190,6 +291,45 @@ describe('who may share a build', () => {
 });
 
 describe('the harness reaching every machine', () => {
+  it('ignores a forged commit without consuming the matching active request', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one');
+    atHead(c); await harnessRound(c.app.ctx); const request = await asked(one.node);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(request, { commitSha: NEXT }));
+    expect((await c.db.select().from(harnessProducts))[0]!.goodCommit).toBeNull();
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(request));
+    expect((await c.db.select().from(harnessProducts))[0]!.goodCommit).toBe(COMMIT);
+  });
+
+  it('does not let a slow old ready overwrite a newer head problem', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one');
+    atHead(c); await harnessRound(c.app.ctx); const old = await asked(one.node);
+    atHead(c, NEXT); await harnessRound(c.app.ctx); const current = await asked(one.node);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(current, { result: { status: 'error', problem: { code: 'environment_unsupported', detail: 'current head broken' } } }));
+    const [before] = await c.db.select().from(harnessProducts);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(old));
+    const [after] = await c.db.select().from(harnessProducts);
+    expect(after).toMatchObject({ goodCommit: before!.goodCommit, problem: before!.problem, told: before!.told });
+    expect(after!.machines).toEqual(before!.machines);
+  });
+
+  it('keeps another machine problem and one notification through a healthy reconnect until all recover', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'healthy-arm'), two = await capable(c, c.ann, 'broken-x64');
+    atHead(c); await harnessRound(c.app.ctx);
+    const healthy = await asked(one.node), broken = await asked(two.node);
+    const fail = (request: typeof broken, detail: string) => harnessSynced(c.app.ctx, nodeIdentity(two.nodeId), synced(request, { result: { status: 'error', problem: { code: 'environment_unsupported', detail } } }));
+    await fail(broken, 'x64 broken');
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(healthy));
+    expect((await c.db.select().from(harnessProducts))[0]!.problem).toBeTruthy();
+    harnessGreeted(c.app.ctx, nodeIdentity(one.nodeId)); await harnessRound(c.app.ctx);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(await asked(one.node)));
+    await harnessRound(c.app.ctx, new Date(Date.now() + 31 * 60_000));
+    await fail(await asked(two.node), 'x64 still broken');
+    expect((await turnsOf(c, c.head.id)).filter(prompt => prompt.includes('x64'))).toHaveLength(1);
+    await harnessRound(c.app.ctx, new Date(Date.now() + 62 * 60_000));
+    await harnessSynced(c.app.ctx, nodeIdentity(two.nodeId), synced(await asked(two.node)));
+    expect((await c.db.select().from(harnessProducts))[0]).toMatchObject({ problem: null, told: null, goodCommit: COMMIT });
+  });
+
   it('asks every machine that takes harnesses for the head of the branch, once, and again when it moves', async () => {
     const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two'), old = await c.planless(c.ceo, 'old');
     atHead(c);
