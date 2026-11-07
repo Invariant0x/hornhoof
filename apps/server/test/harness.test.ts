@@ -62,6 +62,24 @@ describe('one build of a harness unit for all machines', () => {
     expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${KEY}.zst`]);
   });
 
+  it('says no to a machine that says it is done before anything came', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one');
+    await c.claim(one.key);
+    expect((await c.finish(one.key, Buffer.from('nothing of this came'))).statusCode).toBe(409);
+  });
+
+  it('starts from nothing when a build passes to another machine, so what the last one sent makes no part of it', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one'), two = await c.machine(c.ann, 'two');
+    await c.claim(one.key);
+    await c.part(one.key, 0, Buffer.from('a longer bundle'));
+    await c.part(one.key, 1, Buffer.from(' than the next'));
+    await c.failed(one.key, null);
+    await c.claim(two.key);
+    const bytes = Buffer.from('a shorter one');
+    expect((await c.uploaded(two.key, bytes)).statusCode).toBe(204);
+    expect((await c.claim(one.key)).json()).toMatchObject({ state: 'ready', digest: sha(bytes), size: bytes.length });
+  });
+
   it('takes a range open to the end, one running past the end and none at all, and refuses one past the end', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), bytes = Buffer.from('a bundle of a harness unit');
     await c.claim(one.key); await c.uploaded(one.key, bytes);

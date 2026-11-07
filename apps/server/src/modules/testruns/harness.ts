@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
-import { access, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { access, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { once } from 'node:events';
 import { EnvironmentDigest, HarnessDone, HarnessFailed, HarnessUnit, type HarnessClaim, type HarnessSynced, type RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -92,6 +91,8 @@ async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now =
     const [build] = await tx.select().from(harnessBuilds).where(and(eq(harnessBuilds.companyId, department.companyId), eq(harnessBuilds.key, unit.key))).for('update');
     if (build!.departmentId !== department.id) throw new ApiError(409, 'conflict', 'This key belongs to another product.');
     const decided = decideClaim(build!, me, now, await exists(bundleFile(dir, build!)));
+    /* What the machine before this one sent makes no part of what this one sends. */
+    if (decided.set?.builder === me && build!.builder !== me) await rm(partsFolder(dir, build!), { recursive: true, force: true });
     if (decided.set) await tx.update(harnessBuilds).set(decided.set).where(eq(harnessBuilds.id, build!.id));
     return decided.answer;
   });
@@ -101,20 +102,21 @@ async function claimBuild(ctx: Ctx, node: NodeIdentity, unit: HarnessUnit, now =
 async function assemble(dir: string, build: Build, digest: string, size: number): Promise<void> {
   const file = bundleFile(dir, build), staging = `${file}.staging-${randomUUID()}`, hash = createHash('sha256');
   let total = 0;
-  const out: WriteStream = createWriteStream(staging, { flags: 'wx', mode: 0o600 });
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  const out = await open(staging, 'wx', 0o600);
   try {
     const names = (await readdir(partsFolder(dir, build)).catch(() => [])).filter(name => /^\d+$/.test(name)).sort((a, b) => Number(a) - Number(b));
     for (const name of names) {
       for await (const chunk of createReadStream(join(partsFolder(dir, build), name))) {
         hash.update(chunk as Buffer); total += (chunk as Buffer).length;
-        if (!out.write(chunk)) await once(out, 'drain');
+        await out.writeFile(chunk as Buffer);
       }
     }
-    await new Promise<void>(resolve => { out.end(() => { resolve(); }); });
+    await out.close();
     if (total !== size || hash.digest('hex') !== digest) throw new ApiError(409, 'conflict', 'The bundle that came differs from what the machine said it made.');
     await rename(staging, file);
     await rm(partsFolder(dir, build), { recursive: true, force: true });
-  } finally { out.destroy(); await rm(staging, { force: true }); }
+  } finally { await out.close(); await rm(staging, { force: true }); }
 }
 
 /* The bundles used longest ago go when they take more than they may, and rows of what never came ready after a while. */

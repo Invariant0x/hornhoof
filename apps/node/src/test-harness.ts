@@ -1,6 +1,6 @@
-import { createWriteStream } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 import { HarnessClaim, type HarnessUnit } from '@hornhoof/protocol';
 import { bundleName, packBundle, unpackBundle } from './test-bundle.js';
 import { checkCacheContext, fileDigest, type CacheContext, type CacheEntry, type CacheReady, type CacheShare } from './test-cache.js';
@@ -19,6 +19,7 @@ type ShareOptions = { renewMs?: number; tail?: () => string };
 /* A claim lasts a few minutes and a build may take longer, so it is said again until it ends. */
 const RENEW_MS = 60_000;
 const TRIES = 3;
+const PAUSE_MS = 10_000;
 
 function sleep(ms: number, context: CacheContext): Promise<void> {
   checkCacheContext(context);
@@ -104,16 +105,20 @@ async function answered(response: Response): Promise<Response> {
   throw new Error(`Hornhoof answered ${response.status}${body?.error?.message ? `: ${body.error.message}` : '.'}`);
 }
 
-async function again<T>(signal: AbortSignal, run: () => Promise<T>): Promise<T> {
+/* A link that dropped takes a while to come back, so each new try waits longer. */
+async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try { return await run(); }
-    catch (error) { if (signal.aborted || attempt >= TRIES) throw error; }
+    catch (error) {
+      if (signal.aborted || attempt >= TRIES) throw error;
+      await wait(pauseMs * attempt, undefined, { signal });
+    }
   }
 }
 
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
-export function harnessRemote(server: string, nodeKey: string): HarnessRemote {
+export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS): HarnessRemote {
   const at = (path: string) => `${server}/api/harness${path}`;
   const headers = { authorization: `Bearer ${nodeKey}` };
   const json = (body: unknown) => ({ method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -127,20 +132,20 @@ export function harnessRemote(server: string, nodeKey: string): HarnessRemote {
         for (let index = 0; index * partBytes < size; index++) {
           const { buffer, bytesRead } = await file.read(Buffer.alloc(partBytes), 0, partBytes, index * partBytes);
           const body = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-          await again(signal, async () => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...headers, 'content-type': 'application/octet-stream' }, body, signal })));
+          await again(signal, pauseMs, async () => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...headers, 'content-type': 'application/octet-stream' }, body, signal })));
         }
       } finally { await file.close(); }
       await answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), signal }));
     },
     async download(key, path, claim, signal) {
-      const out = createWriteStream(path, { flags: 'wx', mode: 0o600 });
+      const out = await open(path, 'wx', 0o600);
       try {
         for (let start = 0; start < claim.size; start += claim.partBytes) {
           const range = `bytes=${start}-${Math.min(start + claim.partBytes, claim.size) - 1}`;
-          const part = await again(signal, async () => Buffer.from(await (await answered(await fetch(at(`/${key}/bundle`), { headers: { ...headers, range }, signal }))).arrayBuffer()));
-          if (!out.write(part)) await new Promise<void>(resolve => { out.once('drain', () => { resolve(); }); });
+          const part = await again(signal, pauseMs, async () => Buffer.from(await (await answered(await fetch(at(`/${key}/bundle`), { headers: { ...headers, range }, signal }))).arrayBuffer()));
+          await out.writeFile(part);
         }
-      } finally { await new Promise<void>(resolve => { out.end(() => { resolve(); }); }); }
+      } finally { await out.close(); }
       if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
     },
     async failed(key, error) {

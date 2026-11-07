@@ -227,7 +227,7 @@ describe('the registry over HTTP', () => {
   const unit = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: INPUT, unit: 'dependencies', key: KEY, commitSha: 'e'.repeat(40), platform: 'linux-arm64' };
   type Asked = { method: string; url: string; authorization: string | undefined; range: string | undefined; body: Buffer };
   /* A server that answers each request as told, and keeps what it was asked. */
-  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void) {
+  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1) {
     const heard: Asked[] = [];
     const running = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -240,7 +240,7 @@ describe('the registry over HTTP', () => {
     await new Promise<void>(resolve => { running.listen(0, '127.0.0.1', resolve); });
     onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
     const address = running.address() as { port: number };
-    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key') };
+    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs) };
   }
   const send = (response: ServerResponse<IncomingMessage>, status: number, body = '') => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body); };
   async function file(text: string) {
@@ -280,6 +280,21 @@ describe('the registry over HTTP', () => {
     expect(heard.map(asked => asked.url.split('/').at(-1))).toEqual(['0', '0', '0']);
   });
 
+  it('waits longer before each new try, as a link that dropped takes a while to come back', async () => {
+    const at: number[] = [], { remote } = await server((_asked, response) => { at.push(Date.now()); send(response, 503); }, 100);
+    const { path } = await file('abc');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL)).rejects.toThrow('Hornhoof answered 503');
+    expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(90);
+    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(190);
+  });
+
+  it('stops waiting when it is told to stop', async () => {
+    const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { send(response, 503); setTimeout(() => { stop.abort(); }, 20); }, 60_000);
+    const { path } = await file('abc');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal)).rejects.toThrow();
+    expect(heard).toHaveLength(1);
+  });
+
   it('stops trying when it is told to stop', async () => {
     const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { stop.abort(); send(response, 503); });
     const { path } = await file('abc');
@@ -299,6 +314,12 @@ describe('the registry over HTTP', () => {
     expect(await readFile(join(root, 'came'), 'utf8')).toBe(bytes);
     expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=3-5', 'bytes=3-5', 'bytes=6-7']);
     await expect(remote.download(KEY, join(root, 'other'), { state: 'ready', digest: sha('other bytes'), size: 8, partBytes: 3 }, SIGNAL)).rejects.toThrow('differs from what Hornhoof holds');
+  });
+
+  it('fails a download it cannot store, so the machine stays up and builds it itself', async () => {
+    const { remote } = await server((_asked, response) => { response.writeHead(206); response.end('abc'); });
+    const { root } = await file('');
+    await expect(remote.download(KEY, join(root, 'no such folder', 'came'), { state: 'ready', digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL)).rejects.toThrow(/ENOENT/);
   });
 
   it('says a build failed, or was given up', async () => {
