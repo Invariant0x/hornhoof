@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseTestEnvironment, type TestEnvironmentV1 } from '@hornhoof/protocol';
 import { discoverEnvironment } from '../src/test-discovery.js';
 import type { CommitTree } from '../src/test-mirror.js';
@@ -301,6 +306,28 @@ describe('a Java project', () => {
 
   it('reads the old way of writing a Java version', async () => {
     expect((await found({ 'pom.xml': '<project><properties><java.version>1.8</java.version></properties></project>' })).dependencies.install[0]!.args.at(-2)).toBe('8');
+  });
+});
+
+describe('a package taken from git', () => {
+  /* Runs a preparation with its tool made up, which leaves what the real one leaves. */
+  async function prepared(manifest: TestEnvironmentV1, tool: string, leaves: string) {
+    const folder = await mkdtemp(join(tmpdir(), 'hh-discovered-')), bin = join(folder, '.bin'); onTestFinished(() => rm(folder, { recursive: true, force: true }));
+    await mkdir(bin);
+    await writeFile(join(bin, tool), `#!/bin/sh\n[ "$1" = lock ] && exit 0\nmkdir -p ${leaves}/.git ${leaves}/lib\ntouch ${leaves}/.git/config ${leaves}/lib/code\n`, { mode: 0o755 });
+    await writeFile(join(bin, 'ruby'), '#!/bin/sh\n', { mode: 0o755 });
+    execFileSync('sh', manifest.prepare[0]!.commands[0]!.args, { cwd: folder, env: { PATH: `${bin}:/usr/bin:/bin` } });
+    return { code: existsSync(join(folder, leaves, 'lib/code')), git: existsSync(join(folder, leaves, '.git')) };
+  }
+
+  it('keeps no git folder of a gem, which a stored tree never holds', async () => {
+    const manifest = await found({ Gemfile: "source 'https://rubygems.org'\n", 'Gemfile.lock': 'GEM\n' });
+    expect(await prepared(manifest, 'bundle', '.hornhoof/gems/ruby/3.3.0/bundler/gems/one-abc')).toEqual({ code: true, git: false });
+  });
+
+  it('keeps no git folder of a Composer package installed from its source', async () => {
+    const manifest = await found({ 'composer.json': JSON.stringify({ name: 'a/shop' }), 'composer.lock': JSON.stringify({ packages: [] }) });
+    expect(await prepared(manifest, 'composer', 'vendor/a/b')).toEqual({ code: true, git: false });
   });
 });
 

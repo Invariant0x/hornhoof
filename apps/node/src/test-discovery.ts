@@ -336,6 +336,8 @@ function slugs(programs: Program[]): string[] {
 const inProgram = (root: string, env: Record<string, string>, lines: string[]): Command => ({
   program: 'sh', args: ['-c', ['set -e', ...Object.entries(env).map(([name, path]) => `export ${name}="$PWD/${path}"`), ...lines].join('\n')], cwd: root,
 });
+/* A package taken from git keeps its git folder, which a stored tree never holds. */
+const noGitFolders = (folders: string[]): string => `find ${folders.map(quoted).join(' ')} -name .git -prune -exec rm -rf {} +`;
 function unitOf(program: Program, id: string, sharedNames: Set<string>): TestPrepare {
   const env = program.env ?? {}, nameOf = (path: string) => Object.entries(env).find(([name, value]) => value === path && !sharedNames.has(name))?.[0];
   const artifact = (path: string, link: boolean): TestArtifact => {
@@ -345,7 +347,7 @@ function unitOf(program: Program, id: string, sharedNames: Set<string>): TestPre
   const all = [...program.shared, ...(program.own ?? [])];
   return {
     id: `dependencies-${id}`, profiles: ['default'], serviceIds: [], inputs: program.inputs,
-    commands: [inProgram(program.root, env, [...program.steps, `mkdir -p ${all.map(quoted).join(' ')}`])],
+    commands: [inProgram(program.root, env, [...program.steps, `mkdir -p ${all.map(quoted).join(' ')}`, noGitFolders(all)])],
     artifacts: [...program.shared.map(path => artifact(path, true)), ...(program.own ?? []).map(path => artifact(path, false))],
   };
 }
