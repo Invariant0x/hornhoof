@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, chownSync, closeSync, constants, cpSync, existsSync, fchownSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { redact } from './redact.js';
 import type { JobUser } from './isolation.js';
 import { checkDeadline } from './test-context.js';
 import { signalProcessGroup } from './process-group.js';
+import { copyServiceSource, copyServiceTree, withServiceDirectory, writeServiceFile } from './test-service-files.js';
 
 export interface ServiceCommand { program: string; args: string[]; cwd: string }
 interface ServiceBase { id: string; runtime: string; profiles: string[] }
@@ -110,18 +111,10 @@ function inside(root: string, path: string): string {
   return target;
 }
 function directory(path: string, context: ServiceContext): void {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (lstatSync(path).isSymbolicLink()) throw new Error('A service folder cannot be a link.');
-  chmodSync(path, 0o700);
-  chownSync(path, context.jobUser.uid, context.jobUser.gid);
-}
-function ownTree(path: string, context: ServiceContext): void {
-  const st = lstatSync(path);
-  if (st.isSymbolicLink()) throw new Error('Service state cannot contain symlinks');
-  chownSync(path, context.jobUser.uid, context.jobUser.gid);
-  /* What is stored stays read-only; a service writes in its own copy. */
-  chmodSync(path, st.isDirectory() || st.mode & 0o100 ? 0o700 : 0o600);
-  if (st.isDirectory()) for (const entry of readdirSync(path)) ownTree(join(path, entry), context);
+  withServiceDirectory(path, true, (_path, fd) => {
+    fchmodSync(fd, 0o700);
+    fchownSync(fd, context.jobUser.uid, context.jobUser.gid);
+  });
 }
 function kill(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
@@ -302,10 +295,7 @@ function privateSocket(context: ServiceContext): string {
 /* The folder is the job's and a stopped template's configuration can run programs in it, so this, done as root, goes through no
    link that may stand in this place. */
 function hba(state: string, context: ServiceContext): void {
-  const file = join(state, 'pg_hba.conf');
-  rmSync(file, { force: true });
-  const written = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try { writeSync(written, 'local all all scram-sha-256\n'); fchownSync(written, context.jobUser.uid, context.jobUser.gid); } finally { closeSync(written); }
+  writeServiceFile(join(state, 'pg_hba.conf'), 'local all all scram-sha-256\n', context.jobUser, true);
 }
 async function ready(server: Running, env: Record<string, string>, cwd: string, context: ServiceContext, hidden: string[]): Promise<void> {
   for (;;) {
@@ -340,7 +330,7 @@ async function postgres(service: Postgres, state: string, context: ServiceContex
   directory(state, context);
   if (fresh) {
     const pwfile = join(dirname(state), `.pw-${randomBytes(8).toString('hex')}`);
-    writeFileSync(pwfile, passwords.admin + '\n', { mode: 0o600 }); ownTree(pwfile, context);
+    writeServiceFile(pwfile, passwords.admin + '\n', context.jobUser);
     try { await command(join(bin, 'initdb'), ['-D', state, '--username=postgres', `--locale=${locale}`, '--encoding=UTF8', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', `--pwfile=${pwfile}`], '/tmp', {}, context, hidden); }
     finally { rmSync(pwfile, { force: true }); }
   } else {
@@ -457,7 +447,7 @@ async function acquire(path: string, context: ServiceContext): Promise<{ fd: num
     throw new Error('Legacy directory service lock has no owner information. Remove it only after confirming that the node and all its writers have stopped.');
   }
   // flock and this process share one open file description. Keep the inode when releasing it.
-  const fd = openSync(path, 'a', 0o600);
+  const fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   try { await lockDescriptor(fd, context); check(context); }
   catch (error) { closeSync(fd); throw error; }
   return { fd, release: () => closeSync(fd) };
@@ -470,14 +460,15 @@ async function prepareCommands(definitions: ServiceDefinitions, checkout: string
 }
 function copyDeclaredState(service: ServiceDefinition, source: string, destination: string): void {
   if (service.driver === 'postgres') {
-    cpSync(source, destination, { recursive: true, dereference: false, errorOnExist: true });
+    copyServiceSource(source, destination);
     return;
   }
   mkdirSync(destination, { mode: 0o700 });
-  for (const path of service.options.statePaths) {
-    const target = inside(destination, path);
+  const paths = [...new Set(service.options.statePaths.map(path => inside(source, path)))];
+  for (const path of paths.filter(path => !paths.some(parent => path.startsWith(parent + sep)))) {
+    const target = inside(destination, path.slice(resolve(source).length + 1));
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-    cpSync(inside(source, path), target, { recursive: true, dereference: false, errorOnExist: true });
+    copyServiceSource(path, target);
   }
 }
 async function buildArtifacts(definitions: ServiceDefinitions, checkout: string, root: string, context: ServicePrepareContext, fingerprint: string): Promise<void> {
@@ -492,7 +483,6 @@ async function buildArtifacts(definitions: ServiceDefinitions, checkout: string,
     mkdirSync(join(stage, 'payload'), { recursive: true, mode: 0o700 });
     for (const service of definitions.services) {
       const source = join(work, service.id);
-      payloadFiles(source);
       copyDeclaredState(service, source, join(stage, 'payload', service.id));
     }
     const ready: Receipt = { format: FORMAT, inputDigest: context.inputDigest, definitions: hash(JSON.stringify(definitions)), runtime: fingerprint, checksums: payloadFiles(join(stage, 'payload')) };
@@ -511,15 +501,22 @@ export async function prepareServiceArtifacts(definitions: ServiceDefinitions, c
   isolated(context);
   if (!/^[a-f0-9]{64}$/.test(context.envKey)) throw new Error('Invalid service environment key');
   const fingerprint = await runtime(definitions, context);
-  mkdirSync(context.cacheRoot, { recursive: true, mode: 0o700 }); chmodSync(context.cacheRoot, 0o700);
-  const root = join(context.cacheRoot, context.envKey);
-  const lease = await acquire(`${root}.lock`, context);
-  preparationLeases.set(context, lease.fd);
+  const cache = withServiceDirectory(context.cacheRoot, true, (path, fd) => {
+    if (fstatSync(fd).uid !== process.geteuid?.()) throw new Error('Service cache must belong to the node');
+    fchmodSync(fd, 0o700);
+    return openSync(path, constants.O_RDONLY | constants.O_DIRECTORY);
+  });
   try {
-    if (!existsSync(join(root, 'READY.json'))) await buildArtifacts(definitions, checkout, root, context, fingerprint);
-    validateArtifacts(root, definitions, context.inputDigest, fingerprint);
-    return { paths: artifactPaths(root, definitions), format: FORMAT, inputDigest: context.inputDigest };
-  } finally { preparationLeases.delete(context); lease.release(); }
+    // Keep the private cache pinned while untrusted preparation commands run and can rename their own ancestors.
+    const root = join(`/proc/self/fd/${cache}`, context.envKey);
+    const lease = await acquire(`${root}.lock`, context);
+    preparationLeases.set(context, lease.fd);
+    try {
+      if (!existsSync(join(root, 'READY.json'))) await buildArtifacts(definitions, checkout, root, context, fingerprint);
+      validateArtifacts(root, definitions, context.inputDigest, fingerprint);
+      return { paths: artifactPaths(join(context.cacheRoot, context.envKey), definitions), format: FORMAT, inputDigest: context.inputDigest };
+    } finally { preparationLeases.delete(context); lease.release(); }
+  } finally { closeSync(cache); }
 }
 async function validateForOpen(definitions: ServiceDefinitions, artifacts: ServiceArtifacts, context: ServiceContext): Promise<void> {
     if (artifacts.format !== FORMAT || Object.keys(artifacts.paths).length !== definitions.services.length) throw new Error('Service artifact integrity metadata mismatch');
@@ -538,16 +535,18 @@ export async function openServices(definitions: ServiceDefinitions, artifacts: S
   const state = join(partContext.attemptRoot, 'state');
   let ownsState = false;
   let closing: Promise<void> | undefined;
-  const close = () => closing ??= (async () => { try { await closeAll(active); } finally { if (ownsState) rmSync(state, { recursive: true, force: true }); } })();
+  const close = () => closing ??= (async () => { try { await closeAll(active); } finally {
+    if (ownsState) withServiceDirectory(partContext.attemptRoot, false, parent => rmSync(join(parent, basename(state)), { recursive: true, force: true }));
+  } })();
   try {
     await validateForOpen(definitions, artifacts, partContext);
     if (existsSync(state)) throw new Error('Attempt service state already exists');
     directory(partContext.attemptRoot, partContext);
-    mkdirSync(state, { mode: 0o700 }); ownsState = true; directory(state, partContext);
+    withServiceDirectory(partContext.attemptRoot, false, parent => mkdirSync(join(parent, 'state'), { mode: 0o700 }));
+    ownsState = true; directory(state, partContext);
     for (const service of definitions.services) {
       const destination = join(state, safeId(service.id));
-      cpSync(artifacts.paths[service.id]!, destination, { recursive: true, dereference: false, errorOnExist: true });
-      ownTree(destination, partContext);
+      copyServiceTree(artifacts.paths[service.id]!, destination, partContext.jobUser);
       active.push(await start(service, destination, partContext.checkout, partContext, hidden, false));
     }
     return { env: Object.assign({}, ...active.map(service => service.env)) as Record<string, string>, close };
