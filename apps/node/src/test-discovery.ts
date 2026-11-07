@@ -225,15 +225,18 @@ const gradle: Finder = seen => inTurn(topMost(foldersWith(seen, GRADLE_FILES)), 
 
 /* PHP: a class map names classes that are not there at install, so a project that keeps one writes it again before a run. */
 type ComposerFile = { scripts?: Record<string, unknown>; config?: { platform?: { php?: unknown } }; require?: Record<string, unknown>; autoload?: { classmap?: unknown[] }; 'autoload-dev'?: { classmap?: unknown[] } };
+/* What a constraint reaches within one major version: its own lower bound, or none when that major is the newest there is. */
+function phpWithinMajor(constraint: string, major: string | undefined): string | undefined {
+  const lower = /\d+\.\d+/.exec(constraint)?.[0];
+  return (major ?? lower?.split('.')[0]) === TOOL_DEFAULTS.php.split('.')[0] ? undefined : lower;
+}
 /* The newest series of PHP a constraint allows, as what is locked may need more than its lowest; none when that is the newest of all. */
 function phpSeries(constraint: string): string | undefined {
   const last = constraint.split('|').at(-1)!.trim(), exact = /^[~=]?(\d+\.\d+)(?:\.\*|\.\d+)$/.exec(last)?.[1];
   if (exact) return exact;
-  const lower = /\d+\.\d+/.exec(last)?.[0], below = /<\s*(\d+)\.(\d+)/.exec(last);
-  if (below && below[2] !== '0') return `${below[1]}.${Number(below[2]) - 1}`;
-  if (last.startsWith('>') && !below) return undefined;
-  const major = below ? String(Number(below[1]) - 1) : lower?.split('.')[0];
-  return major === TOOL_DEFAULTS.php.split('.')[0] ? undefined : lower;
+  const below = /<\s*(\d+)\.(\d+)/.exec(last);
+  if (!below) return last.startsWith('>') ? undefined : phpWithinMajor(last, undefined);
+  return below[2] === '0' ? phpWithinMajor(last, String(Number(below[1]) - 1)) : `${below[1]}.${Number(below[2]) - 1}`;
 }
 function phpVersion(composer: ComposerFile, own: string | null): string | undefined {
   const platform = composer.config?.platform?.php;
