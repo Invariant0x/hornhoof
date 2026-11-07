@@ -25,6 +25,14 @@ describe('product environment ownership', () => {
     expect(rendered.text).toContain('- dev-test-environment:');
   });
 
+  it('has the head and the owner name the languages they chose, whose tools then come once, for that product alone', () => {
+    const skill = readFileSync(fileURLToPath(new URL('../../../templates/skills/dev-test-environment.md', import.meta.url)), 'utf8');
+    expect(skill).toMatch(/\*\*DEV-HEAD\*\* and the owner choose the product's languages/);
+    expect(skill).toContain('`.tool-versions`');
+    expect(skill).toContain('fetches their tools once');
+    expect(skill).toMatch(/several programs/);
+  });
+
   it('keeps final checks and existing role skills while adding the environment procedure', () => {
     expect(templates.roles.get('DEV-TEST')).toMatchObject({ schema: 'final_check', gate: null, inDefault: false });
     expect(templates.roles.get('DEV-QA')).toMatchObject({ schema: null, gate: null, inDefault: false });

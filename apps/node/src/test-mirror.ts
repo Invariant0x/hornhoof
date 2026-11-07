@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import { signalProcessGroup } from './process-group.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
-export type CommitTree = { commitSha: string; entries: GitEntry[]; readBlob: (path: string, limit: number) => Promise<Buffer>; readTexts: (paths: string[], limit: number) => Promise<Map<string, string>> };
+export type CommitTree = { commitSha: string; entries: GitEntry[]; readBlob: (path: string, limit: number) => Promise<Buffer>; readBlobs: (paths: string[], limit: number, use: (path: string, bytes: Buffer) => void) => Promise<void>; readTexts: (paths: string[], limit: number) => Promise<Map<string, string>> };
 const GIT_FLAGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.logAllRefUpdates=false', '-c', 'protocol.ext.allow=never'];
 
 function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -31,21 +31,16 @@ function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: 
   return gitCancellation(error, stopped);
 }
 
-/* A child that stopped reading fails by its own exit code. */
-function feed(child: ChildProcess, input: string | undefined): void {
-  if (input === undefined) return;
-  child.stdin!.on('error', () => {});
-  child.stdin!.end(input);
-}
-const stdinFor = (input: string | undefined): 'ignore' | 'pipe' => input === undefined ? 'ignore' : 'pipe';
-
-function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false, input?: string): Promise<Buffer> {
+type GitOutput = { auth?: Record<string, string>; network?: boolean; input?: string };
+const TOO_MUCH = 'Git output exceeds the configured limit.';
+/* Runs git and hands over what it prints as it comes; whatever take throws stops it, and is what the run fails with. */
+function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) => void, { auth = {}, network = false, input }: GitOutput = {}): Promise<void> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
-    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [stdinFor(input), 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
-    const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
-    const mask = new GitCredentialMask([auth.HH_GIT_PASSWORD ?? '']);
+    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
+    let failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
+    const secret = auth.HH_GIT_PASSWORD ?? '', mask = new GitCredentialMask([secret]);
     let stderr = '', stderrTruncated = false;
     const capture = (text: string) => { const combined = stderr + text; stderrTruncated ||= combined.length > 8192; stderr = combined.slice(-8192); };
     child.stderr!.setEncoding('utf8');
@@ -55,20 +50,30 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
       killTimer ??= setTimeout(() => stopGit(child.pid, 'SIGKILL'), 5000); killTimer.unref();
     };
     child.stdout!.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > limit) { failure = new Error('Git output exceeds the configured limit.'); stop(); }
-      else chunks.push(chunk);
+      try { take(chunk); }
+      catch (error) { failure ??= error as Error; stop(); }
     });
+    // A git that stops early closes this pipe: how it ended says what went wrong.
+    child.stdin?.on('error', () => {}).end(input);
     child.once('error', error => { failure = error; });
     feed(child, input);
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');
       capture(mask.flush());
-      if (signal.aborted || failure || code !== 0) reject(failedGit(code, signalName, failure, signal, stderr, stderrTruncated, network, [auth.HH_GIT_PASSWORD ?? '']));
-      else resolve(Buffer.concat(chunks));
+      if (signal.aborted || failure || code !== 0) reject(failedGit(code, signalName, failure, signal, stderr, stderrTruncated, network, [secret]));
+      else resolve();
     });
   });
+}
+
+function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false): Promise<Buffer> {
+  const chunks: Buffer[] = []; let size = 0;
+  return gitStream(args, context, chunk => {
+    size += chunk.length;
+    if (size > limit) throw new Error(TOO_MUCH);
+    chunks.push(chunk);
+  }, { auth, network }).then(() => Buffer.concat(chunks));
 }
 
 export async function repositoryCacheRoot(source: Pick<Source, 'url'>, scope: RepositoryScope, context: CacheContext): Promise<string> {
@@ -129,32 +134,57 @@ function treeEntries(output: Buffer): GitEntry[] {
   if (result.length > 10_000) throw new Error('The tracked inventory exceeds its 10000-entry limit.');
   return result;
 }
-function regularEntry(entries: GitEntry[], path: string): GitEntry {
-  const entry = entries.find(item => item.path === path);
-  if (!entry || !['100644', '100755'].includes(entry.mode)) throw new Error('The description requires a tracked regular file.');
-  return entry;
+/* What asks for a file asks by path, and one commit may be asked for all it tracks. */
+function regularOids(entries: GitEntry[]): (path: string) => string {
+  const oids = new Map(entries.filter(entry => ['100644', '100755'].includes(entry.mode)).map(entry => [entry.path, entry.oid]));
+  return path => {
+    RepositoryPath.parse(path);
+    const oid = oids.get(path);
+    if (!oid) throw new Error('The description requires a tracked regular file.');
+    return oid;
+  };
 }
-function batchTexts(output: Buffer): Map<string, string> {
-  const texts = new Map<string, string>();
-  for (let at = 0; at < output.length;) {
-    const end = output.indexOf(10, at), match = /^([a-f0-9]{40}) blob (\d+)$/.exec(output.toString('ascii', at, end));
-    if (!match) throw new Error('Git returned something other than a tracked file.');
-    const start = end + 1, next = start + Number(match[2]);
-    texts.set(match[1], output.toString('utf8', start, next));
-    at = next + 1;
+/* Parts what `git cat-file --batch` prints into its files, each held only while it is used. */
+class BlobOutput {
+  private held: Buffer = Buffer.alloc(0);
+  private next = 0;
+  constructor(private readonly paths: string[], private readonly limit: number, private readonly use: (path: string, bytes: Buffer) => void) {}
+  private oneFile(): boolean {
+    const end = this.held.indexOf(10);
+    if (end < 0) return false;
+    const size = /^[a-f0-9]{40} blob (\d+)$/.exec(this.held.toString('latin1', 0, end))?.[1];
+    if (size === undefined) throw new Error('Unsupported Git blob output.');
+    if (Number(size) > this.limit) throw new Error(TOO_MUCH);
+    const after = end + 1 + Number(size);
+    if (this.held.length <= after) return false;
+    this.use(this.paths[this.next++]!, this.held.subarray(end + 1, after));
+    this.held = this.held.subarray(after + 1);
+    return this.held.length > 0;
   }
-  return texts;
+  push(chunk: Buffer): void {
+    this.held = this.held.length ? Buffer.concat([this.held, chunk]) : chunk;
+    while (this.oneFile());
+  }
+  get whole(): boolean { return this.next === this.paths.length && !this.held.length; }
 }
 export async function readCommit(source: Source, scope: RepositoryScope, commitSha: string, context: CacheContext): Promise<CommitTree> {
   let entries: GitEntry[] = [];
   const mirror = await mirrorAt(source, scope, commitSha, context, async path => { entries = treeEntries(await gitBytes(['--git-dir', path, 'ls-tree', '-rz', '--full-tree', commitSha], context)); });
-  return { commitSha, entries, readBlob: async (path, limit) => {
-    RepositoryPath.parse(path);
-    return gitBytes(['--git-dir', mirror, 'cat-file', 'blob', regularEntry(entries, path).oid], context, limit);
-  }, readTexts: async (paths, limit) => {
-    const wanted = new Map(entries.filter(entry => ['100644', '100755'].includes(entry.mode)).map(entry => [entry.path, entry.oid]));
-    const oids = paths.map(path => { const oid = wanted.get(path); if (!oid) throw new Error('The description requires a tracked regular file.'); return oid; });
-    const texts = batchTexts(await gitBytes(['--git-dir', mirror, 'cat-file', '--batch'], context, limit, {}, false, `${[...new Set(oids)].join('\n')}\n`));
-    return new Map(paths.map((path, index) => [path, texts.get(oids[index]!)!]));
+  const oidOf = regularOids(entries);
+  const readBlobs: CommitTree['readBlobs'] = async (paths, limit, use) => {
+    const wanted = paths.map(oidOf), output = new BlobOutput(paths, limit, use);
+    if (!wanted.length) return;
+    await gitStream(['--git-dir', mirror, 'cat-file', '--batch'], context, chunk => output.push(chunk), { input: wanted.map(oid => `${oid}\n`).join('') });
+    if (!output.whole) throw new Error('Git did not print every file asked for.');
+  };
+  return { commitSha, entries, readBlob: async (path, limit) => gitBytes(['--git-dir', mirror, 'cat-file', 'blob', oidOf(path)], context, limit), readBlobs, readTexts: async (paths, limit) => {
+    const texts = new Map<string, string>();
+    let size = 0;
+    await readBlobs(paths, limit, (path, bytes) => {
+      size += bytes.length;
+      if (size > limit) throw new Error(TOO_MUCH);
+      texts.set(path, bytes.toString('utf8'));
+    });
+    return texts;
   } };
 }

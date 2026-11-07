@@ -13,6 +13,7 @@ import { wakeLeftBehind } from '../tasks/wake.js';
 import { checkWaitHealth } from '../tasks/wait-monitor.js';
 import { checkExternalWaits } from '../tasks/external-wait.js';
 import { moveLeases } from '../subscriptions/lease.js';
+import { harnessRound } from '../testruns/harness.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
@@ -131,6 +132,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
+    harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
     modelCheckRound(ctx, now, liveEvaluator(ctx), certifyPassed(ctx)).catch(failed('running model checks failed')),

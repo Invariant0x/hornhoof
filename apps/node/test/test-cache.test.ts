@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
@@ -13,6 +13,16 @@ async function context() {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-prepared-')); folders.push(cacheRoot);
   return { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} };
 }
+describe('restoring a stored tree', () => {
+  it('never takes a root for the checkout itself, whose parent would go to the part', async () => {
+    const ctx = await context(), destination = join(ctx.cacheRoot, 'part', 'repo'), key = 'a'.repeat(64);
+    await mkdir(destination, { recursive: true }); await writeFile(join(destination, 'kept'), 'still here');
+    const ready = { format: 2 as const, key, inputDigest: key, roots: ['.'], entries: [] };
+    await expect(cache.restoreCache({ path: join(ctx.cacheRoot, key), key, inputDigest: key, hit: true, ready }, destination, ctx)).rejects.toThrow(/root/);
+    expect(await readFile(join(destination, 'kept'), 'utf8')).toBe('still here');
+  });
+});
+
 describe('cache writer locking', () => {
   it('holds a process lock through the callback and lets another writer proceed after failure', async () => {
     const ctx = await context(), entered = deferred(), release = deferred();
@@ -88,6 +98,7 @@ describe('immutable preparation payloads', () => {
     const directory = join(ctx.cacheRoot, 'environments'), key = 'e'.repeat(64), digest = 'd'.repeat(64);
     const results = await Promise.all([cache.prepareCache(directory, key, digest, ctx, build), cache.prepareCache(directory, key, digest, ctx, build)]);
     expect(results.map(result => result.hit).sort()).toEqual([false, true]); expect(builds).toBe(1);
+    await chmod(join(results[0].path, 'payload', 'template'), 0o644);
     await writeFile(join(results[0].path, 'payload', 'template'), 'corrupt');
     expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false); expect(builds).toBe(2);
     expect((await readdir(directory)).some(name => name.startsWith('.corrupt-'))).toBe(true);
@@ -210,4 +221,158 @@ it('never serves a payload whose publisher was killed before READY and lets a la
   await expect(readFile(join(directory, 'a'.repeat(64), 'READY.json'))).rejects.toThrow();
   const entry = await cache.prepareCache(directory, 'a'.repeat(64), 'd'.repeat(64), ctx, async () => { await writeFile(join(source, 'template'), 'rebuilt'); return { root: source, paths: ['template'] }; });
   expect(entry.hit).toBe(false); expect(await readFile(join(entry.path, 'payload/template'), 'utf8')).toBe('rebuilt');
+});
+
+describe('sharing one prepared tree between parts', () => {
+  async function linked() {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(join(source, 'node_modules', 'dep'), 'locked');
+    await writeFile(join(source, 'node_modules', '.bin', 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['node_modules'] }));
+    await cache.restoreCache(entry, part, ctx, { link: true });
+    return { ctx, entry, part, dep: join(part, 'node_modules', 'dep'), kept: join(entry.path, 'payload', 'node_modules', 'dep') };
+  }
+
+  it('restores files as read-only links to the one stored file, so a part cannot change what the next part gets', async () => {
+    const { dep, kept, part } = await linked();
+    expect((await stat(dep)).ino).toBe((await stat(kept)).ino);
+    await expect(writeFile(dep, 'changed by a part')).rejects.toThrow(/EACCES/);
+    expect(await readFile(kept, 'utf8')).toBe('locked');
+    expect((await stat(join(part, 'node_modules', '.bin', 'tool'))).mode & 0o111).toBe(0o111);
+  });
+
+  it('lets a part replace a linked file and add its own, keeping the stored file', async () => {
+    const { dep, kept, part } = await linked();
+    await rm(dep); await writeFile(dep, 'replaced by a part');
+    await mkdir(join(part, 'node_modules', '.cache')); await writeFile(join(part, 'node_modules', '.cache', 'made'), 'by a part');
+    expect(await readFile(kept, 'utf8')).toBe('locked');
+  });
+
+  it('gives plain copies a writable mode, even from read-only stored files', async () => {
+    const { ctx, entry, kept } = await linked(), part = join(ctx.cacheRoot, 'copied');
+    await cache.restoreCache(entry, part, ctx);
+    const dep = join(part, 'node_modules', 'dep');
+    expect((await stat(dep)).ino).not.toBe((await stat(kept)).ino);
+    await writeFile(dep, 'changed by a part');
+    expect(await readFile(kept, 'utf8')).toBe('locked');
+  });
+
+  it('does not read the stored files again on a hit', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(source); await writeFile(join(source, 'template'), 'migrated');
+    let builds = 0;
+    const build = async () => { builds++; return { root: source, paths: ['template'] }; };
+    const first = await cache.prepareCache(directory, key, digest, ctx, build);
+    await chmod(join(first.path, 'payload', 'template'), 0o000);
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(true);
+    expect(builds).toBe(1);
+    await chmod(join(first.path, 'payload', 'template'), 0o444);
+  });
+
+  it('rebuilds a stored tree with a file added, or one written after it was stored', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(source); await writeFile(join(source, 'template'), 'migrated');
+    let builds = 0;
+    const build = async () => { builds++; return { root: source, paths: ['template'] }; };
+    const first = await cache.prepareCache(directory, key, digest, ctx, build);
+    await chmod(join(first.path, 'payload'), 0o700);
+    await writeFile(join(first.path, 'payload', 'extra'), 'left behind');
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
+    expect(builds).toBe(2);
+    const second = await cache.prepareCache(directory, key, digest, ctx, build);
+    expect(second.hit).toBe(true);
+    await chmod(join(second.path, 'payload', 'template'), 0o644);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await writeFile(join(second.path, 'payload', 'template'), 'MIGRATED');
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
+    expect(builds).toBe(3);
+  });
+
+  it.each([
+    ['a file gone', (payload: string) => rm(join(payload, 'node_modules', 'dep'), { force: true })],
+    ['a file of another size', async (payload: string) => { await chmod(join(payload, 'node_modules', 'dep'), 0o644); await writeFile(join(payload, 'node_modules', 'dep'), 'locked and more'); }],
+    ['a folder where a file was', async (payload: string) => { await rm(join(payload, 'node_modules', 'dep')); await mkdir(join(payload, 'node_modules', 'dep')); }],
+    ['a link that leads elsewhere', async (payload: string) => { await rm(join(payload, 'node_modules', 'near')); await symlink('dep', join(payload, 'node_modules', 'near')); }],
+  ])('rebuilds a stored tree with %s', async (_name, spoil) => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(join(source, 'node_modules'), { recursive: true }); await writeFile(join(source, 'node_modules', 'dep'), 'locked'); await symlink('.bin', join(source, 'node_modules', 'near'));
+    const build = async () => ({ root: source, paths: ['node_modules'] });
+    const stored = await cache.prepareCache(directory, key, digest, ctx, build);
+    await spoil(join(stored.path, 'payload'));
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(true);
+  });
+
+  it('knows a stored tree again whatever its names and links hold', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'deps', 'with space'), { recursive: true });
+    await writeFile(join(source, 'deps', 'with space', 'two words'), 'one');
+    await writeFile(join(source, 'deps', 'new\nline'), 'two');
+    await writeFile(join(source, 'deps', 'имя'), 'three');
+    await writeFile(join(source, 'deps', 'empty'), '');
+    await symlink('with space/two words', join(source, 'deps', 'linked name'));
+    const build = async () => ({ root: source, paths: ['deps'] });
+    const first = await cache.prepareCache(directory, key, digest, ctx, build), again = await cache.prepareCache(directory, key, digest, ctx, build);
+    expect(again.hit).toBe(true);
+    expect(again.ready!.entries.map(item => item.path).sort()).toEqual(first.ready!.entries.map(item => item.path).sort());
+    await cache.restoreCache(again, part, ctx, { link: true });
+    expect(await readFile(join(part, 'deps', 'linked name'), 'utf8')).toBe('one');
+    expect(await readFile(join(part, 'deps', 'new\nline'), 'utf8')).toBe('two');
+    expect(await readFile(join(part, 'deps', 'имя'), 'utf8')).toBe('three');
+  });
+
+  it('counts a file written the moment its READY was as stored', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(source); await writeFile(join(source, 'template'), 'migrated');
+    const build = async () => ({ root: source, paths: ['template'] }), stored = await cache.prepareCache(directory, key, digest, ctx, build), moment = new Date();
+    await utimes(join(stored.path, 'payload', 'template'), moment, moment); await utimes(join(stored.path, 'READY.json'), moment, moment);
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(true);
+  });
+
+  it('stores what lies below a folder that is not stored, in any order of its names', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'apps', 'one', 'node_modules', 'a-b'), { recursive: true }); await mkdir(join(source, 'apps', 'one', 'node_modules', 'a'), { recursive: true });
+    await writeFile(join(source, 'apps', 'one', 'node_modules', 'a', 'file'), 'one'); await writeFile(join(source, 'apps', 'one', 'node_modules', 'a-b', 'file'), 'two'); await writeFile(join(source, 'apps', 'one', 'not-stored'), 'no');
+    const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['apps/one/node_modules'] }));
+    expect(entry.ready!.roots).toEqual(['apps/one/node_modules']);
+    await cache.restoreCache(entry, part, ctx);
+    expect(await readFile(join(part, 'apps', 'one', 'node_modules', 'a-b', 'file'), 'utf8')).toBe('two');
+    await expect(readFile(join(part, 'apps', 'one', 'not-stored'))).rejects.toThrow();
+  });
+
+  it('never stores a git folder, and refuses one a stored tree comes to say it holds', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source');
+    await mkdir(join(source, 'deps', '.git'), { recursive: true }); await writeFile(join(source, 'deps', '.git', 'config'), 'x');
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['deps'] }))).rejects.toThrow(/permitted root/);
+    expect(cache.CacheReady.safeParse({ format: 2, key: 'a'.repeat(64), inputDigest: 'd'.repeat(64), roots: ['deps'], entries: [{ path: 'deps/.git', kind: 'directory' }] }).success).toBe(false);
+  });
+
+  it('refuses to store through a folder that is a link', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), elsewhere = join(ctx.cacheRoot, 'elsewhere');
+    await mkdir(join(elsewhere, 'deps'), { recursive: true }); await writeFile(join(elsewhere, 'deps', 'file'), 'x');
+    await mkdir(source); await symlink(elsewhere, join(source, 'through'));
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['through/deps'] }))).rejects.toThrow(/symlink/i);
+  });
+
+  it('says plainly that what it was told to store is not there', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'); await mkdir(source);
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['node_modules'] }))).rejects.toThrow(/ENOENT/);
+  });
+
+  it('keeps a link that ends nowhere, as the install left it', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'node_modules'), { recursive: true });
+    await symlink('missing', join(source, 'node_modules', 'broken'));
+    const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['node_modules'] }));
+    await cache.restoreCache(entry, part, ctx, { link: true });
+    expect((await readdir(join(part, 'node_modules')))).toEqual(['broken']);
+  });
+
+  it('gives a part its folders, and leaves the linked files stored', async () => {
+    const { ctx, entry, part, dep } = await linked(), me = { uid: process.getuid!(), gid: process.getgid!() };
+    await cache.restoreCache(entry, part, ctx, { link: true, owner: me });
+    expect((await stat(join(part, 'node_modules'))).uid).toBe(me.uid);
+    expect((await stat(dep)).mode & 0o222).toBe(0);
+  });
 });

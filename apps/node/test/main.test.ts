@@ -1311,6 +1311,22 @@ it('queues description discovery before reading a cold mirror and replies with a
   await server.wait(() => server.received.some(frame => frame.type === 'check.release'));
 });
 
+it('waits for its turn to get a product harness ready, says how it went, and says it takes harnesses', async () => {
+  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testHarness: 1 });
+  const requestId = '55555555-5555-4555-8555-555555555555';
+  server.send({ type: 'tests.harness', requestId, repositoryScope: source.repositoryScope, repo: source.repo, commitSha: source.commitSha });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
+  expect(server.received.filter(frame => frame.type === 'tests.harness.done')).toEqual([]);
+  const acquired = server.received.find(frame => frame.type === 'check.acquire')!;
+  server.send({ type: 'check.state', id: acquired.id, state: 'running', position: 0 });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.harness.done'));
+  expect(server.received.find(frame => frame.type === 'tests.harness.done')).toMatchObject({ requestId, commitSha: source.commitSha, result: { status: 'error' } });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.release'));
+});
+
 it('cancels a queued description before repository materialization', async () => {
   const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());

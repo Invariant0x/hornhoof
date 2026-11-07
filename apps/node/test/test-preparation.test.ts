@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { parseTestEnvironment, type EnvironmentDescription, type InputDigest } from '@hornhoof/protocol';
+// Giving folders to the job user takes root, which a test machine need not have.
+vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
 import * as environment from '../src/test-environment.js';
 import { restoreCache, type CacheEntry } from '../src/test-cache.js';
 const execute = promisify(execFile), roots: string[] = [];
@@ -20,7 +22,7 @@ async function setup(cache: 'copy' | 'none' = 'copy') {
     services: [], prepare: [{ id: 'schema', profiles: ['fast'], serviceIds: [], inputs: ['migration.sql'], commands: [command("const f=require('fs'); f.mkdirSync('template'); f.writeFileSync('template/db',f.readFileSync('migration.sql')); ")], artifacts: [{ path: 'template', format: 'directory', env: 'HH_TEMPLATE' }] }], reset: null,
     suites: [{ id: 'unit', root: '.', files: ['test.js'], run: command(''), split: { kind: 'argv-files' }, profiles: ['fast'] }], impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'No rollback.' } }, mutation: { status: 'unsupported', language: 'typescript', reason: 'No plan.' } });
   await writeFile(join(checkout, 'package-lock.json'), 'lock A'); await writeFile(join(checkout, 'migration.sql'), 'schema A');
-  const description: EnvironmentDescription = { version: 1, repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, commitSha: 'a'.repeat(40), manifestSource: JSON.stringify(manifest), manifestHash: sha(JSON.stringify(manifest)), manifest, inputDigests: [{ path: 'package-lock.json', digest: sha('lock A') }, { path: 'migration.sql', digest: sha('schema A') }], inventory: [{ suiteId: 'unit', file: 'test.js', selectionUnit: 'test.js' }], runtimeCapabilities: [{ id: 'node', version: process.versions.node, fingerprint: 'f'.repeat(64) }] };
+  const description: EnvironmentDescription = { version: 1, repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, commitSha: 'a'.repeat(40), manifestSource: JSON.stringify(manifest), manifestHash: sha(JSON.stringify(manifest)), manifest, inputDigests: [{ path: 'package-lock.json', digest: sha('lock A') }, { path: 'migration.sql', digest: sha('schema A') }], inventory: [{ suiteId: 'unit', file: 'test.js', selectionUnit: 'test.js' }], runtimeCapabilities: [{ id: 'node', version: process.versions.node, fingerprint: 'f'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'e'.repeat(64) }] };
   const commands: string[] = [], closed: string[] = [];
   const context = { cacheRoot: join(root, 'cache'), checkout, profile: 'fast', attemptRoot: join(root, 'attempt'), nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid: 20000, gid: 20000 }, deadline: Date.now() + 10_000, signal: new AbortController().signal, env: {}, registerSecrets: () => {}, log: () => {},
     run: async (cmd: typeof manifest.suites[0]['run']) => { commands.push('direct'); await execute(cmd.program, cmd.args, { cwd: join(checkout, cmd.cwd) }); }, quiesce: async () => {},

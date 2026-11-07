@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,7 +37,7 @@ function executable(name: string, body: string): void {
 function fakePostgres(): void {
   const common = `const fs=require('node:fs'); const p=require('node:path'); const a=process.argv.slice(2); if(a.includes('--version')) { console.log(p.basename(process.argv[1])+' (PostgreSQL) 17.4'); process.exit(0); }`;
   executable('initdb', `${common} if(process.env.INIT_MARKER) fs.appendFileSync(process.env.INIT_MARKER,'init\\n'); const dir=a[a.indexOf('-D')+1]; fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(p.join(dir,'PG_VERSION'),'17'); fs.writeFileSync(p.join(dir,'pg_hba.conf'),''); fs.writeFileSync(p.join(dir,'postgresql.conf'),'');`);
-  executable('postgres', `${common} if(a.includes('--single')) {process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
+  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs.symlinkSync(fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
   executable('pg_ctl', `${common} const dir=a[a.indexOf('-D')+1]; const file=p.join(dir,'postmaster.pid'); if(fs.existsSync(file)) process.kill(Number(fs.readFileSync(file,'utf8')),'SIGTERM');`);
   executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.SOCKET_TRACE) fs.writeFileSync(process.env.SOCKET_TRACE,process.env.PGHOST); if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
 }
@@ -95,6 +95,25 @@ describe('prepared native services', () => {
     await one.close();
     expect(existsSync(one.env.PGHOST!)).toBe(false);
     expect(existsSync(join(root, 'runs', 'one', 'state', 'pg'))).toBe(false);
+  });
+  it('writes its access rules into a file of its own, whatever a program a template runs left in that place', async () => {
+    const artifacts = await prep(), outside = join(root, 'outside');
+    writeFileSync(outside, 'untouched');
+    writeFileSync(join(bin, 'link-hba-to'), outside);
+    const opened = await openServices(definitions, artifacts, part('one'));
+    try {
+      expect(readFileSync(outside, 'utf8')).toBe('untouched');
+      const file = join(root, 'runs', 'one', 'state', 'pg', 'pg_hba.conf');
+      expect(lstatSync(file).isFile()).toBe(true);
+      expect(readFileSync(file, 'utf8')).toContain('scram-sha-256');
+    } finally { await opened.close(); }
+  });
+  it('gives no folder away through a link', async () => {
+    const artifacts = await prep(), elsewhere = join(root, 'elsewhere');
+    mkdirSync(elsewhere, { mode: 0o755 }); mkdirSync(join(root, 'runs'));
+    symlinkSync(elsewhere, join(root, 'runs', 'one'));
+    await expect(openServices(definitions, artifacts, part('one'))).rejects.toThrow(/link/);
+    expect(statSync(elsewhere).mode & 0o777).toBe(0o755);
   });
   it('rejects modified immutable payload before opening a server', async () => {
     const artifacts = await prep();

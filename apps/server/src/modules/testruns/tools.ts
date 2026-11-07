@@ -8,7 +8,9 @@ import { taskByRef } from '../tasks/views.js';
 import { refuse } from '../tasks/engine.js';
 import type { ToolJob } from '../tools/job.js';
 import { queuedRunState } from '../nodes/check-slot-view.js';
-import { startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
+import { repoAt } from '../departments/repository.js';
+import { harnessState } from './harness.js';
+import { startRun, stopRun, taskFor, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const answer = (fn: () => Promise<string>) =>
@@ -40,13 +42,13 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. A release's profiles take a result only from the repository's main branch or the turn's, so run a release's check on the turn's branch: every so many turns everything runs there and any mismatch with the kept results is named. " +
         "With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
-        "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
+        "a part that checked another one fails the run. The product's harness is ready there before the command starts: dependencies and what the repository prepares are in place, so a command needs no installation or build. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
         `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
         'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
         "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
       inputSchema: {
-        command: z.string().trim().min(1).max(4000).optional().describe('Manual command, including installation. Omit it for the pinned product environment.'),
+        command: z.string().trim().min(1).max(4000).optional().describe('Manual command. Dependencies are in place already; omit it for the pinned product environment.'),
         suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
         profile: z.string().min(1).max(64).optional().describe('Product profile ID; defaults to defaultProfile in the pinned manifest.'),
         task: TaskRef('whose branch it tests'),
@@ -79,6 +81,19 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'stop_tests',
     { description: 'Stops a test run: every part of it that waits or runs. Whoever started it hears of it when that was someone else.', inputSchema: { run: Run } },
     async ({ run }) => answer(() => stopRun(ctx, job, run)),
+  );
+  server.registerTool(
+    'test_harness',
+    {
+      description:
+        "Where the test harness of a product stands: everything a test needs before it starts, which Hornhoof builds once per architecture and keeps ready on all machines. Shows the head of the branch, the last commit that was good, each machine's word, the builds and what is wrong. " +
+        'Nobody installs or builds it by hand; a failed update leaves the last good version in use and tries again by itself.',
+      inputSchema: { task: TaskRef('whose product it shows') },
+    },
+    async input => answer(async () => {
+      const task = await taskFor(ctx, job, input.task, 'tests'), found = await repoAt(ctx, [task.productId, task.departmentId]);
+      return found ? JSON.stringify(await harnessState(ctx, found.department)) : `#${task.number} has no repository, so it has no test harness.`;
+    }),
   );
   server.registerTool(
     'run_work',

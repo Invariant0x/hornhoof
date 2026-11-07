@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, chownSync, closeSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, cpSync, existsSync, fchownSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { redact } from './redact.js';
 import type { JobUser } from './isolation.js';
@@ -111,6 +111,7 @@ function inside(root: string, path: string): string {
 }
 function directory(path: string, context: ServiceContext): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
+  if (lstatSync(path).isSymbolicLink()) throw new Error('A service folder cannot be a link.');
   chmodSync(path, 0o700);
   chownSync(path, context.jobUser.uid, context.jobUser.gid);
 }
@@ -118,6 +119,8 @@ function ownTree(path: string, context: ServiceContext): void {
   const st = lstatSync(path);
   if (st.isSymbolicLink()) throw new Error('Service state cannot contain symlinks');
   chownSync(path, context.jobUser.uid, context.jobUser.gid);
+  /* What is stored stays read-only; a service writes in its own copy. */
+  chmodSync(path, st.isDirectory() || st.mode & 0o100 ? 0o700 : 0o600);
   if (st.isDirectory()) for (const entry of readdirSync(path)) ownTree(join(path, entry), context);
 }
 function kill(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -296,9 +299,13 @@ function privateSocket(context: ServiceContext): string {
   if (Buffer.byteLength(join(socket, '.s.PGSQL.5432')) >= 100) throw new Error('PostgreSQL Unix socket path is too long');
   return socket;
 }
+/* The folder is the job's and a stopped template's configuration can run programs in it, so this, done as root, goes through no
+   link that may stand in this place. */
 function hba(state: string, context: ServiceContext): void {
-  writeFileSync(join(state, 'pg_hba.conf'), 'local all all scram-sha-256\n', { mode: 0o600 });
-  chownSync(join(state, 'pg_hba.conf'), context.jobUser.uid, context.jobUser.gid);
+  const file = join(state, 'pg_hba.conf');
+  rmSync(file, { force: true });
+  const written = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try { writeSync(written, 'local all all scram-sha-256\n'); fchownSync(written, context.jobUser.uid, context.jobUser.gid); } finally { closeSync(written); }
 }
 async function ready(server: Running, env: Record<string, string>, cwd: string, context: ServiceContext, hidden: string[]): Promise<void> {
   for (;;) {

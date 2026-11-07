@@ -21,7 +21,7 @@ vi.mock('node:child_process', async original => {
 });
 vi.mock('node:fs', async original => {
   const module = await original<typeof import('node:fs')>();
-  return { ...module, chownSync: () => {},
+  return { ...module, chownSync: () => {}, fchownSync: () => {},
     readdirSync: (path: import('node:fs').PathLike) => {
       const folder = String(path);
       if (['/tmp', '/var/tmp', '/dev/shm'].includes(folder)) return [...sharedState.builderFiles].filter(file => file.startsWith(folder + '/') && !file.slice(folder.length + 1).includes('/')).map(file => file.slice(folder.length + 1));
@@ -30,6 +30,7 @@ vi.mock('node:fs', async original => {
     lstatSync: (path: import('node:fs').PathLike) => { const stat = module.lstatSync(path); return sharedState.builderFiles.has(String(path)) ? Object.assign(stat, { uid: sharedState.builderUid }) : stat; },
   };
 });
+vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
 vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();
   return { ...module, userFor: () => ({ uid: sharedState.builderUid, gid: sharedState.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };

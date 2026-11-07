@@ -20,6 +20,9 @@ services:
       TUNNEL_HOST: tunnel
       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
       TASK_FILES_MB: ${TASK_FILES_MB:-}
+      # What machines share of products' test harnesses: its folder here, and how many MB it may take; 20480 when empty.
+      HARNESS_DIR: /harness
+      HARNESS_MB: ${HARNESS_MB:-}
       # Parts of runs allowed on one physical computer at once; 1 when empty.
       MAX_RUNS_PER_HOST: ${MAX_RUNS_PER_HOST:-}
       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
@@ -28,6 +31,7 @@ services:
       HORNHOOF_LIVE_CHECK_STAND: ${HORNHOOF_LIVE_CHECK_STAND:-}
     volumes:
       - control:/control
+      - harness:/harness
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -147,3 +151,4 @@ volumes:
   pgdata:
   nodedata:
   control:
+  harness:
