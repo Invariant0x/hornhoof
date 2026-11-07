@@ -7,6 +7,8 @@ sources: [unclebob/crapper README.md, unclebob/dryer README.md, unclebob/mutator
 ---
 This is the one place that says who runs which check and when. Other skills point here. It fits any company, project and language.
 
+Use the check assigned by the head under the shared small-task rule. The per-task test steps below apply when that requires a separate test; shared final checks still run as specified.
+
 ### How the engineering rules apply here
 
 The engineering rules (ub-mode) are kept word for word, so the company's own ways are written here, and here wins where they differ:

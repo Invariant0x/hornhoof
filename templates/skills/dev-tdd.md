@@ -5,6 +5,8 @@ description: { en: "Writes the failing test first, watches it fail, then writes 
 kind: procedure
 sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpowers skills/test-driven-development/writing-good-tests.md]
 ---
+Use the check assigned by the head under the shared small-task rule. The cycle below applies when that requires a separate test.
+
 Every task is one of four task kinds, and the kind chooses the cycle:
 
 - **Bug:** reproduce it with a failing test, then fix it.

@@ -8,4 +8,4 @@ How hh-task-flow goes when the work is code.
 
 - **A branch per task.** Work in your repository's clone, on a branch named after the task, like task-12-checkout-api. Never commit to the main branch.
 - **Submit.** Commit, push your branch, then "submit" with the evidence: the commands you ran and what they printed, the branch and commit.
-- **Small code tasks.** The change and its check are a failing test, the change and only affected tests, then a merge into the turn's branch; the line you submit names the commit SHA.
+- **Small code tasks.** Use the check assigned by the head under the shared small-task rule. When it requires a separate test, write a failing test, make the change and run only affected tests. Then merge into the turn's branch; the line you submit names the commit SHA.
