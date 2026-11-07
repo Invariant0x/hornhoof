@@ -106,6 +106,8 @@ const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safePar
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
+const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes'> => ({ ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}), harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024 });
+
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const raw = env.HORNHOOF_SECRET;
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
@@ -148,8 +150,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
-    ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}),
-    harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024,
+    ...harnessSettings(set),
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }
