@@ -266,8 +266,33 @@ describe('a Java project', () => {
     expect(toolsOf(manifest)).toEqual(['java', 'gradle']);
     expect(manifest.dependencies.install[0]!.args.at(-2)).toBe('17');
     expect(manifest.dependencies.install[1]!.args.slice(-2)).toEqual(['8.10.2', '.hornhoof/tools/gradle']);
-    expect(manifest.prepare[0]).toMatchObject({ artifacts: [{ path: '.hornhoof/gradle/caches', link: true, env: 'GRADLE_RO_DEP_CACHE' }] });
+    expect(manifest.prepare[0]).toMatchObject({ artifacts: [{ path: '.hornhoof/gradle/caches', link: true, env: 'GRADLE_RO_DEP_CACHE' }, { path: '.hornhoof/gradle/home', env: 'GRADLE_USER_HOME' }] });
     expect(script(manifest.suites[0]!.run)).toContain('gradle --no-daemon test');
+  });
+
+  /* Java takes its home from the system, not from HOME, and a job user's there is not its to write. */
+  it('keeps what Gradle made for itself as each part\'s own copy of its home, and leaves no other value of that variable', async () => {
+    const manifest = await found({ 'build.gradle': '', 'settings.gradle': '' });
+    expect(manifest.dependencies.env?.GRADLE_USER_HOME).toBeUndefined();
+    expect(manifest.prepare[0]!.artifacts).toContainEqual({ path: '.hornhoof/gradle/home', format: 'directory', env: 'GRADLE_USER_HOME' });
+    const steps = script(manifest.prepare[0]!.commands[0]!);
+    expect(steps).toContain('export GRADLE_USER_HOME="$PWD/.hornhoof/gradle/home"');
+    expect(steps).toContain('mv "$GRADLE_USER_HOME/caches/modules-2" .hornhoof/gradle/caches/');
+  });
+
+  it('gives Gradle an empty home when no program of its own names one', async () => {
+    const manifest = await found({ '.tool-versions': 'gradle 8.10.2\n' });
+    expect(manifest.dependencies.env).toMatchObject({ GRADLE_USER_HOME: '.hornhoof/gradle-home' });
+    expect(manifest.dependencies.paths).toContain('.hornhoof/gradle-home');
+    expect(manifest.dependencies.install).toContainEqual({ program: 'mkdir', args: ['-p', '.hornhoof/gradle-home'], cwd: '.' });
+  });
+
+  it('gives a command outside the two Gradle programs of a repository that empty home, and each program its own in its suite', async () => {
+    const manifest = await found({ 'a/build.gradle': '', 'b/build.gradle': '' });
+    expect(manifest.dependencies.env).toMatchObject({ GRADLE_USER_HOME: '.hornhoof/gradle-home' });
+    expect(manifest.prepare.flatMap(unit => unit.artifacts)).toContainEqual({ path: 'a/.hornhoof/gradle/home', format: 'directory' });
+    expect(manifest.prepare.flatMap(unit => unit.artifacts)).toContainEqual({ path: 'b/.hornhoof/gradle/home', format: 'directory' });
+    expect(manifest.suites.map(suite => [suite.run.cwd, script(suite.run).includes('export GRADLE_USER_HOME="$PWD/.hornhoof/gradle/home"')])).toEqual([['a', true], ['b', true]]);
   });
 
   it('takes the newest long-term JDK when nothing names one', async () => {

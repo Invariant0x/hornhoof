@@ -2,9 +2,10 @@ import { vi } from 'vitest';
 import { ids, network } from './measure-machines.js';
 
 /* Only the OS identity operations a machine without root cannot do are doubled: git, installers, builds, files and commands are
-   real. A closed network is a proxy nobody listens on, which the tools of every language obey. */
+   real. A closed network is a proxy nobody listens on, which the tools of every language obey. The home Java takes from the
+   system, not from HOME, is not a job user's to write, so here it is no home at all. */
 const NOWHERE = 'http://127.0.0.1:9';
-const CLOSED = { HTTP_PROXY: NOWHERE, HTTPS_PROXY: NOWHERE, ALL_PROXY: NOWHERE, http_proxy: NOWHERE, https_proxy: NOWHERE, all_proxy: NOWHERE, JAVA_TOOL_OPTIONS: '-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=9 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=9' };
+const CLOSED = { HTTP_PROXY: NOWHERE, HTTPS_PROXY: NOWHERE, ALL_PROXY: NOWHERE, http_proxy: NOWHERE, https_proxy: NOWHERE, all_proxy: NOWHERE, JAVA_TOOL_OPTIONS: '-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=9 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=9 -Duser.home=/nonexistent' };
 vi.mock('node:child_process', async original => {
   const module = await original<typeof import('node:child_process')>();
   return { ...module, spawn: (bin: string, args: string[], options: import('node:child_process').SpawnOptions) => module.spawn(bin, args, { ...options, uid: undefined, gid: undefined, ...(network.closed ? { env: { ...options.env, ...CLOSED } } : {}) }) };

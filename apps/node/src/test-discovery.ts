@@ -213,10 +213,12 @@ const GRADLE_RESOLVE = `cat > "$TMPDIR/resolve.gradle" <<'GRADLE'
 allprojects { tasks.register('hornhoofResolve') { doLast { project.configurations.findAll { it.canBeResolved }.each { try { it.resolve() } catch (Exception e) { logger.warn(e.message) } } } } }
 GRADLE`;
 const GRADLE_STEPS = [
-  /* It builds with a folder of its own, and every part reads what came down from it, read-only, as Gradle provides for. */
-  'unset GRADLE_RO_DEP_CACHE', 'export GRADLE_USER_HOME="$PWD/.hornhoof/gradle"', GRADLE_RESOLVE,
+  /* What came down, every part reads read-only, as Gradle provides for. What it made for itself, each part gets a copy of, or every
+     run would make it again, and with no note of its last cleaning, as it would clean all that looks old by the stored time. */
+  'unset GRADLE_RO_DEP_CACHE', GRADLE_RESOLVE,
   'gradle --no-daemon --no-configuration-cache --init-script "$TMPDIR/resolve.gradle" hornhoofResolve || echo "Some of it did not come down: a run takes it itself."',
-  'mkdir -p .hornhoof/gradle/caches/modules-2', "find .hornhoof/gradle/caches -mindepth 1 -maxdepth 1 ! -name modules-2 -exec rm -rf {} +", "find .hornhoof/gradle/caches -name '*.lock' -delete", 'rm -f .hornhoof/gradle/caches/modules-2/gc.properties',
+  'mkdir -p "$GRADLE_USER_HOME/caches/modules-2" .hornhoof/gradle/caches', 'mv "$GRADLE_USER_HOME/caches/modules-2" .hornhoof/gradle/caches/', "find .hornhoof/gradle/caches -name '*.lock' -delete",
+  'rm -rf "$GRADLE_USER_HOME/daemon" "$GRADLE_USER_HOME/.tmp"', "find .hornhoof/gradle -name gc.properties -delete",
 ];
 const gradle: Finder = seen => inTurn(topMost(foldersWith(seen, GRADLE_FILES)), async root => {
   const builds = GRADLE_FILES.flatMap(name => parts(seen, root, name)), wrapper = under(root, 'gradle/wrapper/gradle-wrapper.properties');
@@ -224,7 +226,7 @@ const gradle: Finder = seen => inTurn(topMost(foldersWith(seen, GRADLE_FILES)), 
   return {
     language: 'java', root, asks: [{ tool: 'java' as const, version: await javaAsk(seen, builds, root) }, { tool: 'gradle' as const, version }],
     inputs: [...builds, ...within(seen, root, ['gradle.properties']), ...seen.paths.filter(path => path.startsWith(`${under(root, 'gradle')}/`) || path.startsWith(`${under(root, 'buildSrc')}/`))],
-    env: { GRADLE_RO_DEP_CACHE: '.hornhoof/gradle/caches' }, shared: ['.hornhoof/gradle/caches'], steps: GRADLE_STEPS, test: ['gradle --no-daemon test'],
+    env: { GRADLE_RO_DEP_CACHE: '.hornhoof/gradle/caches', GRADLE_USER_HOME: '.hornhoof/gradle/home' }, shared: ['.hornhoof/gradle/caches'], own: ['.hornhoof/gradle/home'], steps: GRADLE_STEPS, test: ['gradle --no-daemon test'],
   };
 });
 
@@ -355,8 +357,10 @@ function toolsSuite(named: Map<string, string>, tools: Tool[]): TestSuite {
   return { id: 'tools', root: '.', files: ['.tool-versions'], split: { kind: 'whole-package' }, profiles: ['default'], run: inProgram('.', {}, prints) };
 }
 
-function toolsUnit(tools: Tool[]): TestEnvironmentV1['dependencies'] {
-  const env = Object.assign({}, ...tools.map(tool => tool.env ?? {})) as Record<string, string>, bin = tools.flatMap(tool => tool.bin);
+/* What one program names reaches every command from there, and a variable with two values is refused. */
+function toolsUnit(tools: Tool[], named: string[]): TestEnvironmentV1['dependencies'] {
+  const all = Object.assign({}, ...tools.map(tool => tool.env ?? {})) as Record<string, string>, bin = tools.flatMap(tool => tool.bin);
+  const env = Object.fromEntries(Object.entries(all).filter(([name]) => !named.includes(name)));
   return { adapter: tools.map(tool => tool.id).join('.') || 'none', inputs: tools.flatMap(tool => tool.inputs ?? []), install: tools.flatMap(tool => tool.install), paths: tools.flatMap(tool => tool.paths), cache: 'link', ...(Object.keys(env).length ? { env } : {}), ...(bin.length ? { bin } : {}) };
 }
 function manifestOf(programs: Program[], tools: Tool[], named: Map<string, string>): TestEnvironmentV1 {
@@ -366,7 +370,7 @@ function manifestOf(programs: Program[], tools: Tool[], named: Map<string, strin
   return {
     version: 1, defaultProfile: 'default', runtimes: [],
     profiles: [{ id: 'default', requiredSuiteIds: suites.map(suite => suite.id) }],
-    dependencies: toolsUnit(tools),
+    dependencies: toolsUnit(tools, names.filter(name => !sharedNames.has(name))),
     services: [], prepare: programs.map((program, index) => unitOf(program, ids[index]!, sharedNames)), reset: null, suites,
     impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'The system found this environment by itself and knows of no migration check.' } },
     mutation: { status: 'unsupported', language: programs[0]?.language ?? 'none', reason: 'The system found this environment by itself and names no mutation tool.' },

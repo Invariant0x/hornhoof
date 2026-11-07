@@ -115,7 +115,10 @@ python3 -m zipfile -e "$TMPDIR/$file" "$TMPDIR/gradle"
 mv "$TMPDIR"/gradle/gradle-* "$2"
 chmod +x "$2/bin/gradle"
 rm -rf "$TMPDIR/$file" "$TMPDIR/gradle"`;
-const gradleTool = (version: string): Tool => ({ id: 'gradle', paths: [GRADLE_PATH], bin: [`${GRADLE_PATH}/bin`], install: [script(GRADLE_INSTALL, version, GRADLE_PATH)] });
+/* Java takes its home from the system, not from HOME, and a job user's there is not its to write. So a command outside a program with
+   a home of its own gets this one: a folder stored empty, which a part gets as its own even when all else comes by links. */
+const GRADLE_USER_HOME = '.hornhoof/gradle-home';
+const gradleTool = (version: string): Tool => ({ id: 'gradle', paths: [GRADLE_PATH, GRADLE_USER_HOME], env: { GRADLE_USER_HOME }, bin: [`${GRADLE_PATH}/bin`], install: [script(GRADLE_INSTALL, version, GRADLE_PATH), at('mkdir', '-p', GRADLE_USER_HOME)] });
 
 const PHP_PATH = `${TOOLS}/php`;
 const COMPOSER_VERSION = '2.11.1';
