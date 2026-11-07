@@ -62,8 +62,12 @@ describe('orchestrator instructions', () => {
     expect(carried).not.toContain('later version');
   });
 
-  it('gives each goal to one department whole and keeps new asks for the next turn unless the CEO says now', () => {
-    for (const words of ['one task for the one department that owns it end to end', 'next planned turn', '"now"']) expect(carried).toContain(words);
+  it('gives each goal to one department whole and refers new asks to the shared sprint admission rule', () => {
+    expect(carried).toContain('one task for the one department that owns it end to end');
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('hh-lead-tasks');
+    expect(told).toContain('A turn is a sprint');
+    expect(carried).toMatch(/orchestrator[\s\S]*head immediately/);
+    expect(carried).not.toMatch(/only when the CEO says (?:"now"|now)/);
     expect(carried).not.toContain('in the running turn it starts at once');
     expect(carried).not.toContain("one task for each department's part");
   });

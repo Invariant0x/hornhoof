@@ -38,10 +38,38 @@ describe('templates', () => {
     const body = templates.skills.get('hh-lead-tasks')!.body;
     expect(body).toMatch(/already working in that area[\s\S]*context/);
     expect(body).toMatch(/[Dd]o not search for a free member or start a new chain/);
-    expect(body).toMatch(/until the department's final check starts; after that it waits for the next turn/);
+    expect(body).toMatch(/final gate has not started[\s\S]*change fits/);
+    expect(body).toMatch(/final gate is already running[\s\S]*reset it[\s\S]*next turn/);
     expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
     expect(body).toMatch(/several tasks ahead[\s\S]*free member/);
     expect(templates.skills.get('dev-lead')!.body).toMatch(/separate small commit[\s\S]*back to its own work/);
+  });
+
+  it('delivers the sprint admission rule once to every head and the orchestrator', () => {
+    const policy = templates.skills.get('hh-lead-tasks')!.body;
+    expect(policy).toMatch(/A turn is a sprint/);
+    expect(policy).toMatch(/days or hours[\s\S]*as fast as it can/);
+    expect(policy).toMatch(/orchestrator[\s\S]*head immediately/);
+    expect(policy).toMatch(/without CEO approval or an urgency flag/);
+    expect(policy).toMatch(/simple visual change[\s\S]*head[\s\S]*shared turn check[\s\S]*without a separate test/);
+    expect(policy).toContain('Keep explicit deadlines for real waits.');
+    for (const role of roles.filter(r => r.kind === 'head')) {
+      const rendered = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
+      expect(rendered.text.match(/A turn is a sprint/g), role.id).toHaveLength(1);
+    }
+    expect(orchestratorSteady(templates).text.match(/A turn is a sprint/g)).toHaveLength(1);
+    for (const id of ['dev-lead', 'orch-plan-turn']) {
+      expect(templates.skills.get(id)!.body, id).toContain('hh-lead-tasks');
+      expect(templates.skills.get(id)!.body, id).not.toContain('A turn is a sprint');
+    }
+    expect(templates.skills.get('dev-lead')!.body).toMatch(/test choice from hh-lead-tasks[\s\S]*Otherwise[\s\S]*failing test/);
+  });
+
+  it('keeps named sub-unit orders outside planned turns under the department and release checks', () => {
+    const body = templates.skills.get('orch-company')!.body;
+    expect(body).toMatch(/named orders end to end outside planned turns/);
+    expect(body).toMatch(/department's oversight[\s\S]*checks[\s\S]*security review[\s\S]*exact-commit release approval/);
+    expect(body).toContain('A sub-unit that takes only urgent work (`urgentOnly`) gets only what the CEO called urgent.');
   });
 
   it('keeps each connected block with one owner in the head skill, with one generalist developer for code, and in the developer role', () => {
@@ -539,10 +567,11 @@ describe('templates', () => {
     }
   });
 
-  it('lays each goal out whole, for one department, with new asks in the next turn', () => {
+  it('lays each goal out whole and uses the shared admission rule for new asks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
-    expect(body('orch-plan-turn')).toMatch(/next (?:planned )?turn[\s\S]*"now"/);
+    expect(body('orch-plan-turn')).toContain('hh-lead-tasks');
+    expect(body('orch-plan-turn')).not.toMatch(/only when the CEO says/);
     for (const id of ['orch-plan-turn', 'hh-break-down']) expect(body(id), id).toMatch(/plans, contracts or proofs/);
     expect(body('hh-break-down')).toMatch(/whole blocks as hh-lead-tasks says/);
     expect(body('hh-break-down')).not.toMatch(/two to four/);

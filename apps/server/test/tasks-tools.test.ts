@@ -107,7 +107,9 @@ describe('task tools', () => {
     const said = async (agent: { id: string }, name: string) => (await (await tools(agent)).listTools()).tools.find(t => t.name === name)!.description!;
     expect(await said(head, 'create_task')).toContain("leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs");
     expect(await said(orchestrator, 'plan_turn')).toContain("one for each of the CEO's goals, for the one department that owns it end to end");
-    expect(await said(orchestrator, 'add_tasks')).toContain('A new ask goes into the next planned turn, into the running turn only when the CEO says now.');
+    const add = await said(orchestrator, 'add_tasks');
+    expect(add).toContain('hh-lead-tasks');
+    expect(add).not.toContain('only when the CEO says now');
     const prompt = wakePrompt({ kind: 'head' }, { number: 1, title: 'Payments', executorAgentId: null, panel: [] } as unknown as Task, { agentId: head.id, taskId: 't', why: 'assigned' });
     expect(prompt).toContain('Give each connected block to one generalist developer to finish end to end.');
     expect(prompt).toContain('Give independent blocks to different members at once with create_task, each under it (parent 1) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in');
