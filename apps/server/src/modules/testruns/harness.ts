@@ -378,7 +378,10 @@ async function noteReady(ctx: Ctx, department: Department, request: Request, mes
 async function noteTrouble(ctx: Ctx, department: Department, message: HarnessSynced, problem: Extract<HarnessSynced['result'], { status: 'error' }>['problem']): Promise<ProblemNotice | null> {
   if (PASSING.includes(problem.code)) return null;
   /* A build that failed was told of when it failed, with its output, whichever machine built it. */
-  if (problem.code === 'build_failed' && ctx.config.harnessDir) return null;
+  if (problem.code === 'build_failed' && ctx.config.harnessDir) {
+    const [reported] = await ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))).limit(1);
+    if (reported) return null;
+  }
   const signature = problem.code === 'build_failed' ? `${problem.code}:${message.commitSha}` : `${problem.code}:${problem.detail}`;
   return noteProblem(ctx, department, { code: problem.code, detail: problem.detail, commitSha: message.commitSha }, signature);
 }
