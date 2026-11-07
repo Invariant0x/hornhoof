@@ -648,7 +648,7 @@ describe('templates', () => {
   it('gates work by its size and risk, and fails it only for what blocks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const gates = body('dev-gates');
-    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note never get one/);
+    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note otherwise never get one/);
     expect(gates).toMatch(/[Oo]ne review/);
     expect(gates).toMatch(/access, sign-in, secrets or permissions/);
     expect(gates).toMatch(/one reviewer of each provider/);

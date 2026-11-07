@@ -7,12 +7,16 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 ---
 A turn is a sprint. It passes four gates in order, and each opens when the one before it is done. Rules here name order and conditions, never units of time. Who runs which check is in dev-testing-policy.
 
+## Security before integration
+
+Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This gate applies to urgent work, small tasks and direct named orders, including fixes from a review. Self-review does not replace this gate. This rule takes precedence over fast paths, tasks without gates and the no-second-review rule.
+
 ## Development
 
 - **Design for a large block.** Architects of different models each propose a solution on their own and write no code; the head, as arbiter, picks one or merges them into one design note, which the block waits on.
 - **One owner for a connected block.** It goes whole to one developer, with no chains or `after` between developers. Two developers work on separate features, never on the same task.
-- **Work goes out without gates**, under the department's task of the turn. A developer writes the code and a failing test, runs the affected tests, submits, and merges the branch into the turn's branch as soon as it hands the work in. An author's own review, where the role has one, comes before this and replaces no later gate.
-- **Small tasks** (`small: true`) go to whoever already holds their context, until the testing gate starts; after that they wait for the next turn.
+- **Work goes out without gates**, subject to the pre-merge Security gate above, under the department's task of the turn. A developer makes the change and runs the check assigned by the head, submits, and merges into the turn's branch after the required gates pass. An author's own review, where the role has one, comes before this and replaces no later gate.
+- **Small tasks** (`small: true`) follow the assignment and check chosen by the head under the shared small-task rule, subject to the pre-merge Security gate above.
 
 ## Review
 
@@ -21,8 +25,8 @@ One review per turn, on what the turn changed. When the department's last work o
 - **Who reviews.** Code review checks the code, the tests and obvious security problems. Security, when it is on, checks what touches access, sign-in, secrets or permissions. Red team, when on, checks the changed logic and flows. Security and red team join for declared money/access/security/data risk, sensitive changed paths, risky added diff or explicit pre-release mode, which a head requests with `Review mode: pre-release` in a covered task body header. A missing or incomplete trusted comparison wakes both. Harmless UI/text outside these triggers does not wake either.
 - **Never the author.** Whoever made a piece of work does not pass its gate.
 - **Other providers check.** Reviewers run on other providers than the developer when you have them. With only one provider, use a fresh session on another tier and say "cross-check degraded" in your status.
-- **The verdicts come to the head in one list**, what blocks first. The head gives each blocking finding as a fix task without gates to the member whose change it is, all at once. Each fix starts with a test that fails and then passes; there is no second review. A note that does not block goes into those tasks only when it is cheap.
-- **A gate on one task** only where a change must not reach the turn's branch unchecked, such as a migration that rewrites existing data. Research, reports, plans, docs and the architect's design note never get one; the head reads them when they come back. At such a gate **a second round checks only the fixes**, by the reviewers who sent it back, each for its own findings; one that passed is not asked again.
+- **The verdicts come to the head in one list**, what blocks first. The head gives each blocking finding as a fix task without gates to the member whose change it is, all at once, subject to the pre-merge Security gate above. Each fix starts with a test that fails and then passes; there is no second review of the whole turn, while the pre-merge Security gate still applies. A note that does not block goes into those tasks only when it is cheap.
+- **A gate on one task** enforces the pre-merge Security rule above or protects work that must not reach the turn's branch unchecked, such as a migration that rewrites existing data. Research, reports, plans, docs and the architect's design note otherwise never get one; the head reads them when they come back. At such a gate **a second round checks only the fixes**, by the reviewers who sent it back, each for its own findings; one that passed is not asked again.
 
 ## Testing
 

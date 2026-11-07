@@ -105,11 +105,13 @@ describe('independent Security before integration', () => {
     expect(gate, roleKey).toBeDefined();
     expect(preMergeSecurityProblems(gate!.body), roleKey).toEqual([]);
     expect(preMergeSecurityProblems(packet.whole), `${roleKey} whole`).toEqual([]);
+    expect(packet.whole.match(/independent Security engineer/gi), `${roleKey} single rule`).toHaveLength(1);
     expect(packet.text).toContain('dev-gates');
     const entry = roleKey === 'DEV-GEN' ? packet.parts.find(p => p.kind === 'base')!.text : packet.skills.find(s => s.name === 'dev-lead')!.body;
     expect(entry).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
     if (roleKey === 'DEV-GEN') {
       expect(packet.text).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
+      expect(packet.parts.find(p => p.id === 'dev-task-flow')!.text).toMatch(/before any merge[^.!?]*pass[^.!?]*required gates/i);
       expect(packet.text).toMatch(/own review/);
     }
   });
