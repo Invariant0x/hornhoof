@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, UnitFingerprints, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext, type CacheShare } from './test-cache.js';
+import { cacheKey, checkCacheContext, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext, type CacheShare } from './test-cache.js';
 import { DiscoveryProblem, discoverEnvironment } from './test-discovery.js';
 import { withCheckSlot } from './check-queue.js';
 import { prepareServiceArtifacts, openServices, type OpenedServices, type ServiceArtifacts, type ServiceContext, type ServiceDefinition, type ServiceDefinitions } from './test-services.js';
@@ -23,6 +24,19 @@ export class EnvironmentFailure extends Error {
 }
 function fail(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail }); }
 const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
+const inputHash = (mode: string) => createHash('sha256').update(mode).update('\0');
+/* Git blobs, generated inputs and the builder's checkout all use the same content and executable-mode identity. */
+export async function preparationInputDigest(path: string, context: Pick<CacheContext, 'deadline' | 'signal'>): Promise<string> {
+  checkCacheContext(context);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) fail('environment_invalid', 'A preparation input is not a regular file.');
+    const hash = inputHash(stat.mode & 0o111 ? '100755' : '100644');
+    for await (const chunk of file.createReadStream({ autoClose: false })) { checkCacheContext(context); hash.update(chunk); }
+    return hash.digest('hex');
+  } finally { await file.close(); }
+}
 function regular(entry: GitEntry): void {
   if (!['100644', '100755'].includes(entry.mode)) fail('environment_unsupported', `A declared input is not a regular tracked file: ${entry.path}.`);
 }
@@ -45,7 +59,7 @@ async function inputDigests(tree: CommitTree, manifest: TestEnvironmentV1): Prom
     for (const entry of entries) { regular(entry); wanted.add(entry.path); }
   }
   const modes = new Map(tree.entries.map(entry => [entry.path, entry.mode]));
-  await tree.readBlobs([...wanted], INPUT_BYTES, (path, bytes) => { if (lfsPointer(bytes)) pointers.push(path); inputs.set(path, createHash('sha256').update(modes.get(path)!).update('\0').update(bytes).digest('hex')); });
+  await tree.readBlobs([...wanted], INPUT_BYTES, (path, bytes) => { if (lfsPointer(bytes)) pointers.push(path); inputs.set(path, inputHash(modes.get(path)!).update(bytes).digest('hex')); });
   if (pointers.length) fail('environment_unsupported', `Git LFS materialization is not described for ${pointers[0]}.`);
   return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
 }
@@ -334,7 +348,7 @@ export async function readPreparationInputs(description: EnvironmentDescription,
   for (const reference of references) {
     const files = await preparationFiles(reference, context);
     inputs.delete(reference.pattern);
-    for (const path of files) inputs.set(path, await fileDigest(resolve(context.checkout, path), context));
+    for (const path of files) inputs.set(path, await preparationInputDigest(resolve(context.checkout, path), context));
   }
   return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
 }

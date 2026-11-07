@@ -9,8 +9,8 @@ import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from '.
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
 import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
-import { fileDigest, privateCacheRoot, pruneCache, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { privateCacheRoot, pruneCache, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
+import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
 import { collectKept, parseFileReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
@@ -578,7 +578,7 @@ async function builderInputs(inputs: InputDigest[], source: string, target: stri
   for (const input of inputs) {
     if (input.digest === null) continue;
     const full = await safeCheckoutPath(source, input.path);
-    if (!(await fsStat(full)).isFile() || await fileDigest(full, context) !== input.digest) environmentError('description_mismatch', 'A preparation input changed before its isolated build.');
+    if (!(await fsStat(full)).isFile() || await preparationInputDigest(full, context) !== input.digest) environmentError('description_mismatch', 'A preparation input changed before its isolated build.');
     const destination = join(target, input.path); await fsMkdir(dirname(destination), { recursive: true });
     await fsCopyFile(full, destination);
   }
