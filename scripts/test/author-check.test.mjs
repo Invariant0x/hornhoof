@@ -623,16 +623,16 @@ test('the real git port reads commits, a plan of a real repository included', { 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('preparing a run installs only what is missing and builds what the selector needs', async () => {
+test('preparing a run does only what the harness left undone', async () => {
   const asked = [];
-  const ports = have => ({ exists: () => have, exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code: 0 }; } });
-  assert.equal(await prepare(ports(false)), null);
-  assert.deepEqual(asked, ['npm ci --ignore-scripts', 'npm run -s prepare', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
-  asked.length = 0;
-  assert.equal(await prepare(ports(true)), null);
-  assert.equal(asked.length, 2);
-  assert.equal(await prepare({ exists: () => true, exec: async () => ({ code: 1 }) }), 'prepare_failed');
-  assert.equal(await prepare({ exists: () => true, exec: async () => ({ code: null }) }), 'prepare_failed');
+  const ports = have => ({ exists: path => have.includes(path), exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code: 0 }; } });
+  const preparing = async have => { asked.length = 0; assert.equal(await prepare(ports(have)), null); return [...asked]; };
+  assert.deepEqual(await preparing([]), ['npm ci --ignore-scripts', 'npm run -s prepare', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
+  assert.deepEqual(await preparing(['node_modules']), ['npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
+  assert.deepEqual(await preparing(['node_modules', 'packages/protocol/dist']), ['npm run -s build -w @hornhoof/node']);
+  assert.deepEqual(await preparing(['node_modules', 'packages/protocol/dist', 'apps/node/dist']), []);
+  assert.equal(await prepare({ exists: () => false, exec: async () => ({ code: 1 }) }), 'prepare_failed');
+  assert.equal(await prepare({ exists: () => false, exec: async () => ({ code: null }) }), 'prepare_failed');
 });
 
 test('the tracked files of the index keep paths with spaces', () => {

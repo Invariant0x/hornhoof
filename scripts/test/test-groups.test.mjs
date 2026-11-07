@@ -39,6 +39,9 @@ for (const [group, path, expected] of [
   ['the database schema', 'apps/server/src/db/schema.ts', ['server']],
   ['a test only the final profile runs', 'apps/server/test/postgres/locking.pg.spec.ts', []],
   ['the selection itself', 'apps/node/src/test-impact.ts', ['node', 'release-scripts']],
+  ['the fingerprints of test files', 'apps/node/src/test-fingerprint.ts', ['node', 'release-scripts']],
+  ['a risky source of the node, which mutation also lists', 'apps/node/src/redact.ts', ['node']],
+  ['a risky source of the server, which mutation also lists', 'apps/server/src/auth/password.ts', ['server']],
   ['the templates', 'templates/roles/operations/OPS-HEAD.md', ['node', 'server']],
   ['the skills', 'templates/skills/dev-tdd.md', ['node', 'server']],
   ['the workflow of a build', '.github/workflows/images.yml', ['release-scripts', 'server']],
@@ -66,6 +69,10 @@ test('a change a person sees names the browser scenarios of its screen, says whe
   assert.deepEqual(await named('apps/web/src/App.tsx'), ['browser scenario by hand, none is named after: apps/web/src/App.tsx']);
   assert.deepEqual(await named('apps/web/src/theme.css'), ['browser scenario by hand, none is named after: apps/web/src/theme.css']);
   assert.deepEqual(await named('apps/server/src/modules/tasks/wait-policy.ts'), []);
+});
+
+test('a scenario that changed says so once', { timeout: 60_000 }, async () => {
+  assert.deepEqual((await runs('apps/web/e2e/about.spec.ts')).notes, ['browser scenario: apps/web/e2e/about.spec.ts']);
 });
 
 test('a file moved into the scenarios still runs the tests of where it was', { timeout: 60_000 }, async () => {

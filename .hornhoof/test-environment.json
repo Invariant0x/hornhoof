@@ -595,7 +595,8 @@
       {
         "globs": [
           "apps/node/src/test-impact*.ts",
-          "apps/node/src/test-environment.ts"
+          "apps/node/src/test-environment.ts",
+          "apps/node/src/test-fingerprint.ts"
         ],
         "suiteIds": [
           "node",

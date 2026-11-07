@@ -91,10 +91,10 @@ function browserNotes(changes, tracked) {
   return [...new Set(changes.flatMap(change => [change.path, change.previousPath ?? change.path]).flatMap(path => browserNote(path, specs)))];
 }
 
-/* The tests only a later profile than this one runs. */
-function laterTests(environment, units) {
-  const fast = new Set(environment.inventory.map(unit => unit.file));
-  return new Set(units.map(unit => unit.file).filter(file => !fast.has(file)));
+/* The tests only a later profile than this one runs. What a suite of mutation lists are sources, which keep their own tests here. */
+function laterTests(environment, units, mutation) {
+  const fast = new Set(environment.inventory.map(unit => unit.file)), sources = new Set(mutation.sourcePaths ?? []);
+  return new Set(units.map(unit => unit.file).filter(file => !fast.has(file) && !sources.has(file)));
 }
 
 /* A file moved here from where the fast suites run still counts for where it was. */
@@ -104,13 +104,13 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const suites = fastSuites(manifest);
   const units = ports.listTestUnits(manifest, tracked);
   const environment = impactEnvironment(manifest, units);
-  const later = laterTests(environment, units);
+  const later = laterTests(environment, units, manifest.mutation);
   const documents = changes.filter(change => isDocument(change.path));
   const kept = changes.filter(change => !isDocument(change.path) && !outsideFast(change, later));
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
   const rest = kept.filter(change => !opaqueOwner(suites, change.path));
   const selection = await adapterSelection(environment, rest, suites, ports);
-  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked), ...changes.filter(change => later.has(change.path)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
+  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
   const packages = [...selection.packages, ...wholeOf(environment, suites, opaque)];
