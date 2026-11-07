@@ -13,7 +13,9 @@ A repository whose files do not say enough gets one versioned `.hornhoof/test-en
 
 ## Ownership
 
-The task and employee assignment identify who owns the environment description, language choices, runtime provisioning and readiness proof. Skill selection does not fix those owners by role. Use the actual repository language/version declarations, including .tool-versions where present, and verify pinned runtime fingerprints on the machine that will run the check.
+The task and employee assignment identify who owns the environment description, language choices, runtime provisioning and readiness proof. Skill selection does not fix those owners by role. The authorized product owner and assigned environment owner choose the product's languages from its requirements and repository evidence. Several programs may need different runtimes. Use the actual repository language/version declarations, including `.tool-versions` where present, and verify pinned runtime fingerprints on the machine that will run the check.
+
+Approved preparation fetches tools once for each product and declared runtime fingerprint, then reuses its verified immutable artifacts for that scope. A changed version or preparation input invalidates that prepared version. Never infer that another product's runtime or a machine-global installation proves this environment ready.
 
 Provision runtimes and services through the approved image or integration path. Keep immutable prepared artifacts separate from each attempt's private writable state, verify readiness and recovery after interrupted preparation, and route shared machine changes through their authorized owner. Do not patch running containers, mount host sockets or expose node credentials in product test code. A missing owner is an explicit task boundary, not permission to invent a new grant.
 

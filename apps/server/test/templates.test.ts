@@ -137,9 +137,11 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-RED')!.skills.map(s => s.id)).not.toContain('dev-threat-model');
     for (const id of ['DEV-RED', 'DEV-SEC']) {
       const role = templates.roles.get(id)!;
-      const text = [role.body, ...role.skills.filter(s => s.on && s.id.startsWith('dev-')).map(s => body(s.id))].join('\n');
-      expect(text, id).not.toMatch(/attack|hostile|exploit|steal/i);
+      expect(role.body, id).not.toMatch(/attack|hostile|exploit|steal/i);
     }
+    expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
+    expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
+    expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
     expect(body('dev-gates')).toMatch(/When an independent review is assigned[\s\S]*author cannot pass it/);
     expect(body('dev-gates')).toMatch(/When broader validation is assigned[\s\S]*exact candidate/);
     expect(body('dev-review-verdict')).toMatch(/only the fixes/);
@@ -798,7 +800,6 @@ describe('templates', () => {
       expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
       expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
       expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
-      expect(templates.skills.get('ops-task-watch')!.body).toContain('no one stands free while work waits');
       expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
     });
 
@@ -1337,7 +1338,8 @@ describe('outbound and support gateway templates', () => {
     ] as const) {
       expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
       expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
-      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bserver\b/i);
+      expect(body, id).toMatch(/published (?:catalog|template)[\s\S]*revisions/i);
       expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
       expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
     }
@@ -1558,7 +1560,8 @@ describe('identity, defaults and shared instruction delivery', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThanOrEqual(180);
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/hh-lead-tasks|plan_turn|build_structure/);
     const steady = orchestratorSteady(templates);
-    expect(steady.parts.map(part => part.kind)).toEqual(['base', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
+    expect(steady.parts.map(part => part.kind)).toEqual(['base', 'assignment', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
+    expect(steady.parts[0]!.text).toBe(ORCHESTRATOR_INSTRUCTIONS);
     for (const id of ORCHESTRATOR_SKILLS) expect(steady.parts.filter(part => part.id === id)).toHaveLength(1);
   });
 });

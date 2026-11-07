@@ -33,16 +33,16 @@ const COMMON = [
   /task(?:s| gates)?/i,
   /scope|candidate|output|records/i,
   /versioned[\s\S]*examples/i,
-  /label(?:led|ed)[\s\S]*(?:independent|other than)|examples[\s\S]*independent[\s\S]*label/i,
+  /label(?:led|ed)[^.!?\n]*(?:independent|other than)|independent(?:ly)?[^.!?\n]*label(?:led|ed)/i,
   /threshold/i,
   /false[ -]accept[\s\S]*(?:false[ -]reject|reject)/i,
   /(?:real[ -](?:work )?miss|miss[\s\S]*real work)/i,
-  /(?:unvalidated|until[\s\S]*validat|until a set has run)[\s\S]*(?:cannot|not|nothing|no pass)/i,
+  /(?:unvalidated|until[^.!?\n]*validat|until a set has run|without a validated set)[^.!?\n]*(?:cannot|not|nothing|no pass)/i,
   /(?:check|prompt|model)[\s\S]*change/i,
 ];
 const POINTS: Record<string, RegExp[]> = {
   'sup-work-pipeline': [
-    /person[\s\S]*refund[\s\S]*legal question[\s\S]*personal data/i,
+    /\bperson\b[^.!?\n]*decides every refund[^.!?\n]*legal question[^.!?\n]*personal data/i,
     /support_classify[\s\S]*before drafting[\s\S]*receipt/i,
     /requiresHuman[\s\S]*department owner[\s\S]*CEO/i,
     /highest urgency[\s\S]*security or privacy[\s\S]*at once/i,
@@ -149,13 +149,18 @@ describe('standalone verification planning abilities', () => {
     ['restricted refund decision', (body: string) => body.replace('A person with that authority decides every refund', 'An agent decides every refund')],
     ['missing reply receipt', (body: string) => body.replaceAll('receipt', 'note')],
     ['missing model rejection count', (body: string) => body.replaceAll('false rejects', 'results')],
+    ['independent model labels', (body: string) => body.replace('labelled by someone other than its author', 'labelled by its author')],
+    ['unvalidated model acceptance', (body: string) => body.replace('Until a set has run for a check, that check proves nothing', 'Before validation, the model check certifies acceptance')],
     ['unknown private set', (body: string) => `${body} model-check-set:invented`],
     ['skill dependency', (body: string) => `${body} Follow sup-support-policy.`],
     ['incident', (body: string) => `${body} See task #323.`],
     ['public approval bypass', (body: string) => `${body} You may waive public approval and skip the server gateway.`],
   ])('rejects loss of %s', (_, broken) => {
-    expect(problemsOf('sup-work-pipeline', bodyOf('sup-work-pipeline'))).toEqual([]);
-    expect(problemsOf('sup-work-pipeline', broken(bodyOf('sup-work-pipeline')))).not.toEqual([]);
+    const original = bodyOf('sup-work-pipeline');
+    const changed = broken(original);
+    expect(changed).not.toBe(original);
+    expect(problemsOf('sup-work-pipeline', original)).toEqual([]);
+    expect(problemsOf('sup-work-pipeline', changed)).not.toEqual([]);
   });
 
   it('goes through the one loader: a head that names it without its file does not load', () => {

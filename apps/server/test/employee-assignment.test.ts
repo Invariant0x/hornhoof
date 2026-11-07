@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { listen, setUpCompany, testApp } from './helpers.js';
 
 async function fixture() {
@@ -48,6 +48,7 @@ describe('employee assignment authority', () => {
     const [after] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(after).toEqual({ ...worker, overrides: { ...worker.overrides, base: assignment } });
     expect(await db.select().from(agentChanges).where(eq(agentChanges.agentId, worker.id))).toMatchObject([{ field: 'prompt', after: { base: assignment } }]);
+    expect(await db.select().from(agentEvents).where(eq(agentEvents.agentId, head.id))).toMatchObject([{ kind: 'applied', data: { action: 'set_employee_assignment', employee: worker.id } }]);
     expect((await client.callTool({ name: 'set_employee_assignment', arguments: { employee: worker.id, assignment: null } })).isError).toBeFalsy();
     const [cleared] = await db.select().from(agents).where(eq(agents.id, worker.id));
     expect(cleared!.overrides).toEqual(worker.overrides);

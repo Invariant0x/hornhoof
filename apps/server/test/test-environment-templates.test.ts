@@ -25,12 +25,14 @@ describe('product environment ownership', () => {
     expect(rendered.text).toContain('- dev-test-environment:');
   });
 
-  it('has the head and the owner name the languages they chose, whose tools then come once, for that product alone', () => {
+  it('assigns product language choices and reuses tools only within a verified product runtime fingerprint', () => {
     const skill = readFileSync(fileURLToPath(new URL('../../../templates/skills/dev-test-environment.md', import.meta.url)), 'utf8');
-    expect(skill).toMatch(/\*\*DEV-HEAD\*\* and the owner choose the product's languages/);
+    expect(skill).toMatch(/product owner and assigned environment owner choose the product's languages/);
     expect(skill).toContain('`.tool-versions`');
-    expect(skill).toContain('fetches their tools once');
-    expect(skill).toMatch(/several programs/);
+    expect(skill).toMatch(/fetches tools once for each product and declared runtime fingerprint/);
+    expect(skill).toMatch(/Several programs/);
+    expect(skill).toMatch(/changed version or preparation input invalidates/);
+    expect(skill).toMatch(/another product's runtime[\s\S]*proves this environment ready/);
   });
 
   it('keeps final checks and existing role skills while adding the environment procedure', () => {

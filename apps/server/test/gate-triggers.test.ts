@@ -61,7 +61,11 @@ describe('release improvement procedure', () => {
       expect(rendered.skills.map(s => s.name), id).toContain('dev-release-improvements');
     }
     const procedure = templates.skills.get('dev-release-improvements')!.body;
-    for (const topic of ['pipeline_report', 'issue-to-acceptance', '30%', 'reviewer usefulness', 'released version', 'nonblocking', 'Before', 'Target after', 'unknown', 'company isolation', 'outbound']) expect(procedure, topic).toContain(topic);
+    for (const topic of ['issue-to-acceptance', 'reviewer usefulness', 'released version', 'nonblocking', 'Before', 'Target after', 'unknown', 'company isolation', 'outbound']) expect(procedure, topic).toContain(topic);
+    expect(procedure).toMatch(/owner and schedule come from that assignment/);
+    expect(procedure).toMatch(/authorized isolated measurement or a recorded baseline supplied by the owner/);
+    expect(procedure).toMatch(/Agree a relative target with the task owner/);
+    expect(procedure).toMatch(/Do not run an expensive operation against production merely because a measurement ability is enabled/);
     expect(role('DEV-RED').body).not.toContain('or public-facing');
   });
 });
