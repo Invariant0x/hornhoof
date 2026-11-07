@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TestUnit } from '@hornhoof/protocol';
-import { selectAffectedTests, type ImpactInput, type ImpactSelection } from '../src/test-impact.js';
+import { matchesPattern, namedAfter, selectAffectedTests, type ImpactInput, type ImpactSelection } from '../src/test-impact.js';
 
 const unit = (suiteId: string, file: string): TestUnit => ({ suiteId, file, selectionUnit: file });
 function fixture(): ImpactInput {
@@ -25,6 +25,22 @@ function fixture(): ImpactInput {
 const files = (result: ImpactSelection) => result.units.map(value => value.file).sort();
 const mode = (result: ImpactSelection, id: string) => result.packages.find(value => value.packageId === id)?.mode;
 const nodeFiles = ['apps/node/test/a.test.ts', 'apps/node/test/b.test.ts', 'apps/node/test/new.test.ts'];
+
+describe('the words of a manifest', () => {
+  it('reads a pattern as a file, a folder or a glob, and nothing it only resembles', () => {
+    for (const pattern of ['apps/a.ts', 'apps', 'apps/', 'apps/*.ts', '**/a.ts', 'apps/{a,b}.ts']) expect(matchesPattern('apps/a.ts', pattern), pattern).toBe(true);
+    for (const pattern of ['app', 'apps/b.ts', 'src/*.ts', 'apps/a.tsx']) expect(matchesPattern('apps/a.ts', pattern), pattern).toBe(false);
+  });
+  it('takes a scenario for one of a screen when one name starts the other, word by word', () => {
+    const named = (scenario: string, screen: string) => namedAfter(`apps/web/e2e/${scenario}.spec.ts`, `apps/web/src/screens/${screen}`);
+    expect(named('tree', 'Tree.tsx')).toBe(true);
+    expect(named('tree-plates', 'Tree.tsx')).toBe(true);
+    expect(named('tree', 'TreeView.tsx')).toBe(true);
+    expect(named('tree', 'theme.css')).toBe(false);
+    expect(named('tree-plates', 'TreeView.tsx')).toBe(false);
+    expect(named('trees', 'Tree.tsx')).toBe(false);
+  });
+});
 
 describe('pure commit impact selection', () => {
   it('lets a rule of the manifest name who reads a file no package owns, and takes everyone without one', () => {

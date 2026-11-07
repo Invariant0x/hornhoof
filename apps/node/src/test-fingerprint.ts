@@ -3,7 +3,7 @@ import { builtinModules } from 'node:module';
 import { matchesGlob, posix } from 'node:path';
 import { PREPARATION_UNIT, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
-import { selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
+import { matchesPattern, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
 import { readCommit, type GitEntry } from './test-mirror.js';
 
 /* What a test file's result depends on, read from the pinned commit alone: nothing is installed and no repository code runs.
@@ -43,7 +43,7 @@ const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
 const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+(?=\s+from\b))\s*from\s*(['"])[^'"\n]+\1;?/gm;
-const SCREEN = /([^/]+)\.[jt]sx$/;
+const SCREEN = /\.[jt]sx$/;
 const LONGEST_PATH = 300;
 /* What takes a package whole because it runs around its tests, so what it imports does too. */
 const RUNS_AROUND_TESTS = new Set(['configuration', 'full_package_rule']);
@@ -54,11 +54,9 @@ const READ_BYTES = 64 * 1024 * 1024;
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 const isDocument = (path: string): boolean => DOCUMENT.test(path);
-const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 const relativeLike = (literal: string): boolean => literal.startsWith('./') || literal.startsWith('../');
 const bare = (literal: string): string => literal.replace(/[?#].*$/, '');
 const isInside = (path: string, folder: string): boolean => folder === '.' || path === folder || path.startsWith(`${folder}/`);
-const matches = (path: string, pattern: string): boolean => isInside(path, pattern.replace(/\/$/, '')) || matchesGlob(path, pattern);
 const nextTurn: Pause = () => new Promise(done => setImmediate(done));
 
 /* The files a fingerprint reads; the rest it knows by their object ids. */
@@ -123,7 +121,7 @@ class Tree {
   }
   /* A workspace package as what imports it reaches: its code and not its tests. */
   packageCode(root: string): string[] { return this.under(root).filter(path => !TEST_FOLDER.test(path)); }
-  matching(patterns: string[]): string[] { return this.paths.filter(path => patterns.some(pattern => matches(path, pattern))); }
+  matching(patterns: string[]): string[] { return this.paths.filter(path => patterns.some(pattern => matchesPattern(path, pattern))); }
   rootOf(path: string): string { return this.roots.find(root => isInside(path, root)) ?? '.'; }
   isRoot(folder: string): boolean { return this.roots.includes(folder); }
   /* What a path that may lack its extension names: a file, the source of a built one, or a folder's index. */
@@ -419,8 +417,7 @@ function runtimesOf(description: FingerprintInput['description'], suite: Suite |
 }
 
 function screensFor(tree: Tree, sources: string, spec: string): string[] {
-  const name = posix.basename(spec).replace(/\.[^.]+\.[^.]+$/, ''), screens = tree.under(sources).filter(path => SCREEN.test(path));
-  const named = screens.filter(path => { const screen = `${kebab(SCREEN.exec(path)![1]!)}-`; return `${name}-`.startsWith(screen) || screen.startsWith(`${name}-`); });
+  const named = tree.under(sources).filter(path => SCREEN.test(path) && namedAfter(spec, path));
   return named.length ? named : tree.under(sources);
 }
 
@@ -461,7 +458,7 @@ export async function fingerprintUnits(input: FingerprintInput, pause: Pause = n
   await graph.scanAll(pause);
   const outside = await outOfGraph(graph, pause), suites = new Map(manifest.suites.map(suite => [suite.id, suite])), { mutation } = manifest;
   const sources = new Set(mutation.status === 'supported' ? mutation.sourcePaths : []);
-  const installed = { inputs: inputDigests.filter(item => manifest.dependencies.inputs.some(pattern => matches(item.path, pattern))), commands: manifest.dependencies.install };
+  const installed = { inputs: inputDigests.filter(item => manifest.dependencies.inputs.some(pattern => matchesPattern(item.path, pattern))), commands: manifest.dependencies.install };
   const environments = new Map(manifest.suites.map(suite => [suite.id, digest([runtimesOf(description, suite), installed, suite.id, suite.run, suite.split])]));
   const printOf = (unit: TestUnit): UnitFingerprint => {
     const suite = suites.get(unit.suiteId)!, environment = environments.get(suite.id)!;

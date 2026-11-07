@@ -1,4 +1,4 @@
-import { extname, matchesGlob } from 'node:path';
+import { extname, matchesGlob, posix } from 'node:path';
 import type { Command, TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
 
 export type ImpactAdapter = 'vitest-related' | 'pytest';
@@ -85,8 +85,22 @@ function defaultTargets(state: SelectionState, rule: FullRule, path: string, nam
   if (owner) return [owner];
   return named ? [] : state.environment.packages;
 }
-function matchesPolicy(path: string, pattern: string): boolean {
-  return path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`) || matchesGlob(path, pattern);
+const WILDCARD = /[?*[\]{}()!+@]/;
+const UNEVEN_PATH = /(?:^|\/)\.?(?:\/|$)/;
+/* A pattern of a manifest names a file, a folder or a glob. Compiling a glob for every tracked file costs more than reading them, so
+   what comes before its first wildcard decides first. Only a path written unevenly, which the glob would read evenly, cannot go by that. */
+export function matchesPattern(path: string, pattern: string): boolean {
+  if (path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`)) return true;
+  if (UNEVEN_PATH.test(pattern)) return matchesGlob(path, pattern);
+  const wildcard = pattern.search(WILDCARD);
+  return wildcard >= 0 && path.startsWith(pattern.slice(0, wildcard)) && matchesGlob(path, pattern);
+}
+const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+/* A scenario of a screen is named after it: one of the two names starts the other, word by word. It imports no screen, so this is all
+   that ties them, for what a release runs again as for what an author is told to look at. */
+export function namedAfter(scenario: string, screen: string): boolean {
+  const own = `${posix.basename(scenario).replace(/\.[^.]+\.[^.]+$/, '')}-`, other = `${kebab(posix.basename(screen).replace(/\.[^.]+$/, ''))}-`;
+  return own.startsWith(other) || other.startsWith(own);
 }
 function packageGraphs(state: SelectionState, graphs: ImpactGraph[], pkg?: ImpactPackage): ImpactGraph[] | undefined {
   if (!pkg) return new Set(graphs.map(graph => graph.adapter)).size === graphs.length ? graphs : undefined;
@@ -104,10 +118,10 @@ function widen(state: SelectionState, graphs: ImpactGraph[], pkg: ImpactPackage,
   whole(state, [pkg, ...graphPackages(state, graphs, pkg)], reason);
 }
 function policy(state: SelectionState, graphs: ImpactGraph[], path: string): boolean {
-  const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPolicy(path, glob)))
+  const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPattern(path, glob)))
     .flatMap(rule => state.environment.packages.filter(pkg => pkg.suiteIds.some(id => rule.suiteIds.includes(id))));
   whole(state, targets, { code: 'full_package_rule', path });
-  const rules = DEFAULT_FULL_PACKAGE_RULES.filter(value => value.globs.some(glob => matchesPolicy(path, glob)));
+  const rules = DEFAULT_FULL_PACKAGE_RULES.filter(value => value.globs.some(glob => matchesPattern(path, glob)));
   for (const rule of rules) {
     if (rule.code === 'migration') state.migration = true;
     whole(state, defaultTargets(state, rule, path, targets.length > 0), { code: rule.code, path });

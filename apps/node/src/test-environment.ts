@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
-import { basename, join, matchesGlob, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, UnitFingerprints, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext, type CacheShare } from './test-cache.js';
 import { DiscoveryProblem, discoverEnvironment } from './test-discovery.js';
@@ -10,6 +10,7 @@ import { prepareServiceArtifacts, openServices, type OpenedServices, type Servic
 import type { JobUser } from './isolation.js';
 import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
 import { readTestFingerprints } from './test-fingerprint.js';
+import { matchesPattern as match } from './test-impact.js';
 
 type Source = Parameters<typeof readCommit>[0];
 type DescriptionContext = CacheContext & { runtimes?: RuntimeCapability[] };
@@ -22,16 +23,6 @@ export class EnvironmentFailure extends Error {
 }
 function fail(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail }); }
 const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
-const WILDCARD = /[?*[\]{}()!+@]/;
-const UNEVEN_PATH = /(?:^|\/)\.?(?:\/|$)/;
-/* Compiling a glob for every tracked file costs more than reading them, so what comes before its first wildcard decides first.
-   Only a path written unevenly, which the glob would read evenly, cannot go by that. */
-function match(path: string, pattern: string): boolean {
-  if (path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`)) return true;
-  if (UNEVEN_PATH.test(pattern)) return matchesGlob(path, pattern);
-  const wildcard = pattern.search(WILDCARD);
-  return wildcard >= 0 && path.startsWith(pattern.slice(0, wildcard)) && matchesGlob(path, pattern);
-}
 function regular(entry: GitEntry): void {
   if (!['100644', '100755'].includes(entry.mode)) fail('environment_unsupported', `A declared input is not a regular tracked file: ${entry.path}.`);
 }

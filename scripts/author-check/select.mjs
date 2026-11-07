@@ -7,7 +7,7 @@ const PROJECT_SUITES = {
 const ONLY_A_NOTE = 'migration_check_unsupported';
 const E2E = 'apps/web/e2e/';
 const SPEC = '.spec.ts';
-const SCREEN = /^apps\/web\/src\/(?:.*\/)?([^/]+)\.(?:tsx|css)$/;
+const SCREEN = /^apps\/web\/src\/.*\.(?:tsx|css)$/;
 const CONSUMERS = 'policy_consumers';
 
 export function adapterOf(run) {
@@ -73,22 +73,19 @@ function reachesEveryone(packages) {
   return shared.size > 0 && everywhere.every(reason => shared.has(reason.path));
 }
 
-const kebab = name => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-
 /* What a change a person sees asks of a browser: a scenario that changed, and the scenarios named after a screen that changed. */
-function browserNote(path, specs) {
+function browserNote(path, specs, namedAfter) {
   const scenario = spec => `browser scenario: ${spec}`;
   if (specs.includes(path)) return [scenario(path)];
   if (path.startsWith(E2E)) return path.endsWith(SPEC) || isDocument(path) ? [] : [`browser helper, its scenarios run at the release: ${path}`];
-  const screen = SCREEN.exec(path)?.[1];
-  if (!screen) return [];
-  const named = specs.filter(spec => `${spec.slice(E2E.length, -SPEC.length)}-`.startsWith(`${kebab(screen)}-`));
+  if (!SCREEN.test(path)) return [];
+  const named = specs.filter(spec => namedAfter(spec, path));
   return named.length ? named.map(scenario) : [`browser scenario by hand, none is named after: ${path}`];
 }
 
-function browserNotes(changes, tracked) {
+function browserNotes(changes, tracked, namedAfter) {
   const specs = tracked.map(file => file.path).filter(path => path.startsWith(E2E) && path.endsWith(SPEC));
-  return [...new Set(changes.flatMap(change => [change.path, change.previousPath ?? change.path]).flatMap(path => browserNote(path, specs)))];
+  return [...new Set(changes.flatMap(change => [change.path, change.previousPath ?? change.path]).flatMap(path => browserNote(path, specs, namedAfter)))];
 }
 
 /* The tests only a later profile than this one runs. What a suite of mutation lists are sources, which keep their own tests here. */
@@ -110,7 +107,7 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
   const rest = kept.filter(change => !opaqueOwner(suites, change.path));
   const selection = await adapterSelection(environment, rest, suites, ports);
-  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
+  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
   const packages = [...selection.packages, ...wholeOf(environment, suites, opaque)];

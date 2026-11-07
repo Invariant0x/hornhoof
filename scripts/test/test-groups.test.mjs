@@ -66,6 +66,7 @@ test('a change a person sees names the browser scenarios of its screen, says whe
   assert.deepEqual(await named('apps/web/e2e/README.md'), []);
   assert.deepEqual(await named('apps/web/e2e/api.ts'), ['browser helper, its scenarios run at the release: apps/web/e2e/api.ts']);
   assert.deepEqual(await named('apps/web/src/ui/AgentTerminal.tsx'), ['browser scenario: apps/web/e2e/agent-terminal-fit.spec.ts']);
+  assert.deepEqual(await named('apps/web/src/screens/TreeView.tsx'), ['browser scenario: apps/web/e2e/tree.spec.ts']);
   assert.deepEqual(await named('apps/web/src/App.tsx'), ['browser scenario by hand, none is named after: apps/web/src/App.tsx']);
   assert.deepEqual(await named('apps/web/src/theme.css'), ['browser scenario by hand, none is named after: apps/web/src/theme.css']);
   assert.deepEqual(await named('apps/server/src/modules/tasks/wait-policy.ts'), []);

@@ -51,11 +51,11 @@ export function tracked(git) {
 }
 
 export async function selectionPorts(root) {
-  const { selectAffectedTests } = await import('../../apps/node/dist/test-impact.js');
+  const { namedAfter, selectAffectedTests } = await import('../../apps/node/dist/test-impact.js');
   const { collectVitestImpact } = await import('../../apps/node/dist/test-impact-adapters.js');
   const { listTestUnits } = await import('../../apps/node/dist/test-environment.js');
   const collect = async changed => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', PROBE, JSON.stringify(changed)], { cwd: root, encoding: 'utf8', timeout: COLLECT_MS, maxBuffer: COLLECT_BYTES, stdio: ['ignore', 'pipe', 'inherit'] }));
-  return { selectAffectedTests, collectVitestImpact, listTestUnits, collect };
+  return { namedAfter, selectAffectedTests, collectVitestImpact, listTestUnits, collect };
 }
 
 async function selection(args, plan, manifest, ports, root) {
