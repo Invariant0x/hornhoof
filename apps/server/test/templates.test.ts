@@ -1348,7 +1348,7 @@ describe('outbound and support gateway templates', () => {
     expect(sal).toMatch(/"outbound_status"/);
     expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
     expect(mkt).toMatch(/"outbound_submit"/);
-    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(mkt).toMatch(/\bevery public item\b[^.!?]*\bexplicit approval of its exact rendered content\b/i);
     expect(sup).toMatch(/"support_classify"/);
     expect(sup).toMatch(/"support_submit"/);
     expect(sup).toMatch(/\buntrusted data\b/i);

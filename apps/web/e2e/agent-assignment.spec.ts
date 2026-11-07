@@ -221,7 +221,8 @@ async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
 
 for (const width of [375, 1280]) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`assignment card flow and geometry at ${width}px in ${theme}`, async ({ page }, info) => {
+    test(`assignment card flow and geometry at ${width}px in ${theme}`, async ({ page, browser }, info) => {
+      console.log('BROWSER_RUNTIME', JSON.stringify({ engine: info.project.use.browserName, version: browser.version() }));
       const state: FixtureState = { assignment: LEGACY_ASSIGNMENT, skill: DEFAULT_SKILL, canEdit: true, patches: [], resets: 0, apiRequests: [] };
       const errors: string[] = [];
       const geometry: Geometry[] = [];
@@ -254,6 +255,7 @@ for (const width of [375, 1280]) {
 
           await assignment.fill(SAVED_ASSIGNMENT);
           await assignment.focus();
+          await assignment.press('ControlOrMeta+Home');
           await expect(assignment).toBeFocused();
           await expect(assignment).toHaveCSS('overflow-wrap', 'anywhere');
           geometry.push({ surface: 'assignment-edit', locale, measurements: await geometryOf(page, card) });
@@ -318,7 +320,7 @@ for (const width of [375, 1280]) {
         });
       }
 
-      await info.attach('assignment-fixture-observations', { body: JSON.stringify({ provenance: 'playwright-route-fixture', engine: info.project.use.browserName, width, theme, selectedLocales: locales.selected, patches: state.patches, resets: state.resets, apiRequests: state.apiRequests, geometry, errors }, null, 2), contentType: 'application/json' });
+      await info.attach('assignment-fixture-observations', { body: JSON.stringify({ provenance: 'playwright-route-fixture', engine: info.project.use.browserName, browserVersion: browser.version(), width, theme, selectedLocales: locales.selected, patches: state.patches, resets: state.resets, apiRequests: state.apiRequests, geometry, errors }, null, 2), contentType: 'application/json' });
       expect(errors).toEqual([]);
     });
   }
