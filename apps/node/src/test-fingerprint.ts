@@ -189,7 +189,7 @@ function namedFolder(tree: Tree, text: string, inPackage: string): string[] {
   if (!FOLDER.test(text)) return [];
   return [text, inPackage].map(folder => folder.replace(/\/$/, '')).filter(folder => !tree.isRoot(folder)).flatMap(folder => tree.under(folder));
 }
-/* A pattern outside a test is mostly a rule about paths, as the rules of #309 are, and only a test reads what it names. */
+/* A pattern outside a test is mostly a rule about paths, as the selector's rules are, and only a test reads what it names. */
 function namedPattern(tree: Tree, text: string, inPackage: string): string[] {
   const patterns = text.startsWith('*') ? [inPackage] : [text, inPackage];
   return tree.paths.filter(path => (!isDocument(path) || text.endsWith('.md')) && patterns.some(pattern => matchesGlob(path, pattern)));
@@ -229,7 +229,7 @@ function scanCode(tree: Tree, from: string, source: string): Scan {
 }
 function scanFile(tree: Tree, path: string): Scan {
   if (!tree.isRegular(path)) return { edges: [], runs: [], opaque: true };
-  /* A fixture of a test folder may be a program too, and #309 takes its package whole whenever it changes. */
+  /* A fixture of a test folder may be a program too, and the selector takes its package whole whenever it changes. */
   if (!CODE.test(path)) return { edges: [], runs: [], opaque: !tree.holdsData(path) && !TEST_FOLDER.test(path) };
   const text = tree.input.texts.get(path);
   return text === undefined ? { edges: [], runs: [], opaque: true } : scanCode(tree, path, text);
@@ -336,7 +336,7 @@ export function testGraph(input: FingerprintInput): { closure: (starts: string |
   return new Graph(new Tree(input));
 }
 
-/* Suites of one folder share a package: what #309 takes whole for it, it takes whole for each of them. */
+/* Suites of one folder share a package: what the selector takes whole for it, it takes whole for each of them. */
 function packagesOf(manifest: Manifest): ImpactPackage[] {
   const packages = new Map<string, ImpactPackage>();
   for (const suite of manifest.suites) {
@@ -388,7 +388,7 @@ function verdictsBy(environment: ImpactEnvironment, kept: Map<string, Verdict>, 
     return verdict;
   };
 }
-/* What #309 says the graph cannot see, per package: for each tracked file, whether it takes a package whole. A file that is a
+/* What the selector says the graph cannot see, per package: for each tracked file, whether it takes a package whole. A file that is a
    test itself changes only itself, and a document changes nothing. */
 async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, string>> {
   const { tree } = graph, { manifest, inventory } = tree.input.description, packages = packagesOf(manifest);
