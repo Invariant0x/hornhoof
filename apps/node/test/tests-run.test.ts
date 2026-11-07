@@ -277,18 +277,30 @@ describe('a part pinned to one commit', () => {
   });
 });
 
-describe('the folder older nodes ran their parts in', () => {
-  it('goes with what parts left there, read-only folders too, and nothing else goes', () => {
+describe('the folders a restart left parts in', () => {
+  it('go with what parts left there, read-only folders too, and nothing else goes', () => {
     const dir = nodeDir();
     const left = join(dir, 'tests', 'part-0', 'repo');
     mkdirSync(left, { recursive: true });
     writeFileSync(join(left, 'marker.txt'), 'left\n');
     chmodSync(left, 0o555);
-    mkdirSync(join(dir, 'runs', 'part-1'), { recursive: true });
+    mkdirSync(join(dir, 'cache', 'dependencies'), { recursive: true });
     const lines: string[] = [];
     removeOldParts(dir, line => lines.push(line));
-    expect(readdirSync(dir)).toEqual(['runs']);
-    expect(readdirSync(join(dir, 'runs'))).toEqual(['part-1']);
+    expect(readdirSync(dir)).toEqual(['cache']);
+    expect(readdirSync(join(dir, 'cache'))).toEqual(['dependencies']);
+    expect(lines).toEqual([]);
+  });
+
+  it('take a part and a harness sync a restart stopped, as neither comes back to its folder', () => {
+    const dir = nodeDir();
+    const part = join(dir, 'runs', 'part-1', 'builders', 'unit-1');
+    mkdirSync(part, { recursive: true });
+    chmodSync(part, 0o555);
+    mkdirSync(join(dir, 'runs', 'harness-request-1', 'repo'), { recursive: true });
+    const lines: string[] = [];
+    removeOldParts(dir, line => lines.push(line));
+    expect(readdirSync(dir)).toEqual([]);
     expect(lines).toEqual([]);
   });
 

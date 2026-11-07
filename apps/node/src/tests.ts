@@ -213,11 +213,12 @@ function remove(path: string): void {
    way here may have such a name. quality/test_part_paths.py checks the tools against this path in the image. */
 const partsFolder = (dir: string) => join(dir, 'runs');
 
-/* Older nodes ran their parts in tests/. No part runs there any more and a part's log never lived in its folder, so what a
-   restart left there is of no use. */
+/* Nothing runs yet when a node starts, and older nodes ran their parts in tests/. A part or a harness sync sent again gets a new
+   id and a part's log never lived in its folder, so what a restart left is of no use, and the next product's builder could read it. */
 export function removeOldParts(dir: string, log: (line: string) => void): void {
   try {
     remove(join(dir, 'tests'));
+    remove(partsFolder(dir));
   } catch (err) {
     log(`The old folder of test runs could not be removed: ${err instanceof Error ? err.message : String(err)}`);
   }
