@@ -80,9 +80,11 @@ export async function readTestEnvironment(source: Source, repositoryScope: Repos
   fixtureInputs(tree, manifest);
   return validateEnvironmentDescription({ version: 1, repositoryScope, commitSha, manifestSource: bytes.toString('utf8'), manifestHash: await hashTestEnvironment(bytes), manifest, inputDigests: await inputDigests(tree, manifest), inventory: listTestUnits(manifest, tree.entries), runtimeCapabilities: context.runtimes ?? await trustedTestRuntimes(context) });
 }
-/* A description with what lets the server reuse results. Only the description is needed for a run: without fingerprints, everything runs. */
+/* A description with what lets the server reuse results. Only the description is needed for a run: without fingerprints, everything
+   runs. A manifest that names no full run reuses nothing, so nothing of the commit is read for them. */
 export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[] }> {
   const description = await readTestEnvironment(source, repositoryScope, commitSha, context);
+  if (!description.manifest.execution?.fullRun) return { description };
   try { return { description, fingerprints: UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, context)) }; }
   catch { context.signal.throwIfAborted(); return { description }; }
 }

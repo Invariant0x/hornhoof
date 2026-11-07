@@ -1327,6 +1327,33 @@ it('waits for its turn to get a product harness ready, says how it went, and say
   await server.wait(() => server.received.some(frame => frame.type === 'check.release'));
 });
 
+/* Without its fingerprints the server runs everything, whatever it has kept. */
+it('describes a product by itself with what lets the server reuse results', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url), root = join(dir, 'described-source');
+  mkdirSync(join(root, '.hornhoof'), { recursive: true }); mkdirSync(join(root, 'test'));
+  writeFileSync(join(root, '.hornhoof/test-environment.json'), JSON.stringify({
+    version: 1, defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }], runtimes: [{ id: 'node', version: process.versions.node.split('.')[0] }],
+    execution: { version: 2, fullRun: { everyTurns: 5, replaces: 'fast', profile: 'full' } },
+    dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
+    suites: [{ id: 'unit', root: '.', files: ['test/*.js'], run: { program: 'node', args: ['run.js'], cwd: '.' }, split: { kind: 'argv-files' }, profiles: ['fast', 'full'] }],
+    impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } }, mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
+  }));
+  writeFileSync(join(root, 'run.js'), ''); writeFileSync(join(root, 'test/a.js'), '');
+  execFileSync('git', ['init', '--quiet'], { cwd: root }); execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--quiet', '-m', 'Described'], { cwd: root });
+  const url = 'https://example.test/described.git', commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(url).digest('hex') };
+  /* The commit is in the mirror already, so the node asks no one for it. */
+  const cached = join(dir, 'cache', repositoryScope.companyId, repositoryScope.repositoryOwnerId, repositoryScope.repoUrlHash);
+  mkdirSync(cached, { recursive: true, mode: 0o700 });
+  execFileSync('git', ['clone', '--quiet', '--bare', root, join(cached, 'mirror.git')]);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  server.send({ type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', repo: { url, token: '' }, commitSha, repositoryScope });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'), 15_000);
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'ready', fingerprints: [{ suiteId: 'unit', file: 'test/a.js' }] } });
+});
+
 it('cancels a queued description before repository materialization', async () => {
   const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());

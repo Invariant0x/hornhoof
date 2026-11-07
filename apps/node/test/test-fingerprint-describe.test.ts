@@ -15,9 +15,10 @@ const folders: string[] = [];
 afterEach(async () => { setCheckClient(null); await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8' }).trim();
 const manifest = {
-  version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['api'] }],
+  version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['api'] }, { id: 'full', requiredSuiteIds: ['api'] }],
+  execution: { version: 2, fullRun: { everyTurns: 5, replaces: 'fast', profile: 'full' } },
   dependencies: { adapter: 'npm', inputs: ['package-lock.json'], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-  suites: [{ id: 'api', root: 'app', files: ['app/test/*.test.ts'], run: { program: 'node', args: ['runner.js'], cwd: 'app' }, split: { kind: 'argv-files' }, profiles: ['fast'] }],
+  suites: [{ id: 'api', root: 'app', files: ['app/test/*.test.ts'], run: { program: 'node', args: ['runner.js'], cwd: 'app' }, split: { kind: 'argv-files' }, profiles: ['fast', 'full'] }],
   impact: { adapter: 'typescript', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
 };
@@ -64,6 +65,15 @@ describe('fingerprints of a pinned commit', () => {
     const next = await printsOf(f, await f.commit('app/src/a.ts', 'export const a = 2;\n'));
     expect(next.get('app/test/a.test.ts')).not.toBe(first.get('app/test/a.test.ts'));
     expect(next.get('app/test/b.test.ts')).toBe(first.get('app/test/b.test.ts'));
+  });
+
+  it('are not worked out where the manifest names no full run, as nothing would reuse them', async () => {
+    const f = await repository(), sha = await f.commit('.hornhoof/test-environment.json', JSON.stringify({ ...manifest, execution: undefined }));
+    let asked = false;
+    const result = await describeTestEnvironment(f.source, f.scope, sha, f.context, () => { asked = true; return Promise.resolve([]); });
+    expect(result.description.commitSha).toBe(sha);
+    expect(result.fingerprints).toBeUndefined();
+    expect(asked).toBe(false);
   });
 
   it('do not stop a description when they fail', async () => {

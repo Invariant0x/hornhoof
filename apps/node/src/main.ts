@@ -15,7 +15,7 @@ import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protoco
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
-import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment, type TestCapabilities } from './test-environment.js';
+import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -189,7 +189,7 @@ function sealedFor(known: CodexSealed | null, version: number, recipients: Recip
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment = readTestEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
