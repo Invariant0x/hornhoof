@@ -106,6 +106,20 @@ describe('harness access and attempt fences', () => {
     await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).toBe(first!.id);
     await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
     await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).not.toBe(first!.id);
+    const headers = { authorization: 'Bearer ' + one.key, 'x-harness-company': c.dev.companyId, 'x-harness-attempt': first!.id };
+    for (const route of ['parts/0', 'done', 'failed']) {
+      const response = await c.app.inject({ method: route === 'parts/0' ? 'PUT' : 'POST', url: '/api/harness/' + KEY + '/' + route, headers: { ...headers, 'content-type': route === 'parts/0' ? 'application/octet-stream' : 'application/json' }, payload: route === 'parts/0' ? Buffer.from('stale') : route === 'done' ? { digest: sha(Buffer.from('stale')), size: 5 } : { error: 'stale failure' } });
+      expect(response.statusCode).toBe(409);
+    }
+    expect((await turnsOf(c, c.head.id)).join('\n')).not.toContain('stale failure');
+  });
+
+  it('refuses private bundles and claims from a removed subscription', async () => {
+    const c = await shared(), one = await c.machine(c.ann, 'one');
+    await c.claim(one.key); await c.uploaded(one.key, Buffer.from('private'));
+    await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, one.subscriptionId));
+    expect((await c.bundle(one.key, 'all')).statusCode).toBe(403);
+    expect((await c.claim(one.key)).statusCode).toBe(403);
   });
 
   it.each(['write', 'rename'])('fences a delayed %s after another builder has published', async operation => {
@@ -134,6 +148,18 @@ describe('harness access and attempt fences', () => {
     expect(await pending).toBe(403);
     expect((await c.db.select().from(harnessBuilds))[0]!.status).toBe('building');
     expect((await c.db.select().from(harnessProducts))).toEqual([]);
+  });
+
+  it('never overwrites a published archive with another delayed done from the same attempt', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one');
+    const old = Buffer.from('old'), current = Buffer.from('current');
+    await c.claim(one.key); await c.part(one.key, 0, old);
+    const gate = pauseIO('rename'), pending = c.finish(one.key, old).then(response => response.statusCode);
+    await gate.entered;
+    try { expect((await c.uploaded(one.key, current)).statusCode).toBe(204); }
+    finally { gate.resume(); }
+    expect(await pending).toBe(409);
+    expect((await c.bundle(one.key, 'all')).rawPayload).toEqual(current);
   });
 
   it('keeps an old row whose reclaimed lease is still live when pruning', async () => {

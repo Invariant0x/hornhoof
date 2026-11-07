@@ -150,16 +150,22 @@ async function headOfProduct(ctx: Ctx, department: Department): Promise<string |
 const productName = (department: Department) => department.name ?? department.templateKey ?? 'the product';
 
 /* The head hears of a problem once, however many machines run into it, until the harness is good again. */
-async function noteProblem(ctx: Ctx, department: Department, problem: HarnessProblem, signature: string): Promise<void> {
+type ProblemNotice = { to: string; name: string; text: string };
+async function noteProblem(ctx: Ctx, department: Department, problem: HarnessProblem, signature: string): Promise<ProblemNotice | null> {
   await ctx.db.insert(harnessProducts).values({ departmentId: department.id, companyId: department.companyId }).onConflictDoNothing();
   await ctx.db.update(harnessProducts).set({ problem, updatedAt: new Date() }).where(eq(harnessProducts.departmentId, department.id));
   const fresh = await ctx.db.update(harnessProducts).set({ told: signature }).where(and(eq(harnessProducts.departmentId, department.id), isNull(harnessProducts.told))).returning({ id: harnessProducts.departmentId });
-  if (!fresh.length) return;
+  if (!fresh.length) return null;
   const to = await headOfProduct(ctx, department);
-  if (!to) return;
+  if (!to) return null;
   const name = productName(department);
   const text = `The test harness of ${name} could not be updated at commit ${problem.commitSha} (${problem.code}). The last version that worked stays in use, so only runs on this commit are stopped. Machines try again by themselves. test_harness shows where it stands.\n\n${quote(problem.detail)}`;
-  await enqueueTurn(ctx, { companyId: department.companyId, agentId: to, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
+  return { to, name, text };
+}
+async function tellProblem(ctx: Ctx, companyId: string, notice: ProblemNotice | null): Promise<void> {
+  if (!notice) return;
+  const { to, name, text } = notice;
+  await enqueueTurn(ctx, { companyId, agentId: to, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
 }
 
 /* The one who builds a unit is the only one who may send it. */
@@ -229,7 +235,7 @@ async function failBuild(ctx: Ctx, node: NodeIdentity, key: string, body: unknow
   await changeBuild(ctx, node, build, { status: 'failed', error, failures, nextTryAt: new Date(Date.now() + pause), builder: null, leaseUntil: null });
   await rm(partsFolder(needDir(ctx), build), { recursive: true, force: true });
   const [department] = await ctx.db.select().from(departments).where(eq(departments.id, build.departmentId));
-  if (department) await noteProblem(ctx, department, { code: 'build_failed', detail: error, commitSha: build.commitSha }, `build:${build.key}`);
+  if (department) await tellProblem(ctx, department.companyId, await noteProblem(ctx, department, { code: 'build_failed', detail: error, commitSha: build.commitSha }, `build:${build.key}`));
 }
 
 async function sendBundle(ctx: Ctx, node: NodeIdentity, ranged: string | undefined, key: string, lease: Lease) {
@@ -357,26 +363,24 @@ async function noteMachine(ctx: Ctx, department: Department, request: Request, m
   await ctx.db.update(harnessProducts).set({ machines: sql`${harnessProducts.machines} || ${patch}::jsonb`, updatedAt: new Date() }).where(eq(harnessProducts.departmentId, department.id));
 }
 
-async function noteReady(ctx: Ctx, department: Department, request: Request, message: HarnessSynced, result: Extract<HarnessSynced['result'], { status: 'ready' }>): Promise<void> {
+async function noteReady(ctx: Ctx, department: Department, request: Request, message: HarnessSynced, result: Extract<HarnessSynced['result'], { status: 'ready' }>, recovered: boolean): Promise<void> {
   if (result.keys.length) {
     await ctx.db.update(harnessBuilds).set({ copies: sql`(select coalesce(jsonb_agg(distinct value), '[]'::jsonb) from jsonb_array_elements(${harnessBuilds.copies} || ${JSON.stringify([who(request.node)])}::jsonb))` })
       .where(and(eq(harnessBuilds.companyId, department.companyId), eq(harnessBuilds.departmentId, department.id), inArray(harnessBuilds.key, result.keys)));
   }
   if (!request.head) return;
-  const required = [...syncsOf(ctx)].filter(([key, sync]) => key.startsWith(`${department.id}:`) && sync.commitSha === message.commitSha);
-  const recovered = required.every(([, sync]) => sync.answered && !sync.problem);
   const failed = dbExists(ctx.db.select({ id: harnessBuilds.id }).from(harnessBuilds).where(and(eq(harnessBuilds.departmentId, department.id), eq(harnessBuilds.commitSha, message.commitSha), eq(harnessBuilds.status, 'failed'))));
   await ctx.db.update(harnessProducts).set({ goodCommit: message.commitSha, version: result.version }).where(and(eq(harnessProducts.departmentId, department.id), eq(harnessProducts.headCommit, message.commitSha)));
   const machineProblem = sql`exists (select 1 from jsonb_each(${harnessProducts.machines}) as machine where machine.value->>'commitSha' = ${message.commitSha} and machine.value->>'problem' is not null)`;
   if (recovered) await ctx.db.update(harnessProducts).set({ problem: null, told: null }).where(and(eq(harnessProducts.departmentId, department.id), eq(harnessProducts.headCommit, message.commitSha), sql`not ${failed}`, sql`not ${machineProblem}`));
 }
 
-async function noteTrouble(ctx: Ctx, department: Department, message: HarnessSynced, problem: Extract<HarnessSynced['result'], { status: 'error' }>['problem']): Promise<void> {
-  if (PASSING.includes(problem.code)) return;
+async function noteTrouble(ctx: Ctx, department: Department, message: HarnessSynced, problem: Extract<HarnessSynced['result'], { status: 'error' }>['problem']): Promise<ProblemNotice | null> {
+  if (PASSING.includes(problem.code)) return null;
   /* A build that failed was told of when it failed, with its output, whichever machine built it. */
-  if (problem.code === 'build_failed' && ctx.config.harnessDir) return;
+  if (problem.code === 'build_failed' && ctx.config.harnessDir) return null;
   const signature = problem.code === 'build_failed' ? `${problem.code}:${message.commitSha}` : `${problem.code}:${problem.detail}`;
-  await noteProblem(ctx, department, { code: problem.code, detail: problem.detail, commitSha: message.commitSha }, signature);
+  return noteProblem(ctx, department, { code: problem.code, detail: problem.detail, commitSha: message.commitSha }, signature);
 }
 
 /* A machine's answer: it has all of the commit's harness, or why not. */
@@ -387,18 +391,20 @@ export async function harnessSynced(ctx: Ctx, id: NodeIdentity, message: Harness
   const sync = syncsOf(ctx).get(syncKey(request.departmentId, id));
   if (request.head && sync?.requestId !== message.requestId) return;
   if (sync?.requestId === message.requestId) syncsOf(ctx).set(syncKey(request.departmentId, id), { ...sync, answered: true, problem: message.result.status !== 'ready', at: Date.now() });
-  await ctx.db.transaction(async tx => {
+  const notice = await ctx.db.transaction(async tx => {
     const scoped = { ...ctx, db: tx };
     const [department] = await tx.select().from(departments).where(eq(departments.id, request.departmentId));
-    if (!department) return;
+    if (!department) return null;
     const [product] = await tx.select().from(harnessProducts).where(eq(harnessProducts.departmentId, department.id)).for('update');
-    if (request.head && product?.headCommit !== request.commitSha || product?.headCommit && product.headCommit !== request.commitSha) return;
+    if ((request.head && product?.headCommit !== request.commitSha) || (product?.headCommit && product.headCommit !== request.commitSha)) return null;
     await noteMachine(scoped, department, request, message);
-    /* In-memory request state belongs to the original context; database operations use the locked transaction. */
-    syncs.set(scoped, syncsOf(ctx));
-    if (message.result.status === 'ready') await noteReady(scoped, department, request, message, message.result);
-    else await noteTrouble(scoped, department, message, message.result.problem);
+    if (message.result.status === 'error') return { companyId: department.companyId, notice: await noteTrouble(scoped, department, message, message.result.problem) };
+    const required = [...syncsOf(ctx)].filter(([key, state]) => key.startsWith(`${department.id}:`) && state.commitSha === message.commitSha);
+    await noteReady(scoped, department, request, message, message.result, required.every(([, state]) => state.answered && !state.problem));
+    return null;
   });
+  /* Delivery uses the original context and its queue locks, after the transaction commits. */
+  if (notice) await tellProblem(ctx, notice.companyId, notice.notice);
 }
 
 const SHOWN_BUILDS = 20;
