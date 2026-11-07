@@ -23,6 +23,7 @@ import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
 import { registerOutboundTools } from '../outbound/tools.js';
 import { registerOutboundControlTools } from '../outbound/tools-control.js';
+import { registerAssignmentTools } from '../agents/assignment.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -57,7 +58,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
     registerTestTools(server, ctx, job);
-    if (job.agentKind === 'head') registerHeadNotebookTools(server, ctx, job);
+    if (job.agentKind === 'head') {
+      registerHeadNotebookTools(server, ctx, job);
+      registerAssignmentTools(server, ctx, job);
+    }
     if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
     if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');
     return server;

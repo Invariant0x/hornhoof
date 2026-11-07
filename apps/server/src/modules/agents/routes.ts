@@ -19,7 +19,7 @@ import { backOn, leaveForTeam, leaveIfOff, resumeAgent } from '../tasks/wake.js'
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
-import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
+import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
 import { releaseLeftProgram } from './left-programs.js';
@@ -294,8 +294,8 @@ type PatchBody = z.infer<typeof AgentPatch>;
 type PlanRow = typeof subscriptions.$inferSelect;
 
 function requirePatchKind(orchestrator: boolean, body: PatchBody): void {
-  if (orchestrator && [body.name, body.skills, body.base, body.skillText, body.on, body.timer, body.team].some(v => v !== undefined)) {
-    throw invalid("The orchestrator's card changes only his model, his effort and the subscription he runs on.", 'orchestrator_card');
+  if (orchestrator && [body.name, body.skills, body.skillText, body.on, body.timer, body.team].some(v => v !== undefined)) {
+    throw invalid("The orchestrator's card changes only the assignment, model, effort and subscription.", 'orchestrator_card');
   }
 }
 
@@ -394,7 +394,8 @@ function patchOverrides(ctx: Ctx, next: AgentRow, body: PatchBody): void {
 }
 
 async function checkInstructionLength(ctx: Ctx, next: AgentRow, orchestrator: boolean): Promise<void> {
-  if (!orchestrator && renderInstructions(ctx.templates, next, await placeOf(ctx.db, next)).text.length > MAX_INSTRUCTIONS) {
+  const text = orchestrator ? orchestratorSteady(ctx.templates, next.overrides.base).text : renderInstructions(ctx.templates, next, await placeOf(ctx.db, next)).text;
+  if (text.length > MAX_INSTRUCTIONS) {
     throw invalid(`The instructions would be longer than ${MAX_INSTRUCTIONS} characters. Shorten the text or turn a skill off.`, 'instructions_too_long');
   }
 }
@@ -474,7 +475,7 @@ async function patchAgent(ctx: Ctx, req: FastifyRequest, { me, agent: found }: A
   return card(ctx, next, me);
 }
 
-/* Back to the role as the templates have it now: its skills, texts and effort. The model and subscription stay. */
+/* Reset template abilities and effort. Personal assignment, model and subscription stay. */
 async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise<AgentCard> {
   const { db } = ctx;
   await requireEditor(ctx, me, found);
@@ -482,12 +483,13 @@ async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise
     const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
     if (!role) throw invalid('This agent has no role template to go back to.', 'no_role');
     const skills = role.skills.filter(s => s.on).map(s => s.id);
+    const overrides = agent.overrides.base === undefined ? {} : { base: agent.overrides.base };
     const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
     await db.transaction(async tx => {
-      await tx.update(agents).set({ skills, overrides: {}, templateHashes, effort: null }).where(eq(agents.id, agent.id));
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides, effort: agent.effort }, after: { skills, effort: null } });
+      await tx.update(agents).set({ skills, overrides, templateHashes, effort: null }).where(eq(agents.id, agent.id));
+      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides, effort: agent.effort }, after: { skills, overrides, effort: null } });
     });
-    return { ...agent, skills, overrides: {}, templateHashes, effort: null };
+    return { ...agent, skills, overrides, templateHashes, effort: null };
   });
   ctx.bus.publish(reset.companyId, { type: 'org' });
   return card(ctx, reset, me);

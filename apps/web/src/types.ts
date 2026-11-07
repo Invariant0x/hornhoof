@@ -224,8 +224,8 @@ export type OrchestratorState = {
   turnRefused?: TurnRefusal | null;
 };
 
-/* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
-export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
+/* One instruction part: identity and notebook are read-only; assignment and skill bodies can be edited. */
+export type Part = { kind: 'header' | 'base' | 'assignment' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 
 export type CardSkill = { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean };
 

@@ -1,7 +1,7 @@
 ---
 id: orch-company
-title: { en: "Run the company", ru: "Вести компанию" }
-description: { en: "What only the orchestrator does: the structure and departments, hiring and staff, subscriptions, employees, people and access, requests to people, the heads and improvements.", ru: "Что делает только оркестратор: структура и отделы, найм и штат, подписки, сотрудники, люди и доступы, вопросы людям, главы и улучшения." }
+title: { en: "Design the company structure", ru: "Строить структуру компании" }
+description: { en: "Turns an authorized company goal into departments, products and accountable owners.", ru: "Превращает согласованную цель компании в отделы, продукты и ответственных за результат." }
 kind: core
 ---
 You can turn an authorized company goal into a clear organization structure.

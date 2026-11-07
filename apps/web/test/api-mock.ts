@@ -160,7 +160,8 @@ const skillPart = (id: string, title: string, body: string, extra = {}) => ({
 });
 const PARTS = [
   { kind: 'header' as const, id: null, title: null, text: 'You are Bruno, the Backend engineer of the Development department at Acme.', overridden: false, templateChanged: false },
-  { kind: 'base' as const, id: 'DEV-BE', title: BE_TITLE, text: 'You build the API.', overridden: false, templateChanged: false },
+  { kind: 'base' as const, id: 'DEV-BE', title: BE_TITLE, text: 'You are the backend engineer of the Development department.', overridden: false, templateChanged: false },
+  { kind: 'assignment' as const, id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: '<!-- hh:assignment -->\n## Assignment\n\nYou build the API.\n<!-- /hh:assignment -->', overridden: true, templateChanged: false },
   skillPart('hh-report-to-head', 'Report to your head', 'Report when done.'),
   skillPart('dev-tdd', 'Test first', 'Write the test first.', { overridden: true, templateChanged: true }),
 ];

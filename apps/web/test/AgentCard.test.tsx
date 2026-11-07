@@ -217,7 +217,8 @@ describe('AgentCard', () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, CARD] });
     expect(await screen.findByRole('textbox', { name: 'Test first' })).toHaveValue('Write the test first.');
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the API.');
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveAttribute('readonly');
     await user.click(screen.getByRole('button', { name: 'Raw' }));
     const raw = screen.getByRole('textbox', { name: 'Raw' });
     expect(raw).toHaveValue(CARD.raw);
@@ -233,13 +234,13 @@ describe('AgentCard', () => {
     open({ 'PATCH /api/agents/b1': () => new Promise(resolve => (answer = () => resolve([200, saved]))) });
     fireEvent.change(await screen.findByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Backend engineer' }), { target: { value: 'You build the billing API.' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Assignment' }), { target: { value: 'You build the billing API.' } });
     await act(async () => {
       answer();
       await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('textbox', { name: 'Test first' })).toHaveValue('Write it first.');
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the billing API.');
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 
@@ -268,7 +269,7 @@ describe('AgentCard', () => {
     await user.click(await screen.findByRole('button', { name: 'Raw' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: CARD.raw.replace('<!-- /hh:skill -->', '') } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(screen.getByText(/Keep the first part and the skill markers as they are/)).toBeInTheDocument();
+    expect(screen.getByText(/Keep the identity, headings and assignment and skill markers as they are/)).toBeInTheDocument();
     expect(calls.some(c => c.method === 'PATCH')).toBe(false);
   });
 
@@ -445,7 +446,7 @@ describe('AgentCard', () => {
     const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
     expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
-    expect(screen.getByText('Reset Bruno to the template? Its own prompt, skill changes and effort choice are lost.')).toBeInTheDocument();
+    expect(screen.getByText('Reset Bruno to the template? Skill changes and effort choice are lost. Its assignment is kept.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
     expect(await screen.findByText(/Reset to the template: Ivan/)).toBeInTheDocument();
@@ -483,7 +484,7 @@ describe('AgentCard', () => {
     const billing = CARD.raw.replace('You build the API.', 'You build the billing API.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: billing } });
     await user.click(screen.getByRole('button', { name: 'By skill' }));
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the billing API.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
     await user.click(screen.getByRole('button', { name: 'Raw' }));
     expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(billing.replace('Write the test first.', 'Write it first.'));

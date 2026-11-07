@@ -92,7 +92,7 @@ describe('the employee card', () => {
     });
     expect(card.skills.map((s: { id: string }) => s.id)).toEqual(role.skills.map(s => s.id));
     expect(card.skills.find((s: { id: string }) => s.id === 'hh-report-to-head')).toMatchObject({ on: true, locked: true, overridden: false, templateChanged: false });
-    expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', ...role.skills.filter(s => s.on).map(() => 'skill')]);
+    expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', 'assignment', ...role.skills.filter(s => s.on).map(() => 'skill')]);
     expect(card.raw).toBe(card.parts.map((p: { text: string }) => p.text).join('\n\n'));
     const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
     expect(card.instructions).toEqual({ length: (await instructionsOf(app.ctx, bruno!)).text.length, max: MAX_INSTRUCTIONS });
@@ -201,7 +201,8 @@ describe('the employee card', () => {
     expect(rows.find(r => r.field === 'name')).toMatchObject({ before: 'Bruno', after: 'Bruna' });
     const card = (await open(app, ceo, brunoId)).json();
     expect(card.changes[0]).toMatchObject({ personName: 'Ivan', at: expect.any(String) });
-    expect(card.parts[1]).toMatchObject({ text: 'You own the billing API.', overridden: true });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment')).toMatchObject({ overridden: true });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain('You own the billing API.');
   });
 
   it('keeps the instructions within what a turn carries, counting only what is not a skill file', async () => {
@@ -209,7 +210,7 @@ describe('the employee card', () => {
     const card = (await open(app, ceo, brunoId)).json();
     const told = async () => (await instructionsOf(app.ctx, (await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!)).text;
     const core = (id: string) => app.ctx.templates.skills.get(id)?.kind === 'core';
-    /* No field a person writes reaches the limit alone: the role's text is saved near it first. */
+    /* No field a person writes reaches the limit alone: an existing assignment is saved near it first. */
     await db.update(agents).set({ overrides: { base: '' } }).where(eq(agents.id, brunoId));
     await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS - (await told()).length - 100) } }).where(eq(agents.id, brunoId));
     /* A core skill goes whole into the instructions. Its part carries its markers and heading around the text it takes. */

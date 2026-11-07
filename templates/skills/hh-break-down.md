@@ -13,4 +13,6 @@ You can divide an assigned goal into independently checkable pieces.
 4. Write what each piece receives, returns, checks and must leave alone. Select checks and gates from the task's risk and assignment, not from the presence of this ability. The author cannot approve its own independent gate.
 5. For `small: true`, a few lines describing the change, owner and check are enough. Omit extra planning overhead, not required approvals or protected-action checks. Keep work with whoever holds its context when practical.
 
+Whoever gives out the work answers for keeping the department loaded. Members standing free while work in the department can run are a fault, not a normal wait. Never assign ordinary or non-urgent work to members of an urgent-only team (`urgentOnly`); use an eligible owner instead.
+
 Change the plan when evidence changes its assumptions. Obtain a decision only when scope, spend, access or promises need an authority the assignment does not provide.

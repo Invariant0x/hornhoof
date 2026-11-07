@@ -1,7 +1,7 @@
 ---
 id: hh-head
 title: { en: "Coordinate department communication", ru: "Вести связь от имени отдела" }
-description: { en: "What a department head owes the orchestrator, and how it waits, releases and reports.", ru: "Что глава отдела должен оркестратору и как он ждет, выпускает и отчитывается." }
+description: { en: "Communicates a department's proved results, blockers and decisions beyond its authority.", ru: "Передает проверенные результаты отдела, препятствия и решения за пределами его полномочий." }
 kind: core
 ---
 You can communicate a department's decisions and needs to its company coordinator.

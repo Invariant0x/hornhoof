@@ -77,13 +77,11 @@ function basePart(role: Role | undefined, agent: AgentRow): Part | null {
 }
 
 /* Existing personal base text is an assignment, never a replacement for role identity. */
-function assignmentPart(agent: AgentRow): Part | null {
-  const body = agent.overrides.base;
-  if (body === undefined) return null;
+function assignmentPart(body: string | undefined): Part {
   return {
     kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' },
-    text: `<!-- hh:assignment -->\n## Assignment\n\n${body}\n<!-- /hh:assignment -->`,
-    overridden: true, templateChanged: false,
+    text: `<!-- hh:assignment -->\n## Assignment\n\n${body ?? ''}\n<!-- /hh:assignment -->`,
+    overridden: body !== undefined, templateChanged: false,
   };
 }
 
@@ -134,8 +132,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
   const base = basePart(role, agent);
   if (base) parts.push(base);
-  const assignment = assignmentPart(agent);
-  if (assignment) parts.push(assignment);
+  parts.push(assignmentPart(agent.overrides.base));
   const initialKept = parts.map(p => p.text);
 
   const collected = collectSkills(t, role, agent);
@@ -165,9 +162,9 @@ export const ORCHESTRATOR_SKILLS = [
 ] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
-export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
-  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false }];
-  const kept = [ORCHESTRATOR_INSTRUCTIONS];
+export function orchestratorSteady(t: Templates, assignment?: string): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
+  const parts: Part[] = [{ kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false }, assignmentPart(assignment)];
+  const kept = parts.map(p => p.text);
   const skills: SkillFile[] = [];
   for (const id of ORCHESTRATOR_SKILLS) {
     const skill = t.skills.get(id);
@@ -209,11 +206,11 @@ const notebookRoom = (said: string, files: boolean): number => (files ? MAX_INST
 const forNode = (shown: Rendered, files: boolean): Rendered =>
   files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
 
-async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, files: boolean): Promise<Rendered> {
-  const steady = orchestratorSteady(ctx.templates);
+async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files: boolean): Promise<Rendered> {
+  const steady = orchestratorSteady(ctx.templates, agent.overrides.base);
   const said = files ? steady.text : steady.whole;
   const skills = files ? steady.skills : [];
-  const notebook = await notebookPart(ctx.db, companyBook(companyId), notebookRoom(said, files));
+  const notebook = await notebookPart(ctx.db, companyBook(agent.companyId), notebookRoom(said, files));
   const parts = [...steady.parts, notebookOf(notebook)];
   return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
 }
@@ -241,7 +238,7 @@ async function appendDepartmentNotebook(
    the program reads from its file. files: the agent's node writes skill files; one that does not is told every skill in
    the text, which the hash covers then. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files = true): Promise<Rendered> {
-  if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent.companyId, files);
+  if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent, files);
   const rendered = forNode(renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent)), files);
   const dept = await headDepartment(ctx.db, agent);
   return dept ? appendDepartmentNotebook(ctx.db, rendered, dept, files) : rendered;
