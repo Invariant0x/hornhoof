@@ -70,7 +70,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
       if (part.status !== 'running') continue;
       const selection = part.environmentSelection!.selection;
       if (selection.kind !== 'batch' && selection.kind !== 'prepare') throw new Error('This fixture plans versioned parts.');
-      const count = selection.kind === 'batch' ? selection.selections.length : 0;
+      const count = selection.kind === 'batch' ? selection.selections.length : run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.commands.length + run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.suiteIds.length;
       const message: Extract<NodeMessage, { type: 'tests.done' }> = { type: 'tests.done', partId: part.id, ok, error: ok ? null : 'failed', exitCode: ok ? 0 : 1, commit, log: 'Fixture result',
         ...(how.files ? { files: how.files } : {}),
         environmentReceipt: { version: 2, profile: run.environmentSnapshot!.profile, selection, commitSha: TEST_COMMIT, manifestHash: run.environmentSnapshot!.description.manifestHash, runtimes,
@@ -343,7 +343,7 @@ describe('reusing green test results', () => {
 describe('zero-part review receipts', () => {
   it.each([false, true])('accepts complete server reuse after closeFileCache, preparation=%s', async preparation => {
     const f = await fixture(3, 5, preparation);
-    const review = () => f.db.transaction(tx => turnReviewContext(tx, f.task, f.agent.id, TEST_COMMIT, 'turn-3', { complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }));
+    const review = () => f.db.transaction(tx => turnReviewContext(tx, f.task, f.agent.id, 'turn-3', { complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }));
     await f.finish(await f.start({ profile: 'final' }));
     const id = await f.start({ profile: 'final' }), ended = await f.runOf(id);
     expect(ended).toMatchObject({ status: 'passed', parts: 0, fileCache: { mode: 'cached', reused: 3, preparationReused: preparation, fingerprints: [] } });
@@ -376,7 +376,7 @@ describe('zero-part review receipts', () => {
     ];
     for (const [why, change] of invalid) {
       await f.db.update(testRuns).set({ ...ended, ...change }).where(eq(testRuns.id, id));
-      expect((await review()).runs.find(run => run.id === id)?.verified, why).toBe(false);
+      expect.soft((await review()).runs.find(run => run.id === id)?.verified, why).toBe(false);
     }
     await f.db.update(testRuns).set(ended).where(eq(testRuns.id, id));
     expect((await review()).runs.find(run => run.id === id)?.verified).toBe(true);
