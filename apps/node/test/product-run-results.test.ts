@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
-const shared = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000 }));
+const shared = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000, handedOver: (_path: string): void => {} }));
 import type { TestEnvironmentV1, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
 vi.mock('node:child_process', async original => {
@@ -19,7 +20,7 @@ vi.mock('node:fs', async original => {
 });
 vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();
-  return { ...module, userFor: () => ({ uid: shared.builderUid, gid: shared.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
+  return { ...module, userFor: () => ({ uid: shared.builderUid, gid: shared.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => { shared.handedOver(path); return module.prepareFolder(path, null); } };
 });
 import { readTestEnvironment } from '../src/test-environment.js';
 import { runTests } from '../src/tests.js';
@@ -75,6 +76,14 @@ it('gives a suite back what it kept and takes what it leaves', async () => {
   expect(first.kept).toEqual([{ suiteId: 'unit', files: [{ path: '.metrics/mutate/a.edn', text: 'after none' }] }]);
   const second = await f.run({ partId: 'part-two', kept: first.kept });
   expect(second.kept).toEqual([{ suiteId: 'unit', files: [{ path: '.metrics/mutate/a.edn', text: 'after after none' }] }]);
+});
+
+/* A folder is handed over once and whole, and a file put in later would stay the node's, where the job cannot read it. */
+it('hands a checkout to the job user with what came back into it', async () => {
+  const f = await fixture('', { keep: ['.metrics/mutate'] }), there: boolean[] = [];
+  shared.handedOver = path => { if (basename(path) === 'repo') there.push(existsSync(join(path, '.metrics/mutate/a.edn'))); };
+  await f.run({ kept: [{ suiteId: 'unit', files: [{ path: '.metrics/mutate/a.edn', text: 'kept' }] }] }).finally(() => { shared.handedOver = () => {}; });
+  expect(there).toEqual([true]);
 });
 
 it('takes nothing from a suite that keeps nothing', async () => {

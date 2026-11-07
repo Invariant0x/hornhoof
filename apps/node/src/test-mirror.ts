@@ -56,7 +56,6 @@ function gitStream(args: string[], context: CacheContext, take: (chunk: Buffer) 
     // A git that stops early closes this pipe: how it ended says what went wrong.
     child.stdin?.on('error', () => {}).end(input);
     child.once('error', error => { failure = error; });
-    feed(child, input);
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');

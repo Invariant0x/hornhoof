@@ -632,9 +632,6 @@ function productOperations(execution: TestExecution): ProductOperation[] {
 async function productCheckout(msg: TestRun, state: ProductState, context: PreparationContext): Promise<EnvironmentDescription> {
   const expected = await productDescription(msg.environment!.snapshot.description);
   await checkoutCommit(msg.repo!, expected.repositoryScope, expected.commitSha, state.repo, context);
-  /* The job user gets its checkout before anything is restored into it: a handover afterwards would reach through shared
-     links into the files every part reads. */
-  prepareFolder(state.repo, state.user);
   const actual = await readTestEnvironment(msg.repo!, expected.repositoryScope, expected.commitSha, context);
   if (expected.manifestHash !== actual.manifestHash || JSON.stringify(expected.inputDigests) !== JSON.stringify(actual.inputDigests) || JSON.stringify(expected.inventory) !== JSON.stringify(actual.inventory)) environmentError('description_mismatch', 'The pinned checkout differs from the accepted environment snapshot.');
   if (!supportsTestProfile({ description: actual, profile: context.profile }, actual.runtimeCapabilities)) environmentError('runtime_missing', 'The node lacks a runtime required by this product profile.');
@@ -711,6 +708,9 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
   try {
     const description = await timedPhase(state.receipt, 'checkoutMs', () => productCheckout(msg, state, context));
     restoreProductKept(msg, execution, state);
+    /* The job user gets its checkout with what a suite kept, and before anything else is restored into it: a handover afterwards
+       would reach through shared links into the files every part reads. */
+    prepareFolder(state.repo, state.user);
     const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
     await timedPhase(state.receipt, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
