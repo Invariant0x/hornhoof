@@ -25,9 +25,11 @@ it.each([
   'test_part_timings',
   'test_file_results',
   'test_suite_memory',
+  'harness_builds',
+  'harness_products',
 ])('keeps %s writes behind the service API for both SQL roles', async table => {
   const run = await roles();
-  const column = { program_operator_signals: 'agent_id', turn_snapshots: 'turn_id', test_part_timings: 'part_id', test_file_results: 'file', test_suite_memory: 'suite_id' }[table] ?? 'id';
+  const column = { program_operator_signals: 'agent_id', turn_snapshots: 'turn_id', test_part_timings: 'part_id', test_file_results: 'file', test_suite_memory: 'suite_id', harness_products: 'department_id' }[table] ?? 'id';
   const writes = [
     `INSERT INTO ${table} (${column}) SELECT ${column} FROM ${table} WHERE false`,
     `UPDATE ${table} SET ${column} = ${column} WHERE false`,

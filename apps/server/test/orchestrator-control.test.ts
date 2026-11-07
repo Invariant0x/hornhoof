@@ -534,6 +534,8 @@ describe('the orchestrator reads and changes the database itself', () => {
       ['DELETE FROM node_connections', /Hornhoof writes the history/],
       [`UPDATE node_connections SET cause = 'network'`, /Hornhoof writes the history/],
       ['DELETE FROM test_parts', /run_tests/],
+      ['DELETE FROM harness_builds', /test_harness/],
+      [`UPDATE harness_products SET told = 'quiet'`, /test_harness/],
       [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
       [`UPDATE agents SET node_id = NULL WHERE id = '${bruno.id}'`, /change_employee/],

@@ -20,6 +20,7 @@ const DECISIONS = 'Requests, cards and the logs of tasks and conversations chang
 const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
 const TESTS = 'Test runs and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
+const HARNESS = 'Hornhoof keeps where a test harness stands itself and builds it by itself: test_harness shows it, and the tool only reads it.';
 /* What the orchestrator may not do with a table, in the words he acts on. */
 const RULES: Record<string, string> = {
   people: PEOPLE,
@@ -34,6 +35,8 @@ const RULES: Record<string, string> = {
   test_part_timings: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   test_file_results: 'Hornhoof keeps which test files passed itself, as a forged row would let a test go unrun: the tool only reads it.',
   test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
+  harness_builds: HARNESS,
+  harness_products: HARNESS,
   departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",
   agents:
     "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, and a head stays in its department.",

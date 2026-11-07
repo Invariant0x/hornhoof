@@ -46,13 +46,14 @@ export const SECRET: Record<string, string[]> = {
    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
    who may take it, and a forged message would make a turn answer someone else. The numbers of the pipeline report, which
    only Hornhoof works out, so that they can be believed. Which test files passed and what their runs keep, as a forged row
-   would let a test go unrun. A department's rules of approval, which say what a person must
-   see first, and change only through a person's guarded API. */
+   would let a test go unrun. Where a product's harness stands, as a forged row would hold its machines back from building
+   or quiet what its head hears. A department's rules of approval, which say what a person must see first, and change only
+   through a person's guarded API. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_actions', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
-  'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'approval_policies',
+  'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
