@@ -124,7 +124,7 @@ function listedItems(output: string): Listed[] {
   for (let at = 0; at + 1 < fields.length; at += 2) {
     const line = LISTED.exec(fields[at]!);
     if (!line) throw new Error('A tree could not be listed.');
-    found.push({ full: line[7]!, kind: line[1]!, size: Number(line[2]), mode: parseInt(line[3]!, 8), links: Number(line[4]), inode: line[5]!, time: line[6]!, target: fields[at + 1]! });
+    found.push({ full: line[7]!, kind: line[1]!, size: Number(line[2]), mode: parseInt(line[3]!, 8) & 0o777, links: Number(line[4]), inode: line[5]!, time: line[6]!, target: fields[at + 1]! });
   }
   return found;
 }

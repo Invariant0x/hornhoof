@@ -341,6 +341,15 @@ describe('sharing one prepared tree between parts', () => {
     await expect(readFile(join(part, 'apps', 'one', 'not-stored'))).rejects.toThrow();
   });
 
+  it('stores a file with a setuid or setgid bit by its permissions alone, and takes the stored tree back', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source');
+    await mkdir(join(source, 'deps'), { recursive: true }); await writeFile(join(source, 'deps', 'tool'), 'x');
+    await chmod(join(source, 'deps', 'tool'), 0o2755);
+    const build = () => cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['deps'] }));
+    expect((await build()).ready!.entries).toContainEqual(expect.objectContaining({ path: 'deps/tool', mode: 0o755 }));
+    expect(await build()).toMatchObject({ hit: true });
+  });
+
   it('never stores a git folder, and refuses one a stored tree comes to say it holds', async () => {
     const ctx = await context(), source = join(ctx.cacheRoot, 'source');
     await mkdir(join(source, 'deps', '.git'), { recursive: true }); await writeFile(join(source, 'deps', '.git', 'config'), 'x');
