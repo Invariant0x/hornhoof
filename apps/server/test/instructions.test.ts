@@ -77,6 +77,62 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
 
 const PLACE = { company: 'Acme', department: 'Development', product: 'Mascot' };
 
+/* Check the delivered policy's obligations, rather than pinning its wording. */
+function preMergeSecurityProblems(text: string): string[] {
+  const clauses = text.split(/[.!?\n]/);
+  const riskRule = clauses.find(s => ['access', 'root', 'permissions', 'secrets'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(s))) ?? '';
+  const scope = clauses.find(s => /\b(?:applies|covers)\b/i.test(s) && /\burgent\b/i.test(s)) ?? '';
+  const checks: [string, boolean][] = [
+    ['independent-reviewer', /\bindependent Security engineer\b/i.test(riskRule) && /\b(?:must|requires?)\b[^.!?]*\bpass\b/i.test(riskRule)],
+    ['before-shared-branch', /\bpass\b[^.!?]*\bbefore\b[^.!?]*\bshared\b[^.!?]*\bbranch\b/i.test(riskRule) && /\bturn(?:'s)? branch\b/i.test(riskRule)],
+    ['urgent-small-named', ['urgent', 'small', 'named'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(scope))],
+    ['self-review-not-a-gate', clauses.some(s => /\b(?:self-review|own review)\b[^.!?]*\b(?:does not|cannot|never) replace\b[^.!?]*\bgate\b/i.test(s))],
+    ['no-merge-first-bypass', !/\b(?:urgent|small|named)\b[^.!?\n]*\b(?:merge first|skip Security)\b/i.test(text)],
+  ];
+  return checks.filter(([, holds]) => !holds).map(([id]) => id);
+}
+
+describe('independent Security before integration', () => {
+  const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const delivered = (roleKey: string) => {
+    const role = shipped.roles.get(roleKey)!;
+    return renderInstructions(shipped, agent({ roleKey, kind: role.kind === 'head' ? 'head' : 'worker', skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+  };
+
+  it.each(['DEV-GEN', 'DEV-HEAD'])('gives %s the independent pre-merge gate with no urgent, small or named-order bypass', roleKey => {
+    const packet = delivered(roleKey);
+    const gate = packet.skills.find(s => s.name === 'dev-gates');
+    expect(gate, roleKey).toBeDefined();
+    expect(preMergeSecurityProblems(gate!.body), roleKey).toEqual([]);
+    expect(preMergeSecurityProblems(packet.whole), `${roleKey} whole`).toEqual([]);
+    expect(packet.whole.match(/independent Security engineer/gi), `${roleKey} single rule`).toHaveLength(1);
+    expect(packet.text).toContain('dev-gates');
+    const entry = roleKey === 'DEV-GEN' ? packet.parts.find(p => p.kind === 'base')!.text : packet.skills.find(s => s.name === 'dev-lead')!.body;
+    expect(entry).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
+    if (roleKey === 'DEV-GEN') {
+      expect(packet.text).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
+      expect(packet.parts.find(p => p.id === 'dev-task-flow')!.text).toMatch(/before any merge[^.!?]*pass[^.!?]*required gates/i);
+      expect(packet.text).toMatch(/own review/);
+    }
+  });
+
+  it('rejects late review, author approval and fast-path bypasses even when the other security words remain', () => {
+    const rule = delivered('DEV-GEN').skills.find(s => s.name === 'dev-gates')!.body;
+    expect(preMergeSecurityProblems(rule)).toEqual([]);
+    const mutations: [string, string][] = [
+      [rule.replace(/before (it reaches|entering)/i, 'after $1'), 'before-shared-branch'],
+      [rule.replace(/independent Security engineer/gi, 'author'), 'independent-reviewer'],
+      [rule.replace(/\burgent\b/gi, 'ordinary'), 'urgent-small-named'],
+      [rule.replace(/\bsmall\b/gi, 'large'), 'urgent-small-named'],
+      [rule.replace(/\bnamed\b/gi, 'planned'), 'urgent-small-named'],
+      [rule.replace(/does not replace/gi, 'replaces'), 'self-review-not-a-gate'],
+      [`${rule}\nUrgent tasks may merge first and get Security afterward.`, 'no-merge-first-bypass'],
+      [`${rule}\nSmall tasks may skip Security.`, 'no-merge-first-bypass'],
+    ];
+    for (const [changed, failure] of mutations) expect(preMergeSecurityProblems(changed), failure).toContain(failure);
+  });
+});
+
 describe('what a node from before skill files takes', () => {
   const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
   const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);

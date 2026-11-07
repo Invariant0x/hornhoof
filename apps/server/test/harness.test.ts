@@ -4,11 +4,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessUnit, ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+const io = vi.hoisted(() => ({ pause: null as null | ((operation: string, path: string) => Promise<void>) }));
+vi.mock('node:fs/promises', async original => {
+  const fs = await original<typeof import('node:fs/promises')>();
+  return { ...fs,
+    writeFile: async (...args: Parameters<typeof fs.writeFile>) => { await fs.writeFile(...args); await io.pause?.('write', String(args[0])); },
+    link: async (...args: Parameters<typeof fs.link>) => { await io.pause?.('rename', String(args[0])); return fs.link(...args); },
+    rename: async (...args: Parameters<typeof fs.rename>) => { await io.pause?.('rename', String(args[0])); return fs.rename(...args); },
+  };
+});
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, harnessBuilds, harnessProducts, jobs, machines } from '../src/db/schema.js';
-import { harnessRound } from '../src/modules/testruns/harness.js';
+import { departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
+import { harnessGreeted, harnessRound, harnessSynced } from '../src/modules/testruns/harness.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { nextOf, type FakeNode } from './helpers.js';
 import { company, gets } from './test-runs-company.js';
 
@@ -21,17 +31,159 @@ const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 async function shared(env: NodeJS.ProcessEnv = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'hh-harness-')); folders.push(dir);
   const c = await company({ HARNESS_DIR: dir, ...env });
-  const unit = (over: Partial<HarnessUnit> = {}): HarnessUnit => ({ repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(REPO) }, key: KEY, version: 'f'.repeat(64), unit: 'dependencies', commitSha: COMMIT, platform: 'linux-arm64', ...over });
-  const as = (key: string) => ({ authorization: `Bearer ${key}` });
-  const claim = (key: string, over: Partial<HarnessUnit> = {}) => c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: as(key), payload: unit(over) });
-  const part = (key: string, index: number, bytes: Buffer, build = KEY) => c.app.inject({ method: 'PUT', url: `/api/harness/${build}/parts/${index}`, headers: { ...as(key), 'content-type': 'application/octet-stream' }, payload: bytes });
-  const finish = (key: string, bytes: Buffer, build = KEY) => c.app.inject({ method: 'POST', url: `/api/harness/${build}/done`, headers: as(key), payload: { digest: sha(bytes), size: bytes.length } });
-  const failed = (key: string, error: string | null, build = KEY) => c.app.inject({ method: 'POST', url: `/api/harness/${build}/failed`, headers: as(key), payload: { error } });
-  const bundle = (key: string, range: string, build = KEY) => c.app.inject({ method: 'GET', url: `/api/harness/${build}/bundle`, headers: { ...as(key), range } });
+  const unit = (over: Partial<HarnessUnit> = {}): HarnessUnit => ({ fencing: 1, repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(REPO) }, key: KEY, version: 'f'.repeat(64), unit: 'dependencies', commitSha: COMMIT, platform: 'linux-arm64', ...over });
+  const leases = new Map<string, { companyId: string; attempt: string }>();
+  const as = (key: string, build = KEY) => {
+    const lease = leases.get(key + ':' + build) ?? leases.get(build);
+    return { authorization: 'Bearer ' + key, 'x-harness-company': c.dev.companyId, 'x-harness-attempt': lease?.attempt ?? '11111111-1111-4111-8111-111111111111' };
+  };
+  const claim = async (key: string, over: Partial<HarnessUnit> = {}) => {
+    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: as(key), payload: unit(over) });
+    const lease = response.json() as { companyId?: string; attempt?: string };
+    if (lease.companyId && lease.attempt) {
+      const value = { companyId: lease.companyId, attempt: lease.attempt }, build = over.key ?? KEY;
+      leases.set(key + ':' + build, value); leases.set(build, value);
+    }
+    return response;
+  };
+  const part = (key: string, index: number, bytes: Buffer, build = KEY) => c.app.inject({ method: 'PUT', url: '/api/harness/' + build + '/parts/' + index, headers: { ...as(key, build), 'content-type': 'application/octet-stream' }, payload: bytes });
+  const finish = (key: string, bytes: Buffer, build = KEY) => c.app.inject({ method: 'POST', url: '/api/harness/' + build + '/done', headers: as(key, build), payload: { digest: sha(bytes), size: bytes.length } });
+  const failed = (key: string, error: string | null, build = KEY) => c.app.inject({ method: 'POST', url: '/api/harness/' + build + '/failed', headers: as(key, build), payload: { error } });
+  const bundle = (key: string, range: string, build = KEY) => c.app.inject({ method: 'GET', url: '/api/harness/' + build + '/bundle', headers: { ...as(key, build), range } });
   const uploaded = async (key: string, bytes: Buffer, build = KEY) => { await part(key, 0, bytes, build); return finish(key, bytes, build); };
   return { ...c, dir, unit, claim, part, finish, failed, bundle, uploaded };
 }
 type Shared = Awaited<ReturnType<typeof shared>>;
+
+function pauseIO(operation: string) {
+  const deferred = () => {
+    let finish = () => {};
+    const promise = new Promise<void>(resolve => { finish = resolve; });
+    return { promise, resolve: () => finish() };
+  };
+  const entered = deferred(), resume = deferred();
+  io.pause = async (kind, path) => {
+    if (kind !== operation || !path.includes('.parts') && !path.includes('.staging-')) return;
+    io.pause = null; entered.resolve(); await resume.promise;
+  };
+  return { entered: entered.promise, resume: () => resume.resolve() };
+}
+afterEach(() => { io.pause = null; });
+
+describe('harness access and attempt fences', () => {
+  it('lets an old node build locally without giving it an unfenced shared claim', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'old');
+    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: { authorization: 'Bearer ' + one.key }, payload: c.unit({ fencing: undefined }) });
+    expect(response.json()).toEqual({ state: 'local' });
+    expect(await c.db.select().from(harnessBuilds)).toEqual([]);
+  });
+
+  it.each(['subscription', 'access', 'lending', 'machine'])('rejects every write after revoking %s, without publication or a head wake', async revoked => {
+    const c = await shared(), one = await c.machine(c.ann, 'builder'), bytes = Buffer.from('private');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    if (revoked === 'subscription') await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, one.subscriptionId));
+    if (revoked === 'lending') await c.db.update(machines).set({ lendsTests: false }).where(eq(machines.id, one.machineId));
+    if (revoked === 'machine') await c.db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, one.machineId));
+    if (revoked === 'access') {
+      const [machine] = await c.db.select().from(machines).where(eq(machines.id, one.machineId));
+      await c.db.delete(personAccess).where(eq(personAccess.personId, machine!.personId));
+    }
+    expect((await c.part(one.key, 1, bytes)).statusCode).toBe(403);
+    expect((await c.finish(one.key, bytes)).statusCode).toBe(403);
+    expect((await c.failed(one.key, 'untrusted failure')).statusCode).toBe(403);
+    expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'building', error: null });
+    expect((await turnsOf(c, c.head.id)).join('\n')).not.toContain('untrusted failure');
+    expect((await c.claim(one.key)).statusCode).toBe(403);
+  });
+
+  it('rejects writes after lease expiry even before another builder claims it', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'builder'), bytes = Buffer.from('private');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+    expect((await c.part(one.key, 1, bytes)).statusCode).toBe(409);
+    expect((await c.finish(one.key, bytes)).statusCode).toBe(409);
+    expect((await c.failed(one.key, 'expired')).statusCode).toBe(409);
+  });
+
+  it('renews the same attempt, and replaces it after expiry even for the same builder', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'builder');
+    await c.claim(one.key); const [first] = await c.db.select().from(harnessBuilds);
+    await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).toBe(first!.id);
+    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+    await c.claim(one.key); expect((await c.db.select().from(harnessBuilds))[0]!.id).not.toBe(first!.id);
+    const headers = { authorization: 'Bearer ' + one.key, 'x-harness-company': c.dev.companyId, 'x-harness-attempt': first!.id };
+    for (const route of ['parts/0', 'done', 'failed']) {
+      const response = await c.app.inject({ method: route === 'parts/0' ? 'PUT' : 'POST', url: '/api/harness/' + KEY + '/' + route, headers: { ...headers, 'content-type': route === 'parts/0' ? 'application/octet-stream' : 'application/json' }, payload: route === 'parts/0' ? Buffer.from('stale') : route === 'done' ? { digest: sha(Buffer.from('stale')), size: 5 } : { error: 'stale failure' } });
+      expect(response.statusCode).toBe(409);
+    }
+    expect((await turnsOf(c, c.head.id)).join('\n')).not.toContain('stale failure');
+  });
+
+  it('refuses private bundles and claims from a removed subscription', async () => {
+    const c = await shared(), one = await c.machine(c.ann, 'one');
+    await c.claim(one.key); await c.uploaded(one.key, Buffer.from('private'));
+    await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, one.subscriptionId));
+    expect((await c.bundle(one.key, 'all')).statusCode).toBe(403);
+    expect((await c.claim(one.key)).statusCode).toBe(403);
+  });
+
+  it.each(['write', 'rename'])('fences a delayed %s after another builder has published', async operation => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one'), two = await c.machine(c.ann, 'two');
+    const old = Buffer.from('old bundle'), current = Buffer.from('current bundle');
+    await c.claim(one.key); await c.part(one.key, 0, old);
+    const gate = pauseIO(operation);
+    const pending = (operation === 'write' ? c.part(one.key, 0, old) : c.finish(one.key, old)).then(response => response.statusCode);
+    await gate.entered;
+    try {
+      await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() - 1000) });
+      await c.claim(two.key); expect((await c.uploaded(two.key, current)).statusCode).toBe(204);
+    } finally { gate.resume(); }
+    expect(await pending).toBe(409);
+    expect((await c.bundle(two.key, 'all')).rawPayload).toEqual(current);
+    expect((await c.db.select().from(harnessBuilds))[0]).toMatchObject({ status: 'ready', digest: sha(current) });
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
+  });
+
+  it('rechecks authorization after assembling a bundle', async () => {
+    const c = await shared(), one = await c.machine(c.ann, 'one'), bytes = Buffer.from('bundle');
+    await c.claim(one.key); await c.part(one.key, 0, bytes);
+    const gate = pauseIO('rename'), pending = c.finish(one.key, bytes).then(response => response.statusCode);
+    await gate.entered;
+    try { await c.db.update(machines).set({ lendsTests: false }).where(eq(machines.id, one.machineId)); }
+    finally { gate.resume(); }
+    expect(await pending).toBe(403);
+    expect((await c.db.select().from(harnessBuilds))[0]!.status).toBe('building');
+    expect((await c.db.select().from(harnessProducts))).toEqual([]);
+  });
+
+  it('never overwrites a published archive with another delayed done from the same attempt', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one');
+    const old = Buffer.from('old'), current = Buffer.from('current');
+    await c.claim(one.key); await c.part(one.key, 0, old);
+    const gate = pauseIO('rename'), pending = c.finish(one.key, old).then(response => response.statusCode);
+    await gate.entered;
+    try { expect((await c.uploaded(one.key, current)).statusCode).toBe(204); }
+    finally { gate.resume(); }
+    expect(await pending).toBe(409);
+    expect((await c.bundle(one.key, 'all')).rawPayload).toEqual(current);
+  });
+
+  it('keeps an old row whose reclaimed lease is still live when pruning', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one');
+    await c.claim(one.key);
+    await c.db.update(harnessBuilds).set({ createdAt: new Date(Date.now() - 31 * 86400_000) });
+    await c.claim(one.key, { key: OTHER }); await c.uploaded(one.key, Buffer.from('other'), OTHER);
+    expect((await c.db.select().from(harnessBuilds)).map(build => build.key)).toContain(KEY);
+  });
+
+  it('scopes builtin bundle reads to the explicitly named company', async () => {
+    const c = await shared(); await c.builtin();
+    await c.claim('builtin-node-key-0123456789abcdef');
+    const bytes = Buffer.from('company one'); await c.uploaded('builtin-node-key-0123456789abcdef', bytes);
+    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': '33333333-3333-4333-8333-333333333333', 'x-harness-attempt': (await c.db.select().from(harnessBuilds))[0]!.id } });
+    expect(response.statusCode).toBe(404);
+  });
+});
 
 const takesHarnesses = (node: FakeNode) => { node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [], testHarness: 1 }); };
 /* A machine that says it takes harnesses. */
@@ -59,7 +211,7 @@ describe('one build of a harness unit for all machines', () => {
     const first = await c.bundle(two.key, 'bytes=0-9'), rest = await c.bundle(two.key, `bytes=10-${bytes.length - 1}`);
     expect(first.statusCode).toBe(206);
     expect(Buffer.concat([first.rawPayload, rest.rawPayload]).equals(bytes)).toBe(true);
-    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${KEY}.zst`]);
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
   });
 
   it('says no to a machine that says it is done before anything came', async () => {
@@ -149,7 +301,7 @@ describe('one build of a harness unit for all machines', () => {
   it('builds a unit again when its bundle is gone', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), bytes = Buffer.from('a bundle');
     await c.claim(one.key); await c.uploaded(one.key, bytes);
-    await rm(join(c.dir, c.dev.companyId, `${KEY}.zst`));
+    await rm(join(c.dir, c.dev.companyId, KEY + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst'));
     expect((await c.claim(one.key)).json().state).toBe('build');
   });
 
@@ -164,7 +316,7 @@ describe('one build of a harness unit for all machines', () => {
     await c.claim(one.key); await c.uploaded(one.key, big);
     await c.claim(one.key, { key: OTHER }); await c.uploaded(one.key, big, OTHER);
     expect((await c.db.select().from(harnessBuilds)).map(row => row.key)).toEqual([OTHER]);
-    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${OTHER}.zst`]);
+    expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([OTHER + '.' + (await c.db.select().from(harnessBuilds))[0]!.id + '.zst']);
   });
 });
 
@@ -190,6 +342,53 @@ describe('who may share a build', () => {
 });
 
 describe('the harness reaching every machine', () => {
+  it('reports a local build failure when no registry attempt could report it', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'legacy-local');
+    atHead(c); await harnessRound(c.app.ctx);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(await asked(one.node), { result: { status: 'error', problem: { code: 'build_failed', detail: 'local preparation broke' } } }));
+    expect((await c.db.select().from(harnessProducts))[0]!.problem).toMatchObject({ code: 'build_failed', detail: 'local preparation broke' });
+    expect((await turnsOf(c, c.head.id)).join('\n')).toContain('local preparation broke');
+  });
+
+  it('ignores a forged commit without consuming the matching active request', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one');
+    atHead(c); await harnessRound(c.app.ctx); const request = await asked(one.node);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(request, { commitSha: NEXT }));
+    expect((await c.db.select().from(harnessProducts))[0]!.goodCommit).toBeNull();
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(request));
+    expect((await c.db.select().from(harnessProducts))[0]!.goodCommit).toBe(COMMIT);
+  });
+
+  it('does not let a slow old ready overwrite a newer head problem', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one');
+    atHead(c); await harnessRound(c.app.ctx); const old = await asked(one.node);
+    atHead(c, NEXT); await harnessRound(c.app.ctx); const current = await asked(one.node);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(current, { result: { status: 'error', problem: { code: 'environment_unsupported', detail: 'current head broken' } } }));
+    const [before] = await c.db.select().from(harnessProducts);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(old));
+    const [after] = await c.db.select().from(harnessProducts);
+    expect(after).toMatchObject({ goodCommit: before!.goodCommit, problem: before!.problem, told: before!.told });
+    expect(after!.machines).toEqual(before!.machines);
+  });
+
+  it('keeps another machine problem and one notification through a healthy reconnect until all recover', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'healthy-arm'), two = await capable(c, c.ann, 'broken-x64');
+    atHead(c); await harnessRound(c.app.ctx);
+    const healthy = await asked(one.node), broken = await asked(two.node);
+    const fail = (request: typeof broken, detail: string) => harnessSynced(c.app.ctx, nodeIdentity(two.nodeId), synced(request, { result: { status: 'error', problem: { code: 'environment_unsupported', detail } } }));
+    await fail(broken, 'x64 broken');
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(healthy));
+    expect((await c.db.select().from(harnessProducts))[0]!.problem).toBeTruthy();
+    harnessGreeted(c.app.ctx, nodeIdentity(one.nodeId)); await harnessRound(c.app.ctx);
+    await harnessSynced(c.app.ctx, nodeIdentity(one.nodeId), synced(await asked(one.node)));
+    await harnessRound(c.app.ctx, new Date(Date.now() + 31 * 60_000));
+    await fail(await asked(two.node), 'x64 still broken');
+    expect((await turnsOf(c, c.head.id)).filter(prompt => prompt.includes('x64'))).toHaveLength(1);
+    await harnessRound(c.app.ctx, new Date(Date.now() + 62 * 60_000));
+    await harnessSynced(c.app.ctx, nodeIdentity(two.nodeId), synced(await asked(two.node)));
+    expect((await c.db.select().from(harnessProducts))[0]).toMatchObject({ problem: null, told: null, goodCommit: COMMIT });
+  });
+
   it('asks every machine that takes harnesses for the head of the branch, once, and again when it moves', async () => {
     const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two'), old = await c.planless(c.ceo, 'old');
     atHead(c);

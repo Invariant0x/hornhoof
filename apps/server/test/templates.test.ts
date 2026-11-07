@@ -629,7 +629,8 @@ describe('templates', () => {
     expect(gates).toMatch(/Work goes out without gates/);
     expect(gates).toMatch(/checks everything the turn changed on its branch at the same time/);
     expect(gates).toMatch(/fix task without gates to the member whose change it is/);
-    expect(gates).toMatch(/starts with a test that fails and then passes; there is no second review/);
+    expect(gates).toMatch(/starts with a test that fails and then passes/);
+    expect(gates).toMatch(/no second review[^.!?]*pre-merge Security gate/i);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/one review of the turn/);
     expect(templates.roles.get('DEV-REV')!.body).toMatch(/everything the turn changed/);
     expect(templates.roles.get('DEV-SEC')!.body).toMatch(/review of each turn/);
@@ -647,7 +648,7 @@ describe('templates', () => {
   it('gates work by its size and risk, and fails it only for what blocks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const gates = body('dev-gates');
-    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note never get one/);
+    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note otherwise never get one/);
     expect(gates).toMatch(/[Oo]ne review/);
     expect(gates).toMatch(/access, sign-in, secrets or permissions/);
     expect(gates).toMatch(/one reviewer of each provider/);
@@ -2046,7 +2047,8 @@ describe('a role is a short line and bricks: what every head and the orchestrato
     /* Claude Code is a program the agent may run in, not code it works on. */
     for (const id of shared) expect(body(id).replaceAll('Claude Code', ''), id).not.toMatch(CODE);
     expect(body('dev-lead')).toMatch(/one generalist developer/);
-    expect(body('dev-lead')).toMatch(/access, root, secrets or permissions[^.]*security review of its own before it merges/);
+    expect(body('dev-lead')).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
+    expect(body('dev-lead')).not.toMatch(/access, root, secrets or permissions/);
     expect(body('dev-lead')).toMatch(/exact 40-character commit/);
     expect(body('dev-task-flow')).toMatch(/branch named after the task[\s\S]*Never commit to the main branch/);
     for (const role of roles) {
