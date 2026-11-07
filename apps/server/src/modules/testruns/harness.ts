@@ -256,7 +256,7 @@ function ask(ctx: Ctx, place: Place, department: Department, repo: Repo, commitS
 
 /* A changed lock file, on whichever branch, came ready on one machine: the others take it now, not at their first run. */
 async function spread(ctx: Ctx, build: Build, builder: NodeIdentity): Promise<void> {
-  if (build.unit !== 'dependencies') return;
+  if (!build.unit.startsWith('dependencies')) return;
   const found = await repoAt(ctx, [build.departmentId]);
   if (!found) return;
   const now = new Date(), places = await harnessPlaces(ctx, await placesOf(ctx, build.companyId));

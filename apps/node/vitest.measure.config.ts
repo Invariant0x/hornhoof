@@ -1,4 +1,4 @@
 import { defineConfig } from 'vitest/config';
 
-/* The harness measurement on a real repository, which no test run starts: it installs and builds for minutes. */
-export default defineConfig({ test: { include: ['test/harness.measure.ts'], testTimeout: 1_800_000, reporters: ['default'] } });
+/* The measurements on real repositories, which no test run starts: they install and build for minutes. */
+export default defineConfig({ test: { include: ['test/*.measure.ts'], setupFiles: ['test/measure-setup.ts'], testTimeout: 1_800_000, reporters: ['default'] } });

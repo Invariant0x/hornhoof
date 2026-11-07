@@ -153,10 +153,12 @@ export async function buildTestInvocation(suite: TestSuite, files: string[], con
 function selectedInputs(description: EnvironmentDescription, patterns: string[]): InputDigest[] {
   return description.inputDigests.filter(input => patterns.some(pattern => match(input.path, pattern)));
 }
+/* Which of the machine's programs a command runs on: by its name, or by what a shell line of it calls. */
 function commandRuntime(command: Command): string[] {
-  const program = basename(command.program);
-  if (['node', 'npm', 'npx', 'pnpm', 'yarn', 'corepack'].includes(program)) return ['node'];
-  return /^python(?:[23](?:\.\d+)?)?$/.test(program) ? ['python'] : [];
+  const program = basename(command.program), line = program === 'sh' ? command.args.join(' ') : '';
+  const node = ['node', 'npm', 'npx', 'pnpm', 'yarn', 'corepack'].includes(program) || /\b(?:node|npm|npx|pnpm|yarn|corepack)\b/.test(line);
+  const python = /^python(?:[23](?:\.\d+)?)?$/.test(program) || /\bpython[23]?\b/.test(line);
+  return [...(node ? ['node'] : []), ...(python ? ['python'] : [])];
 }
 function commandRuntimes(description: EnvironmentDescription, commands: Command[]): string[] {
   const serviceRuntimes = new Set(description.manifest.services.map(service => service.runtime));

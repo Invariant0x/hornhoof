@@ -5,8 +5,9 @@ import { join } from 'node:path';
 import type { HarnessUnit, ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { harnessBuilds, harnessProducts, jobs, machines } from '../src/db/schema.js';
+import { departments, harnessBuilds, harnessProducts, jobs, machines } from '../src/db/schema.js';
 import { harnessRound } from '../src/modules/testruns/harness.js';
 import { nextOf, type FakeNode } from './helpers.js';
 import { company, gets } from './test-runs-company.js';
@@ -251,6 +252,24 @@ describe('the harness reaching every machine', () => {
     await c.claim(one.key, { commitSha: NEXT }); await c.uploaded(one.key, Buffer.from('new lock'));
     expect((await asked(two.node)).commitSha).toBe(NEXT);
     expect(await gets(one.node, 'tests.harness')).toBe(false);
+  });
+
+  it('sends the changed lock file of one program of several to the other machines', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two');
+    atHead(c);
+    await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-go-api' }); await c.uploaded(one.key, Buffer.from('new lock'));
+    expect((await asked(two.node)).commitSha).toBe(NEXT);
+  });
+
+  it('keeps a harness per program of a company, each on every machine that takes it', async () => {
+    const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two');
+    atHead(c);
+    const others = await c.db.insert(departments).values(['api', 'site'].map((name, n) => ({ companyId: c.dev.companyId, templateKey: 'development' as const, roleCode: `D${n}`, position: 10 + n, repoUrl: `https://github.com/acme/${name}.git`, repoTokenEnc: encryptSecret('ghp_0123456789', c.app.ctx.config.secret), repoTokenLast4: '6789' }))).returning();
+    await harnessRound(c.app.ctx);
+    const seen = [await asked(one.node), await asked(one.node), await asked(one.node)].map(message => message.repo.url).sort();
+    expect(seen).toEqual([REPO, ...others.map(other => other.repoUrl!)].sort());
+    expect((await asked(two.node)).repo.url).toBe(REPO);
+    expect(await gets(two.node, 'tests.harness')).toBe(false);
   });
 
   it('spreads only what is shared by all: a unit built from a branch stays where it was asked for', async () => {

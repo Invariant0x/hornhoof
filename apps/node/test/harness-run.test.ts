@@ -158,6 +158,19 @@ describe('a harness that reaches every machine', () => {
     expect(environmentCacheKey(other, 'schema', 'k')).not.toBe(environmentCacheKey(description, 'schema', 'k'));
   });
 
+  it('builds anew for another version of the program a shell line calls, and only for that', async () => {
+    const line = (code: string) => ({ program: 'sh', args: ['-c', code], cwd: '.' });
+    const keys = async (code: string) => {
+      const f = await fixture(manifest => { manifest.runtimes = []; manifest.prepare[0]!.commands = [line(code)]; });
+      const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+      const newer = (id: string) => ({ ...description, runtimeCapabilities: [...description.runtimeCapabilities.filter(runtime => runtime.id !== id), { id, version: '99.0.0', fingerprint: 'a'.repeat(64) }] });
+      return { node: environmentCacheKey(newer('node'), 'schema', 'k') !== environmentCacheKey(description, 'schema', 'k'), python: environmentCacheKey(newer('python'), 'schema', 'k') !== environmentCacheKey(description, 'schema', 'k') };
+    };
+    expect(await keys('set -e\nnpm ci --no-audit')).toEqual({ node: true, python: false });
+    expect(await keys('set -e\npython3 -m venv x')).toEqual({ node: false, python: true });
+    expect(await keys('set -e\ngo mod download')).toEqual({ node: false, python: false });
+  });
+
   it('answers at once for a version it holds, without a checkout', async () => {
     const f = await fixture(), shared = registry();
     let checkouts = 0;

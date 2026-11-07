@@ -1,59 +1,24 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { it, vi } from 'vitest';
-const ids = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000 }));
-import type { EnvironmentDescription, HarnessClaim, HarnessUnit, ServerMessage } from '@hornhoof/protocol';
-// Only the OS identity operations a machine without root cannot do are doubled: git, npm, builds, files and commands are real.
-vi.mock('node:child_process', async original => {
-  const module = await original<typeof import('node:child_process')>();
-  return { ...module, spawn: (bin: string, args: string[], options: import('node:child_process').SpawnOptions) => module.spawn(bin, args, { ...options, uid: undefined, gid: undefined }) };
-});
-vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>(), chownSync: () => {} }));
-vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
-vi.mock('../src/isolation.js', async original => {
-  const module = await original<typeof import('../src/isolation.js')>();
-  return { ...module, userFor: () => ({ uid: ids.builderUid, gid: ids.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
-});
+import { it } from 'vitest';
+import type { EnvironmentDescription, ServerMessage } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
-import type { HarnessRemote } from '../src/test-harness.js';
 import { runTests, syncHarness } from '../src/tests.js';
+import { ids, registry, stopwatch } from './measure-machines.js';
 
 /* How long a run takes to reach its first test, before and after the shared harness, on this one machine. Start it from
-   apps/node, on a committed tree: npx --no-install vitest run --config vitest.measure.config.ts. HH_MEASURE_OUT names the
-   file that gets the results. */
+   apps/node, on a committed tree: npx --no-install vitest run --config vitest.measure.config.ts test/harness.measure.ts.
+   HH_MEASURE_OUT names the file that gets the results. */
 const results: { step: string; seconds: number; note?: string }[] = [];
-async function timed<T>(step: string, run: () => Promise<T> | T, note?: (value: T) => string): Promise<T> {
-  const started = performance.now(), value = await run();
-  results.push({ step, seconds: Math.round((performance.now() - started) / 10) / 100, ...(note ? { note: note(value) } : {}) });
-  console.log(`${step}: ${results.at(-1)!.seconds} s${note ? ` (${note(value)})` : ''}`);
-  return value;
-}
+const timed = stopwatch(results);
 const run = (cwd: string, env: NodeJS.ProcessEnv, program: string, ...args: string[]) => {
   const done = spawnSync(program, args, { cwd, env: { ...process.env, ...env }, stdio: 'ignore' });
   if (done.status !== 0) throw new Error(`${program} ${args.join(' ')} failed with ${done.status}.`);
 };
-
-/* What Hornhoof's registry does, with its bundles on this same disk, so moving them costs no network here. */
-function registry(root: string) {
-  const builds = new Map<string, { builder: string; file?: string; digest?: string; size?: number }>();
-  const remote = (name: string): HarnessRemote => ({
-    async claim(unit: HarnessUnit): Promise<HarnessClaim> {
-      const build = builds.get(unit.key);
-      if (build?.file) return { state: 'ready', digest: build.digest!, size: build.size!, partBytes: 32 * 1024 ** 2 };
-      if (build && build.builder !== name) return { state: 'wait', afterMs: 100 };
-      builds.set(unit.key, { builder: name });
-      return { state: 'build', partBytes: 32 * 1024 ** 2 };
-    },
-    async upload(key, file, digest, size) { const kept = join(root, `${key}.zst`); await copyFile(file, kept); builds.set(key, { builder: name, file: kept, digest, size }); },
-    async download(key, file) { await copyFile(builds.get(key)!.file!, file); },
-    async failed(key, error) { console.log(`failed ${key}: ${error}`); builds.delete(key); },
-  });
-  return { builds, remote };
-}
 
 it('measures the time to the first test', async () => {
   const repository = resolve(import.meta.dirname, '../../..'), work = await mkdtemp(join(tmpdir(), 'hh-measure-'));

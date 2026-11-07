@@ -37,7 +37,7 @@ How work moves through development. Check each item only where a mistake cannot 
 
 ## Descriptions and measures
 
-- The system builds each product's test harness from its repository and keeps it on every machine. DEV-HEAD answers for it, and when a repository needs a description names who writes it, DEV-TEST or else DEV-QA (dev-test-environment).
+- The system builds each product's test harness from its repository and keeps it on every machine, with the tools of the languages DEV-HEAD and the owner chose. DEV-HEAD answers for it, and when a repository needs a description names who writes it, DEV-TEST or else DEV-QA (dev-test-environment).
 - Name the department's own measures in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
 - A new company has these rules from its start and writes its descriptions on its first turn.
 

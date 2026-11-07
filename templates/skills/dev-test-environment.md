@@ -5,12 +5,13 @@ description: { en: "Use when a product repository arrives or its dependencies, s
 kind: procedure
 sources: []
 ---
-Hornhoof brings a product's test harness up by itself: all a test needs before it starts, read from the repository's lock and build files, built once per architecture and kept on every machine, so any machine can test and no run installs or builds anything first. When one of its inputs changes, only what that input touches is built again. A failed update leaves the last good version in use, and the run on the broken commit says why. `test_harness` shows where it stands.
+Hornhoof brings a product's test harness up by itself: all a test needs before it starts, read from the repository's lock and build files, built once per architecture and kept on every machine, so any machine can test and no run installs or builds anything first. When one of its inputs changes, only what that input touches is built again. A failed update leaves the last good version in use, and the run on the broken commit says why. `test_harness` shows where it stands. A repository may hold several programs, in one language or many: each gets its own part of the harness and its own suite, so a changed lock file rebuilds that one.
 
 A repository whose files do not say enough gets one versioned `.hornhoof/test-environment.json`, based on repository evidence. A proposed description, a schema-valid description and a working environment are three different results. Report which one was proved.
 
 ## Ownership
 
+- **DEV-HEAD** and the owner choose the product's languages when they choose its architecture. The head has them named in `.tool-versions` at the repository root on the default branch, one tool and version per line, as asdf reads it, even before there is any code. The system then fetches their tools once, into that product's harness alone, and shows that each runs. A product's own build files name a language just as well; what `.tool-versions` says wins.
 - **DEV-HEAD** answers for each product's harness and hears when an update fails. Nobody builds it by hand. When a repository needs a description, **DEV-TEST** writes and maintains it; when no DEV-TEST is assigned, **DEV-QA** does; when neither role exists, the head creates the first task to establish ownership. The head also arranges a mutation command for a language without the default tool.
 - **OPS-INTEG** provisions pinned runtimes and services through the approved image or integration path. **OPS-FIX** verifies readiness, private mutable state and recovery after interrupted preparation. **OPS-HEAD** owns machine readiness, capacity, storage and recovery. Request shared changes through the head, without hand-editing running containers.
 
