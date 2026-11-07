@@ -23,11 +23,17 @@ agent's instructions from shared skills and the skills of its department.
 - Load common instructions, leadership rules and department knowledge as separate skills. Existing heads and employees
   receive the speed skill without replacing their role text.
 - Give heads one shared rule for fitting small work into a turn before its final check and choosing the check it needs.
+- Require independent Security review before access, root, permissions or secrets changes reach a shared branch, including
+  urgent and small fixes.
 
 ### Fixed
 
 - Give a test job a writable copy of saved service state while keeping the protection against job-owned links.
 - Declare access to the test environment's sharing routes and include its tool in agent tool lists.
+- Bind shared environment uploads and publication to the current authorized lease and build attempt, and ignore stale replies.
+- Hide repository tokens in manual preparation failures and reject unsupported Yarn PnP environments before sharing them.
+- Include file modes, test helpers, configuration and tested Markdown files in reuse decisions, and validate fully reused
+  runs before review.
 
 ### Before you update
 
@@ -35,6 +41,8 @@ agent's instructions from shared skills and the skills of its department.
   shared test environments. Keep a backup from 0.8.0; there is no down-migration command.
 - Nodes must support skill files before agents restart with the new instructions. Older nodes cannot start a role whose
   instructions exceed their inline limit. Applying the generalist role to existing employees is a separate action.
+- Nodes without the new sharing contract prepare their environments locally. Shared bundles are rebuilt for the new build
+  attempts, and the new fingerprint format invalidates previously cached test results.
 
 ### Russian
 
@@ -49,12 +57,21 @@ agent's instructions from shared skills and the skills of its department.
 - Общие инструкции, правила руководителя и знания отдела подключаются отдельными навыками. Действующие главы и сотрудники
   получают навык быстрой работы без замены текста их роли.
 - Главы получают общее правило, как включать мелкую работу в ход до итоговой проверки и выбирать нужную ей проверку.
+- Правки доступа, root, прав и секретов проходят независимую проверку безопасности до общей ветки, включая срочные
+  и малые исправления.
 - Копия сохраненного состояния сервиса доступна тестовому заданию на запись с сохранением защиты от подмены ссылками.
 - Для маршрутов общей среды явно заданы правила доступа, а ее инструмент включен в списки инструментов сотрудников.
+- Загрузка и публикация общей среды привязаны к действующему доступу, сроку аренды и попытке сборки; запоздалые ответы
+  не меняют актуальное состояние.
+- Токены репозитория скрываются при сбоях ручной подготовки. Неподдерживаемая среда Yarn PnP не передается другим машинам.
+- Повторное использование тестов учитывает права файлов, вспомогательный код тестов, настройки и проверяемые Markdown-файлы.
+  Полностью сохраненный результат проверяется перед ревью.
 
 Перед обновлением: сначала обновите сервер, затем ноды. При старте применяются миграции 0081–0085. Сохраните резервную копию
 0.8.0: команды обратных миграций нет. Перед перезапуском сотрудников ноды должны поддерживать файлы навыков; старые ноды
 не запускают роли, чьи инструкции превышают их предел. Применение роли универсала к действующим сотрудникам идет отдельно.
+Ноды без нового протокола обмена готовят среду локально. Общие пакеты среды пересобираются для новых попыток сборки,
+а новый формат отпечатков сбрасывает ранее сохраненные результаты тестов.
 
 ## [0.8.0] - 2026-11-06
 
