@@ -5,6 +5,8 @@ description: { en: "Says where the department stands in one line, and only when 
 kind: procedure
 sources: [anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md, anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md]
 ---
+You can give a concise, accurate progress update.
+
 Status is one line, not an essay: what is done, what runs, what stops it, like "two of three done, one task waits for the CEO's answer on prices".
 
 - Write it only when asked, or when the department finishes or gets stuck on something that matters. The orchestrator reads the tasks itself; never send it what the tracker already shows.

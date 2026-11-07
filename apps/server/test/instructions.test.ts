@@ -154,6 +154,24 @@ describe('what a node from before skill files takes', () => {
 });
 
 describe('renderInstructions', () => {
+  it('keeps role identity separate from an existing personal assignment', () => {
+    const assignment = 'Close assigned incident orders end to end without a shared pipeline.';
+    const packet = renderInstructions(T, agent({ overrides: { base: assignment } }), PLACE);
+    expect(packet.parts.find(p => p.kind === 'base')?.text).toBe(ROLE.body);
+    expect(packet.parts.find(p => p.kind === 'base')?.overridden).toBe(false);
+    expect(packet.parts.find(p => p.kind === 'assignment')?.text).toContain(assignment);
+    expect(packet.text).toContain(ROLE.body);
+    expect(packet.text).toContain(assignment);
+    expect(packet.whole).toContain(assignment);
+    expect(packet.skills.map(s => s.name)).not.toContain('assignment');
+  });
+
+  it('describes independent abilities without a missing-skill escape', () => {
+    const packet = renderInstructions(T, agent(), PLACE);
+    expect(packet.text).not.toContain('A skill may name another skill');
+    expect(packet.text).toMatch(/self-contained abilit/i);
+  });
+
   it('shows the header, the role and each enabled skill between markers on the card', () => {
     const { parts, raw } = renderInstructions(T, agent(), PLACE);
     expect(parts.map(p => [p.kind, p.id])).toEqual([

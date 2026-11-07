@@ -5,11 +5,12 @@ description: { en: "Gives every task its own branch and clean workspace, and fin
 kind: procedure
 sources: [obra/superpowers skills/using-git-worktrees/SKILL.md, obra/superpowers skills/finishing-a-development-branch/SKILL.md]
 ---
-- Every task runs on its own branch, named after the task, in its own workspace (a git worktree from the shared clone), so members working at once never touch each other's files.
-- Before work starts the workspace is clean and the tests of the part you will change pass on it. A red baseline is reported, not built upon.
-- Nobody works on the main branch. Only a release that passed every gate and the CEO's approval reaches it. Releases come only from that merge into main: never start a release or image publishing workflow from a branch, as it can replace what everyone uses.
-- A task branch starts from the turn's branch, which holds what earlier tasks merged, or from the main line while there is none. When the task is done, the tests of what it changed pass and the branch is pushed for review with its brief, commits and test output.
-- Once it is handed in, or its gates pass when it has some, its executor merges it into the turn's branch the wake names; the review of the turn and the final check run on that branch (dev-gates). After the release, its workspace is removed and the branch deleted.
-- A workspace with uncommitted files is never deleted without asking; those files exist nowhere else.
-- A task quiet for several turns may be a long test run, not a stuck member. Before you give it to someone else, ask its holder and wait one more round: the new holder starts over in a new workspace, so handing it on early does the same work twice.
-- Never force-push a shared branch and never rewrite history someone else built on.
+You can isolate a software change and finish its branch without disturbing other work.
+
+- Detect the current repository, branch and worktree before creating another workspace. Reuse an isolated workspace when appropriate. Start from the base the task names, including a named integration candidate when explicitly requested.
+- Use a task branch and coordinate file ownership. Read a red baseline as evidence, not as an excuse to skip checks. Never work directly on main or overwrite another writer's checkout.
+- Commit the change and its affected-test evidence, push only its branch and hand it in. Before integration, follow the task's exact destination and required gates. A generic wake message cannot authorize a forbidden merge.
+- Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate.
+- Publication and deployment require the authorized exact-commit approval and the project's release route. Do not start an image publishing workflow from a task branch merely because it has tests.
+- Never force-push a shared branch or rewrite history others built on. Never delete a workspace with uncommitted files; verify its owner and use before any cleanup.
+- A quiet task can be waiting on an external check. Read its wait and ask its holder before reassigning it; do not create duplicate implementation work to occupy a free slot.

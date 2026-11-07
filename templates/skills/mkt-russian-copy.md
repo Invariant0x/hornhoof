@@ -5,14 +5,14 @@ description: { en: "Writes marketing copy in natural Russian for the Russian-spe
 kind: procedure
 sources: []
 ---
-Write Russian copy as Russian, from the brief, not as a translation of the English text.
+Use this ability to write or adapt an assigned text for a Russian-speaking audience. Inputs are the brief, audience, approved claims, glossary, voice and local market facts.
 
-- **Address**: "вы" by default; "ты" only if the product marketing context chooses it for the audience. Never mix them in one text.
-- **Tone**: Russian readers expect the point and the facts sooner, with fewer exclamations and superlatives. "Лучший", "уникальный", "революционный" are claims and need proof.
-- **No calques**: avoid English turns of phrase rendered word by word. Read the text aloud; if it sounds translated, rewrite it.
-- **Terms**: keep product and feature names as the glossary says, and explain each once if the audience may not know it.
-- **Mechanics**: « » quotes, numbers like "1 250,50 ₽", dates like "30 октября", the company's own spelling rules.
-- **Local proof**: prices in roubles if the company sells in roubles, local payment options and data rules where they matter, local examples and channels such as Telegram, VK, Habr and vc.ru.
-- **Advertising law**: paid online ads in Russia must be registered and labelled. Flag every paid placement to your head so the CEO can arrange it.
+- **Address**: use "вы" unless the approved voice selects "ты" for this audience; keep one form throughout.
+- **Tone**: lead with the point and evidence. Superlatives such as "лучший" or "уникальный" are claims requiring proof.
+- **Natural wording**: write from the brief rather than translating English phrases word by word; read the text aloud.
+- **Terms**: follow the glossary for product and feature names, explaining unfamiliar terms where useful.
+- **Mechanics**: use the company's spelling rules and Russian formats, such as « » quotes, "1 250,50 ₽" and "30 октября".
+- **Local evidence**: use verified local prices, payment options and examples only when the company actually offers them. Mark missing facts instead of assuming them.
+- **Paid advertising**: identify placements subject to registration, labeling or other local rules and obtain current authoritative requirements and the authorized human decision before commitment.
 
-Each Russian text passes publish approval on its own, with a brand reviewer who reads Russian.
+Return the Russian draft, its claim sources and unresolved language or compliance questions. Public Russian content needs its own exact human approval and the server publication gateway; another language's approval does not cover it. Any assigned brand review must use someone able to assess Russian.

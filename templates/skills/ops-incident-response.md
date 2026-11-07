@@ -5,15 +5,17 @@ description: { en: "Restores a broken node, tool or integration first, then find
 kind: procedure
 sources: [anthropics/knowledge-work-plugins engineering/skills/incident-response/SKILL.md, wshobson/agents plugins/incident-response/skills/incident-runbook-templates/SKILL.md, obra/superpowers skills/systematic-debugging/SKILL.md]
 ---
-1. **Size it**: who is stopped and since when: one agent, one department, the whole company. Tell your head at once if more than one department is stopped.
-2. **Look for a runbook**. If one fits, follow it and note where it was wrong.
-3. **Restore**: take the fastest safe step that brings work back: restart, roll back the last change, switch to a spare connector, free disk. Change one thing at a time, or you will not know which one helped.
-4. **Tell your head** in one line when it starts and in one line when it ends: what broke, who was affected, what you did.
-5. **Find the root cause** once work runs again:
-   - Reproduce the failure, or find it in the logs with timestamps.
-   - Read the whole error and what changed just before it.
-   - Write one hypothesis, test it with the smallest experiment, keep or drop it. Do not stack fixes.
-   - After two failed fixes, question the premise: the fault may not be where you are looking.
-6. **Fix the cause**, not only the symptom, and add a check that would have caught it. A shared change goes to your head as a change request.
+Restore the node, tool or integration named in the incident assignment, then establish the cause from evidence.
 
-Read-only diagnosis and small fixes need no gates. Never delete logs, data or accounts to make an error go away. Write the timeline as you go; the postmortem needs it.
+1. Size the impact: who is stopped, since when and what may be lost. Notify the assigned incident owner promptly when impact spreads.
+2. Read the relevant runbook and confirm its prerequisites. Note steps that are wrong or unsafe.
+3. Take the fastest authorized safe recovery step: restart, roll back, use an approved spare connector or free space under approved cleanup rules. Change one thing at a time and preserve logs, data and accounts.
+4. Record the start, actions and recovery with timestamps; report what broke, who was affected and what restored service through the incident's route.
+5. Reproduce the failure or locate it in logs. Read the full error and preceding changes. Test one hypothesis with the smallest experiment; keep or discard it. After two failed fixes, question the premise instead of stacking changes.
+6. Fix the evidenced cause and add the check that would have caught it. For a shared change, document affected users, risk, approved window, rollback and user-side verification.
+
+Read-only diagnosis and small fixes need no gates only when reversible, within existing authority and outside protected actions. Emergency, small, named work and review fixes never waive required human approval or an independent Security engineer's pass before shared merge for access, root, permissions or secrets changes.
+
+For product test environments, verify pinned runtime fingerprints, service readiness, private mutable state per attempt and recovery after interrupted preparation. Keep immutable prepared artifacts unchanged and usable; a failed preparation must not replace the last good version. Request image or service repairs through approved provisioning, never patch running containers by hand. Product tests receive no host sockets or node credentials.
+
+Return the recovery evidence, cause, remaining risks and timeline for any assigned follow-up. Checks and handoff follow the task's gates, rather than this skill selection.

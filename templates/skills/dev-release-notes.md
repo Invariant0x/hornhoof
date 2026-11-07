@@ -5,6 +5,8 @@ description: { en: "Writes what a release changes for the people who use it, in 
 kind: procedure
 sources: [garrytan/gstack document-release/SKILL.md.tmpl]
 ---
+You can write release notes that tell a user what changed and what they must do.
+
 For every release, from the merged changes and their reports:
 
 1. **One line on top**: what this version is about, in a person's words.

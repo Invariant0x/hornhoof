@@ -5,6 +5,8 @@ description: { en: "Builds the interface users meet on the design system: every 
 kind: checklist
 sources: [addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md, anthropics/skills skills/frontend-design/SKILL.md]
 ---
+You can build an interface on the existing design system for every shipped state and language.
+
 - Read the repository's documented UI reference or style book (such as `AGENTS.md`, `CONTRIBUTING.md` or the project's style guide) before changing layout. Use the design system's tokens and components where the project has one; a new colour, size or component goes to Design through your head, and you never invent unapproved tokens or spacing on your own.
 - Non-visual work (server, data, API, logic, states, live data, behaviour tests and a simple temporary skeleton) runs in parallel without waiting on a design mockup; only final visual styling waits for the approved design reference and visual check.
 - Every view has its states: loading, empty, error, partial, and the normal one. An empty view says what to do next; an error says what happened and how to fix it.
@@ -16,4 +18,4 @@ sources: [addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md, anthr
 - Layout holds on every size and density the product supports. Respect reduced motion.
 - Keep state where it is used, load once and share, never block the interface on something it can show later. Stay within the platform's frame and response budgets.
 - Test behaviour as a person uses it, through what they see, not internal names.
-- The browser, width, theme and language checks of a view are in dev-browser-check.
+- Verify an affected web view on an isolated fixture/stand across Chromium, Firefox and WebKit, narrow/wide widths, all shipped themes and the actually longest/shortest shipped locales plus a shipped RTL locale when available. Use remote browser checks and keep screenshots and geometry evidence; never install browsers locally.

@@ -1,6 +1,6 @@
 # Where these templates learned from
 
-Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules is unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, as its README asks people to copy it, and Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
+Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules includes unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, as its README asks people to copy it, and Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
 
 The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
@@ -45,7 +45,6 @@ Development authors write a failing test before the change, run only affected te
 | `roles/development/DEV-DOCS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-ENG.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-FE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
-| `roles/development/DEV-GEN.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources; project-owned test-environment responsibilities | Hornhoof |
 | `roles/development/DEV-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-PERF.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -258,3 +257,9 @@ Development authors write a failing test before the change, run only affected te
 | `skills/home-shopping.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-bills.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-calendar.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+
+| `skills/orch-staff.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
+
+| `skills/orch-people.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |
+
+| `skills/orch-resources.md` | Written for Hornhoof | No outside source: standalone company administration procedure | Hornhoof |

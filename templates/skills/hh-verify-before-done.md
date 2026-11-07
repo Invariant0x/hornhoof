@@ -5,13 +5,11 @@ description: { en: "Runs the check that proves the work before claiming it works
 kind: core
 sources: [obra/superpowers skills/verification-before-completion/SKILL.md]
 ---
-Before you write DONE, fixed, passing, sent or ready, prove it in this session:
+You can establish what evidence actually proves before claiming a result.
 
-1. Name the check that would show the claim is true: the test command, the build, the page you open, the record you read back, the total you recompute.
-2. Run it now, after your last change. An earlier run proves an earlier state.
-3. Read the whole output. A green summary line over a failure is a failure.
-4. Put the command and the part of the output that proves the claim into your report.
+1. Name the check that shows the claim: executed test/build, inspected record or recomputed total.
+2. After the last relevant change, run that check or read its existing passed result for the exact same commit/version. An earlier version proves only that earlier state; a selector collection alone proves no executed tests.
+3. Read the whole output and actual status. A green summary over a failure is a failure. A sent receipt proves sending, not human reading.
+4. Report the command or record and the part proving the claim, with the checked version and limits.
 
-A check someone else owns is proved only by its result: read that before you claim readiness, as your own green tests do not prove a check nobody ran. On `small: true` work the proof stays and only its report shrinks to a line.
-
-If you cannot run the check, say DONE_WITH_CONCERNS and why. "Should work", "looks right" and "probably" are not evidence. Never weaken a test, a check or a threshold to make it pass; report what failed instead.
+If the task requires another owner's check, read its real result before claiming that stage is ready; your own green result does not prove unrun work. On `small: true` work only the report shrinks. Say DONE_WITH_CONCERNS when required proof is unavailable, and identify it. Never weaken a test, check or threshold to obtain a passing label.

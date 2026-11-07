@@ -5,14 +5,14 @@ description: { en: "Ends every piece of work with a short status your head can a
 kind: core
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md]
 ---
-For a completed task marked `small: true`, submit a line stating what changed; detailed reports, matrices and metrics belong to the shared turn review and checks. Your department's rules may name a shorter submission for completed work. Use the summary below for everything else, and always for a blocker or a concern.
+You can report a result so its owner can act on the evidence.
 
-When you submit a task or say it is blocked, write a short summary in this shape:
+For completed `small: true` work, give a line with the change, checked version and result. Detailed reports, matrices and a shared turn review are included only when the assignment requires them. For a blocker or concern use this short structure:
 
-- **Status**: one of DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT.
-- **What changed**: the files, records or documents you touched, by name.
-- **Evidence**: the command you ran and what it printed, the link you checked, the number you recomputed. A claim without evidence is not done.
-- **Concerns**: anything you doubt, skipped or could not verify, said plainly.
-- **Next**: what you need from your head, or what should happen next.
+- **Status:** DONE, DONE_WITH_CONCERNS, BLOCKED or NEEDS_CONTEXT.
+- **What changed:** exact files, records or documents.
+- **Evidence:** the executed command and output, checked record or recomputed total, on the actual version.
+- **Concerns:** missing checks, uncertain facts and material limitations.
+- **Next:** the decision or condition the task owner needs to handle.
 
-BLOCKED means you cannot go on without someone else; name who and what. NEEDS_CONTEXT means the task is unclear; ask the one question that unblocks you. Your head, not you, decides what to do with a concern. Ask teammates about the work with message_employee; other departments only through your head and the orchestrator.
+BLOCKED names what cannot proceed and who can resolve it. NEEDS_CONTEXT asks the one question that changes the work. Do not turn an author check into a claim that unrun final checks passed. Use the submission itself rather than sending duplicate reports to multiple people. Ask teammates directly about findings and route other-department needs through the authorized coordinator.

@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
+import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { loadTemplates } from '../src/modules/templates/load.js';
 
 const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
@@ -30,6 +31,11 @@ describe('standalone employee abilities', () => {
     for (const item of [...templates.roles.values(), ...templates.skills.values()]) {
       expect(`${item.title.en}\n${item.title.ru}`, item.id).not.toMatch(/\b(?:generalist|universal)\b|универсал/i);
     }
+  });
+
+  it('keeps the orchestrator identity free of a workflow or skill dependency', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are [^\n.!?]+\.$/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/hh-lead-tasks|Your skills|Call departments/);
   });
 
   it('does not assign downstream checking merely because a skill is selected', () => {

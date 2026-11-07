@@ -5,6 +5,8 @@ description: { en: "Ships a build with a backup, a health check and a tested way
 kind: checklist
 sources: [anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md, addyosmani/agent-skills skills/shipping-and-launch/SKILL.md, affaan-m/ECC skills/docker-patterns/SKILL.md]
 ---
+You can deploy an approved build and restore the previously agreed working version.
+
 Before:
 - The build passed every gate and the CEO approved this exact commit.
 - A backup of the data was taken and you know how to restore it.

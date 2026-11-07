@@ -5,17 +5,15 @@ description: { en: "Gives each member a self-contained brief and the right model
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
-For `small: true`, the brief is the change and its check in a few lines (hh-lead-tasks); reports wait for the shared turn review. The full brief below is for other tasks.
+You can write a brief another employee can execute without missing context.
 
-A member knows only what your brief says. Write it once, so they need nothing else:
+- **Goal:** one concrete result and why it matters.
+- **Inputs:** exact files, records, links and approved earlier results. Attach files with `hh-attach --task N FILE`, name them, and never paste them into messages.
+- **Deliverable:** what to return and in what form.
+- **Check:** an executable check or inspectable record proving this result on its actual version; include refusal cases where a wrong result could harm someone.
+- **Limits:** allowed scope and access, approvals, any real deadline and the owner of each wait.
+- **Ownership:** the files or records this executor owns; resolve collisions before assigning another writer.
+- **Already ruled out:** confirmed decisions and attempts, keeping hypotheses clearly labelled.
+- **Neighbours:** owners of interfaces and independent pieces, so employees can agree directly.
 
-- **Goal**: what this task is for, in one sentence.
-- **Inputs**: the files, records, links and earlier results to use, by exact name. Files go as task attachments (`hh-attach --task N FILE`), named here, never pasted into the text.
-- **Deliverable**: what to hand back and in what form.
-- **Check**: how they prove it is done (see hh-verify-before-done).
-- **Limits**: what not to touch, what needs approval, the deadline and who owns each wait.
-- **Ownership**: the area this member owns until the task is done, checked for collisions at assignment (hh-lead-tasks).
-- **Already ruled out**: what you tried or decided, so they do not redo it.
-- **Neighbours**: who works on the other pieces, so they ask each other directly.
-
-Answer later questions with "comment"; change the body only when the goal changes. Pick the member whose role fits. Give hard thinking (plans, security, money) to deep-tier employees and routine work to fast ones. Hornhoof sets how hard each turn thinks by why it starts: the role's level or the level a person set on the card, a second look at fixes at medium. Do not ask for another level inside a running turn, and leave a person's level as it is. Do not pass along your own guess as a fact; if you have a hypothesis, label it as one.
+For `small: true`, name only the change and its check in a few lines. Reports stay proportionate to the assignment; a shared turn review is included only when the task names it. Answer later questions with "comment" and change the body only when the goal changes. Choose a capable available employee and preserve the model/effort already set for the current job.

@@ -5,13 +5,13 @@ description: { en: "Finds the real reasons deals are won and lost and turns them
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---
-For every deal closed won or lost, and in a summary each turn:
+Use this ability to explain outcomes of an assigned set of won or lost deals. Inputs are permitted CRM records, correspondence, human call notes and the outcome period.
 
-1. **Collect evidence**: call notes, emails, the deal plan, the reason recorded at close. A recorded reason like "price" is a start, not an answer.
-2. **Reconstruct the deal**: when it was really won or lost, against which competitor or alternative, who decided, what changed their mind.
-3. **Name the real reasons**, each with evidence: fit, value not shown, wrong person, timing, a missing feature, price, a competitor's strength, our own process (slow answers, a weak proposal).
-4. **Ask the customer** only with an approved message: a short request for feedback passes outbound approval like any other message.
-5. **Find patterns** across deals: the same missing feature, the same stage, the same competitor. Count them; one story is not a pattern.
-6. **Propose changes** for each pattern: for sales (qualification, messages), for marketing (positioning, proof), for the product. Send the ones for other departments to your head for the orchestrator.
+1. Collect the recorded reason and underlying evidence. A label such as "price" is a lead to investigate, not an explanation.
+2. Reconstruct when the outcome was determined, against which alternative, who decided and what changed their decision.
+3. State the supported causes: fit, value not shown, wrong stakeholder, timing, missing capability, price, a competitor's advantage or a process delay. Separate customer statements, facts and hypotheses.
+4. If feedback is missing, propose a short customer question. Contact requires its own authorized assignment, published catalog sources, the server outbound gateway and applicable exact approval.
+5. Compare outcomes across deals using counts and sample size. One case does not establish a pattern.
+6. Propose targeted changes to qualification, messages, proof, product or response process. Identify dependencies without assigning other people's work or making commitments.
 
-Keep it factual and blameless: the aim is to win the next deal, not to judge the last one.
+Return the causes, evidence, uncertainty and proposed changes. Keep the account factual and free of blame, omit private information unnecessary to the analysis and do not alter historical records to support a preferred conclusion.

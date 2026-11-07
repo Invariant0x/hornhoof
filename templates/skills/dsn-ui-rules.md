@@ -5,29 +5,32 @@ description: { en: "Checks a screen against the basic rules of layout, type, col
 kind: checklist
 sources: [nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md, wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md]
 ---
-Go through this list for every screen before you hand it over.
+Check the assigned screen against the approved system and its user task before handing it over.
 
 **Layout**
-- [ ] One primary action, placed where the eye ends up.
-- [ ] Spacing only from the system's scale; related items closer together than unrelated ones.
-- [ ] Content sits on the grid; nothing is a few pixels off.
-- [ ] Works at phone width (360 px) and on a wide desktop, with no horizontal scroll.
+- [ ] One clear primary action placed at the natural end of the task.
+- [ ] System spacing, with related content grouped, and alignment to the system grid.
+- [ ] Usable at phone width (360 px) and a wide desktop, without horizontal scroll.
+- [ ] Long words, identifiers, paths and URLs wrap inside their container. Actions wrap below text as one aligned group; content and controls remain fully visible.
 
 **Type**
-- [ ] Few text sizes on one screen; body text at least 16 px on phones.
-- [ ] Reading text runs 45 to 80 characters per line.
+- [ ] A short type scale, with body text at least 16 px on phones.
+- [ ] Reading lines run about 45 to 80 characters.
 
 **Colour**
-- [ ] Colour only from meaning tokens; status is never shown by colour alone.
-- [ ] Contrast meets WCAG AA in every theme.
+- [ ] Semantic tokens only, with status conveyed by more than colour.
+- [ ] WCAG AA contrast in every theme: 4.5:1 body text and 3:1 large text and meaningful icons or control boundaries.
 
 **Interaction**
-- [ ] Touch targets at least 44 by 44 px; visible focus on every control.
-- [ ] Every action shows a result: loading, success, or an error that says what to do.
-- [ ] Destructive actions ask for confirmation or can be undone.
-- [ ] Forms keep what the user typed after an error and mark the field that failed.
+- [ ] Touch targets at least 44 by 44 px and visible focus on every control.
+- [ ] Explicit hover, focus, active, disabled, loading, error and success states where relevant.
+- [ ] Every action communicates its result; errors say how to continue.
+- [ ] Destructive actions require confirmation or offer undo.
+- [ ] Forms preserve input after an error and identify the failing field.
 
 **Content**
-- [ ] Real text in every language fits; numbers, dates and money follow each language's format.
+- [ ] Real text in every supported language fits, with room for longer translations and relevant writing directions.
+- [ ] Numbers, dates and money follow locale conventions.
+- [ ] Empty, partial-data and long-content states remain usable.
 
-A box you cannot tick is either fixed or written into the handoff as a known gap.
+Return the checked screen, evidence and unresolved gaps. Use the task's gates for any required independent review; this author check does not replace it.

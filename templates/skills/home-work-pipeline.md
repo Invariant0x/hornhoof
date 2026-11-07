@@ -5,16 +5,16 @@ description: { en: "Where the home departments check item by item, in a batch, b
 kind: procedure
 sources: []
 ---
-How work moves through the home devices and household departments, which serve one family. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
+When assigned to plan or assess checks for a family's home devices or household work, use its records, device metadata, proposed actions and named approver. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The department owner is the person named for this department, or the CEO when there is none. The employee assignment and task gates select the work route, not the selected abilities.
 
 ## Item by item
 
-- Every physical action waits for the approval of a person, every time (home-real-world-approval): a changed setting, a device or scene switched, a purchase or payment, a lock, a recording read or moved.
+- Every physical action waits for a person's approval of that exact action, target, change or amount and time: a changed setting, a device or scene switched, a purchase or payment, a lock, or camera or microphone content read or moved. Streams and recordings are not ordinary device metadata.
 - When you are not sure whether something acts on the real home, treat it as an action.
 
 ## In a batch
 
-- Reading and suggesting need no approval. What the department proposes is gathered into one clear request, and the person still approves each action in it.
+- Reading permitted metadata and family-provided records, making lists and suggesting changes need no action approval. What the department proposes is gathered into one clear request, and the person still approves each action in it. Record that approval and stay within existing access; people make payments in their own accounts.
 - Lists of bills, supplies, chores and devices are gone through together when a list is due.
 
 ## By sample
@@ -33,6 +33,6 @@ How work moves through the home devices and household departments, which serve o
 
 ## Descriptions and measures
 
-- HOM-HEAD writes a short description of the network and devices, and HHD-HEAD of the supplies, bills and calendar, on their first turn: what they hold, who approves and where the checks above stand. Keep it in the department notebook, private to the home.
+- For the records in scope, describe the network and devices or the supplies, bills and calendar: what they hold, who approves and where the checks above stand. Keep the description and all family information in the department notebook, private to the home. Read only the data the assignment needs, and never ask for or store card, bank or account secrets.
 - Name the department's own measures, such as reminders in time and requests waiting for a person, in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
-- A new company has these rules from its start and writes its descriptions on its first turn.
+- Return the proposed check plan, action requests and missing evidence to the person who assigned this work. No check plan grants permission for physical actions or recording-content access.

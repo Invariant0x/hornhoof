@@ -5,15 +5,15 @@ description: { en: "Writes clear labels, messages and hints, natural in every la
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md]
 ---
-Every interface text exists in every language the product supports. Write each language as itself, not as a word-by-word translation.
+Write the interface text named in the assignment in every supported language. Use the approved voice and glossary, writing each language naturally rather than translating word by word.
 
-- **Labels name the action**: "Save changes"; not "OK" or "Submit". The same action has the same word everywhere.
-- **Errors say what happened and what to do**: "Card declined. Try another card or contact your bank." Never blame the user; never show a bare error code.
-- **Empty states** say what will appear here and offer the first action.
-- **Confirmations** name the thing and the consequence: "Delete 3 files? This cannot be undone."
-- **Short**: cut every word that does not change the meaning. Buttons are usually two or three words.
-- **Terms**: use the glossary in the design system document. A new term goes into it.
-- **Each language**: pick one form of address for the product and keep it; follow the company's spelling rules; use that language's quotes and plural forms; leave room for text up to a third longer.
-- **Formats**: dates, numbers and money follow each language, such as "1,250.50" or "1 250,50".
+- **Labels** name the action, such as "Save changes". Use the same term for the same action throughout.
+- **Errors** say what happened and how to continue. Do not blame the user or expose a bare internal code.
+- **Empty states** explain what will appear and offer the first useful action.
+- **Confirmations** name the object and consequence, including when an action cannot be undone.
+- **Brevity** removes words that add no meaning; button labels are usually two or three words.
+- **Terms** follow the system glossary; propose additions rather than inventing inconsistent names.
+- **Language** uses a consistent form of address, local quotation and plural rules, and the company's spelling rules. Allow expansion and relevant writing directions without hiding text.
+- **Formats** follow each locale for dates, numbers and money.
 
-Put the texts into the mockup itself and list them by screen in the handoff, with a key for each string if development uses keys.
+Place the copy in the actual mockups and list it by screen, with string keys when the product uses them. Check realistic long values, errors, empty states and narrow layouts. Return the text, glossary proposals and unresolved decisions through the task's route. Interface wording cannot authorize spending, access or an unapproved promise.

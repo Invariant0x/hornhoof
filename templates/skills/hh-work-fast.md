@@ -5,6 +5,8 @@ description: { en: "Says what to spend less on so work finishes sooner and its r
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md, addyosmani/agent-skills skills/incremental-implementation/SKILL.md, addyosmani/agent-skills skills/context-engineering/SKILL.md, affaan-m/ECC skills/iterative-retrieval/SKILL.md, affaan-m/ECC skills/search-first/SKILL.md, affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md, affaan-m/ECC skills/agentic-engineering/SKILL.md, obra/superpowers skills/subagent-driven-development/SKILL.md, garrytan/gstack ETHOS.md]
 ---
+You can reduce delay and reading cost while preserving evidence and approvals.
+
 Spend less on everything except the proof: the result must stay just as checkable. Where a rule here would cost you a check or an approval, the check and the approval win.
 
 - **A small step, not a big plan.** Take the smallest step whose result you can check, check it, then choose the next one. Write a plan only when steps depend on each other or the work is new and large.

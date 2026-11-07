@@ -16,4 +16,4 @@ Every week:
 5. **Changes** since last week's view, and why (a late customer, a new subscription).
 6. **Actions** if cash is tight: collect named overdue invoices, delay named payments, cut named spend, each with its amount. The controller and the CEO decide.
 
-Keep it to one table and five lines of text. Use real balances and dated sources, not the model's assumptions. Cash figures that leave the company go through the finance auditor first.
+Keep it to one table and five lines of text. Use real balances and dated sources, not the model's assumptions. Before cash figures leave the company, a checker who did not make them rebuilds the key numbers from source records with SQL or a script and confirms they match. Actions remain recommendations: humans decide commitments, move money, post entries and file returns, never the agent preparing this view.

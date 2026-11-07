@@ -5,10 +5,12 @@ description: { en: "Pins the most important user flows with tests that drive the
 kind: procedure
 sources: [affaan-m/ECC skills/e2e-testing/SKILL.md, openai/skills skills/.curated/playwright/SKILL.md, obra/superpowers skills/systematic-debugging/condition-based-waiting.md]
 ---
+You can pin a few important user flows with reproducible end-to-end tests.
+
 - Cover the few flows that matter most end to end: the main thing the product does, and signing in, paying or publishing when it does those. Keep the rest at unit and integration level, where tests are fast.
 - Drive the product through the surface its user uses: its interface (by role and visible text on the web, through the platform's test driver elsewhere), its command line, or its public API.
 - Start each test from a known state you create in the test; never depend on another test or on shared data.
 - Wait for conditions (an element, a response, a line of output), never for a fixed number of seconds.
 - On failure keep what shows what happened: a screenshot, the logs, the requests, the output.
 - A test that fails sometimes is a bug in the test or the product; find which before retrying it.
-- These tests run through `run_tests` (`hh-run-checks`), at the stage dev-testing-policy gives them.
+- These tests run through `run_tests` on the exact candidate at the scope assigned by the task; never run a browser suite or install dependencies locally.

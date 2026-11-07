@@ -5,6 +5,8 @@ description: { en: "Designs routes, messages and module interfaces that are hard
 kind: checklist
 sources: [addyosmani/agent-skills skills/api-and-interface-design/SKILL.md, wshobson/agents plugins/backend-development/skills/api-design-principles/SKILL.md]
 ---
+You can design a clear interface and data boundary for an assigned software result.
+
 - Name things in the domain's words, the same words the interface and the data use.
 - Inputs are validated at the edge with a schema or types; inside, types guarantee what was checked. Reject unknown fields that would be silently ignored.
 - One way to do each thing. A flag that changes what a call is means it should be two calls.

@@ -5,12 +5,12 @@ description: { en: "Finds directories and integration marketplaces for the produ
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/directory-submissions/SKILL.md]
 ---
-Use this to list the product where its customers look: integration marketplaces of tools they already use, app stores, software directories and review sites.
+Use this ability to prepare an assigned product listing for a marketplace, store, directory or review site. Inputs are the intended audience, approved product facts, price sources, authorized accounts and each destination's current rules.
 
-1. List candidate places. For each: who browses it, traffic or installs if public, cost, review rules, and what a listing needs (an integration, a security review, screenshots, a demo account).
-2. Rank them by expected customers per unit of effort. Drop places that charge for a listing unless the CEO approves the spend.
-3. For the chosen places, draft each listing in that place's format: name, one-line summary, description, categories, screenshots needed, pricing shown, support contact. Reuse approved product wording from Marketing; never invent claims, numbers or customer names.
-4. Mark listings that need work from other departments (an integration from Development, images from Design) and request it through your head.
-5. Keep one table: place, status (draft, approved, submitted, live, rejected), owner, date, link.
+1. Compare candidate destinations by audience, publicly supported reach, cost, review rules and requirements such as an integration, security review, media or demonstration account.
+2. Rank expected customer value against effort. Paid placements remain proposals until the CEO approves the spend.
+3. Draft each listing in the destination's format: name, summary, description, category, media requirements, approved pricing and support contact. Never invent claims, results or customer names.
+4. Identify missing integrations, images or other inputs as dependencies for the assignment owner, without promising another person's work.
+5. Return a table of destination, draft revision, status, proposed owner, date and source link. Only report submitted or live when tool or destination evidence proves it.
 
-Submitting is a public action and waits for the approval your company set. Never create accounts or accept a marketplace's terms without the CEO.
+Submitting is public and requires the authorized server publication gateway and explicit approval of each exact public item. Account creation and acceptance of marketplace terms need the CEO's authorization; no listing plan grants credentials. Unknown delivery must be verified before resubmission, and changing or deleting a live listing needs approval.

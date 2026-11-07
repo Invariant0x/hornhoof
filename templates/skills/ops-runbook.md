@@ -5,16 +5,18 @@ description: { en: "Writes and keeps step-by-step instructions for recurring tas
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md]
 ---
-A runbook lets the next agent fix a known problem without rediscovering it. Write one when you solve something for the second time, and after every postmortem.
+Write or update the runbook for the recurring task or known failure in the assignment. It must let another authorized operator act without rediscovering the diagnosis.
 
-Each runbook has:
+Include:
 
-- **When to use**: the symptoms, error texts or alerts that point to it.
-- **Before you start**: the access needed, what must be true, the risk of the steps.
-- **Steps**: numbered, one action each, with the exact command or click and what you should see after it.
-- **If a step fails**: what to do instead, or when to stop and escalate.
-- **Check**: how you know it is fixed.
-- **Rollback**: how to undo the steps.
-- **Owner and last tested**: role and date.
+- **When to use**: matching symptoms, errors or alerts, and cases it does not cover.
+- **Prerequisites**: required access, known state, risk and approvals.
+- **Steps**: numbered single actions with exact commands or clicks and expected results.
+- **If a step fails**: a safe alternative or a clear stopping and escalation condition.
+- **Check**: observable proof of recovery.
+- **Rollback**: tested steps back, or an explicit gap requiring a decision before execution.
+- **Owner and last tested**: responsible owner, date, environment and result.
 
-Commands name secret store entries, never their values. Test a new runbook once on the real problem or a safe copy before you mark it ready. When a runbook was wrong during an incident, fix it before the next incident.
+Commands reference secret store entry names, never values. Test the changed procedure on the real problem or a safe copy through the approved check route before calling it usable. Record steps that failed and their corrections.
+
+A runbook cannot grant permission or bypass approval. Urgent, small, named work and review fixes retain protected human approval and an independent Security engineer's pass before shared merge for access, root, permissions or secrets changes. For prepared test environments, retain pinned fingerprints, private mutable attempt state and approved provisioning; never prescribe running-container patches, host sockets or node credentials in product tests.

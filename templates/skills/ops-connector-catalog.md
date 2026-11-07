@@ -5,16 +5,17 @@ description: { en: "Keeps one list of the outside services the company is connec
 kind: procedure
 sources: [anthropics/knowledge-work-plugins customer-support/CONNECTORS.md]
 ---
-The catalog lets other departments ask for a capability, such as "CRM", "email sending" or "payments sandbox", without knowing which product sits behind it. Keep it where your company named, one entry per connector:
+Maintain the connector catalog named in the assignment. It lets users request a capability, such as contact lookup or a payments sandbox, without guessing which service supplies it. Keep one entry per connector:
 
-- **Capability**: the plain name departments use.
-- **Service**: the product and plan behind it.
-- **How**: API, MCP server or installed tool, with its version.
-- **Actions allowed**: read, write, send, delete, spend. Anything not listed is not allowed.
-- **Who may use it**: departments and roles, and which actions need an approval first.
-- **Credentials**: the name of the secret store entry, never the secret itself.
-- **Limits and cost**: rate limits, quotas, price per use.
-- **Owner and check**: who fixes it and the smoke test that proves it works.
-- **Last checked**: date and result of the last smoke test.
+- Capability in plain words.
+- Service and plan.
+- API, MCP server or installed tool, with a pinned version.
+- Allowed actions: read, write, send, delete or spend; an unlisted action is not permitted.
+- Authorized users and approvals required for each action.
+- Secret store entry names, never values.
+- Rate limits, quotas and cost per use.
+- Responsible owner, harmless smoke test, last check date and result.
 
-When you add or change a connector, update its entry in the same piece of work. Run each smoke test at least once per turn and after every change; a failed test marks the entry broken and goes to your head. Remove entries for services the company no longer uses, together with their access.
+Update the entry when the assigned connector changes. During an assigned audit, compare entries with the actual authorized setup and run the relevant harmless smoke tests through the approved check route. Mark failures as broken with their evidence. Propose retirement for unused entries; revoke access or delete resources only with the required authorization.
+
+The catalog records permissions; it does not grant them. Access, root, permissions or secrets changes require an independent Security engineer's pass before shared merge on the exact candidate, including urgent, small, named work and review fixes. Spending and irreversible actions retain human approval.

@@ -5,6 +5,8 @@ description: { en: "Measures first, fixes the biggest cost, and proves the gain 
 kind: procedure
 sources: [affaan-m/ECC agents/performance-optimizer.md, addyosmani/agent-skills skills/performance-optimization/SKILL.md, garrytan/gstack review/specialists/performance.md]
 ---
+You can measure a defined performance problem and verify a useful improvement.
+
 1. **Define the problem as a number**: which action, how slow, for how much data, how fast it must be; a frame or response budget where the product has one.
 2. **Measure** the real thing with a profiler, query plans, timings, memory or build sizes. Do not guess where time goes.
 3. **Fix the biggest cost first**: a query in a loop, a missing index, work repeated on every frame or render, a payload far larger than shown, a blocking call.

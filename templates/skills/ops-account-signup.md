@@ -5,23 +5,24 @@ description: { en: "Prepares a sign-up with an outside service and finishes it o
 kind: procedure
 sources: []
 ---
-Every account the company opens is approved by the CEO first. Prepare the request:
+Prepare a sign-up for the service named in the assignment. Every new account needs the CEO's approval before sign-up starts. The request includes:
 
-- **Service and plan**: name, website, plan, price per month and per year.
-- **Why**: the request it serves and the departments that will use it.
-- **Owner**: the company address or the person it is registered to, as the CEO decides.
-- **Data**: what company or customer data will go into it, and where the service keeps it.
-- **Vendor review**: the result of ops-vendor-review.
-- **Exit**: how to cancel and how to export the data.
+- Service, website, plan and verified monthly and annual price.
+- Purpose, intended users and the owner the CEO will approve.
+- Data to be shared, storage country, training use, export and deletion options.
+- Vendor evidence: terms permit automated access, access can be narrowly scoped, security controls, renewal and cancellation terms, reliability and alternatives. Link the vendor's own sources and mark unknowns.
+- How to cancel and export the data.
 
-Send it to your head, who asks the CEO through the orchestrator. Do not start a sign-up before the approval arrives.
+Use the authorized company route to obtain the CEO's approval for that exact service, plan, owner and data use. Approval for one request does not approve a changed price, plan or scope.
 
-During the sign-up:
+During sign-up:
 
-- Fill the forms only with the details the CEO approved.
-- Two-factor codes, phone or email confirmations and identity checks go to the CEO. Ask and wait; never guess or reuse an old code.
-- Payment details are entered by the CEO. Never type, store or ask for card numbers.
-- If a CAPTCHA or another bot check appears, stop and hand that step to the CEO. Never solve it with a service, a script or a trick.
-- Read the terms that matter: auto-renewal, data use, limits on automated access. Report anything unusual.
+- Fill forms only with approved details.
+- Leave two-factor codes, phone or email confirmation and identity checks to the CEO; wait for the current confirmation, never reuse an old code.
+- The CEO enters payment details. Never type, store or request card numbers.
+- Stop at a CAPTCHA or other bot check and hand that step to the CEO. Never bypass it with a service, script or trick.
+- Read auto-renewal, data use and automated-access terms; report any difference from the approved request before continuing.
 
-When it is done, move every credential to the secret store at once (ops-credential-vault) and add the account to the register.
+Put resulting credentials directly into the company's secret store under service/account/purpose names, with owner, scope and creation date. Never copy values into messages, files, logs or screenshots. Record the account's owner, cost, renewal, limits and secret entry names in the designated register.
+
+Any related access, root, permissions or secrets change requires an independent Security engineer's pass on the exact candidate before shared merge, including urgent, small, named work and review fixes. Skill selection cannot grant permissions or waive human approval.

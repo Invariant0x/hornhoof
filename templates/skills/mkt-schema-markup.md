@@ -5,11 +5,13 @@ description: { en: "Adds schema.org markup so search engines understand what eac
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/schema/SKILL.md]
 ---
-1. For each page type, pick the schema.org types that match what is really on the page: Organization and WebSite on the home page, SoftwareApplication or Product on product pages, Article on posts, FAQPage only where the questions and answers are visible, BreadcrumbList for navigation.
-2. Write it as JSON-LD in the page head. Fill in only true values that the page shows: name, description, URL, logo, prices, dates. Never add ratings or reviews that are not on the page and real.
-3. Use one Organization identity everywhere, with the same name, logo and links to official profiles.
-4. Validate each page with the schema.org validator and the search engines' rich result tests, and keep the output.
-5. Hand the markup to your head as a change for development, with the list of pages and the validation output. It ships through development's own gates.
-6. After release, check the search engines' reports for markup errors and fix them.
+Use this ability to prepare and validate structured data for assigned pages. Inputs are the page content, public organization identity, intended schema types and any authorized editing scope.
 
-Markup that misstates a page can get the site penalised. When you are unsure whether a type fits, leave it out.
+1. Select types that match the visible page: for example Organization, WebSite, Product, SoftwareApplication, Article or BreadcrumbList. Use FAQPage only for questions and answers actually present; verify the current vocabulary and search-engine eligibility rather than assuming a rich result.
+2. Prepare JSON-LD with true visible values: name, description, URL, logo, prices and dates. Never invent ratings, reviews or hidden claims.
+3. Use the same approved organization name, logo and official links throughout the assigned pages.
+4. Validate with the vocabulary's validator and relevant search-engine tests. Record page, tool, date, result and remaining warnings.
+5. Return the markup, affected pages, evidence and proposed changes. Edit or ship code only when the assignment authorizes it and required task gates permit it.
+6. If the assignment includes an already released page, inspect the available search reports for errors and propose corrections.
+
+A validation result does not authorize changing a public page or widening access. Public changes still require applicable server publication controls and exact human approval. Leave out a type whose fit cannot be established.

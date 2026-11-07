@@ -1,41 +1,30 @@
 ---
 id: dev-gates
-title: { en: "The path of a turn", ru: "Путь хода" }
+title: { en: "Choose development checks", ru: "Выбирать проверки разработки" }
 description: { en: "Moves each turn through four gates in order: development, review, testing and release. Review and testing run once per turn.", ru: "Проводит каждый ход через четыре ворот по порядку: разработка, ревью, тестирование и выпуск. Ревью и тестирование идут один раз за ход." }
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m/ECC skills/council-multi-model/SKILL.md, affaan-m/ECC skills/santa-method/SKILL.md]
 ---
-A turn is a sprint. It passes four gates in order, and each opens when the one before it is done. Rules here name order and conditions, never units of time. Who runs which check is in dev-testing-policy.
+You can choose and enforce a development check route for an assigned change.
+
+Read the employee's assignment, task acceptance, declared risk and actual gates. Skill selection supplies abilities, not a mandatory pipeline. A standalone named order may be completed by its assigned owner; shared review, testing and release stages exist only when the task assigns them. A turn is a sprint, with order and conditions rather than fixed units of time.
 
 ## Security before integration
 
-Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This gate applies to urgent work, small tasks and direct named orders, including fixes from a review. Self-review does not replace this gate. This rule takes precedence over fast paths, tasks without gates and the no-second-review rule.
+Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate. This protected condition takes precedence over small/fast paths, tasks without gates and a no-second-review convention. If the required independent reviewer is unavailable, keep the branch separate and report the missing approval.
 
 ## Development
 
-- **Design for a large block.** Architects of different models each propose a solution on their own and write no code; the head, as arbiter, picks one or merges them into one design note, which the block waits on.
-- **One owner for a connected block.** It goes whole to one developer, with no chains or `after` between developers. Two developers work on separate features, never on the same task.
-- **Work goes out without gates**, subject to the pre-merge Security gate above, under the department's task of the turn. A developer makes the change and runs the check assigned by the head, submits, and merges into the turn's branch after the required gates pass. An author's own review, where the role has one, comes before this and replaces no later gate.
-- **Small tasks** (`small: true`) follow the assignment and check chosen by the head under the shared small-task rule, subject to the pre-merge Security gate above.
+Keep a connected block with one owner and resolve shared-file collisions. A design step is needed only when the assignment or missing architecture requires it. For small work preserve context, state the change and its check briefly, and omit unnecessary process. The owner may choose a visual check for a simple visual change; required approvals remain.
 
 ## Review
 
-One review per turn, on what the turn changed. When the department's last work of the turn is in, Hornhoof opens the review of the turn: of each gate role one reviewer of each provider, the least busy, checks everything the turn changed on its branch at the same time, and each runs its program's own review. Reviewers verify the author's affected-test evidence without rerunning its checks.
-
-- **Who reviews.** Code review checks the code, the tests and obvious security problems. Security, when it is on, checks what touches access, sign-in, secrets or permissions. Red team, when on, checks the changed logic and flows. Security and red team join for declared money/access/security/data risk, sensitive changed paths, risky added diff or explicit pre-release mode, which a head requests with `Review mode: pre-release` in a covered task body header. A missing or incomplete trusted comparison wakes both. Harmless UI/text outside these triggers does not wake either.
-- **Never the author.** Whoever made a piece of work does not pass its gate.
-- **Other providers check.** Reviewers run on other providers than the developer when you have them. With only one provider, use a fresh session on another tier and say "cross-check degraded" in your status.
-- **The verdicts come to the head in one list**, what blocks first. The head gives each blocking finding as a fix task without gates to the member whose change it is, all at once, subject to the pre-merge Security gate above. Each fix starts with a test that fails and then passes; there is no second review of the whole turn, while the pre-merge Security gate still applies. A note that does not block goes into those tasks only when it is cheap.
-- **A gate on one task** enforces the pre-merge Security rule above or protects work that must not reach the turn's branch unchecked, such as a migration that rewrites existing data. Research, reports, plans, docs and the architect's design note otherwise never get one; the head reads them when they come back. At such a gate **a second round checks only the fixes**, by the reviewers who sent it back, each for its own findings; one that passed is not asked again.
+When an independent review is assigned, the author cannot pass it. Read the exact comparison and existing author evidence, use the assigned scope and report all blocking findings together. Check code, tests and obvious security problems; sensitive access/sign-in/secrets/permissions and data risks require the independent expertise the task and protected condition demand. Prefer another provider where available and report degraded independence honestly. A scoped return checks its original findings and new breakage, not unrelated unchanged work.
 
 ## Testing
 
-Once per turn, with the turn's branch frozen: nothing enters it now but the fixes this gate returns. The head assigns a test engineer or QA to run the final check once per turn on the final pinned commit, as T3 in dev-testing-policy lists it. Coordinate ownership so each check runs once, through run_tests on a compatible free machine, in parts when its runner can split. After fixes run only what failed and the tests around it; do not repeat the whole suite for each fix. Where the manifest declares a full run, `run_tests` without a command on the final profile and the turn's branch is this check and does the choosing itself: it runs the groups in parallel on free machines, a test file proved green on the main branch or the turn's at the same fingerprint does not run again, and on the turns the manifest names everything runs. Read its result for failed files and for any mismatch with the kept results; a mismatch is a finding. Acceptance and QA run once per turn, on the turn's branch, against these results.
+When broader validation is assigned, one owner freezes the exact candidate and coordinates required suites, types/build/language checks, user-facing surfaces and quality measurements. Use run_tests on compatible free machines and read every part's actual SHA and full log. Reuse a proved result only for the same candidate/fingerprint; after fixes rerun what failed and what changed, rather than starting duplicate full runs. A missing or refused stage is NOT_RUN, never PASS.
 
 ## Release
 
-The CEO's word on the exact commit; nothing else reaches the main line. The update then reaches machines one at a time.
-
-## Beside the gates
-
-Improvement lanes run in the background and hold nobody. Performance and the released-version red team inspect released work and open ordinary next-turn tasks with measurements that become tests, never task or turn gates.
+Release requires actual passed required checks, release notes, a tested rollback and the authorized human's approval of the exact commit. Publication and live updates use the project's approved route. Merely having an ability never authorizes an action on another person's machine or a public release.
