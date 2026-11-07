@@ -15,7 +15,7 @@ vi.mock('node:fs/promises', async original => {
 });
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { companies, departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
+import { departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
 import { harnessGreeted, harnessRound, harnessSynced } from '../src/modules/testruns/harness.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { nextOf, type FakeNode } from './helpers.js';
@@ -53,6 +53,13 @@ function pauseIO(operation: string) {
 afterEach(() => { io.pause = null; });
 
 describe('harness access and attempt fences', () => {
+  it('lets an old node build locally without giving it an unfenced shared claim', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'old');
+    const response = await c.app.inject({ method: 'POST', url: '/api/harness/claim', headers: { authorization: 'Bearer ' + one.key }, payload: c.unit() });
+    expect(response.json()).toEqual({ state: 'local' });
+    expect(await c.db.select().from(harnessBuilds)).toEqual([]);
+  });
+
   it.each(['subscription', 'access', 'lending', 'machine'])('rejects every write after revoking %s, without publication or a head wake', async revoked => {
     const c = await shared(), one = await c.machine(c.ann, 'builder'), bytes = Buffer.from('private');
     await c.claim(one.key); await c.part(one.key, 0, bytes);
@@ -128,8 +135,7 @@ describe('harness access and attempt fences', () => {
     const c = await shared(); await c.builtin();
     await c.claim('builtin-node-key-0123456789abcdef');
     const bytes = Buffer.from('company one'); await c.uploaded('builtin-node-key-0123456789abcdef', bytes);
-    const [other] = await c.db.insert(companies).values({ name: 'Other' }).returning();
-    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': other!.id } });
+    const response = await c.app.inject({ method: 'GET', url: '/api/harness/' + KEY + '/bundle', headers: { authorization: 'Bearer builtin-node-key-0123456789abcdef', 'x-harness-company': '33333333-3333-4333-8333-333333333333' } });
     expect(response.statusCode).toBe(404);
   });
 });
