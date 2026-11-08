@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskWaits } from '../src/db/schema.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
-import { BASE, FIRST, fixture } from './development-echelons-fixture.js';
+import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
 describe('waits follow the required checking owner', () => {
   it('binds Review to its current candidate and ends that wait on forward handoff', async () => {
@@ -11,7 +11,7 @@ describe('waits follow the required checking owner', () => {
     const candidateId = (await f.detail()).echelons.candidateId;
     const open = () => f.db.select().from(taskWaits).where(and(eq(taskWaits.taskId, f.task.id), eq(taskWaits.kind, 'review'), isNull(taskWaits.endedAt)));
     expect(await open()).toEqual([expect.objectContaining({ ownerAgentId: f.reviewer.id, sourceKey: `review:${f.task.id}:review:${candidateId}:${f.reviewer.id}` })]);
-    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Correct.', reviewedCommit: FIRST });
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Correct.', reviewedCommit: HEAD });
     expect(await open()).toEqual([]);
   });
 });

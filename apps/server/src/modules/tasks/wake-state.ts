@@ -134,7 +134,6 @@ export async function discardStaleTurn(db: Store, job: TaskTurn): Promise<boolea
     .innerJoin(agents, eq(agents.id, job.agentId)).innerJoin(jobs, eq(jobs.id, job.id)).where(eq(tasks.id, job.taskId));
   if (!row) throw new Error('A queued task turn lost its task or agent.');
   const state = await stateOf(db, job.id);
-  if (state === null && legacyNotice(row.task, job.agentId, row.kind, row.job.prompt)) return false;
   if (await applies(db, row.task, job.agentId, state)) return false;
   await recordStale(db, job.id, job.agentId, row.task, runOf(row.job, state), 'queued');
   return true;
