@@ -2,7 +2,9 @@ import { eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 
 async function company() {
@@ -122,11 +124,15 @@ describe('tasks for people', () => {
     expect(turns[0]!.prompt).toContain('Not now.');
   });
 
-  it('keeps an employee who holds or does an open task, and takes it off the gates it has not reached', async () => {
+  it('keeps a current owner and clears a removed future owner without dropping Review', async () => {
     const { app, ctx, db, ceo, head, bruno, dev, hire } = await company();
     const rita = await hire('Rita', 'worker', 'DEV-REV');
-    const ira = await hire('Ira', 'worker', 'DEV-QA');
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id, ira.id] });
+    const ira = await hire('Ira', 'worker', 'DEV-REV');
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+    for (const agent of [bruno, ira]) await db.update(agents).set({ model: 'claude-opus-5-5', skills: ctx.templates.roles.get(agent.roleKey!)!.skills.filter(s => s.on).map(s => s.id) }).where(eq(agents.id, agent.id));
+    ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id });
     const remove = (id: string) => app.inject({ method: 'DELETE', url: `/api/agents/${id}`, ...as(ceo) });
     const refused = await remove(bruno.id);
     expect(refused.statusCode).toBe(409);
@@ -134,8 +140,10 @@ describe('tasks for people', () => {
     expect(refused.json().error.message).toContain('#1');
     expect((await remove(rita.id)).statusCode).toBe(204);
     const [now] = await db.select().from(tasks).where(eq(tasks.id, task.id));
-    expect(now!.gates).toEqual([ira.id]);
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    expect(routeSnapshot(await routeOf(db, now!), now!.assigneeAgentId).stages).toContainEqual(expect.objectContaining({ stage: 'review', status: 'pending', ownerAgentId: null }));
+    const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    expect(sent.task.assigneeAgentId).toBe(ira.id);
+    expect(routeSnapshot(await routeOf(db, sent.task), ira.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: ira.id });
     expect((await remove(ira.id)).json().error.reason).toBe('agent_has_tasks');
   });
 

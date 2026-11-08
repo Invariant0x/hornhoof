@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
 import type { StreamMessage } from '../src/modules/events/bus.js';
 import { answer, ask, cancel, createTask, report, submit } from '../src/modules/tasks/engine.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -13,12 +14,14 @@ async function company() {
   const [ceo] = await db.select().from(people);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const heard: StreamMessage[] = [];
   app.ctx.bus.subscribe(companyId, m => heard.push(m));
   /* The pulses since the last look, as from -> to. */
@@ -49,8 +52,8 @@ describe('pulses on the map for tasks', () => {
     const { ctx, CEO, dev, head, bruno, rita, pulses } = await company();
     const parent = (await createTask(ctx, CEO, { title: 'Icons', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     pulses();
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Chips', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id] });
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Chips', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id });
+    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
     await cancel(ctx, { agentId: head.id }, task.id, 'Not needed.');
     expect(pulses()).toEqual([`agent:${head.id} -> agent:${bruno.id}`, `agent:${bruno.id} -> agent:${rita.id}`]);
   });
