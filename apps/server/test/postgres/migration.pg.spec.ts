@@ -14,9 +14,14 @@ it('upgrades nonempty 0059 rows through candidate migrations and preserves data 
   expect(before.rows.test_parts).toHaveLength(1);
   expect(before.rows.subscriptions![0]).not.toHaveProperty('limits_updated_at');
   expect(before.rows.test_runs![0]).not.toHaveProperty('commit_sha');
+  expect(before.rows.agents).toMatchObject([{ kind: 'worker', role_key: 'DEV-BE', skills: [] }]);
   await migrateCandidate(fixture.db);
   const after = await savedRows(fixture);
-  for (const [table, rows] of Object.entries(before.rows)) expect(after[table], `preserved ${table}`).toMatchObject(rows);
+  for (const [table, rows] of Object.entries(before.rows)) {
+    // Migrations 0084 and 0085 add these abilities to the existing developer.
+    const expected = table === 'agents' ? rows.map(row => ({ ...row, skills: ['dev-task-flow', 'hh-work-fast'] })) : rows;
+    expect(after[table], `preserved ${table}`).toMatchObject(expected);
+  }
   expect(after.subscriptions!.map(row => row.limits_updated_at)).toEqual([null, null]);
   expect(after.test_runs![0]).toMatchObject({ id: UPGRADE_RUN, number: 9, commit_sha: null });
   expect(after.test_parts![0]).toMatchObject({ id: UPGRADE_PART, run_id: UPGRADE_RUN, part: 1, status: 'passed' });
