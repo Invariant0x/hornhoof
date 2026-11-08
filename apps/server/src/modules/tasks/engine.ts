@@ -289,7 +289,7 @@ export function published(ctx: Pick<Ctx, 'bus'>, task: Task): void {
 
 /* Whoever gave the task, when that was an agent other than the one acting. */
 export const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[] =>
-  task.createdByAgentId && task.createdByAgentId !== actorId ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
+  task.createdByAgentId && task.createdByAgentId !== actorId && !(task.parentId && (why === 'done' || why === 'reported')) ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
 
 /* Whoever gave out a task that is done hears it only for a task of its own: work under a bigger task is heard of once,
    when the last of it closes. */

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, people, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask, report } from '../src/modules/tasks/engine.js';
 import { setUpCompany, statements, testApp } from './helpers.js';
 
@@ -46,9 +46,7 @@ describe('completion notices after checked work closes', () => {
   it('notifies the current parent owner after a reassignment', async () => {
     const f = await company();
     const child = await f.member();
-    await f.db.update(agents).set({ name: 'Current owner' }).where(eq(agents.id, f.head.id));
     const [other] = await f.db.insert(agents).values({ companyId: f.head.companyId, name: 'Coordinator', kind: 'worker', roleKey: 'DEV-BE', departmentId: f.head.departmentId, model: 'claude-opus-5-5', subscriptionId: f.head.subscriptionId }).returning();
-    const { tasks } = await import('../src/db/schema.js');
     await f.db.update(tasks).set({ assigneeAgentId: other!.id }).where(eq(tasks.id, f.parent.id));
     expect(woken(await f.done(child.id))).toEqual([[other!.id, 'subtasks']]);
   });
