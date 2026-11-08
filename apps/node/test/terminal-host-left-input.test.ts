@@ -446,10 +446,11 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
 
   it.each(KINDS)('%s: what a person sends while the assignment waits is theirs, and the assignment goes in after it, in the same turn', kind => sendsWhileWaiting(kind));
 
-  /* Kimi Code tells of a prompt twice: by its hook, and then in its log. */
+  /* Kimi Code tells of a prompt twice: by its hook, and then in its log. It clears its input as it takes words, so the
+     assignment can go in while it has told of them by neither; Claude Code's fake shows them until it answers. */
   it('kimi: what a person sends while the assignment waits stays theirs when the log tells of it once the assignment started to go in', () => sendsWhileWaiting('kimi', 'log'));
 
-  it.each(['claude', 'kimi'] as const)('%s: what a person sends while the assignment waits stays theirs when the program tells of it once the assignment started to go in', kind => sendsWhileWaiting(kind, 'hook'));
+  it('kimi: what a person sends while the assignment waits stays theirs when the program tells of it once the assignment started to go in', () => sendsWhileWaiting('kimi', 'hook'));
 
   it('says a stopped turn was stopped when it stops while waiting for a person to finish', async () => {
     const { key, sessionId } = await started('codex', { typingQuietMs: 60_000, readyMs: 60_000 });
