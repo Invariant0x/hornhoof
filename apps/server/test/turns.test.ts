@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, improvements, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, improvements, jobs, people, subscriptions, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -479,8 +479,13 @@ describe('turns', () => {
   it('lists every open task for the tracker even after many newer closed ones', async () => {
     const { db, companyId, orchestrator, dev, tools, ceoToken, get } = await company();
     await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, number: i + 2, title: `Old ${i}`, status: 'done' as const, closedAt: new Date() })));
-    const all = (await get(ceoToken, '/api/tasks?status=all')).json().tasks as { number: number }[];
+    const history = await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, number: i + 2, title: `Old ${i}`, status: 'done' as const, closedAt: new Date() }))).returning();
+    /* Closed coordination history has a terminal route and no invented executable check. */
+    const state: typeof taskRoutes.$inferInsert['state'] = { kind: 'development_echelons', version: 1, resultKind: 'coordination', stage: null, phase: 'done', candidateId: null, assignment: null, stages: [], security: { required: false, reason: null, addedBy: null } };
+    await db.insert(taskRoutes).values(history.map(task => ({ taskId: task.id, companyId, state, paths: [] })));
+    const listed = await get(ceoToken, '/api/tasks?status=all');
+    expect(listed.statusCode, listed.body).toBe(200);
+    const all = listed.json().tasks as { number: number }[];
     expect(all.some(t => t.number === 1)).toBe(true);
   });
 
