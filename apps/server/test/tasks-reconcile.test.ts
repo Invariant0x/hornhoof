@@ -30,6 +30,7 @@ async function company() {
   ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const ready = vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
+  vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
   let number = 0;
   const at = new Date(Date.now() - 10 * MIN);
@@ -42,6 +43,7 @@ async function company() {
   const ageMoves = async (id: string) => {
     await db.update(taskEvents).set({ createdAt: at }).where(eq(taskEvents.taskId, id));
     await db.update(tasks).set({ updatedAt: at }).where(eq(tasks.id, id));
+    await db.update(pendingWakes).set({ createdAt: at }).where(eq(pendingWakes.taskId, id));
   };
   const reviewTask = async (set: Partial<typeof tasks.$inferInsert> = {}) => {
     const row = await task(set);
@@ -204,8 +206,9 @@ describe('work whose move lost its wake', () => {
     const agent = kind === 'worker' ? c.bruno : c.head;
     const task = await c.task({ status: 'working', assigneeAgentId: agent.id, executorAgentId: kind === 'worker' ? agent.id : null });
     const job = await c.job({ agentId: agent.id, taskId: kind === 'worker' ? task.id : null, status: 'running', startedAt: new Date(Date.now() - MIN) });
-    await updateTask(c.ctx, agent.id, task.id, { body: 'The total includes tax.' });
-    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Updated the task.', tail: '', error: null, sessionId: null });
+    if (kind === 'worker') await submit(c.ctx, agent.id, task.id, { summary: 'Candidate', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    else await updateTask(c.ctx, agent.id, task.id, { body: 'The total includes tax.' });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Moved the task.', tail: '', error: null, sessionId: null });
     await c.round(new Date(Date.now() + 3 * MIN));
     expect(await c.turnsOf(agent.id)).toEqual([expect.objectContaining({ id: job.id, status: 'done' })]);
   });
@@ -285,7 +288,10 @@ describe('work whose move lost its wake', () => {
     const task = await c.reviewTask({ turnId: turn!.id });
     const snapshot = await c.snapshot(task.id);
     await c.round();
-    expect(await c.turnsOf(c.rita.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining(HEAD) })]);
+    const [job] = await c.turnsOf(c.rita.id);
+    expect(job).toMatchObject({ taskId: task.id, status: 'running' });
+    const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, job!.id), eq(agentEvents.kind, 'message')));
+    expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ taskWake: expect.objectContaining({ stage: 'review', candidateId: snapshot.candidateId }) }) })]));
     expect(await c.turnsOf(c.head.id)).toHaveLength(0);
     expect(await c.turnsOf(c.bruno.id)).toHaveLength(0);
     expect(await c.snapshot(task.id)).toMatchObject({ stage: 'review', ownerAgentId: c.rita.id, candidateId: snapshot.candidateId });
@@ -296,10 +302,14 @@ describe('work whose move lost its wake', () => {
     const task = await c.reviewTask();
     await verdict(c.ctx, c.rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the candidate.' });
     await c.ageMoves(task.id);
+    const snapshot = await c.snapshot(task.id);
     await c.round();
     expect(await c.turnsOf(c.rita.id)).toHaveLength(0);
     expect(await c.turnsOf(c.head.id)).toHaveLength(0);
-    expect(await c.turnsOf(c.tess.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining(HEAD) })]);
+    const [job] = await c.turnsOf(c.tess.id);
+    expect(job).toMatchObject({ taskId: task.id, status: 'running' });
+    const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, job!.id), eq(agentEvents.kind, 'message')));
+    expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ taskWake: expect.objectContaining({ stage: 'tests', candidateId: snapshot.candidateId }) }) })]));
     expect((await c.snapshot(task.id)).stage).toBe('tests');
   });
 
