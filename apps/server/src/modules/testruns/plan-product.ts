@@ -29,6 +29,7 @@ function finalSuites(input: PreparedEnvironmentPlanInput, onceIds: string[]): st
   return input.snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id);
 }
 async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units']): Promise<EnvironmentPartPlan | null> {
+  if (input.snapshot.candidate && !input.units.length) return null;
   const complete = await planEnvironmentParts(input);
   if (remaining.length === input.units.length) return complete;
   return remaining.length ? planEnvironmentParts({ ...input, units: remaining, purpose: 'affected' }) : null;
@@ -78,5 +79,6 @@ export async function planProductParts(input: ReusingInput): Promise<ProductPlan
   const leaves = preparationLeaves(input, preparation);
   leaves.push(...batchLeaves(input, planned, preparation !== undefined));
   leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));
-  return { leaves, estimate: planEstimate(planned), reason: planReason(preparation, planned) };
+  const reason = input.snapshot.candidate && !input.units.length ? 'No canonical test unit has a changed influencing fingerprint at the bound base and final commit.' : planReason(preparation, planned);
+  return { leaves, estimate: planEstimate(planned), reason };
 }
