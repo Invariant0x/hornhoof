@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, taskEvents, tasks, testParts, turns } from '../src/db/schema.js';
+import { agents, taskEvents, taskRoutes, tasks, testParts, turns } from '../src/db/schema.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
+import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { BASE, FIRST, SECOND, fixture, rejectedFinding } from './review-fixture.js';
 
 describe('pinned review provenance', () => {
@@ -148,12 +149,17 @@ describe('explicit finding confirmation', () => {
     const [baseline] = await f.db.insert(turns).values({ companyId, number: 7, title: 'Baseline', goal: '', status: 'closed', openedAt: new Date(Date.now() - 10000), closedAt: new Date(Date.now() - 5000) }).returning();
     const [current] = await f.db.insert(turns).values({ companyId, number: 8, title: 'Current', goal: '', status: 'open', openedAt: new Date() }).returning();
     const [old] = await f.db.insert(tasks).values({ companyId, number: 100, turnId: baseline!.id, departmentId: f.author.departmentId, title: 'Legacy review', brief: '', body: '', status: 'done', executorAgentId: f.head.id, closedAt: new Date() }).returning();
+    await f.db.transaction(async tx => {
+      await createRoute(tx, old!, {});
+      const route = await routeOf(tx, old!);
+      await tx.update(taskRoutes).set({ state: { ...route.state, stage: null, phase: 'done', stages: [] } }).where(eq(taskRoutes.taskId, old!.id));
+    });
     await f.db.insert(taskEvents).values({ companyId, taskId: old!.id, kind: 'verdict', agentId: f.reviewer.id, text: 'Legacy', data: { pass: true, findings: 7 } });
     await f.db.update(tasks).set({ turnId: current!.id }).where(eq(tasks.id, f.task.id));
     expect((await f.confirm()).isError).toBeFalsy();
     const [orchestrator] = await f.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const result = await (await f.tools(orchestrator!)).callTool({ name: 'pipeline_report', arguments: { turn: 8 } });
-    expect(result.isError).toBeFalsy();
+    expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
     expect(JSON.parse((result.content as { text: string }[])[0]!.text).reviewFindings).toMatchObject({
       current: { confirmedCount: 1, byVendor: [{ vendor: 'codex', count: 1, findingIds: [f.finding.findingId] }] },
       baseline: { confirmedCount: null, status: 'unavailable', reason: 'finding-provenance-unavailable' },
