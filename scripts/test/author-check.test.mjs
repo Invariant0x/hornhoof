@@ -32,8 +32,8 @@ function given({ changes = CHANGES, suites = [vitestSuite], selection, hunks = {
     selection: selection ?? { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }], notes: [] } };
 }
 function fake(answer = () => undefined, files = FILES) {
-  const calls = [], lines = [];
-  return { calls, lines, log: line => lines.push(line), read: path => files[path] ?? null, mkdir: () => {},
+  const calls = [], lines = [], values = { ...files };
+  return { calls, lines, log: line => lines.push(line), read: path => values[path] ?? null, write: (path, text) => { values[path] = text; }, mkdir: () => {},
     exec: async (program, args, options) => { calls.push({ program, args, cwd: options.cwd }); return answer(program, args) ?? { code: 0, output: '' }; } };
 }
 const stage = (result, name) => result.stages.find(item => item.name === name);
@@ -144,6 +144,16 @@ test('tests run once, on the selected files, and crapper reads the coverage of t
   assert.deepEqual(named(ports, 'crapper'), [{ program: 'crapper', args: ['--use-existing-coverage', 'src/a.ts'], cwd: 'apps/node' }]);
 });
 
+test('Vitest coverage includes are relative to its project root when the command runs at the repository root', async () => {
+  const suite = { ...vitestSuite, run: { ...vitestSuite.run, cwd: '.', args: ['--no-install', 'vitest', 'run', '--config', 'vitest.product.config.mjs', '--project=@hornhoof/node'] } };
+  const ports = fake(undefined, { [REPORT]: FILES[REPORT], 'coverage/lcov.info': 'SF:apps/node/src/a.ts\nDA:1,1\nDA:2,1\nDA:3,1\nend_of_record\n', '.metrics/crap.edn': FILES[CRAP] });
+  const result = await runStages(given({ suites: [suite] }), ports);
+  const run = named(ports, 'npx').find(call => call.args.includes('vitest'));
+  assert.ok(run.args.includes('--coverage.include=src/a.ts'));
+  assert.equal(run.args.includes('--coverage.include=apps/node/src/a.ts'), false);
+  assert.deepEqual(result.numbers.changedLines, { covered: 3, total: 3 });
+});
+
 test('a suite run by node has its own coverage and counts from the same run', async () => {
   const suite = { id: 'scripts', root: 'scripts', files: ['scripts/test/*.test.mjs'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, finalChecks: [] };
   const changes = [{ path: 'scripts/a.mjs', kind: 'modified' }];
@@ -159,10 +169,51 @@ test('a suite run by node has its own coverage and counts from the same run', as
   assert.deepEqual([stage(result, 'tests').status, stage(result, 'tests').exitCode], ['failed', 1]);
 });
 
+test('coverage of two selected suites sharing a working directory survives both executions', async () => {
+  const node = { ...vitestSuite, run: { ...vitestSuite.run, cwd: '.' }, finalChecks: [] };
+  const scripts = { id: 'scripts', root: 'scripts', run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, finalChecks: [] };
+  const paths = ['apps/node/src/a.ts', 'scripts/a.mjs'];
+  const selection = { packages: [{ packageId: 'node', mode: 'whole-package', units: [unit('apps/node/test/a.test.ts')] }, { packageId: 'scripts', mode: 'whole-package', units: [{ suiteId: 'scripts', file: 'scripts/test/a.test.mjs', selectionUnit: 'scripts/test/a.test.mjs' }] }], notes: [] };
+  const ports = fake((program, args) => {
+    if (args.includes('vitest')) ports.write('coverage/lcov.info', 'SF:apps/node/src/a.ts\nDA:1,1\nend_of_record\n');
+    if (program === 'node') ports.write('coverage/lcov.info', 'SF:scripts/a.mjs\nDA:1,1\nend_of_record\n');
+  }, { ...FILES, '/tmp/check/tests-scripts.tap': '# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n', '.metrics/crap.edn': edn(['a', 'a', 2, 100, 2]) });
+  const result = await runStages(given({ changes: paths.map(path => ({ path, kind: 'modified' })), suites: [node, scripts], selection, hunks: Object.fromEntries(paths.map(path => [path, [[1, 1]]])) }), ports);
+  assert.deepEqual(result.numbers.changedLines, { covered: 2, total: 2 });
+});
+
+test('a mixed opaque suite keeps the total unknown while its execution can pass', async () => {
+  const selection = { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }, { packageId: 'ruby', mode: 'whole-package', units: [] }], notes: [] };
+  const result = await runStages(given({ suites: [vitestSuite, opaqueSuite], selection }), fake());
+  assert.equal(stage(result, 'tests').status, 'passed');
+  assert.equal(result.numbers.tests, null);
+});
+
 test('a test report that cannot be read leaves the count unknown, never zero', async () => {
   const files = { ...FILES }; delete files[REPORT];
   const result = await runStages(given(), fake(undefined, files));
   assert.equal(result.numbers.tests, null);
+  assert.equal(stage(result, 'tests').status, 'unavailable');
+});
+
+for (const [why, report] of [
+  ['zero tests', { numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }],
+  ['only skipped tests', { numTotalTests: 2, numPassedTests: 0, numFailedTests: 0, numPendingTests: 2, numTodoTests: 0 }],
+  ['a reported failure with exit zero', { numTotalTests: 2, numPassedTests: 1, numFailedTests: 1, numPendingTests: 0, numTodoTests: 0 }],
+]) {
+  test(`the author check fails for ${why}`, async () => {
+    const result = await runStages(given(), fake(undefined, { ...FILES, [REPORT]: JSON.stringify(report) }));
+    assert.equal(stage(result, 'tests').status, 'failed');
+    assert.equal(exitCodeOf(result.stages), 1);
+  });
+}
+
+test('an empty package selection cannot fall through to the runner default suite', async () => {
+  const input = given(); input.selection.packages[0].units = [];
+  const ports = fake();
+  const result = await runStages(input, ports);
+  assert.equal(stage(result, 'tests').status, 'failed');
+  assert.equal(ports.calls.filter(call => call.args.includes('vitest')).length, 0);
 });
 
 test('a changed source without any selected test scores on zero coverage of that fact', async () => {
@@ -253,6 +304,23 @@ test('notes of the selection reach the log', async () => {
   assert.ok(isLine(ports, /^NOTE migration_check_unsupported/));
 });
 
+test('selection evidence names the candidate, base, inventory and reasons separately from execution', async () => {
+  const input = given(); input.selection.packages[0].reasons = [{ code: 'changed_test', path: 'apps/node/test/a.test.ts' }];
+  const ports = fake();
+  await runStages(input, ports);
+  const line = ports.lines.find(item => item.startsWith('TEST_SELECTION '));
+  assert.ok(line, 'the selection has a separate auditable receipt');
+  const receipt = JSON.parse(line.slice('TEST_SELECTION '.length));
+  assert.equal(receipt.commit, SHA); assert.equal(receipt.baseCommit, BASE);
+  assert.equal(receipt.status, 'selected');
+  assert.deepEqual(receipt.packages, input.selection.packages);
+  assert.deepEqual(receipt.sourcePaths, CHANGES.map(change => change.path));
+  assert.equal(receipt.fullSuiteComparator, 'unavailable');
+  const unavailable = fake();
+  await runStages(given({ selection: { unavailable: 'selection_failed', notes: [] } }), unavailable);
+  assert.equal(JSON.parse(unavailable.lines.find(item => item.startsWith('TEST_SELECTION ')).slice('TEST_SELECTION '.length)).status, 'NOT_RUN');
+});
+
 test('stages with nothing to run can all be unavailable for one reason', () => {
   const result = allUnavailable(SHA, 'base_unreachable', [], line => assert.match(line, /reason=base_unreachable/));
   assert.deepEqual(result.stages.map(item => [item.status, item.exitCode]), Array(6).fill(['unavailable', null]));
@@ -308,6 +376,21 @@ test('test reports give counts or nothing', () => {
   assert.deepEqual(parseTap('# tests 6\n# pass 2\n# fail 1\n# cancelled 1\n# skipped 1\n# todo 1\n'), { passed: 2, failed: 2, skipped: 2, total: 6 });
   assert.equal(parseTap('# pass 2\n'), null);
   assert.equal(parseTap(null), null);
+});
+
+test('malformed test counts cannot become passing execution evidence', async () => {
+  for (const report of [
+    { numTotalTests: 2 },
+    { numTotalTests: 2, numPassedTests: 3, numFailedTests: 0 },
+    { numTotalTests: 2, numPassedTests: -1, numFailedTests: 0 },
+    { numTotalTests: 2, numPassedTests: '2', numFailedTests: 0 },
+  ]) {
+    assert.equal(parseVitestJson(JSON.stringify(report)), null);
+    const result = await runStages(given(), fake(undefined, { ...FILES, [REPORT]: JSON.stringify(report) }));
+    assert.equal(stage(result, 'tests').status, 'unavailable');
+    assert.equal(exitCodeOf(result.stages), 2);
+  }
+  for (const report of ['# tests 2\n# pass 2\n', '# tests 2\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n']) assert.equal(parseTap(report), null);
 });
 
 test('dryer output counts its findings', () => {
@@ -467,6 +550,21 @@ test('a change in a package without an adapter takes that package whole and noth
   assert.deepEqual(result.packages.map(item => [item.packageId, item.mode]), [['ruby', 'whole-package']]);
   assert.deepEqual(ports.seen.select[0].changes, []);
   assert.equal(ports.seen.select[0].environment.packages.some(item => item.id === 'ruby'), false);
+});
+
+test('a changed node-test file takes its package without asking the Vitest graph to collect it', async () => {
+  const ports = selector();
+  const changes = [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'scripts/test/a.test.mjs', kind: 'modified' }];
+  const result = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages.map(item => [item.packageId, item.mode]), [['node', 'related'], ['scripts', 'whole-package']]);
+  assert.deepEqual(ports.seen.vitest.changed, ['apps/node/src/a.ts']);
+});
+
+test('a policy and a changed node-test file select the same package only once', async () => {
+  const scripts = { packageId: 'scripts', mode: 'whole-package', units: [UNITS[1]], reasons: [{ code: 'full_package_rule', path: 'apps/node/src/a.ts' }] };
+  const result = await selectTests({ changes: [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'scripts/test/a.test.mjs', kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, selector({ packages: [scripts] }));
+  assert.equal(result.packages.length, 1);
+  assert.deepEqual(result.packages[0].units, [UNITS[1]]);
 });
 
 test('a selection of the whole suite stays unavailable until it is asked for', async () => {

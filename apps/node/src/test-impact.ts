@@ -19,7 +19,7 @@ export interface ImpactSelection {
   units: TestUnit[];
   packages: ImpactPackageSelection[];
   migrationChecks: { direction: 'up' | 'down'; command: Command }[];
-  problems: { code: 'impact_path_invalid' | 'impact_environment_invalid' | 'new_test_unmapped' | 'migration_check_unsupported' }[];
+  problems: { code: 'impact_path_invalid' | 'impact_environment_invalid' | 'new_test_unmapped' | 'changed_test_unmapped' | 'migration_check_unsupported' }[];
 }
 
 export const SUPPORTED_IMPACT_ADAPTERS: readonly ImpactAdapter[] = ['vitest-related', 'pytest'];
@@ -131,14 +131,15 @@ function policy(state: SelectionState, graphs: ImpactGraph[], path: string): boo
   whole(state, consumers, { code: 'policy_consumers', path });
   return true;
 }
-function forceNewTest(state: SelectionState, change: ImpactChange): void {
-  if (change.kind !== 'added') return;
+function forceChangedTest(state: SelectionState, change: ImpactChange): void {
+  if (change.kind === 'deleted') return;
   const found = state.environment.inventory.filter(unit => unit.file === change.path);
-  if (!found.length && /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/.test(change.path)) addProblem(state, 'new_test_unmapped');
+  const added = change.kind === 'added';
+  if (!found.length && /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/.test(change.path)) addProblem(state, added ? 'new_test_unmapped' : 'changed_test_unmapped');
   for (const unit of found) {
     const pkg = packageOfUnit(state.environment, unit);
     if (!pkg) addProblem(state, 'impact_environment_invalid');
-    else add(state, pkg, 'related', [unit], { code: 'new_test', path: change.path });
+    else add(state, pkg, 'related', [unit], { code: added ? 'new_test' : 'changed_test', path: change.path });
   }
 }
 function validGraph(state: SelectionState, graph: ImpactGraph): boolean {
@@ -191,7 +192,7 @@ export function selectAffectedTests(input: ImpactInput): ImpactSelection {
     addProblem(state, 'impact_path_invalid'); return finish(state);
   }
   for (const change of input.changes) {
-    forceNewTest(state, change);
+    forceChangedTest(state, change);
     for (const path of paths(change)) selectPath(state, input.graphs, change, path);
   }
   return finish(state);

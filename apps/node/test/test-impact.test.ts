@@ -76,6 +76,18 @@ describe('pure commit impact selection', () => {
     expect(files(selectAffectedTests(input))).toEqual(['apps/node/test/new.test.ts']);
   });
 
+  it('selects an edited test even when a ready graph omits the test itself', () => {
+    const input = fixture(); input.changes = [{ path: 'apps/node/test/a.test.ts', kind: 'modified' }]; input.graphs[0]!.units = [];
+    const result = selectAffectedTests(input);
+    expect(files(result)).toEqual(['apps/node/test/a.test.ts']);
+    expect(result.packages[0]!.reasons).toContainEqual({ code: 'changed_test', path: 'apps/node/test/a.test.ts' });
+  });
+
+  it('blocks an edited test missing from inventory instead of accepting a zero-test selection', () => {
+    const input = fixture(); input.changes = [{ path: 'apps/node/test/unmapped.test.ts', kind: 'modified' }]; input.graphs[0]!.units = [];
+    expect(selectAffectedTests(input)).toMatchObject({ status: 'blocked', problems: [{ code: 'changed_test_unmapped' }] });
+  });
+
   it('blocks a new test missing from the supplied inventory instead of omitting it', () => {
     const input = fixture(); input.changes = [{ path: 'apps/node/test/not-listed.test.ts', kind: 'added' }];
     expect(selectAffectedTests(input)).toMatchObject({ status: 'blocked', problems: [{ code: 'new_test_unmapped' }] });
