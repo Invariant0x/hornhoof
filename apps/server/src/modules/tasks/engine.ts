@@ -2,7 +2,7 @@ import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskH
 import { testsReport, type Verification } from './echelons-tests.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
-import { agentIdentity, checkerFor } from './echelons-assign.js';
+import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
@@ -589,13 +589,19 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const review = checked?.review ?? await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
+  const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
+  if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);
   const candidate = producedCandidate(route, producer, review);
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
-  }, async tx => { await changeRoute(tx, route, next.state); await unstuck.also(tx); }, next.wakes);
+  }, async tx => {
+    if (inputCandidate) await checkingIdentity({ db: tx }, task, route, inputCandidate);
+    await changeRoute(tx, route, next.state);
+    await unstuck.also(tx);
+  }, next.wakes);
   unstuck.tell();
   return { task: row, wakes: next.wakes };
 }

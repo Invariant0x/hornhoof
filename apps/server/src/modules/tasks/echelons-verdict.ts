@@ -1,7 +1,6 @@
 import { issuesForEchelon } from './review-findings.js';
 import type { Ctx } from '../../app.js';
-import { sameChecker } from './echelons-policy.js';
-import { checkerFor } from './echelons-assign.js';
+import { checkingIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf } from './echelons-store.js';
@@ -19,9 +18,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   if (!verdict.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   const candidate = await currentCandidate(ctx.db, task, route);
   if (verdict.reviewedCommit !== candidate.commit) throw refuse(409, 'task_changed', 'Name the exact current candidate commit in the verdict.');
-  const ability = route.state.stage === 'review' ? 'dev-review-diff' : route.state.stage === 'security' ? 'dev-security-review' : 'dev-cleanup';
-  const identity = await checkerFor(ctx, task, candidate.producedBy, ability, agentId);
-  if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The checking assignment model or provider changed. Ask the head to assign it again.');
+  const identity = await checkingIdentity(ctx, task, route, candidate);
   if (verdict.escalate && verdict.pass) throw refuse(400, 'task_invalid', 'An escalation cannot certify PASS.');
   let state = route.state;
   if (verdict.security !== undefined) {

@@ -1,12 +1,15 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
+import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, subscriptions } from '../../db/schema.js';
-import type { Task } from './engine.js';
-import { modelCapability, modelProvider, reviewEligibility, type CheckerIdentity } from './echelons-policy.js';
+import { ApiError } from '../../errors.js';
+import type { Task, Tx } from './engine.js';
+import type { Route } from './echelons-store.js';
+import { modelCapability, modelProvider, reviewEligibility, sameChecker, type CheckerIdentity } from './echelons-policy.js';
 
-type Reader = Pick<Ctx, 'db'>;
+type Reader = { db: Ctx['db'] | Tx };
 
-export async function agentIdentity(db: Ctx['db'], companyId: string, agentId: string): Promise<CheckerIdentity | null> {
+export async function agentIdentity(db: Reader['db'], companyId: string, agentId: string): Promise<CheckerIdentity | null> {
   const [row] = await db.select({ id: agents.id, subscriptionId: subscriptions.id, model: agents.model, provider: subscriptions.provider }).from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))
     .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
@@ -25,4 +28,12 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
     if (identity && !reviewEligibility(producer, identity)) eligible.push(identity);
   }
   return eligible.find(identity => identity.provider !== producer.provider) ?? eligible[0] ?? null;
+}
+
+/* A verdict and a repair use the same live assignment, including its ability and subscription. */
+export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+  const ability = route.state.stage === 'review' ? 'dev-review-diff' : route.state.stage === 'security' ? 'dev-security-review' : 'dev-cleanup';
+  const identity = await checkerFor(ctx, task, candidate.producedBy, ability, task.assigneeAgentId);
+  if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
+  return identity;
 }
