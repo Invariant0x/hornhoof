@@ -632,9 +632,9 @@ async function prepareRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, ki
   return { department, pin };
 }
 
-async function existingRun(tx: Tx, task: Task, input: RunInput, kind: RunKind, pin: RunSetup['pin']): Promise<Run | undefined> {
-  if (!input.dedupe || !pin.commitSha) return;
-  const [existing] = await tx.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.kind, kind), eq(testRuns.commitSha, pin.commitSha), eq(testRuns.command, input.command ?? ''))).limit(1);
+async function existingRun(tx: Tx, task: Task, agentId: string, input: RunInput, kind: RunKind, pin: RunSetup['pin']): Promise<Run | undefined> {
+  if (!input.dedupe || !pin.commitSha || !pin.branch) return;
+  const [existing] = await tx.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.companyId, task.companyId), eq(testRuns.agentId, agentId), eq(testRuns.branch, pin.branch), eq(testRuns.kind, kind), eq(testRuns.commitSha, pin.commitSha), eq(testRuns.command, input.command ?? ''))).limit(1);
   return existing;
 }
 
@@ -657,7 +657,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
-    const existing = await existingRun(tx, task, input, kind, pin);
+    const existing = await existingRun(tx, task, job.agentId, input, kind, pin);
     if (existing) {
       if (binding) await bindCandidateRun(tx, task, binding, existing);
       return existing;

@@ -92,13 +92,13 @@ export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typ
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) return null;
   const pin = await readPin(ctx.readCommit, found.repo, task.number);
-  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
+  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
 }
 
 /* Keep immutable submission facts separate from the consumer's current receipt validation. */
 export async function visibleReview(db: Store, taskId: string, review: Review): Promise<Review & { qualityAtSubmission: Review['quality'] }> {
   const sourceId = review.qualityTaskId ?? review.quality.record?.taskId ?? taskId;
-  return { ...review, qualityAtSubmission: review.quality, quality: await authorQuality(db, sourceId, review.commit) };
+  return { ...review, qualityAtSubmission: review.quality, quality: await authorQuality(db, sourceId, review.commit, review.authorId) };
 }
 
 /* Event records, rather than a live branch lookup, define what a reviewer was assigned. */

@@ -59,7 +59,7 @@ export const refuse = (status: keyof typeof STATUS_CODES, reason: ErrorReason, m
 
 const notYours = (t: Task, what: string) => refuse(403, 'task_not_yours', `#${t.number} ${what}.`);
 
-export async function loadTask(db: Db, taskId: string): Promise<Task> {
+export async function loadTask(db: Db | Tx, taskId: string): Promise<Task> {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!task) throw refuse(404, 'task_unknown', `There is no task ${taskId}.`);
   return task;
@@ -357,7 +357,7 @@ export type NewTask = {
 };
 
 /* A live employee or orchestrator of the company. */
-async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
+export async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
   if (!agent || (companyId && agent.companyId !== companyId)) throw refuse(400, 'task_invalid', `There is no employee ${id}.`);
   return agent;
@@ -560,7 +560,7 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
 }
 
 export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
-type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
+type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome; validate?: (tx: Tx, before: Task) => Promise<void> };
 
 /* The current producing owner records an immutable candidate and hands it forward. */
 export async function submit(ctx: Live, agentId: string, taskId: string, r: Submission, checked?: CheckedSubmission): Promise<Moved> {
@@ -597,6 +597,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
     kind: 'submitted', actor: { agentId }, text: r.summary,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
   }, async tx => {
+    await checked?.validate?.(tx, task);
     if (inputCandidate) await checkingIdentity({ db: tx }, task, route, inputCandidate);
     await changeRoute(tx, route, next.state);
     await unstuck.also(tx);
@@ -605,13 +606,13 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   return { task: row, wakes: next.wakes };
 }
 
-export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
+export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }, validate?: (tx: Tx, before: Task) => Promise<void>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const third = input.outcome.attempt >= 3;
   const wakes = third ? giver(task, 'blocked', agentId, input.text) : [{ agentId, taskId: task.id, why: 'changes' as const, text: input.text }];
   const row = await move(ctx, task, { status: third ? 'blocked' : 'working', silent: 0 }, {
     kind: third ? 'blocked' : 'comment', actor: { agentId }, text: input.text, data: { authorCheckOutcome: input.outcome }, ...(third ? { returned: true } : {}),
-  }, undefined, wakes);
+  }, validate ? tx => validate(tx, task) : undefined, wakes);
   return { task: row, wakes };
 }
 

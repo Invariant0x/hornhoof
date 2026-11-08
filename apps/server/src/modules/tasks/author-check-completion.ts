@@ -5,7 +5,7 @@ import { ApiError } from '../../errors.js';
 import { endWaitForRun } from './external-wait.js';
 import { endRunWaits } from './wait-state.js';
 import { failAuthorCheck, loadTask, refuse, submit, type AuthorCheckOutcome, type Moved, type Task, type Tx } from './engine.js';
-import { outcomeRun, pendingSubmission, type PendingSubmission } from './author-check-pending.js';
+import { assertAuthorCheckBinding, outcomeRun, pendingSubmission, type PendingSubmission } from './author-check-pending.js';
 import { captureReview } from './review-context.js';
 import { AuthorCheckInput, authorQuality, recordAuthorCheck, type AuthorCheckResult, type Quality } from './review-quality.js';
 
@@ -54,22 +54,24 @@ async function completedRace(ctx: Ctx, error: unknown, runId: string, taskId: st
 }
 
 async function complete(ctx: Ctx, run: Run, task: Task, pending: PendingSubmission, events: Event[]): Promise<Moved> {
+  await assertAuthorCheckBinding(ctx.db, await loadTask(ctx.db, task.id), pending, run);
+  const validate = (tx: Tx, before: Task) => assertAuthorCheckBinding(tx, before, pending, run);
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(testParts.part);
   const files = await logFiles(ctx, run, task, parts);
   const printed = readAuthorCheck(run, parts, files);
-  if (printed) await recordAuthorCheck(ctx.db, task.id, printed);
-  const quality = printed ? await authorQuality(ctx.db, task.id, run.commitSha) : null;
+  if (printed) await recordAuthorCheck(ctx.db, task.id, printed, async tx => validate(tx, await loadTask(tx, task.id)));
+  const quality = printed ? await authorQuality(ctx.db, task.id, run.commitSha, run.agentId) : null;
   const outcome = failedOutcome(run, events, printed, quality);
   if (acceptedQuality(printed, run, quality)) {
-    const review = await captureReview(ctx, task, { baseCommit: pending.baseCommit, authorCheckPlan: pending.authorCheckPlan });
+    const review = await captureReview(ctx, { ...task, executorAgentId: run.agentId }, { baseCommit: pending.baseCommit, authorCheckPlan: pending.authorCheckPlan });
     if (review?.commit === run.commitSha) {
       const accepted: AuthorCheckOutcome = { ...outcome, status: quality.status, reason: null };
-      return submit(ctx, run.agentId, task.id, { summary: pending.summary, evidence: pending.evidence }, { review: { ...review, quality }, outcome: accepted });
+      return submit(ctx, run.agentId, task.id, { operationId: pending.operationId, summary: pending.summary, evidence: pending.evidence, review: { baseCommit: pending.baseCommit, authorCheckPlan: pending.authorCheckPlan } }, { review: { ...review, quality }, outcome: accepted, validate });
     }
     outcome.reason = 'commit-changed';
   }
   const output = parts.map(part => part.tail).filter(Boolean).join('\n') || `Author check ${run.number} ended without a structured result.`;
-  return failAuthorCheck(ctx, run.agentId, task.id, { outcome, text: `Author check ${run.number} failed on ${run.commitSha}.\n\n${output}` });
+  return failAuthorCheck(ctx, run.agentId, task.id, { outcome, text: `Author check ${run.number} failed on ${run.commitSha}.\n\n${output}` }, validate);
 }
 
 function acceptedQuality(printed: AuthorCheckResult | null, run: Run, quality: Quality | null): quality is Quality & { status: 'passed' | 'partial' } {

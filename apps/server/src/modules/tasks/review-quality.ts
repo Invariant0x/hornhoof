@@ -1,8 +1,9 @@
+import { EchelonCandidate, EchelonModel } from '@hornhoof/protocol/echelons';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
-import { jobs, taskEvents, tasks, testParts, testRuns } from '../../db/schema.js';
+import { jobs, taskEvents, taskRoutes, tasks, testParts, testRuns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from './engine.js';
 import { RepoPath, ReviewSha } from './review-schema.js';
@@ -30,15 +31,29 @@ type Input = AuthorCheckResult;
 type Saved = z.infer<typeof AuthorCheckRecord>;
 type Binding = { task: typeof tasks.$inferSelect; run: typeof testRuns.$inferSelect; job: typeof jobs.$inferSelect; parts: (typeof testParts.$inferSelect)[] };
 const invalid = () => new ApiError(409, 'conflict', 'The author-check record does not match its server-owned task, run and commit.', 'task_invalid');
-const responsible = (task: Binding['task']): string | null => task.executorAgentId ?? task.assigneeAgentId;
 
 function assertRun(task: Binding['task'], run: Binding['run']): void {
-  const valid = [run.companyId === task.companyId, run.taskId === task.id, run.kind === 'tests', run.agentId === responsible(task), [task.departmentId, task.productId].includes(run.departmentId)];
+  const valid = [run.companyId === task.companyId, run.taskId === task.id, run.kind === 'tests', [task.departmentId, task.productId].includes(run.departmentId)];
   if (valid.includes(false)) throw invalid();
 }
 
 function assertJob(task: Binding['task'], run: Binding['run'], job: Binding['job']): void {
   if (job.companyId !== task.companyId || job.agentId !== run.agentId || (job.taskId !== null && job.taskId !== task.id)) throw invalid();
+}
+
+/* The producing owner, or its immutable submission/check binding, owns a quality receipt. */
+async function assertProducer(db: Store, task: Binding['task'], run: Binding['run']): Promise<void> {
+  const [route] = await db.select({ state: taskRoutes.state }).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
+  if (task.assigneeAgentId === run.agentId && route?.state.resultKind === 'code' && route.state.phase === 'active' && ['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '')) return;
+  const events = await db.select().from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, run.agentId)));
+  const PendingProducer = z.object({ runId: z.uuid(), producer: EchelonModel, routeRevision: z.number().int().positive(), review: z.object({ commit: ReviewSha, branch: z.string() }) });
+  if (events.some(event => {
+    const candidate = EchelonCandidate.safeParse(event.data.candidate);
+    if (event.kind === 'submitted' && candidate.success && candidate.data.producedBy.agentId === run.agentId && candidate.data.commit === run.commitSha) return true;
+    const pending = PendingProducer.safeParse(event.data.authorCheckPending);
+    return event.kind === 'updated' && pending.success && pending.data.runId === run.id && pending.data.producer.agentId === run.agentId && pending.data.review.commit === run.commitSha && pending.data.review.branch === run.branch;
+  })) return;
+  throw invalid();
 }
 
 async function binding(db: Store, taskId: string, runId: string): Promise<Binding> {
@@ -49,6 +64,7 @@ async function binding(db: Store, taskId: string, runId: string): Promise<Bindin
   const [job] = await db.select().from(jobs).where(eq(jobs.id, run.jobId));
   if (!job) throw invalid();
   assertJob(task, run, job);
+  await assertProducer(db, task, run);
   const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.id));
   if (parts.some(part => part.companyId !== task.companyId)) throw invalid();
   return { task, run, job, parts };
@@ -70,7 +86,7 @@ function assertInput(input: Input, source: Binding): void {
 
 function assertSaved(record: Saved, source: Binding): void {
   assertInput(record, source);
-  if (record.companyId !== source.task.companyId || record.authorId !== responsible(source.task) || record.jobId !== source.job.id) throw invalid();
+  if (record.companyId !== source.task.companyId || record.authorId !== source.run.agentId || record.jobId !== source.job.id) throw invalid();
   const actual = receiptOf(source);
   const stored = { ...record.receipt, parts: record.receipt.parts.toSorted((a, b) => a.id.localeCompare(b.id)) };
   if (JSON.stringify(stored) !== JSON.stringify(actual)) throw invalid();
@@ -104,15 +120,15 @@ function qualityStatus(record: Saved, source: Binding): Quality['status'] {
 
 type SourceEvent = Pick<typeof taskEvents.$inferSelect, 'id' | 'companyId' | 'data'>;
 
-function recordAt(event: SourceEvent, taskId: string, commit: string): Saved | null {
+function recordAt(event: SourceEvent, taskId: string, commit: string, producerId?: string): Saved | null {
   const parsed = AuthorCheckRecord.safeParse(event.data.authorCheck);
   if (!parsed.success) return null;
   const record = parsed.data;
-  return record.taskId === taskId && record.checkCommit === commit && record.companyId === event.companyId ? record : null;
+  return record.taskId === taskId && record.checkCommit === commit && record.companyId === event.companyId && (producerId === undefined || record.authorId === producerId) ? record : null;
 }
 
-async function evidenceAt(db: Store, event: SourceEvent, taskId: string, commit: string): Promise<Quality | null> {
-  const record = recordAt(event, taskId, commit);
+async function evidenceAt(db: Store, event: SourceEvent, taskId: string, commit: string, producerId?: string): Promise<Quality | null> {
+  const record = recordAt(event, taskId, commit, producerId);
   if (!record) return null;
   const source = await binding(db, taskId, record.runId);
   assertSaved(record, source);
@@ -121,12 +137,12 @@ async function evidenceAt(db: Store, event: SourceEvent, taskId: string, commit:
 }
 
 /* Only system events are candidates; comments and client JSON cannot manufacture a producer record. */
-export async function authorQuality(db: Store, taskId: string, commit: string | null): Promise<Quality> {
+export async function authorQuality(db: Store, taskId: string, commit: string | null, producerId?: string): Promise<Quality> {
   if (!commit) return { ...unavailableQuality(), reason: 'commit-unavailable' };
   const events = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'comment'), isNull(taskEvents.agentId), isNull(taskEvents.personId))).orderBy(desc(taskEvents.id));
   for (const event of events) {
     try {
-      const evidence = await evidenceAt(db, event, taskId, commit);
+      const evidence = await evidenceAt(db, event, taskId, commit, producerId);
       if (evidence) return evidence;
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
@@ -137,10 +153,11 @@ export async function authorQuality(db: Store, taskId: string, commit: string | 
 }
 
 /* Backend port for producer 325. Authority and receipts come from protected server records, never client fields. */
-export async function recordAuthorCheck(db: Db, taskId: string, value: Input): Promise<number> {
+export async function recordAuthorCheck(db: Db, taskId: string, value: Input, validate?: (tx: Tx) => Promise<void>): Promise<number> {
   const input = AuthorCheckInput.parse(value);
   return db.transaction(async tx => {
     await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
+    await validate?.(tx);
     const bound = await binding(tx, taskId, input.runId);
     assertInput(input, bound);
     const record: Saved = { ...input, producer: 'author-check-v1', companyId: bound.task.companyId, taskId, authorId: bound.run.agentId, jobId: bound.job.id, receipt: receiptOf(bound) };
