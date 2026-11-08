@@ -426,7 +426,8 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     heard.hold();
     host.input({ type: 'term.input', termId: `view-${key}`, data: '\r', pressedIn: jobId });
     const result = await next;
-    expect(result).toMatchObject({ ok: true });
+    /* A turn that failed says why. */
+    expect(result.ok ? 'ok' : `${result.error}: ${result.failure?.text ?? ''}`).toBe('ok');
     /* The turn ends with the assignment's answer, not with that of what the person sent. Antigravity's fake answers alike. */
     if (kind !== 'antigravity') expect(result.result).toContain('Next assignment.');
     expect(pastedAtEnd).toBe(1);
