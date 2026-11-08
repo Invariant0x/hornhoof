@@ -183,3 +183,44 @@ it('cancels a granted part waiting for its disposable user without starting it o
   expect(started).toBe(false); expect(positions).toEqual([1]);
   await expect(user.run(undefined, async () => 'next', () => {})).resolves.toBe('next');
 });
+
+/* Candidate metadata must compare both pinned trees even when the repository has no periodic full-run policy. */
+describe('the final candidate influencing fingerprints', () => {
+  const describeCandidate = (f: Awaited<ReturnType<typeof fixture>>, head: string, prints?: Parameters<typeof environment.describeTestEnvironment>[4], base = f.sha): Promise<unknown> =>
+    Reflect.apply(environment.describeTestEnvironment, null, [f.source, f.scope, head, f.context, prints, base]);
+
+  const changed = async () => {
+    const f = await fixture();
+    await writeFile(join(f.root, 'app/test/a.test.ts'), 'export const changed = true;');
+    git(f.root, 'commit', '--quiet', '-am', 'Change one test');
+    return { ...f, head: git(f.root, 'rev-parse', 'HEAD') };
+  };
+
+  it('returns distinct base and final fingerprints from pinned blobs without executing repository commands', async () => {
+    const f = await changed();
+    const result = await describeCandidate(f, f.head) as {
+      description: { commitSha: string }; fingerprints: { file: string; fingerprint: string }[];
+      baseFingerprints: { commitSha: string; fingerprints: { file: string; fingerprint: string }[] };
+    };
+    expect(result).toMatchObject({ description: { commitSha: f.head }, baseFingerprints: { commitSha: f.sha } });
+    const base = new Map(result.baseFingerprints.fingerprints.map(print => [print.file, print.fingerprint]));
+    const head = new Map(result.fingerprints.map(print => [print.file, print.fingerprint]));
+    expect(head.get('app/test/a.test.ts')).not.toBe(base.get('app/test/a.test.ts'));
+    expect(head.get('app/test/-option.test.ts')).toBe(base.get('app/test/-option.test.ts'));
+    await expect(access(join(f.root, 'executed'))).rejects.toThrow();
+  });
+
+  it('does not turn an unreadable candidate base into a whole-profile test claim', async () => {
+    const f = await changed();
+    await expect(describeCandidate(f, f.head, undefined, 'f'.repeat(40))).rejects.toThrow();
+  });
+
+  it.each(['base', 'head'] as const)('does not silently omit unavailable %s fingerprints for a candidate', async side => {
+    const f = await changed();
+    const fingerprints: NonNullable<Parameters<typeof environment.describeTestEnvironment>[4]> = async (_source, _scope, description) => {
+      if (description.commitSha === (side === 'base' ? f.sha : f.head)) throw new Error(`${side} fingerprints unavailable`);
+      return [];
+    };
+    await expect(describeCandidate(f, f.head, fingerprints)).rejects.toThrow(`${side} fingerprints unavailable`);
+  });
+});

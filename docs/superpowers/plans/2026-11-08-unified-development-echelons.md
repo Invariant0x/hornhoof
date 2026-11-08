@@ -70,7 +70,7 @@
 
 **Files:** `modules/tasks/echelons-evidence.ts`, `echelons-findings.ts`, applicable `review-*` consumers, test-run boundary files, `scripts/author-check/**`, `scripts/mutation/**`, test wiring where required.
 
-**Interfaces:** Tests accepts only `{candidateId, routeRevision, baseCommit, commit, branch}` with verified completed parts or verified reuse at the same influencing fingerprint. Finding projections count unique server finding/event identities by Review/Security and keep fixes separate from confirmations.
+**Interfaces:** Tests accepts only `{candidateId, routeRevision, baseCommit, commit, branch}` with verified completed parts or verified reuse at the same influencing fingerprint. Finding projections count unique server finding/event identities by Review/Security and keep fixes separate from confirmations. Candidate verification obtains the original base and final influencing fingerprints from the same authenticated node and pinned repository scope. The server derives changed or newly added canonical test units from that pair; unavailable base or fingerprints blocks scope proof instead of certifying an arbitrary command or a whole profile. Existing result reuse still requires a green result at the final fingerprint. Mutation execution must additionally carry the same base/final SHAs into the existing changed-pure-function selector; a file fingerprint alone does not establish function purity.
 
 - [ ] Write RED tests for stale author receipts after a fix, wrong branch/task/revision, zero/malformed results and duplicate finding ingestion.
 - [ ] Wire existing selection/fingerprint and narrow pure-function mutation ports into final-candidate acceptance; preserve applicable check failures and unavailable evidence.
