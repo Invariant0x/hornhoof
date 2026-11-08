@@ -30,6 +30,12 @@ describe('standalone employee abilities', () => {
     }
   });
 
+  it('keeps unconditional turn workflows out of role descriptions as well as their bodies', () => {
+    const route = /\b(?:each turn|whole turn|before a new or large feature|all at once)\b/i;
+    const violations = [...templates.roles.values()].filter(role => route.test(role.description.en));
+    expect(violations.map(role => role.id)).toEqual([]);
+  });
+
   it('keeps the orchestrator identity free of a workflow or skill dependency', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are [^\n.!?]+\.$/);
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/hh-lead-tasks|Your skills|Call departments/);

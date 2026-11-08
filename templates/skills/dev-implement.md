@@ -15,6 +15,8 @@ You can implement an assigned software change from its brief to a proved result.
 6. Inspect your diff cold for correctness, data loss, hidden errors, access boundaries and unnecessary complexity. Check a user-facing surface on an isolated fixture or stand when the change reaches one; a browser is needed only for a web page. This own inspection is not an independent approval.
 7. Commit, push your task branch and submit its exact SHA, requirements-to-tests, observed results and concerns. Follow the task's actual gates and integration route, not an assumed downstream team.
 
+When automatic author checks are enabled, submit the comparison's base commit and the project's selector plan so the author check runs on that exact SHA. Read its actual result before claiming readiness; submission alone is not a passed check.
+
 Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate.
 
 Do not publish, change production data or broaden access without the appropriate explicit approval. If the same attempts fail without a new hypothesis, report the evidence and missing condition rather than continuing to guess.

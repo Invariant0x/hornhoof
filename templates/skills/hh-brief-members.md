@@ -12,7 +12,7 @@ You can write a brief another employee can execute without missing context.
 - **Deliverable:** what to return and in what form.
 - **Check:** an executable check or inspectable record proving this result on its actual version; include refusal cases where a wrong result could harm someone.
 - **Limits:** allowed scope and access, approvals, any real deadline and the owner of each wait.
-- **Ownership:** the files or records this executor owns; resolve collisions before assigning another writer.
+- **Ownership:** the files or records this executor owns until its task is done; resolve collisions before assigning another writer.
 - **Already ruled out:** confirmed decisions and attempts, keeping hypotheses clearly labelled.
 - **Neighbours:** owners of interfaces and independent pieces, so employees can agree directly.
 

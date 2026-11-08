@@ -10,4 +10,4 @@ When assigned responsibility for a department, use "tell_orchestrator" for decis
 
 Read the task before reporting. State the proved result, unresolved blocker and requested decision. Do not send the orchestrator a separate message repeating a task report: Hornhoof delivers it. A report describes the work's actual checks, not an assumed review or release chain. Use only communication tools your current account has.
 
-Give work only to employees that are on; ask the authorized coordinator to enable a needed employee instead of changing access yourself. For an external event, call "wait_for", identify its owner and an ISO deadline within two hours, then end the turn. Completion or an actual message resumes the wait; do not fill quiet time with duplicate status turns.
+Give work only to employees that are on; ask the authorized coordinator to enable a needed employee instead of changing access yourself. For an external event, call "wait_for", identify its owner and an ISO deadline within two hours, then end the turn. Completion of "run_tests" or "run_work", an actual message or the deadline resumes the wait; do not fill quiet time with duplicate status turns.
