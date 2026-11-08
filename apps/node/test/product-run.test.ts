@@ -21,8 +21,15 @@ vi.mock('node:child_process', async original => {
 });
 vi.mock('node:fs', async original => {
   const module = await original<typeof import('node:fs')>();
+  const reportFiles = new Set<number>();
   return { ...module, chownSync: () => {}, fchownSync: () => {},
-    fstatSync: (fd: number) => { const stat = module.fstatSync(fd); return Object.assign(stat, { uid: stat.uid === process.getuid?.() ? sharedState.jobUid : stat.uid }); },
+    openSync: (path: import('node:fs').PathLike, flags: string | number, mode?: import('node:fs').Mode) => {
+      const fd = module.openSync(path, flags, mode);
+      if (String(path).includes('/reports/')) reportFiles.add(fd);
+      return fd;
+    },
+    closeSync: (fd: number) => { reportFiles.delete(fd); module.closeSync(fd); },
+    fstatSync: (fd: number) => { const stat = module.fstatSync(fd); return reportFiles.has(fd) && stat.uid === process.getuid?.() ? Object.assign(stat, { uid: sharedState.jobUid }) : stat; },
     readdirSync: (path: import('node:fs').PathLike) => {
       const folder = String(path);
       if (['/tmp', '/var/tmp', '/dev/shm'].includes(folder)) return [...sharedState.builderFiles].filter(file => file.startsWith(folder + '/') && !file.slice(folder.length + 1).includes('/')).map(file => file.slice(folder.length + 1));
