@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { DepartmentView } from '../src/screens/Department';
-import type { Department, DeptRole, EmployeeTask } from '../src/types';
+import type { Department, DeptRole } from '../src/types';
 import { ME, mockApi } from './api-mock';
 import { ECHELON_ORG, ECHELON_WORKFLOW } from './echelon-fixture';
 
@@ -77,6 +77,3 @@ describe('the echelon department map', () => {
   });
 });
 
-/* The same public task seam is used by the map and the task list. */
-const taskShape: EmployeeTask = atReview;
-void taskShape;
