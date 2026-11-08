@@ -19,8 +19,8 @@ async function authorFixture(repair = false) {
     return { id: job!.id, companyId: f.task.companyId, agentId: actor.id, agentKind: actor.kind, departmentId: actor.departmentId };
   };
   const pending = async () => {
-    const [event] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'updated'))).orderBy(desc(taskEvents.id)).limit(1);
-    return event!.data.authorCheckPending as { runId: string; review: { authorId: string } };
+    const events = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'updated'))).orderBy(desc(taskEvents.id));
+    return events.find(event => event.data.authorCheckPending)!.data.authorCheckPending as { runId: string; review: { authorId: string } };
   };
   return { ...f, jobFor, pending };
 }
