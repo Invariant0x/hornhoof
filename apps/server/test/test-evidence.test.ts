@@ -36,14 +36,16 @@ async function company() {
     ])
     .returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId = sub!.id) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: subscriptionId === reviewPlan!.id ? 'gpt-6.1-sol' : 'claude-opus-5-5', subscriptionId, skills: ctx.templates.roles.get(roleKey)!.skills.filter(skill => skill.on).map(skill => skill.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV', reviewPlan!.id);
+  await hire('Tess', 'worker', 'DEV-TEST');
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   await db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, over: object = {}) =>
-    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, inTurnReview: true, ...over })).task;
+    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, ...over })).task;
   const task = await member('Checkout');
   let tokens = 0;
   const turn = async (agent: { id: string }, taskId: string | null = task.id) => {
@@ -208,25 +210,25 @@ describe('the test runs a task shows', () => {
   });
 });
 
-/* The department's last work of the turn is merged, so the review of turn 4 opens. */
+/* The producer hands its exact candidate to the current mandatory Review owner. */
 async function reviewOpen(c: Awaited<ReturnType<typeof company>>): Promise<Task> {
-  await submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test' });
-  await submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Merged into turn-4.', evidence: 'git log: 1a2b3c4' });
-  const [review] = await c.db.select().from(tasks).where(eq(tasks.title, 'Review of turn 4'));
-  return review!;
+  const moved = await submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'Named total checks.', review: { baseCommit: OLD_COMMIT } });
+  expect(moved.task.assigneeAgentId).toBe(c.rita.id);
+  return moved.task;
 }
 
 describe('a turn has its own branch', () => {
-  it('shows the review of the turn the runs on the turn branch, of its own repository only', async () => {
+  it('shows the current Review only its own task runs, excluding another task and repository', async () => {
     const c = await company();
     const review = await reviewOpen(c);
     await c.aRun({ branch: 'turn-4', command: 'make all' });
-    await c.aRun({ branch: 'turn-4', departmentId: c.sales.id, command: 'crm all' });
+    const other = await c.member('Other review input');
+    await c.aRun({ taskId: other.id, branch: 'turn-4', departmentId: c.sales.id, command: 'crm all' });
     await c.aRun({ command: 'make one' });
     c.branchesAt(NEW_COMMIT);
-    expect((await c.read(review)).testEvidence).toMatchObject([{ run: 1, branch: 'turn-4', command: 'make all', commitSha: TEST_COMMIT, head: NEW_COMMIT, freshness: 'stale', proves: false }]);
+    expect((await c.read(review)).testEvidence).toMatchObject([{ run: 3, command: 'make one', freshness: 'stale', proves: false }, { run: 1, branch: 'turn-4', command: 'make all', commitSha: TEST_COMMIT, head: NEW_COMMIT, freshness: 'stale', proves: false }]);
     c.branchesAt(TEST_COMMIT);
-    expect((await c.read(review)).testEvidence).toMatchObject([{ run: 1, freshness: 'current', proves: true }]);
+    expect((await c.read(review)).testEvidence).toMatchObject([{ run: 3, freshness: 'current', proves: true }, { run: 1, freshness: 'current', proves: true }]);
   });
 
   it("shows the department's task of the turn the runs on the turn branch too", async () => {
@@ -257,11 +259,11 @@ describe('a reviewer', () => {
   const verdictEvents = (c: Awaited<ReturnType<typeof company>>, taskId: string) =>
     c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'))).orderBy(asc(taskEvents.createdAt));
 
-  it('is told where the commit of each test run stands, at a gate and in the review of a turn', async () => {
+  it('is told where each run stands for the current pinned candidate', async () => {
     const c = await company();
     const review = await reviewOpen(c);
     const [rita] = await c.db.select().from(agents).where(eq(agents.id, c.rita.id));
-    for (const w of [{ why: 'turn_review' as const, text: 'turn-4' }, { why: 'review' as const }, { why: 'review' as const, text: 'cart.ts:1 is wrong.' }]) {
+    for (const w of [{ why: 'review' as const }, { why: 'review' as const, text: 'cart.ts:1 is wrong.' }]) {
       const prompt = wakePrompt(rita!, review, { agentId: c.rita.id, taskId: review.id, ...w });
       expect(prompt).toContain('testEvidence');
       expect(prompt).toContain('another commit proves nothing');
@@ -273,7 +275,7 @@ describe('a reviewer', () => {
     const review = await reviewOpen(c);
     await c.aRun({ branch: 'turn-4' });
     const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, comment: 'Good.' });
+    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
     expect(given.error).toBe(false);
     expect(given.text).not.toContain('proves nothing');
     const [event] = await verdictEvents(c, review.id);
@@ -286,7 +288,7 @@ describe('a reviewer', () => {
     await c.aRun({ branch: 'turn-4' });
     c.branchesAt(NEW_COMMIT);
     const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, comment: 'Good.' });
+    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
     expect(given.error).toBe(false);
     expect(given.text).toContain('Test run 1 passed');
     expect(given.text).toContain(TEST_COMMIT);
@@ -302,16 +304,18 @@ describe('a reviewer', () => {
     await c.aRun({ branch: 'turn-4', commitSha: OLD_COMMIT });
     await c.aRun({ branch: 'turn-4' });
     const { call } = await c.turn(c.rita, review.id);
-    expect((await call('verdict', { task: review.number, pass: true, comment: 'Good.' })).text).not.toContain('proves nothing');
+    expect((await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' })).text).not.toContain('proves nothing');
   });
 
-  it('hears nothing of an older run when sending the work back, and a verdict without runs keeps none', async () => {
+  it('keeps an unpassed candidate with its current Review owner and records no invented run evidence', async () => {
     const c = await company();
     const review = await reviewOpen(c);
     const { call } = await c.turn(c.rita, review.id);
-    expect((await call('verdict', { task: review.number, pass: false, comment: 'cart.ts:1 is wrong.' })).text).not.toContain('proves nothing');
+    expect((await call('verdict', { task: review.number, pass: false, reviewedCommit: TEST_COMMIT, comment: 'cart.ts:1 is wrong.' })).text).not.toContain('proves nothing');
     const [event] = await verdictEvents(c, review.id);
     expect(event!.data).not.toHaveProperty('evidence');
+    const [current] = await c.db.select().from(tasks).where(eq(tasks.id, review.id));
+    expect(current).toMatchObject({ assigneeAgentId: c.rita.id, executorAgentId: c.bruno.id, status: 'working' });
   });
 
   it('hears the same of a run from before commits were pinned', async () => {
@@ -319,7 +323,7 @@ describe('a reviewer', () => {
     const review = await reviewOpen(c);
     await c.aRun({ branch: 'turn-4', commitSha: null });
     const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, comment: 'Good.' });
+    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
     expect(given.text).toContain('Test run 1 passed on no pinned commit');
     expect(given.text).toContain('proves nothing');
   });
@@ -330,7 +334,7 @@ describe('a reviewer', () => {
     await c.aRun({ branch: 'turn-4' });
     c.ctx.readCommit = async () => ({ problem: 'The repository did not answer.' });
     const { call } = await c.turn(c.rita, review.id);
-    const given = await call('verdict', { task: review.number, pass: true, comment: 'Good.' });
+    const given = await call('verdict', { task: review.number, pass: true, reviewedCommit: TEST_COMMIT, comment: 'Good.' });
     expect(given.error).toBe(false);
     expect(given.text).toContain('proves nothing');
     expect(given.text).toContain('The repository did not answer.');
