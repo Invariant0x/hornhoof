@@ -13,11 +13,11 @@
 ## Global Constraints
 
 - One author, one working branch `task-717`, one isolated worktree. No parallel builders or implementation subagents.
-- Original report base is `e0d362be11294e0df9a7ef5036389283bffa030b`. The current integration includes David's main `ccf1143e21d21a13442e87e7d96841ac4d473dc0`; the original report base remains unchanged.
+- Original report base is `e0d362be11294e0df9a7ef5036389283bffa030b`. The current integration includes David's main `6fa872076c9756a22d50e1d310bdda7bcc3d82aa`; the original report base remains unchanged.
 - No `echelonsEnabled`, opt-in, nullable second route, author returns or compatibility implementation.
 - No automated old-record conversion before 1.0. Generate schema normally for fresh installation; record exact manual release data work separately. Never change the live database.
 - A reviewer must not be weaker than the producer. Prefer another underlying provider when available; the same provider, subscription and tariff are allowed without waiting for a second provider. Equal capability is allowed. Unknown capability blocks assignment. Instruction 205 replaces the former provider barrier.
-- Review is mandatory for executable work. The default route has Architecture, Development, Review, Security and Tests. Instruction 207 permits a head to request Cleanup for a task or turn, only after Review. It is absent by default and never combined with Review automatically. Use the existing dev-cleanup ability, offered off by default to developers and reviewers; create no new cleanup skill. Security is mandatory for declared sensitive risk and can be added by Review. The setter of #717 approved a coordination result without its own executable output: close it only with a checked report and reviewed child candidate/evidence references. Unaccepted, stale, unfinished or unreviewed children block closure. A parent that produces its own executable result uses mandatory Review. This is the orchestrator's technical decision within #717, not a claimed approval from David.
+- Review is mandatory for executable work. Development, Review and Tests are required for executable work. Architecture is omitted for small work; Security follows the declared or discovered risk. Instruction 207 permits a head to request Cleanup for a task or turn, only after Review. It is absent by default and never combined with Review automatically. Use the existing dev-cleanup ability, offered off by default to developers and reviewers; create no new cleanup skill. Security is mandatory for declared sensitive risk and can be added by Review. The setter of #717 approved a coordination result without its own executable output: close it only with a checked report and reviewed child candidate/evidence references. Unaccepted, stale, unfinished or unreviewed children block closure. A parent that produces its own executable result uses mandatory Review. This is the orchestrator's technical decision within #717, not a claimed approval from David.
 - Every change has a test written first. Author checks use `run_tests`, on exact pushed SHAs, with explicit selection; no local installs/builds/types/lint/tests or full-product author suite.
 - Submitting starts no automatic author check. Keep main's removal of its submit/pending/completion adapter; explicit author checks still run remotely under this task's policy.
 - Existing receipts prove their original inputs only. Formatter, producer quality, comparator and browser readiness gaps remain explicit.
@@ -51,9 +51,9 @@
 
 - [x] Write real engine/view tests: small work starts at Development with Review pending, including the existing Development template; omitted gates cannot bypass Review.
 - [x] Push, print `check:author --sha HEAD --base e54dd0e5...`, execute its exact plan through `run_tests`; expect missing-route/mandatory-Review assertions, not import/setup errors.
-- [ ] Add required protocol/schema/store and task creation/read projection. Delete old gate/panel/stage/bounce/merge fields and their replaced consumers; update relevant fixture contracts.
+- [x] Add required protocol/schema/store and task creation/read projection. Delete old gate/panel/stage/bounce/merge fields and their replaced consumers; update relevant fixture contracts.
 - [x] Generate schema through the project Drizzle tool remotely. Runs 1480/1537 generated 0087/0088; no old-row updates or route backfill. Fresh schema checks passed in 1539.
-- [ ] Run affected acceptance/schema/type checks remotely; commit the proved increment.
+- [x] Run affected acceptance/schema/type checks remotely; commit the proved increment.
 
 ## Increment 2: Assignment, forward transitions and fixes
 
@@ -63,9 +63,9 @@
 
 - [x] Write RED tests for equal-capability acceptance on the same provider/subscription/tariff; prefer an eligible different provider without waiting for one. Refuse weaker or unknown capability. Test direct Review-to-Tests or Review-to-Security handoff. Handoff cases passed in 1538; assignment hardening remains below.
 - [x] Write RED tests for Review/Security retaining their own fixes, final candidate parent/producer provenance, wrong-goal escalation, optional Security insertion, and no author wake. Focused cases passed in 1538; full stale-source guards remain below.
-- [ ] Implement trusted capability resolution, capability-based stage selection, path leases, immutable candidates and CAS/idempotent handoff.
-- [ ] Remove panel fan-out, author-return, old turn review/fix loops and unused entities/tests. Preserve unrelated task comments, dependencies and requests through the new engine. Implement checked report aggregation for coordination results, with no fictional own code SHA or repeated group code review; executable parent results still require Review.
-- [ ] Prove stale owner/model, cross-company/path and duplicate-completion cases; prove independent A/Review and B/Development overlap. Run affected checks and commit.
+- [x] Implement trusted capability resolution, capability-based stage selection, path leases, immutable candidates and CAS/idempotent handoff.
+- [x] Remove panel fan-out, author-return, old turn review/fix loops and unused entities/tests. Preserve unrelated task comments, dependencies and requests through the new engine. Implement checked report aggregation for coordination results, with no fictional own code SHA or repeated group code review; executable parent results still require Review.
+- [x] Prove stale owner/model, cross-company/path and duplicate-completion cases; prove independent A/Review and B/Development overlap. Run affected checks and commit.
 
 ## Increment 3: Exact candidate Tests and source-backed findings
 
@@ -73,11 +73,11 @@
 
 **Interfaces:** Tests accepts only `{candidateId, routeRevision, baseCommit, commit, branch}` with verified completed parts or verified reuse at the same influencing fingerprint. Finding projections count unique server finding/event identities by Review/Security and keep fixes separate from confirmations. Candidate verification obtains the original base and final influencing fingerprints from the same authenticated node and pinned repository scope. The server derives changed or newly added canonical test units from that pair; unavailable base or fingerprints blocks scope proof instead of certifying an arbitrary command or a whole profile. Existing result reuse requires a green result at the final fingerprint and its original executed product receipt. Persist per-unit source run/commit and verified source fingerprints; revalidate them before reuse and at Tests, acceptance and child aggregation. A complete unchanged fingerprint pair records no applicable test commands. The full declared profile supplies applicable suites, while only changed units run. A passed manual command cannot substitute for this scope proof. The shallow-worker mutation plan is JSON with full base/head SHAs, changed paths and hunks, independent of the removed automatic author-check codec. Mutation execution must additionally carry the same base/final SHAs into the existing changed-pure-function selector; a file fingerprint alone does not establish function purity.
 
-- [ ] Write RED tests for stale author receipts after a fix, wrong branch/task/revision, zero/malformed results and duplicate finding ingestion.
-- [ ] Wire existing selection/fingerprint and narrow pure-function mutation ports into final-candidate acceptance; preserve applicable check failures and unavailable evidence.
-- [ ] Verify selection separately from execution, exact final SHA including fixes, changed tests and influencing conditions. DB/process/network/unknown purity is not mutated.
-- [ ] Prove Tests content failure escalates to the head and infrastructure failure stays retryable at Tests; Tests cannot edit the candidate.
-- [ ] Run affected checks and commit.
+- [x] Write RED tests for stale author receipts after a fix, wrong branch/task/revision, zero/malformed results and duplicate finding ingestion.
+- [x] Wire existing selection/fingerprint and narrow pure-function mutation ports into final-candidate acceptance; preserve applicable check failures and unavailable evidence.
+- [x] Verify selection separately from execution, exact final SHA including fixes, changed tests and influencing conditions. DB/process/network/unknown purity is not mutated.
+- [x] Prove Tests content failure escalates to the head and infrastructure failure stays retryable at Tests; Tests cannot edit the candidate.
+- [x] Run affected checks and commit.
 
 ## Increment 4: Actual map, task UI and standalone template abilities
 
@@ -86,19 +86,19 @@
 **Interfaces:** Task/detail/list/org all carry the same required route snapshot; `EchelonFindingsView` is derived from visible events. Stage labels are literally Architecture, Development, Review, Security and Tests in every locale. Any capable assigned agent can check/fix; no new special role exists.
 
 - [x] Prove the default snapshot/map has no Cleanup; a head can insert it after Review for a task or turn; the existing dev-cleanup skill is offered off by default. Server 1538 and web 1534 cover these boundaries.
-- [ ] Adapt material tests into RED for actual stage owners, skips/added Security, live refresh, finding provenance and no old author-return display. Remove cancelled null/disabled cases and invalid test helper options.
-- [ ] Implement UI on the existing design system; integrate only the useful portions of the saved material. Resolve the known empty-coverage seam and fixture 404 causes.
+- [x] Adapt material tests into RED for actual stage owners, skips/added Security, live refresh, finding provenance and no old author-return display. Remove cancelled null/disabled cases and invalid test helper options.
+- [x] Implement UI on the existing design system; integrate only the useful portions of the saved material. Resolve the known empty-coverage seam and fixture 404 causes.
 - [x] Adapt standalone Review/Security repair abilities, required-route instructions and short roles. Remove cancelled return/fanout text and inventory assumptions in those contracts. 1532: 254 template checks passed; remaining generic guide wording still needs the final audit.
 - [ ] Run affected unit/type/language/browser checks remotely. Verify longest/shortest shipped locales, narrow/desktop, light/dark and applicable browser engines. Missing readiness is not PASS.
-- [ ] Commit the proved increment.
+- [x] Commit the proved increment.
 
 ## Increment 5: Clean-install proof and release data handoff
 
 **Files:** fresh-schema tests, `.hornhoof/test-environment.json` and wiring only where the new route needs them, `docs/development-echelons-release-data.md`, updated task guide/spec.
 
-- [ ] Prove fresh schema installation and that no schema change translates old tasks or assigns existing staff/models.
-- [ ] Record manual release order: capture old fields before replaced schema fields disappear, create required route records and ownership/scope/model metadata for affected rows, keep historical events truthful, verify constraints before enabling work.
-- [ ] Identify each affected table/field, selection condition and expected result. Do not implement or run a bulk converter or fabricate decision events.
+- [x] Prove fresh schema installation and that no schema change translates old tasks or assigns existing staff/models.
+- [x] Record manual release order: capture old fields before replaced schema fields disappear, create required route records and ownership/scope/model metadata for affected rows, keep historical events truthful, verify constraints before enabling work.
+- [x] Identify each affected table/field, selection condition and expected result. Do not implement or run a bulk converter or fabricate decision events.
 - [ ] Finish affected author checks on the exact final SHA; report source receipts and new receipts distinctly. Do not start #729 or independent review before submission.
 - [ ] Submit #719 with one final `task-717` SHA, original base, implemented/deleted behavior, all RED/GREEN IDs, limits and the manual data checklist. David owns main and release.
 
@@ -113,3 +113,9 @@
 - Current-main integration keeps `impact.fullPackageGlobs[].tests` and its protocol/selector support. Remove only readers whose replaced gate tests were actually deleted; declare the new route readers. Confirm this wiring with affected selector tests. Do not remove applicability fields to satisfy an older deployed parser.
 
 - Candidate mutation execution uses the manifest-declared narrow invocation with a bound private base/head delta file. Function selection contributes to its unit fingerprint. Final evidence must retain the actual exact selection and one passing result per assigned mutation source; a matching plan or process exit alone does not prove those source outcomes.
+
+## Current proof frontier
+
+Implementation and fixture ports are complete. Remote checks through run 1706 closed all 45 original new or grown server CRAP findings by measured source scopes. Node, protocol, web and root script scopes also have passed tests, types, lint and CRAP records. These records retain their own SHAs and are not a claim of final same-candidate verification. The execution ledger contains the exact commands, RED/GREEN sequence, source artifacts and limits.
+
+Final same-candidate author checks and the unified submission remain pending. Run 1621 failed its runtime identity guard before all three browser engines; browser evidence is NOT_RUN and no retry is authorized. Root `.mjs` duplicate analysis reported no supported source files and remains unavailable. Selector-only whole-suite collection did not execute tests. Independent Review, applicable Security and #729 follow submission; David owns integration and release.

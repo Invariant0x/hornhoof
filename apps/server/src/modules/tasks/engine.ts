@@ -43,7 +43,7 @@ export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: strin
 export type Moved = { task: Task; wakes: Wake[] };
 
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-/* The templates name a department's gate roles, for the review of a turn; without them none opens. */
+/* Task commands use the same context for agents and people. */
 type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare' | 'readCommit'>>;
 
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
@@ -370,8 +370,7 @@ export async function liveAgent(db: Db | Tx, companyId: string | null, id: strin
   return agent;
 }
 
-/* A live agent that can take a turn: one without a subscription would never wake for the task, one switched off not
-   until it is on again. A gate may be off: its role's employees that are on check the work. */
+/* A live agent that can take a turn needs an active subscription and must be switched on. */
 async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
   const agent = await liveAgent(db, companyId, id);
   if (agent.switchedOffAt) throw refuse(409, 'switched_off', `${agent.name} is switched off right now. Give the work to someone who is on.`);
@@ -1124,8 +1123,7 @@ function requireUnsubmittedWork(task: Task, route: Route): void {
   if (route.state.resultKind !== 'code' || route.state.candidateId || !['architecture', 'development'].includes(route.state.stage ?? '') || task.assigneeAgentId !== task.executorAgentId) throw refuse(409, 'task_invalid', 'Only unsubmitted work can change executor automatically.');
 }
 
-/* The agent's turns on the task keep breaking as soon as they start: Hornhoof stops waking it there, and whoever gave the
-   task out hears why, or a person when nobody did or a gate's reviewer broke. */
+/* Repeated startup failures stop task turns and notify the giver, or ask a person when there is no other giver. */
 export async function brokeDown(ctx: Live, agentId: string, task: Task, text: string): Promise<Moved> {
   if (task.createdByAgentId && task.createdByAgentId !== agentId) {
     const wakes = giver(task, 'blocked', agentId, text);
