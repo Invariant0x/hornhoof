@@ -187,10 +187,11 @@ it('cancels a granted part waiting for its disposable user without starting it o
 /* Candidate metadata must compare both pinned trees even when the repository has no periodic full-run policy. */
 describe('the final candidate influencing fingerprints', () => {
   const describeCandidate = (f: Awaited<ReturnType<typeof fixture>>, head: string, prints?: Parameters<typeof environment.describeTestEnvironment>[4], base = f.sha): Promise<unknown> =>
-    Reflect.apply(environment.describeTestEnvironment, null, [f.source, f.scope, head, f.context, prints, base]);
+    environment.describeTestEnvironment(f.source, f.scope, head, f.context, prints, base);
 
   const changed = async () => {
-    const f = await fixture();
+    const value = manifest(); value.impact.adapter = 'vitest-related';
+    const f = await fixture(value);
     await writeFile(join(f.root, 'app/test/a.test.ts'), 'export const changed = true;');
     git(f.root, 'commit', '--quiet', '-am', 'Change one test');
     return { ...f, head: git(f.root, 'rev-parse', 'HEAD') };

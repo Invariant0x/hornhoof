@@ -97,8 +97,15 @@ export async function readTestEnvironment(source: Source, repositoryScope: Repos
 }
 /* A description with what lets the server reuse results. Only the description is needed for a run: without fingerprints, everything
    runs. A manifest that names no full run reuses nothing, so nothing of the commit is read for them. */
-export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[] }> {
+export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints, baseCommit?: string): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[]; baseFingerprints?: { commitSha: string; fingerprints: UnitFingerprint[] } }> {
   const description = await readTestEnvironment(source, repositoryScope, commitSha, context);
+  if (baseCommit !== undefined) {
+    const sameRuntime = { ...context, runtimes: description.runtimeCapabilities };
+    const finalPrints = UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, sameRuntime));
+    const base = await readTestEnvironment(source, repositoryScope, baseCommit, sameRuntime);
+    const basePrints = UnitFingerprints.parse(await fingerprints(source, repositoryScope, base, sameRuntime));
+    return { description, fingerprints: finalPrints, baseFingerprints: { commitSha: base.commitSha, fingerprints: basePrints } };
+  }
   if (!description.manifest.execution?.fullRun) return { description };
   try { return { description, fingerprints: UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, context)) }; }
   catch { context.signal.throwIfAborted(); return { description }; }
