@@ -35,6 +35,7 @@ core on their program observer.
 ### Fixed
 
 - Firefox and WebKit start on every node: the node image carries the system packages they need, not only Chromium's.
+- On a busy machine, words a person sends to Kimi Code while an assignment waits stay theirs: the turn no longer ends with the answer to them, as the node now tells whose a prompt is by its words, not by when it hears of it.
 - A node checks all its programs in one step a second. Before, it copied its whole observer state once for each program
   and delivery it remembered, and with a few hundred of them it sat at 100% CPU with nothing running, so tool and hook
   calls through it timed out.
