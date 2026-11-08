@@ -81,6 +81,7 @@ async function closedTurn(c: Company) {
   await c.event(two.id, 'submitted', 40);
   await c.event(two.id, 'verdict', 45, { pass: false, rework: true });
   await c.event(two.id, 'submitted', 50);
+  await c.event(two.id, 'verdict', 50, { pass: true });
   await c.event(two.id, 'submitted', 60, { merged: true });
   await c.event(three.id, 'submitted', 100);
   await c.event(one.id, 'updated', 11, { externalWait: { reason: 'Test run 1', since: at(11).toISOString(), until: at(90).toISOString() } });
