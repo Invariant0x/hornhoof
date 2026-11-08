@@ -1,12 +1,12 @@
 # The author's check of this repository
 
-One command checks what an author hands in, at an exact commit against its base. It is the `check:author` script in the root `package.json`, beside the test environment in `test-environment.json`. It uses that file's fast profile, suites and final checks. Task 325 owns it; `docs/author-check-port.md` describes the consumer of its result.
+One command checks what an author hands in, at an exact commit against its base. It is the `check:author` script in the root `package.json`, beside the test environment in `test-environment.json`. It uses that file's fast profile, suites and final checks.
 
 ```sh
 npm run -s check:author -- --sha <40 hex> --base <40 hex>
 ```
 
-It checks only inside `run_tests`, which sets `HH_TEST_PART`, so no check uses the CPU of an agent's container. There it prepares only what the product's harness left undone. The clone of a run holds one commit and has no token, so a run cannot read the base. Run the command above outside `run_tests` first. It reads `git diff` and the complexity of the changed files at both commits, runs nothing else, and prints the line to give `run_tests`, with `--plan '<text>'` added: the changed paths and lines, and each function that is new or grew. The line has to fit the 4000 characters of a command, so a larger change goes without its lines, which leaves `changedLines` unknown, and one still too large is refused with `plan_too_long`. A plan not copied exactly is refused with `plan_invalid`: copy the printed line again. The plan comes from the author, and the run reads it only as far as its digest and commits; it stands in the run's command for anyone to compare. When the base can be read in the clone, the plan is not needed.
+It runs where it is called: in the workspace of whoever builds or reviews the change, with `--sha` checked out (`sha_mismatch` otherwise) and `--base` in the local history (`base_unreachable` otherwise: fetch it). It installs from the lockfile and builds the protocol and the node only when they are missing. It reads `git diff` and the complexity of the changed files at both commits, then runs the stages below on what the change touched.
 
 ## What each stage does
 
@@ -48,7 +48,7 @@ The rules are `impact.fullPackageGlobs` of `test-environment.json`: a rule names
 - A function of a changed file at 10 or more whose complexity did not grow does not fail: a `TOUCHED` line shows its numbers, and it stays out of `worstCrap`.
 - Dryer never fails the check. Its findings are in `dryerFlags`.
 
-Exit code 0 means nothing failed, 1 a stage failed, 2 it could not be judged: a wrong commit, no base and no plan, or a tool that did not run. Exit 0 with an unavailable stage is not a full pass: the consumer reads it as `partial`.
+Exit code 0 means nothing failed, 1 a stage failed, 2 it could not be judged: a wrong commit, no base, or a tool that did not run. Exit 0 with an unavailable stage is not a full pass: the consumer reads it as `partial`.
 
 ## What it prints
 

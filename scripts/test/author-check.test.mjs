@@ -1,13 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { URL } from 'node:url';
 import { changedLines, countDuplicates, exitCodeOf, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from '../author-check/judge.mjs';
-import { buildPlan, decodePlan, encodePlan, grownFunctions, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus } from '../author-check/plan.mjs';
+import { buildPlan, grownFunctions, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus } from '../author-check/plan.mjs';
 import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
@@ -380,49 +379,10 @@ test('a plan of new files only never asks for a base it does not need', () => {
   assert.deepEqual(commits, [SHA]);
 });
 
-const FULL_PLAN = {
-  sha: SHA, base: BASE,
-  changes: [{ kind: 'modified', path: 'apps/node/src/a b.ts' }, { kind: 'added', path: 'apps/node/test/a.test.ts' }, { kind: 'deleted', path: 'docs/gone.md' }, { kind: 'renamed', previousPath: 'x/old.ts', path: 'x/new.ts' }],
-  hunks: { 'apps/node/src/a b.ts': [[1, 3], [20, 1]], 'apps/node/test/a.test.ts': [[1, 9]], 'x/new.ts': [[5, 2]] },
-  grown: { 'apps/node': [{ namespace: 'a b', name: 'f', cc: 12, base: 9 }, { namespace: 'a b', name: 'g', cc: 3, base: null }, { namespace: 'c', name: 'Guard.run', cc: 4, base: null }] },
-};
-
-test('a plan is plain words an agent can copy, and reads back', () => {
-  const text = encodePlan(FULL_PLAN);
-  assert.ok(text.startsWith(`v1 ${SHA.slice(0, 12)} ${BASE.slice(0, 12)};M apps/node/src/a b.ts @1+3,20;A apps/node/test/a.test.ts;D docs/gone.md;R x/old.ts>x/new.ts @5+2;`), text);
-  assert.ok(text.includes(';G apps/node a b f=12<9,g=3;G apps/node c Guard.run=4;#'), text);
-  const plan = decodePlan(text);
-  assert.deepEqual(plan.changes, FULL_PLAN.changes);
-  assert.deepEqual(plan.hunks, { 'apps/node/src/a b.ts': [[1, 3], [20, 1]], 'x/new.ts': [[5, 2]] });
-  assert.deepEqual(plan.grown, FULL_PLAN.grown);
-  assert.deepEqual([plan.sha, plan.base], [SHA.slice(0, 12), BASE.slice(0, 12)]);
-});
-
-test('a plan without lines says so, so changed lines stay unknown', () => {
-  const plan = decodePlan(encodePlan({ ...FULL_PLAN, hunks: null }));
-  assert.equal(plan.hunks, null);
-  assert.deepEqual(plan.changes, FULL_PLAN.changes);
-});
-
-test('any change to the words of a plan is refused', () => {
-  const text = encodePlan(FULL_PLAN);
-  for (const broken of [text.replace('@1+3', '@1+4'), text.replace(/#.*$/, '#00000000'), text.replace(';#', ';'), 'nonsense', '', text.replace('v1', 'v2').replace(/#.*$/, '#')]) assert.throws(() => decodePlan(broken), /plan_invalid/, broken);
-});
-
-test('a broken body with a right digest is refused too', () => {
-  const sign = body => `${body};#${createHash('sha256').update(body).digest('hex').slice(0, 8)}`;
-  for (const body of ['v2 111111111111 222222222222', `v1 ${'1'.repeat(12)} ${'2'.repeat(12)};Q what`, `v1 ${'1'.repeat(12)} ${'2'.repeat(12)};G apps/node a nothing`]) assert.throws(() => decodePlan(sign(body)), /plan_invalid/, body);
-});
-
-test('a name a plan cannot hold is refused when it is made, not read wrong later', () => {
-  for (const path of ["a'b.ts", 'a;b.ts', 'a>b.ts', 'a@b.ts']) assert.throws(() => encodePlan({ ...FULL_PLAN, changes: [{ kind: 'modified', path }] }), /plan_unsupported/, path);
-  assert.throws(() => encodePlan({ ...FULL_PLAN, grown: { '.': [{ namespace: 'a', name: 'b,c', cc: 3, base: null }] } }), /plan_unsupported/);
-});
-
 test('arguments need exact commits', () => {
-  assert.deepEqual(parseArgs(['--sha', SHA, '--base', BASE]), { sha: SHA, base: BASE, plan: null, allowWhole: false });
-  assert.deepEqual(parseArgs(['--sha', SHA, '--base', BASE, '--plan', 'p', '--allow-whole']), { sha: SHA, base: BASE, plan: 'p', allowWhole: true });
-  for (const bad of [[], ['--sha', 'abc', '--base', BASE], ['--sha', SHA], ['--sha', SHA, '--base', BASE, '--what'], ['--sha', SHA, '--base', BASE, '--plan']]) assert.equal(parseArgs(bad), null, bad.join(' '));
+  assert.deepEqual(parseArgs(['--sha', SHA, '--base', BASE]), { sha: SHA, base: BASE, allowWhole: false });
+  assert.deepEqual(parseArgs(['--sha', SHA, '--base', BASE, '--allow-whole']), { sha: SHA, base: BASE, allowWhole: true });
+  for (const bad of [[], ['--sha', 'abc', '--base', BASE], ['--sha', SHA], ['--sha', SHA, '--base', BASE, '--what'], ['--sha', SHA, '--base', BASE, '--plan', 'p']]) assert.equal(parseArgs(bad), null, bad.join(' '));
 });
 
 const MANIFEST = {
@@ -492,97 +452,54 @@ function runner(overrides = {}) {
     check: async () => ({ code: 0 }), ...overrides };
 }
 const ARGS = ['--sha', SHA, '--base', BASE];
-const ON_RUN = { HH_TEST_PART: '1' };
 const recordOf = lines => JSON.parse(lines.find(line => line.startsWith('AUTHOR_CHECK ')).slice('AUTHOR_CHECK '.length));
 
-test('outside run_tests the command checks nothing and prints the line to run there', async () => {
-  const ports = runner();
-  assert.equal(await main(ARGS, {}, ports), 0);
-  assert.deepEqual(ports.calls, []);
-  const printed = ports.lines.find(line => line.startsWith('npm run -s check:author -- '));
-  assert.ok(printed.includes(`--sha ${SHA} --base ${BASE} --plan '`));
-  assert.ok(printed.endsWith("'"));
-  assert.ok(printed.length < 4000);
+test('the command checks the change where it is run, in the workspace of whoever runs it, and hands nothing to run_tests', async () => {
+  let given_ = null;
+  const ports = runner({ hasCommit: () => true, check: async (args, plan) => { given_ = [args.sha, plan.base]; return { code: 0 }; } });
+  assert.equal(await main(ARGS, ports), 0);
+  assert.deepEqual(given_, [SHA, BASE]);
+  assert.equal(ports.lines.some(line => line.includes('run_tests')), false);
 });
 
-test('a plan too long for one command is refused with the reason', async () => {
-  const big = Array.from({ length: 4000 }, (_, index) => ({ path: `apps/node/src/${index}-${Math.random()}.ts`, kind: 'modified' }));
-  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: big, hunks: {}, grown: {} }) });
-  assert.equal(await main(ARGS, {}, ports), 2);
-  assert.ok(ports.lines.some(line => line.includes('plan_too_long')));
-  assert.equal(ports.lines.some(line => line.startsWith('npm run')), false);
-});
-
-test('a plan too long with its lines goes without them, and says what that costs', async () => {
-  const hunks = { 'src/a.ts': Array.from({ length: 2000 }, (_, index) => [index * 3 + 1, 1]) };
-  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: [{ kind: 'modified', path: 'src/a.ts' }], hunks, grown: {} }) });
-  assert.equal(await main(ARGS, {}, ports), 0);
-  assert.ok(ports.lines.some(line => line.includes('changedLines')));
-  const printed = ports.lines.find(line => line.startsWith('npm run -s check:author -- '));
-  assert.ok(printed.includes(' nolines;M src/a.ts;#'));
-});
-
-test('a plan that cannot be written is reported', async () => {
-  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: [{ kind: 'modified', path: "a'b.ts" }], hunks: {}, grown: {} }) });
-  assert.equal(await main(ARGS, {}, ports), 2);
-  assert.ok(ports.lines.some(line => line.includes('plan_unsupported')));
-});
-
-test('a plan that cannot be made outside the run is reported', async () => {
-  const ports = runner({ makePlan: () => { throw new Error('crapper_unavailable'); } });
-  assert.equal(await main(ARGS, {}, ports), 2);
+test('a change whose plan cannot be made is reported and checks nothing', async () => {
+  const ports = runner({ hasCommit: () => true, makePlan: () => { throw new Error('crapper_unavailable'); }, check: async () => assert.fail('must not check') });
+  assert.equal(await main(ARGS, ports), 2);
   assert.ok(ports.lines.some(line => line.includes('crapper_unavailable')));
+  assert.ok(ports.lines.some(line => line.includes('reason=plan_failed')));
 });
 
 test('bad arguments say how to use the command', async () => {
   const ports = runner();
-  assert.equal(await main([], ON_RUN, ports), 2);
+  assert.equal(await main([], ports), 2);
   assert.ok(ports.lines.some(line => line.includes('--sha')));
 });
 
-test('on a run any other commit than the one asked for checks nothing', async () => {
+test('any other commit than the one checked out checks nothing', async () => {
   const ports = runner({ head: () => BASE, check: async () => assert.fail('must not check') });
-  assert.equal(await main(ARGS, ON_RUN, ports), 2);
+  assert.equal(await main(ARGS, ports), 2);
   assert.ok(ports.lines.some(line => line.includes('reason=sha_mismatch')));
   assert.equal(recordOf(ports.lines).checkCommit, SHA);
 });
 
-test('on a run with neither a base nor a plan every stage is unavailable and it is not a pass', async () => {
+test('without the base every stage is unavailable and it is not a pass', async () => {
   const ports = runner({ check: async () => assert.fail('must not check') });
-  assert.equal(await main(ARGS, ON_RUN, ports), 2);
+  assert.equal(await main(ARGS, ports), 2);
   assert.ok(ports.lines.some(line => /^STAGE tests unavailable .*reason=base_unreachable/.test(line)));
   assert.deepEqual(recordOf(ports.lines).stages.map(item => item.status), Array(6).fill('unavailable'));
 });
 
-test('on a run a plan for another commit or base is refused', async () => {
-  for (const other of [{ sha: BASE }, { base: SHA }]) {
-    const plan = encodePlan({ sha: SHA, base: BASE, changes: [], hunks: {}, grown: {}, ...other });
-    const ports = runner({ check: async () => assert.fail('must not check') });
-    assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 2);
-    assert.ok(ports.lines.some(line => line.includes('reason=plan_invalid')), JSON.stringify(other));
-  }
-});
-
-test('on a run a reachable base needs no plan', async () => {
-  let given_ = null;
-  const ports = runner({ hasCommit: () => true, check: async (args, plan) => { given_ = [args.sha, plan.base]; return { code: 0 }; } });
-  assert.equal(await main(ARGS, ON_RUN, ports), 0);
-  assert.deepEqual(given_, [SHA, BASE]);
-});
-
-test('on a run the plan given reaches the check and the code of the check is the code of the command', async () => {
-  const plan = encodePlan({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} });
+test('the plan of the change reaches the check and the code of the check is the code of the command', async () => {
   let seen = null;
-  const ports = runner({ check: async (args, value) => { seen = value; return { code: 1 }; } });
-  assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 1);
+  const ports = runner({ hasCommit: () => true, makePlan: () => ({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} }), check: async (args, value) => { seen = value; return { code: 1 }; } });
+  assert.equal(await main(ARGS, ports), 1);
   assert.deepEqual(seen.changes, CHANGES);
   assert.deepEqual([seen.sha, seen.base], [SHA, BASE]);
 });
 
-test('on a run a failed preparation leaves every stage unavailable', async () => {
-  const plan = encodePlan({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} });
-  const ports = runner({ prepare: async () => 'prepare_failed', check: async () => assert.fail('must not check') });
-  assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 2);
+test('a failed preparation leaves every stage unavailable', async () => {
+  const ports = runner({ hasCommit: () => true, makePlan: () => ({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} }), prepare: async () => 'prepare_failed', check: async () => assert.fail('must not check') });
+  assert.equal(await main(ARGS, ports), 2);
   assert.ok(ports.lines.some(line => line.includes('reason=prepare_failed')));
   assert.deepEqual(recordOf(ports.lines).scope.paths, CHANGES.map(change => change.path));
 });
