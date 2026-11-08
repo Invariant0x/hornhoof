@@ -1,3 +1,4 @@
+import { emptyEchelonFindings, type EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { describe, expect, it } from 'vitest';
 import { agentTime, workTree, type DepartmentTree, type TreeFacts, type TreeLine } from '../src/modules/tasks/tree.js';
 
@@ -5,7 +6,26 @@ const T0 = Date.parse('2026-05-01T09:00:00.000Z');
 const at = (minutes: number): Date => new Date(T0 + minutes * 60_000);
 const iso = (minutes: number): string => at(minutes).toISOString();
 
-function baseFacts(overrides: Partial<TreeFacts> = {}): TreeFacts {
+type TaskInput = Omit<TreeFacts['tasks'][number], 'echelons' | 'echelonFindings' | 'ownerSince'> & Partial<Pick<TreeFacts['tasks'][number], 'echelons' | 'echelonFindings' | 'ownerSince'>>;
+
+/* Pure rendering inputs carry a canonical route, without claiming an executed engine acceptance. */
+function taskFact(input: TaskInput): TreeFacts['tasks'][number] {
+  const closed = input.status === 'done' || input.status === 'cancelled';
+  const stage = input.executorAgentId ? (input.status === 'review' ? 'review' : 'development') : null;
+  const ownerAgentId = closed ? null : input.assigneeAgentId ?? input.executorAgentId;
+  const echelons: EchelonsSnapshot = { kind: 'development_echelons', version: 1, revision: 1, resultKind: stage ? 'code' : 'coordination', stage,
+    phase: closed ? 'done' : 'active', ownerAgentId, candidateId: null, assignment: null,
+    security: { required: false, reason: null, addedBy: null }, stages: stage ? [
+      { stage: 'architecture', status: 'skipped', ownerAgentId: null, inputCandidateId: null, candidateId: null, reason: 'small_task' },
+      { stage: 'development', status: closed || stage === 'review' ? 'complete' : 'active', ownerAgentId: input.executorAgentId, inputCandidateId: null, candidateId: null, reason: null },
+      { stage: 'review', status: closed ? 'complete' : stage === 'review' ? 'active' : 'pending', ownerAgentId: stage === 'review' ? ownerAgentId : null, inputCandidateId: null, candidateId: null, reason: null },
+      { stage: 'security', status: 'skipped', ownerAgentId: null, inputCandidateId: null, candidateId: null, reason: 'no_declared_risk' },
+      { stage: 'tests', status: closed ? 'complete' : 'pending', ownerAgentId: null, inputCandidateId: null, candidateId: null, reason: null },
+    ] : [] };
+  return { echelons, echelonFindings: emptyEchelonFindings(), ownerSince: input.createdAt, ...input };
+}
+
+function baseFacts(overrides: Partial<Omit<TreeFacts, 'tasks'>> & { tasks?: TaskInput[] } = {}): TreeFacts {
   return {
     repository: true,
     turn: { id: 'turn-3', number: 3, createdAt: at(0), openedAt: at(0) },
@@ -19,20 +39,20 @@ function baseFacts(overrides: Partial<TreeFacts> = {}): TreeFacts {
       { id: 'gleb', name: 'Gleb', createdAt: at(-10) },
       { id: 'rita', name: 'Rita', createdAt: at(-5) },
     ],
-    tasks: [],
     related: [],
     events: [],
     requests: [],
     signs: [],
     jobs: [],
     ...overrides,
+    tasks: (overrides.tasks ?? []).map(taskFact),
   };
 }
 
 function assertCoversWithoutGaps(line: TreeLine, nowIso: string): void {
   const expectedEnd = line.mergedAt ?? line.doneAt ?? null;
   expect(line.segments.length).toBeGreaterThan(0);
-  expect(line.segments[0]!.from).toBe(line.createdAt);
+  expect(line.segments[0]!.from).toBe(line.ownerSince);
   for (let i = 0; i < line.segments.length; i++) {
     const seg = line.segments[i]!;
     const segEnd = seg.to ?? nowIso;
@@ -51,7 +71,7 @@ function assertAllLinesCovered(tree: DepartmentTree): void {
 }
 
 function waitingFacts(): TreeFacts {
-  const tasks: TreeFacts['tasks'] = [
+  const tasks: TaskInput[] = [
     { id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
       executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
     { id: 'mira-task', number: 110, title: 'Checkout', status: 'done', parentId: 'head-task',
@@ -103,26 +123,19 @@ describe('workTree', () => {
     expect(tree.lines[0]!.segments.at(-1)).toEqual({ kind: 'after', from: iso(20), to: null, externalWait });
     expect(tree.time[0]).toMatchObject({ work: 1200, after: 1200, lost: 0, alarm: 0 });
     facts.turns![0]!.history[0]!.program!.state = 'idle';
-    facts.tasks.push({ id: 'finished-child', number: 2, title: 'Finished child', status: 'done', parentId: 't1', executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) });
+    facts.tasks.push(taskFact({ id: 'finished-child', number: 2, title: 'Finished child', status: 'done', parentId: 't1', executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) }));
     expect(workTree(facts, at(40)).waiting).toEqual([]);
   });
 
-  it('counts a review summary queued for its head even though the head is not a reviewer', () => {
-    const facts = baseFacts({ tasks: [
-      { id: 'head-task', number: 109, title: 'Department work', status: 'working', parentId: null, executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
-      { id: 'r90', number: 90, title: 'Review', status: 'done', parentId: null, executorAgentId: 'head', after: [], inRepository: true, createdAt: at(10), closedAt: at(20) },
-    ], events: [
-      { taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) },
-      { taskId: 'r90', agentId: 'mira', kind: 'verdict', text: '', data: { pass: true, findings: 0 }, createdAt: at(20) },
-    ], turns: [
-      { id: 'head-job', taskId: null, agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'gone', since: at(0).getTime(), tool: null }, alarm: null }] },
-      { id: 'review-message', taskId: 'r90', agentId: 'head', createdAt: at(20), startedAt: null, finishedAt: null, status: 'queued', history: [] },
-    ] });
+  it('counts a checked-result message queued for the head separately from the finished worker', () => {
+    const facts = waitingFacts();
+    facts.turns![0]!.taskId = null;
+    facts.turns!.push({ id: 'checked-message', taskId: 'mira-task', agentId: 'head', createdAt: at(20), startedAt: null, finishedAt: null, status: 'queued', history: [] });
     const tree = workTree(facts, at(40));
     expect(tree.activity).toContainEqual(expect.objectContaining({ jobId: 'head-job', agent: { id: 'head', name: 'Nika' }, task: null, segments: [expect.objectContaining({ kind: 'lost', from: iso(0), to: null })] }));
-    expect(tree.activity).toContainEqual(expect.objectContaining({ jobId: 'review-message', task: { id: 'r90', number: 90, title: 'Review' } }));
+    expect(tree.activity).toContainEqual(expect.objectContaining({ jobId: 'checked-message', task: { id: 'mira-task', number: 110, title: 'Checkout' } }));
     expect(tree.time.find(t => t.agent.id === 'head')).toMatchObject({ lost: 2400, queued: 1200 });
-    expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(20), taskId: 'r90', number: 90, title: 'Review' });
+    expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(10), taskId: 'mira-task' });
   });
 
   it('names the head a finished worker is waiting for, from the time its own work ended', () => {
@@ -172,7 +185,7 @@ describe('workTree', () => {
   });
 
   it('names the actual prerequisite and keeps another employee external wait independent', () => {
-    const task = (id: string, number: number, executorAgentId: string, created: number): TreeFacts['tasks'][number] => ({
+    const task = (id: string, number: number, executorAgentId: string, created: number): TaskInput => ({
       id, number, executorAgentId, title: id, status: 'working', parentId: null, after: [], inRepository: true, createdAt: at(created), closedAt: null,
     });
     const facts = baseFacts({ tasks: [task('unrelated', 1, 'head', 0), task('upstream', 2, 'timur', 0),
@@ -187,7 +200,7 @@ describe('workTree', () => {
   });
 
   it('keeps hidden agents, hidden task turns and earlier-turn tasks out of unlinked activity', () => {
-    const task = (id: string, number: number, executorAgentId: string, visible: boolean): TreeFacts['tasks'][number] => ({
+    const task = (id: string, number: number, executorAgentId: string, visible: boolean): TaskInput => ({
       id, number, executorAgentId, visible, title: id, status: 'working', parentId: null, after: [], inRepository: true, createdAt: at(0), closedAt: null,
     });
     const job = (id: string, agentId: string, taskId: string | null): NonNullable<TreeFacts['turns']>[number] => ({ id, agentId, taskId,
@@ -223,7 +236,6 @@ describe('workTree', () => {
   it('does not make activity from a turn cancelled before it started with no elapsed time or program evidence', () => {
     const facts = baseFacts({ tasks: [{ id: 'r90', number: 90, title: 'Review', status: 'review', parentId: null,
       executorAgentId: 'head', after: [], inRepository: true, createdAt: at(10), closedAt: null }],
-      events: [{ taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) }],
       turns: [{ id: 'never-started', agentId: 'head', taskId: null, createdAt: at(10), startedAt: null, finishedAt: at(10), status: 'failed', history: [] }] });
     expect(workTree(facts, at(40)).activity).toEqual([]);
   });
@@ -234,7 +246,7 @@ describe('workTree', () => {
     expect(tree.lines.map(l => [l.number, l.agent.id])).toEqual([[109, 'head']]);
   });
 
-  it('counts one agent minute once when multiple task and review lifetimes overlap', () => {
+  it('counts one agent minute once when multiple task lifetimes overlap', () => {
     const tasks = [1, 2].map(n => ({ id: `t${n}`, number: n, title: 'Checkout', status: 'working' as const, parentId: null,
       executorAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }));
     const tree = workTree(baseFacts({ tasks, turns: [{ id: 'j1', taskId: 't1', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
@@ -253,7 +265,7 @@ describe('workTree', () => {
     expect(tree.time[0]).toMatchObject({ work: 2400, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 0 });
   });
 
-  it('uses an old proven alarm for the four-hour lost interval and counts queued review messages separately', () => {
+  it('uses an old proven alarm for the four-hour lost interval and counts queued task messages separately', () => {
     const start = new Date('2026-11-03T06:10:00.000Z'), stopped = new Date('2026-11-03T10:33:35.000Z');
     const since = Date.parse('2026-11-03T06:11:06.000Z');
     const queued = ['2026-11-03T06:13:00.000Z', '2026-11-03T06:35:00.000Z'];
@@ -278,28 +290,6 @@ describe('workTree', () => {
       executorAgentId: 'head', after: [], inRepository: false, createdAt: at(0), closedAt: null }] }), at(40));
     expect(tree.lines[0]!.segments).toEqual([{ kind: 'unknown', from: iso(0), to: null }]);
     expect(tree.time[0]).toMatchObject({ work: 0, stall: 0, unknown: 2400 });
-  });
-
-  it('keeps both turn reviews, their verdicts, fixes and the final check in time order', () => {
-    const task = (number: number, executorAgentId: string, created: number, closed: number | null): TreeFacts['tasks'][number] => ({
-      id: `t${number}`, number, title: `Task ${number}`, status: closed === null ? 'review' : 'done', parentId: null,
-      executorAgentId, after: [], inRepository: true, createdAt: at(created), closedAt: closed === null ? null : at(closed),
-    });
-    const facts = baseFacts({ tasks: [task(90, 'head', 10, 20), task(100, 'mira', 20, 30), task(121, 'head', 30, null), task(135, 'rita', 40, null)] });
-    facts.turns = [90, 121].map((number, i) => ({ id: `j${number}`, taskId: `t${number}`, agentId: 'vera', createdAt: at(10 + i * 20), startedAt: at(10 + i * 20), finishedAt: at(18 + i * 20), status: 'done', history: [{ at: at(10 + i * 20), program: { state: 'thinking', since: at(10 + i * 20).getTime(), tool: null }, alarm: null }] }));
-    facts.events = [90, 121].flatMap((number, i) => [
-      { taskId: `t${number}`, agentId: 'head', kind: 'created' as const, text: '', data: { turnReview: true, panel: ['vera'] }, createdAt: at(10 + i * 20) },
-      { taskId: `t${number}`, agentId: 'vera', kind: 'verdict' as const, text: '', data: { pass: i === 1, findings: i === 1 ? 0 : 2 }, createdAt: at(18 + i * 20) },
-    ]);
-    for (const task of facts.tasks.filter(t => t.number === 90 || t.number === 121)) task.createdAt = at(10);
-    facts.tasks.reverse();
-    const tree = workTree(facts, at(45));
-    expect(tree.reviews.map(r => r.number)).toEqual([90, 121]);
-    expect(tree.reviews.map(r => r.reviewers[0]!.verdict?.findings)).toEqual([2, 0]);
-    expect(tree.lines.map(l => l.number)).toEqual([100, 135]);
-    expect(tree.stage).toBe('review');
-    expect(tree.review?.number).toBe(121);
-    expect(tree.time.find(t => t.agent.id === 'vera')?.work).toBe(16 * 60);
   });
 
   it('keeps unreported history unknown regardless of the gaps between task events, and ignores nudges', () => {
@@ -523,7 +513,7 @@ describe('workTree', () => {
       ],
       events: [
         { taskId: 't49', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(10) },
-        { taskId: 't49', agentId: 'eva', kind: 'submitted', text: 'Merged.', data: { merged: true }, createdAt: at(60) },
+        { taskId: 't49', agentId: 'eva', kind: 'report', text: 'Accepted the checked candidate.', data: { acceptedCandidate: { integration: { branch: 'turn-3', commit: 'b'.repeat(40) } } }, createdAt: at(60) },
         { taskId: 't50', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(15) },
         { taskId: 't50', agentId: null, kind: 'started', text: '#49 is done.', data: {}, createdAt: at(60) },
         { taskId: 't52', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(20) },
@@ -579,7 +569,7 @@ describe('workTree', () => {
       events: [
         { taskId: 't1', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(10) },
         { taskId: 't1', agentId: 'mira', kind: 'submitted', text: 'Handed in.', data: {}, createdAt: at(85) },
-        { taskId: 't1', agentId: 'mira', kind: 'submitted', text: 'Merged.', data: { merged: true }, createdAt: at(90) },
+        { taskId: 't1', agentId: 'mira', kind: 'report', text: 'Accepted the checked candidate.', data: { acceptedCandidate: { integration: { branch: 'turn-3', commit: 'b'.repeat(40) } } }, createdAt: at(90) },
         { taskId: 't2', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(15) },
         { taskId: 't2', agentId: 'timur', kind: 'comment', text: 'Halfway.', data: {}, createdAt: at(40) },
         { taskId: 't2', agentId: 'timur', kind: 'report', text: '240 customers.', data: {}, createdAt: at(80) },
@@ -602,102 +592,6 @@ describe('workTree', () => {
       { kind: 'unknown', from: iso(15), to: iso(80) },
     ]);
     assertAllLinesCovered(tree);
-  });
-
-  it('builds the turn review with verdicts and findings, sets stage to review while open and work once closed, and leaves it out of lines', () => {
-    const makeReviewFacts = (reviewStatus: 'review' | 'done', closedAt: Date | null) =>
-      baseFacts({
-        tasks: [
-          {
-            id: 't42',
-            number: 42,
-            title: 'Payment gateway',
-            status: 'done',
-            parentId: null,
-            executorAgentId: 'mira',
-            after: [],
-            inRepository: true,
-            createdAt: at(10),
-            closedAt: at(40),
-          },
-          {
-            id: 'r54',
-            number: 54,
-            title: 'Review of turn 3',
-            status: reviewStatus,
-            parentId: null,
-            executorAgentId: 'head',
-            after: [],
-            inRepository: true,
-            createdAt: at(40),
-            closedAt,
-          },
-        ],
-        events: [
-          { taskId: 't42', agentId: 'head', kind: 'created', text: '', data: {}, createdAt: at(10) },
-          { taskId: 't42', agentId: 'mira', kind: 'submitted', text: 'Merged.', data: { merged: true }, createdAt: at(40) },
-          {
-            taskId: 'r54',
-            agentId: 'head',
-            kind: 'created',
-            text: 'Check turn-3.',
-            data: { turnReview: true, panel: ['vera', 'gleb', 'rita'] },
-            createdAt: at(40),
-          },
-          { taskId: 'r54', agentId: 'rita', kind: 'verdict', text: 'Clean.', data: { pass: true, stage: 1, round: 0, findings: 0 }, createdAt: at(55) },
-          { taskId: 'r54', agentId: 'vera', kind: 'verdict', text: 'Two bugs.', data: { pass: false, stage: 1, round: 0, findings: 2 }, createdAt: at(58) },
-        ],
-        /* Vera's verdict at 58 must not count as a sign of life for Gleb: Gleb has been silent since 40, so at 80 Gleb is stalled. */
-        jobs: [{ taskId: 'r54', agentId: 'gleb', lastActionAt: null, live: true }],
-      });
-
-    const openTree = workTree(makeReviewFacts('review', null), at(80));
-    expect(openTree.stage).toBe('review');
-    expect(openTree.lines.map(l => l.taskId)).toEqual(['t42']);
-    expect(openTree.review).toEqual({
-      taskId: 'r54',
-      number: 54,
-      openedAt: iso(40),
-      closedAt: null,
-      head: { id: 'head', name: 'Nika' },
-      reviewers: [
-        {
-          agent: { id: 'vera', name: 'Vera' },
-          verdict: { at: iso(58), pass: false, findings: 2 },
-          segments: [{ kind: 'unknown', from: iso(40), to: iso(58) }],
-          lastActionAt: null,
-          live: false,
-        },
-        {
-          agent: { id: 'gleb', name: 'Gleb' },
-          verdict: null,
-          segments: [{ kind: 'unknown', from: iso(40), to: null }],
-          lastActionAt: null,
-          live: true,
-        },
-        {
-          agent: { id: 'rita', name: 'Rita' },
-          verdict: { at: iso(55), pass: true, findings: 0 },
-          segments: [{ kind: 'unknown', from: iso(40), to: iso(55) }],
-          lastActionAt: null,
-          live: false,
-        },
-      ],
-    });
-
-    const closedFacts = makeReviewFacts('done', at(75));
-    closedFacts.events.push({
-      taskId: 'r54',
-      agentId: 'gleb',
-      kind: 'verdict',
-      text: 'Looks fine.',
-      data: { pass: true, stage: 1, round: 0 },
-      createdAt: at(65),
-    });
-    const closedTree = workTree(closedFacts, at(80));
-    expect(closedTree.stage).toBe('work');
-    expect(closedTree.review!.closedAt).toBe(iso(75));
-    expect(closedTree.review!.reviewers[1]!.verdict).toEqual({ at: iso(65), pass: true, findings: null });
   });
 
   it('sums time per agent in seconds across multiple lines in staff createdAt order, and orders idle stretches', () => {
@@ -777,7 +671,7 @@ describe('workTree', () => {
         },
       ],
       events: [
-        { taskId: 'm1', agentId: 'mira', kind: 'submitted', text: 'Merged.', data: { merged: true }, createdAt: at(20) },
+        { taskId: 'm1', agentId: 'mira', kind: 'report', text: 'Accepted the checked candidate.', data: { acceptedCandidate: { integration: { branch: 'turn-3', commit: 'b'.repeat(40) } } }, createdAt: at(20) },
         { taskId: 'm2', agentId: null, kind: 'started', text: 'Started.', data: {}, createdAt: at(30) },
         { taskId: 'm2', agentId: 'mira', kind: 'comment', text: 'Progress.', data: {}, createdAt: at(45) },
         { taskId: 'm2', agentId: 'mira', kind: 'comment', text: 'Back at it.', data: {}, createdAt: at(80) },
