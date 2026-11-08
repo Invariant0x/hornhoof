@@ -1,3 +1,4 @@
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
@@ -338,8 +339,9 @@ export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' |
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 export type TaskPlace = { id: string; name: string } | null;
 
-/* A task as lists show it. stage 0 is with its executor; 1 and up is the gate it waits at. */
+/* A task as lists show it, with its required current route. */
 export type TaskLine = {
+  echelons: EchelonsSnapshot;
   id: string;
   number: number;
   title: string;

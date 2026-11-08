@@ -1,3 +1,4 @@
+import { taskRoute } from './task-route';
 import { vi } from 'vitest';
 import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
@@ -209,6 +210,7 @@ const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: { en: 'Cod
 const TOM = { id: 'b3', name: 'Tom', kind: 'worker' as const, role: { en: 'Test engineer', ru: 'Инженер по тестам' } };
 const DEV = { id: 'd2', name: 'Development' };
 const line = (over: Partial<TaskLine>): TaskLine => ({
+  echelons: taskRoute(over.status === 'review' ? 'review' : 'development', over.assignee?.id ?? 'b1'),
   id: 't0', number: 0, title: '', brief: '', status: 'open', department: DEV, product: null, assignee: BRUNO, stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 3, parentId: 't10', waitsFor: [],
   createdAt: '2026-10-30T08:00:00.000Z', updatedAt: '2026-10-30T09:00:00.000Z', ...over,
 });

@@ -1,11 +1,12 @@
+import { TaskWorkflow } from './TaskWorkflow';
 import { taskWaitText } from './task-wait';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { cutLine } from '../restarts';
-import { placeName, roleAfter, useTask } from '../tasks';
-import type { AgentRef, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
+import { placeName, useTask } from '../tasks';
+import type { Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
@@ -131,42 +132,6 @@ function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Wait
   );
 }
 
-function executorStateOf(t: Messages, task: TaskDetail): string {
-  if (task.stage > 0 || task.status === 'done') return t.tasks.gateStates.did;
-  if (task.merging) return t.tasks.gateStates.merging;
-  if (task.waitsFor.length > 0) return t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', '));
-  return t.tasks.gateStates.working;
-}
-
-function executorClassOf(task: TaskDetail): string {
-  if (task.stage > 0 || task.status === 'done') return 'passed';
-  return task.waitsFor.length > 0 ? 'next' : 'current';
-}
-
-function TaskGatesSection({ task }: { task: TaskDetail }) {
-  const t = useT();
-  const { language } = useLanguage();
-  if (!task.executor) {
-    return task.assignee ? <p className="muted">{`${task.assignee.name}${roleAfter(task.assignee, language)}`}</p> : null;
-  }
-  return (
-    <ol className="tgates" aria-label={t.tasks.gates}>
-      {!task.turnReview && (
-        <li className={executorClassOf(task)}>
-          <b>{task.executor.name}</b>
-          {roleAfter(task.executor, language)}, <span>{executorStateOf(t, task)}</span>
-        </li>
-      )}
-      {task.gates.map((g: AgentRef & { state: keyof Messages['tasks']['gateStates'] }) => (
-        <li key={g.id} className={g.state}>
-          <b>{g.name}</b>
-          {roleAfter(g, language)}, <span>{t.tasks.gateStates[g.state]}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 type RelatedItem = { id: string; number: number; title: string; status: TaskStatus };
 
 function TaskRelatedSection({ heading, ariaLabel, items, onOpen }: { heading: string; ariaLabel?: string; items: RelatedItem[]; onOpen: (id: string) => void }) {
@@ -269,7 +234,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
           </button>
         </p>
       )}
-      <TaskGatesSection task={task} />
+      <TaskWorkflow workflow={task.echelons} task={task} org={org} />
       <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
       <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}

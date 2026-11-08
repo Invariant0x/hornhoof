@@ -1,3 +1,4 @@
+import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
 import type { AgentCardView, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
@@ -31,6 +32,7 @@ const TURN: TurnView = {
 
 /* Long briefs, so a row narrowed by the panel would cut them short. */
 export const TASKS: TaskLine[] = Array.from({ length: 30 }, (_, i) => ({
+  echelons: taskRoute(),
   id: `t${i + 1}`, number: i + 1, title: `Checkout step ${i + 1}`,
   brief: 'Take card payments in the shop, refund them on request and show every payment on the order page with its state.',
   status: 'working', department: DEV, product: null, assignee: BRUNO, stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 3,

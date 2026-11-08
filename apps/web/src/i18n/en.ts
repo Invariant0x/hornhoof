@@ -968,6 +968,14 @@ export const en = {
     home: { name: 'Home', description: 'A family\'s helpers run like a small company: home devices and network, and the household. Works best with a few home computers connected. Anything that acts on the real world waits for a person.' },
   },
   tasks: {
+    echelons: {
+      heading: 'Task workflow',
+      stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
+      phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed' },
+      statuses: { pending: 'Pending', active: 'In progress', complete: 'Completed', skipped: 'Skipped' },
+      reasons: { small_task: 'Small task', no_declared_risk: 'Not required', eligible_owner_required: 'An eligible owner is needed' },
+      owner: (name: string) => `Owner: ${name}`,
+    },
     heading: 'Tasks',
     intro: 'The orchestrator lays the work out in turns: one runs now, the next ones wait for it. To add or change something, write to him.',
     writeOrchestrator: 'Write to the orchestrator',

@@ -1004,6 +1004,14 @@ export const ru: Messages = {
     home: { name: 'Дом', description: 'Помощники семьи работают как небольшая компания: домашние устройства и сеть, домашнее хозяйство. Лучше всего с несколькими подключенными домашними машинами. Все, что действует в реальном мире, ждет человека.' },
   },
   tasks: {
+    echelons: {
+      heading: 'Маршрут задачи',
+      stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
+      phases: { active: 'В работе', waiting: 'Нужен исполнитель', escalated: 'У руководителя для решения', ready: 'Готово к слиянию', done: 'Завершено' },
+      statuses: { pending: 'Ожидает', active: 'В работе', complete: 'Завершено', skipped: 'Пропущено' },
+      reasons: { small_task: 'Малая задача', no_declared_risk: 'Не требуется', eligible_owner_required: 'Нужен подходящий исполнитель' },
+      owner: name => `Исполнитель: ${name}`,
+    },
     heading: 'Задачи',
     intro: 'Оркестратор раскладывает работу по ходам: один идет сейчас, следующие ждут своей очереди. Чтобы что-то добавить или поменять, напишите ему.',
     writeOrchestrator: 'Написать оркестратору',

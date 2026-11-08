@@ -1,3 +1,4 @@
+import { taskRoute } from '../test/task-route';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -201,6 +202,7 @@ async function mountFixtureRoutes(page: Page) {
 
   const tasks: TaskLine[] = [
     {
+      echelons: taskRoute('development', 'a-dsn'),
       id: 't478',
       number: 478,
       title: 'Panel action layout',
