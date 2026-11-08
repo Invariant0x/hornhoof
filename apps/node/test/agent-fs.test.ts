@@ -129,6 +129,28 @@ describe.each([
     expect(existsSync(join(root, 'elsewhere'))).toBe(false);
   });
 
+  it('moves a single file or link into place as it is, and never over anything already there', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    mkdirSync(join(root, 'staging')); mkdirSync(join(root, 'repo'));
+    writeFileSync(join(root, 'staging', 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    symlinkSync('tool', join(root, 'staging', 'alias'));
+    await fs.move(join(root, 'staging', 'tool'), join(root, 'repo', 'tool'));
+    await fs.move(join(root, 'staging', 'alias'), join(root, 'repo', 'alias'));
+    expect(readFileSync(join(root, 'repo', 'tool'), 'utf8')).toBe('#!/bin/sh\n');
+    expect(statSync(join(root, 'repo', 'tool')).mode & 0o777).toBe(0o755);
+    expect(readlinkSync(join(root, 'repo', 'alias'))).toBe('tool');
+    expect(existsSync(join(root, 'staging', 'tool'))).toBe(false);
+    expect(lstatSync(join(root, 'staging')).isDirectory()).toBe(true);
+    writeFileSync(join(root, 'staging', 'tool'), 'new');
+    symlinkSync('elsewhere', join(root, 'staging', 'alias'));
+    await expect(fs.move(join(root, 'staging', 'tool'), join(root, 'repo', 'tool'))).rejects.toThrow(/already/);
+    await expect(fs.move(join(root, 'staging', 'alias'), join(root, 'repo', 'alias'))).rejects.toThrow(/already/);
+    expect(readFileSync(join(root, 'repo', 'tool'), 'utf8')).toBe('#!/bin/sh\n');
+    expect(readlinkSync(join(root, 'repo', 'alias'))).toBe('tool');
+    expect(readFileSync(join(root, 'staging', 'tool'), 'utf8')).toBe('new');
+  });
+
   it('says why a write failed', async () => {
     fs = make();
     const file = join(mkdtempSync(join(tmpdir(), 'hh-afs-')), 'file');

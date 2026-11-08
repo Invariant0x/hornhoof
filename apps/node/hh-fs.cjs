@@ -1,6 +1,6 @@
 /* File work in agents' folders for a node that runs as root, done as the agents' own user: the node never follows a link
    an agent left there into its own files. One request per line on stdin, one answer per line on stdout. */
-const { closeSync, constants, cpSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } = require('node:fs');
+const { closeSync, constants, cpSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 
 const OPS = {
@@ -61,18 +61,32 @@ const OPS = {
     if (typeof from !== 'string') throw new Error('copy needs from.');
     cpSync(from, path, { recursive: true });
   },
-  /* Whole, its links as they are, and never over anything already there, a link that leads nowhere included. */
+  /* Whole, its links as they are, and never over anything already there, a link that leads nowhere included. A file or a
+     link gets its new name in one step that fails when the name is taken; a folder can only ever be moved over an empty one. */
   move: ({ path, from }) => {
     if (typeof from !== 'string') throw new Error('move needs from.');
-    let there = true;
+    const taken = () => new Error(`${path} is there already, so nothing was moved over it.`);
     try {
-      lstatSync(path);
+      const stat = lstatSync(from);
+      if (stat.isDirectory()) {
+        let there = true;
+        try {
+          lstatSync(path);
+        } catch (err) {
+          if (!err || !['ENOENT', 'ENOTDIR'].includes(err.code)) throw err;
+          there = false;
+        }
+        if (there) throw taken();
+        renameSync(from, path);
+        return;
+      }
+      if (stat.isSymbolicLink()) symlinkSync(readlinkSync(from), path);
+      else linkSync(from, path);
     } catch (err) {
-      if (!err || err.code !== 'ENOENT') throw err;
-      there = false;
+      if (err && ['EEXIST', 'ENOTEMPTY'].includes(err.code)) throw taken();
+      throw err;
     }
-    if (there) throw new Error(`${path} is there already, so nothing was moved over it.`);
-    renameSync(from, path);
+    unlinkSync(from);
   },
 };
 

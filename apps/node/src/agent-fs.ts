@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { closeSync, constants, cpSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, cpSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -58,15 +58,24 @@ function plainText(path: string): string | null {
   }
 }
 
-/* What already stands at a path, a link that leads nowhere too, keeps it from being moved over. */
-function free(path: string): void {
+/* What already stands at a path, a link that leads nowhere too, keeps it from being moved over. A file or a link gets its
+   new name in one step that fails when the name is taken; a folder can only ever be moved over an empty folder. */
+function moveInto(from: string, to: string): void {
+  const taken = () => new Error(`${to} is there already, so nothing was moved over it.`);
   try {
-    lstatSync(path);
+    const stat = lstatSync(from);
+    if (stat.isDirectory()) {
+      if (entryAt(to)) throw taken();
+      renameSync(from, to);
+      return;
+    }
+    if (stat.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
+    else linkSync(from, to);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if (['EEXIST', 'ENOTEMPTY'].includes((err as NodeJS.ErrnoException).code ?? '')) throw taken();
     throw err;
   }
-  throw new Error(`${path} is there already, so nothing was moved over it.`);
+  unlinkSync(from);
 }
 
 const HELPER = fileURLToPath(new URL('../hh-fs.cjs', import.meta.url));
@@ -109,8 +118,7 @@ export const ownFs: AgentFs = {
     cpSync(from, to, { recursive: true });
   },
   async move(from, to) {
-    free(to);
-    renameSync(from, to);
+    moveInto(from, to);
   },
   stop() {},
 };
