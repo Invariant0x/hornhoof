@@ -141,13 +141,14 @@ async function judgesFor(manifest, tracked, sources) {
 function requestOf(args) {
   if (!args.length) return null;
   const request = {};
-  while (args.length) {
-    const flag = args.shift();
-    if (!['--base', '--head', '--plan'].includes(flag) || !args.length || Object.hasOwn(request, flag.slice(2))) throw new Error('Use --base <SHA> --head <SHA> [--plan <text>].');
-    request[flag.slice(2)] = args.shift();
-  }
+  while (args.length) takeOption(args, request);
   if (!SHA.test(request.base ?? '') || !SHA.test(request.head ?? '')) throw new Error('Mutation base and head require full commit SHAs.');
   return request;
+}
+function takeOption(args, request) {
+  const flag = args.shift();
+  if (!['--base', '--head', '--plan'].includes(flag) || !args.length || Object.hasOwn(request, flag.slice(2))) throw new Error('Use --base <SHA> --head <SHA> [--plan <text>].');
+  request[flag.slice(2)] = args.shift();
 }
 const git = args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
 function hasCommit(sha) {
