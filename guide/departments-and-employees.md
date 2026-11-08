@@ -117,17 +117,12 @@ Cleanup is optional and off by default. When the head enables it for a task or t
 
 ## How hard does an employee think?
 
-Hornhoof picks the level when a turn starts, by why it starts, and the level stays until that turn ends.
+Hornhoof picks the configured level when a turn starts. It stays until that turn ends.
 
-- Plans, first looks, security checks and work run at the role's level, or at the level set on the employee's card.
-- Three kinds of turn run at medium, or at the nearest level above it that the model has. A lower level stays as it is.
-  - A second look at the fixes for a reviewer's own finding.
-  - A merge of what passed its gates.
-  - Fixes where every reviewer who sent the work back marked all of its findings as mechanical in its verdict. Words in a comment or a title do not count.
-- All other fixes keep the full level, because nobody can tell from outside how hard they are.
-- A merge that fails is reported as blocked. The turn that mends it runs at the full level.
-- A turn that also brings anything else, such as a comment or a person's words, keeps the full level.
-- The card keeps the level you set. A model that names no levels gets none from Hornhoof.
+- Every echelon, including repairs by its current owner, runs at the role's level or the level set on the employee's card.
+- Review and Security fix their findings in the same task and branch. Findings do not lower their level or send the work back to its author.
+- The selected model's supported levels bound the role default. An explicit card choice stays on the card.
+- With no configured level and no known model levels, Hornhoof leaves the program to choose.
 - A change of level starts the program again between turns, and the conversation goes on in the same session.
 - Words a person types into a running program start no program and change no level. They run at the level the program already has.
 
@@ -145,13 +140,13 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | OpenAI API | GPT-6.1 Sol, GPT-6 Astra, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna | low, medium, high, xhigh, max | yes |
 | Antigravity | what its machine reports | what its machine reports | yes |
 
-| Level of the role or card | Plans, first looks, security, work, other fixes | Second look, clean merge, mechanical fix |
-| --- | --- | --- |
-| low | low | low |
-| medium | medium | medium |
-| high | high | medium |
-| xhigh | xhigh | medium |
-| max | max | medium |
+| Level of the role or card | Every echelon, including repairs |
+| --- | --- |
+| low | low |
+| medium | medium |
+| high | high |
+| xhigh | xhigh |
+| max | max |
 
 | Department | xhigh | high | medium |
 | --- | --- | --- | --- |

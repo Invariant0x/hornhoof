@@ -1,91 +1,29 @@
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { turnEffort } from '../src/modules/conversation/turn-effort.js';
+import { effortOfTurn } from '../src/modules/conversation/turn-effort.js';
+import { loadTemplates } from '../src/modules/templates/load.js';
 
+const ctx = { templates: loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))) };
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const relook = { why: 'review', again: true };
-const merge = { why: 'merge' };
+const reviewer = { kind: 'worker' as const, roleKey: 'DEV-REV', effort: null };
 
-describe('how hard a turn thinks', () => {
-  /* Plans, first looks, security and work that needs thought: nothing in their wake says less is enough. */
-  it.each(['assigned', 'review', 'turn_review', 'changes', 'reminder', 'go_on', 'comment', 'answered', 'updated', 'unblocked', 'subtasks', 'message'])('keeps the base for a %s turn', why => {
-    expect(turnEffort('xhigh', LEVELS, [{ why }])).toBe('xhigh');
+describe('configured effort at program start', () => {
+  it.each(LEVELS)('honors the supported card choice %s', effort => {
+    expect(effortOfTurn(ctx, { ...reviewer, effort }, LEVELS)).toBe(effort);
   });
 
-  it('takes medium for a look again at the fixes for a finding', () => {
-    expect(turnEffort('xhigh', LEVELS, [relook])).toBe('medium');
+  it('uses the current role default and the orchestrator default', () => {
+    expect(effortOfTurn(ctx, reviewer, LEVELS)).toBe('xhigh');
+    expect(effortOfTurn(ctx, { kind: 'orchestrator', roleKey: null, effort: null }, LEVELS)).toBe('xhigh');
   });
 
-  it('takes medium for merging what already passed its gates', () => {
-    expect(turnEffort('high', LEVELS, [merge])).toBe('medium');
+  it('fits a role default to supported levels when the card choice is unavailable', () => {
+    expect(effortOfTurn(ctx, { ...reviewer, effort: 'max' }, ['low', 'high'])).toBe('high');
+    expect(effortOfTurn(ctx, reviewer, ['low'])).toBe('low');
   });
 
-  it('takes medium for fixes the server marked as mechanical, and for nothing that only sounds like them', () => {
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }])).toBe('medium');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes' }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: false }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'assigned', mechanical: true }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'review', mechanical: true }])).toBe('xhigh');
-  });
-
-  it('keeps the base when mechanical fixes come with anything else', () => {
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, { why: 'changes' }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, null])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'changes', mechanical: true }, relook])).toBe('medium');
-  });
-
-  it('holds a level from the card as the base of a first look and takes medium for the look again', () => {
-    expect(turnEffort('max', LEVELS, [{ why: 'review' }])).toBe('max');
-    expect(turnEffort('max', LEVELS, [relook])).toBe('medium');
-  });
-
-  it('takes "again" only from a review', () => {
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'assigned', again: true }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [{ why: 'review', again: false }])).toBe('xhigh');
-  });
-
-  it('never raises a base below medium', () => {
-    expect(turnEffort('low', LEVELS, [relook])).toBe('low');
-    expect(turnEffort('medium', LEVELS, [relook])).toBe('medium');
-  });
-
-  it('keeps the base when the turn also brings anything else', () => {
-    expect(turnEffort('xhigh', LEVELS, [relook, { why: 'comment' }])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [relook, null])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [relook, merge])).toBe('medium');
-  });
-
-  it('keeps the base of a turn that says nothing of why', () => {
-    expect(turnEffort('xhigh', LEVELS, [])).toBe('xhigh');
-    expect(turnEffort('xhigh', LEVELS, [null])).toBe('xhigh');
-  });
-
-  describe('on a model that does not take medium', () => {
-    it('claims no level for a model with no known levels', () => {
-      expect(turnEffort('max', [], [relook])).toBe('max');
-      expect(turnEffort(null, [], [relook])).toBeNull();
-    });
-
-    it('takes the nearest level above medium, never one below it', () => {
-      expect(turnEffort('max', ['low', 'high', 'max'], [relook])).toBe('high');
-      expect(turnEffort('high', ['low', 'high'], [relook])).toBe('high');
-    });
-
-    it('keeps the base when the model has nothing from medium up', () => {
-      expect(turnEffort('low', ['low'], [relook])).toBe('low');
-      expect(turnEffort(null, ['low'], [relook])).toBeNull();
-    });
-
-    it('keeps a base it cannot compare', () => {
-      expect(turnEffort('minimal', LEVELS, [relook])).toBe('minimal');
-    });
-
-    it('lowers a level above max as well', () => {
-      expect(turnEffort('ultra', ['medium', 'ultra'], [relook])).toBe('medium');
-    });
-  });
-
-  it('asks for medium where the program would choose by itself, when the model takes it', () => {
-    expect(turnEffort(null, LEVELS, [relook])).toBe('medium');
-    expect(turnEffort(null, LEVELS, [{ why: 'review' }])).toBeNull();
+  it('leaves a program to choose without a role or known model levels', () => {
+    expect(effortOfTurn(ctx, reviewer, [])).toBeNull();
+    expect(effortOfTurn(ctx, { ...reviewer, roleKey: null }, LEVELS)).toBeNull();
   });
 });

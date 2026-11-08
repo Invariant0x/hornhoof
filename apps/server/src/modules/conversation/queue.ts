@@ -958,7 +958,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
   /* How hard it thinks goes on in the same session; the program starts again at the new level. */
-  const effort = await effortOfTurn(ctx, agent, effortsOf(models, model), [job, ...along]);
+  const effort = effortOfTurn(ctx, agent, effortsOf(models, model));
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const on = { subscriptionId: sub.id, nodeId: place.nodeId };

@@ -5,7 +5,6 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
-import { wordsForTurn } from '../conversation/turn-words.js';
 import { routeOf, routeSnapshot } from './echelons-store.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
@@ -122,13 +121,6 @@ async function stateOf(db: Store, jobId: string): Promise<TaskWake | null> {
   const [message] = await db.select({ data: agentEvents.data }).from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed']))).orderBy(asc(agentEvents.seq)).limit(1);
   return wakeIn(message?.data);
-}
-
-/* What brought each of a turn's words, as words join a turn while it waits: null for words no wake brought, like a
-   person's, and for a turn with no words at all. */
-export async function wakesOfTurn(db: Db, agentId: string, jobId: string): Promise<(TaskWake | null)[]> {
-  const words = await wordsForTurn({ db }, agentId, jobId);
-  return words.length ? words.map(word => wakeIn(word.data)) : [null];
 }
 
 /* Retain an unsent job and its explanation; it neither starts work nor triggers afterJob's continuation logic. */

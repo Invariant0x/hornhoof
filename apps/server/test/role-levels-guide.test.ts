@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { API_MODELS, CLAUDE_ALIASES, modelsFor, PROVIDER_IDS, ROLE_EFFORTS, type ProviderId } from '@hornhoof/protocol';
+import { API_MODELS, CLAUDE_ALIASES, effortFor, modelsFor, PROVIDER_IDS, ROLE_EFFORTS, type ProviderId } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { turnEffort } from '../src/modules/conversation/turn-effort.js';
 import { loadTemplates, type Role } from '../src/modules/templates/load.js';
 import { runsTier } from '../src/modules/tools/staff.js';
 
@@ -25,16 +24,9 @@ const programRow = (id: ProviderId) => {
 };
 const programs = () => table(['Program', 'Models', 'Levels', 'Deep roles'], PROVIDER_IDS.map(programRow));
 
-/* What each stage runs at, from the policy itself. */
+/* Every echelon uses the configured level supported by the selected model. */
 function stages(): string {
-  const full = [{ why: 'assigned' }, { why: 'review' }, { why: 'turn_review' }, { why: 'changes' }];
-  const light = [{ why: 'review', again: true }, { why: 'merge' }, { why: 'changes', mechanical: true }];
-  const same = (level: string, wakes: { why: string }[]) => {
-    const got = unique(wakes.map(w => [turnEffort(level, LEVELS, [w])!]));
-    expect(got).toHaveLength(1);
-    return got[0]!;
-  };
-  return table(['Level of the role or card', 'Plans, first looks, security, work, other fixes', 'Second look, clean merge, mechanical fix'], LEVELS.map(level => [level, same(level, full), same(level, light)]));
+  return table(['Level of the role or card', 'Every echelon, including repairs'], LEVELS.map(level => [level, effortFor(level, LEVELS, level)!]));
 }
 
 const byTitle = (a: Role, b: Role) => a.title.en.localeCompare(b.title.en);
