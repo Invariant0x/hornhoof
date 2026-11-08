@@ -1,3 +1,4 @@
+import { testsReport, type Verification } from './echelons-tests.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity } from './echelons-assign.js';
@@ -1075,9 +1076,14 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string }): Promise<Moved> {
+export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string; verification?: Verification }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
+  if (r.done && route.state.stage === 'tests' && route.state.phase === 'active') {
+    stillOpen(task);
+    await refuseWaiting(ctx.db, task);
+    return testsReport(ctx, task, route, agentId, r.summary, r.verification);
+  }
   if (r.done && route.state.stage === 'architecture') {
     stillOpen(task);
     await refuseWaiting(ctx.db, task);

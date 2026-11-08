@@ -9,7 +9,7 @@ type Reader = Pick<Ctx, 'db'>;
 export async function agentIdentity(db: Ctx['db'], companyId: string, agentId: string): Promise<CheckerIdentity | null> {
   const [row] = await db.select({ id: agents.id, model: agents.model, provider: subscriptions.provider }).from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))
-    .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt)));
+    .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!row) return null;
   const capability = modelCapability(row.model);
   return capability === null ? null : { agentId: row.id, model: row.model, provider: modelProvider(row.provider), capability };
