@@ -45,6 +45,11 @@ describe('trusted repository comparison', () => {
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: false, reason: 'incomplete-comparison' });
   });
 
+  it.each(['behind', 'diverged'])('does not certify ancestor inclusion for %s source', async status => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...fixture(), status }))));
+    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: false });
+  });
+
   it('handles timeout, HTTP error, redirect and private error text without leaking credentials or failing submit', async () => {
     for (const status of [302, 401, 403, 404, 500]) {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(repo.token, { status })));
