@@ -615,10 +615,10 @@ describe('renderInstructions', () => {
       const policy = files.get('dev-testing-policy')!;
       expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
       expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
-      expect(impl, roleKey).toMatch(/affected checks through run_tests on the exact candidate/i);
+      expect(impl, roleKey).toMatch(/run affected checks in your own workspace right away/i);
       expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
-      expect(impl, roleKey).toMatch(/complete affected package[\s\S]*unavailable graph cannot bound the impact/i);
-      expect(impl, roleKey).toMatch(/dependency preparation and every heavy check remain remote/i);
+      expect(impl, roleKey).toMatch(/unavailable graph cannot bound the impact, use run_tests for the complete affected package[\s\S]*exact candidate/i);
+      expect(impl, roleKey).toMatch(/install from the lockfile and run builds, types and quality checks locally/i);
       expect(policy, roleKey).toContain('NOT_RUN');
       expect(policy, roleKey).toMatch(/fresh and upgraded data[\s\S]*both up\/down when supported[\s\S]*report unsupported down explicitly/i);
       expect(policy, roleKey).toMatch(/never assume `?run_tests`? selects by itself/i);
