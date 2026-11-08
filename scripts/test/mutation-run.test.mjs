@@ -103,12 +103,13 @@ function deltaRepository(t) {
   mkdirSync(root); mkdirSync(bin);
   const write = (path, text) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); };
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } }).trim();
-  const source = 'apps/a/src/pure.ts', unsafe = 'apps/a/src/process.ts', fast = 'apps/a/test/pure.test.ts';
+  const source = 'apps/a/src/pure.ts', unsafe = 'apps/a/src/process.ts', fast = 'apps/a/test/pure.test.ts', unsafeFast = 'apps/a/test/process.test.ts';
   const code = 'export function changed(value: number) {\n return value + 1;\n}\nexport function untouched(value: number) {\n return value + 2;\n}\n';
-  const mutation = { status: 'supported', language: 'typescript', tool: join(bin, 'mutator'), sourcePaths: [source, unsafe], fastTestPaths: [fast] };
+  const mutation = { status: 'supported', language: 'typescript', tool: join(bin, 'mutator'), sourcePaths: [source, unsafe], fastTestPaths: [fast, unsafeFast] };
   write('.hornhoof/test-environment.json', JSON.stringify({ mutation, dependencies: { inputs: [], install: [] }, prepare: [], suites: [{ id: 'a', root: 'apps/a' }, { id: 'mutation', root: 'scripts/mutation' }] }));
   write('package.json', '{}'); write(source, code); write(unsafe, "import { spawn } from 'node:child_process';\nexport function processWork() { return spawn('true'); }\n");
   write(fast, "import { changed } from '../src/pure.js';\nimport { it, expect } from 'vitest';\nit('changes', () => expect(changed(1)).toBe(2));\n");
+  write(unsafeFast, "import { processWork } from '../src/process.js';\nimport { it, expect } from 'vitest';\nit('runs', () => expect(processWork()).toBeDefined());\n");
   write('scripts/mutation/vitest.config.mjs', 'export default {};');
   writeFileSync(join(bin, 'npx'), `#!/usr/bin/env node\nconst fs=require('node:fs'); const arg=process.argv.find(a=>a.startsWith('--outputFile.json=')); if(arg) fs.writeFileSync(arg.slice('--outputFile.json='.length),JSON.stringify({numTotalTests:process.env.HH_FIXTURE_ZERO==='1'?0:1,numPassedTests:process.env.HH_FIXTURE_ZERO==='1'?0:1,numFailedTests:0}));\n`, { mode: 0o755 });
   writeFileSync(join(bin, 'mutator'), `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n'); process.stdout.write('Total 1 0 0 1 100.0%\\n');\n`, { mode: 0o755 });
