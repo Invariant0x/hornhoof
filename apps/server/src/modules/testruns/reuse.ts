@@ -170,7 +170,7 @@ type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
 export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
-  const once = policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
+  const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
   const green = await greenAt(ctx.db, description.repositoryScope, prints, ofRelease(description.manifest, snapshot.profile)), decision = decideReuse({ units, prints, green, once });
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];

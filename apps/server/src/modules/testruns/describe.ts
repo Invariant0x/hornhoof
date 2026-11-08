@@ -57,7 +57,9 @@ export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<Test
 }
 type DescribedBase = Extract<TestsDescribed['result'], { status: 'ready' }>['baseFingerprints'];
 function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase): EnvironmentSnapshot {
-  const profile = request.profile ?? description.manifest.defaultProfile;
+  const completeProfile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
+  if (request.baseCommit && request.profile !== undefined && request.profile !== completeProfile) throw new Error('Candidate verification cannot omit checks with a narrower profile.');
+  const profile = request.baseCommit ? completeProfile : request.profile ?? description.manifest.defaultProfile;
   if (request.baseCommit && (request.suite || !base || base.commitSha !== request.baseCommit)) throw new Error('Candidate verification needs its bound base and every applicable suite.');
   const candidate = request.baseCommit ? { baseCommit: request.baseCommit, baseFingerprints: base!.fingerprints, fingerprints } : undefined;
   const snapshot = EnvironmentSnapshot.parse({ description, profile, ...(candidate ? { candidate } : {}) });
@@ -140,9 +142,11 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
+  const supplied = snapshotFor(description, request, prints, base);
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
-  const snapshot = snapshotFor(description, mode ? { ...request, profile: mode.profile } : request, prints, base);
-  const reuse = await reuseFor(ctx, mode, snapshot, mode ? requestedUnits(snapshot, request.suite) : [], prints);
+  const snapshot = supplied.candidate || !mode ? supplied : snapshotFor(description, { ...request, profile: mode.profile }, prints, base);
+  const reuseMode = mode && snapshot.candidate ? { ...mode, mode: 'cached' as const, profile: snapshot.profile } : mode;
+  const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
   const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
   const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
