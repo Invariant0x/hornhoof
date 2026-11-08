@@ -24,6 +24,16 @@ describe('orchestrator instructions', () => {
     expect(ability('orch-company')).toMatch(/department names people see in their screen/i);
   });
 
+  it('delivers every Russian department label from the CEO screen through the structure ability', () => {
+    const structure = ability('orch-company');
+    expect(structure).toContain("CEO's screen");
+    for (const label of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство']) {
+      expect(structure, label).toContain(label);
+    }
+    expect(steady.whole).toContain(structure);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Операции');
+  });
+
   it.each([undefined, '', '  Coordinate this approved goal.\nKeep this line.  '])('keeps the orchestrator assignment separate from its identity: %s', assignment => {
     const packet = orchestratorSteady(templates, assignment);
     const block = `<!-- hh:assignment -->\n## Assignment\n\n${assignment ?? ''}\n<!-- /hh:assignment -->`;
