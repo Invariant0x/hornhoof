@@ -665,6 +665,11 @@
   },
   "mutation": {
     "status": "supported",
+    "candidateRun": {
+      "program": "node",
+      "args": ["scripts/mutation/run.mjs", "--base", "{baseCommit}", "--head", "{commit}", "--plan-file", "{planFile}"],
+      "cwd": "."
+    },
     "tool": "mutator",
     "language": "typescript",
     "sourcePaths": [

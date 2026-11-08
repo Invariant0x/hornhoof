@@ -781,8 +781,9 @@ async function productSelection(msg: TestRun, state: ProductState, env: Record<s
 async function productSuite(execution: TestExecution, operation: Extract<ProductOperation, { kind: 'suite' }>, state: ProductState, env: Record<string, string>, index: number): Promise<void> {
   const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === operation.suiteId)!;
   const filesPath = join(state.root, `selection-${index}.json`);
-  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 } });
+  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 }, snapshot: execution.snapshot });
   if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
+  if (invocation.env.HH_MUTATION_PLAN_FILE) chownSync(invocation.env.HH_MUTATION_PLAN_FILE, state.user.uid, state.user.gid);
   await productResets(execution, suite.id, state, env);
   const report: SuiteReport = { suiteId: suite.id, selected: operation.files, path: join(state.root, 'reports', `${index}.json`), failed: false };
   state.reports.push(report);

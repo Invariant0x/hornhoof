@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
-import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, UnitFingerprints, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
+import { CandidateMutation, CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, UnitFingerprints, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentSnapshot, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { cacheKey, checkCacheContext, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext, type CacheShare } from './test-cache.js';
 import { DiscoveryProblem, discoverEnvironment } from './test-discovery.js';
 import { withCheckSlot } from './check-queue.js';
@@ -105,11 +105,18 @@ export async function describeTestEnvironment(source: Source, repositoryScope: R
     const base = await readTestEnvironment(source, repositoryScope, baseCommit, sameRuntime);
     const basePrints = UnitFingerprints.parse(await fingerprints(source, repositoryScope, base, sameRuntime));
     const mutation = await readCandidateMutations(source, repositoryScope, description, baseCommit, sameRuntime);
-    return { description, fingerprints: finalPrints, baseFingerprints: { commitSha: base.commitSha, fingerprints: basePrints }, ...(mutation ? { mutation } : {}) };
+    return { description, fingerprints: mutationFingerprints(finalPrints, mutation), baseFingerprints: { commitSha: base.commitSha, fingerprints: basePrints }, ...(mutation ? { mutation } : {}) };
   }
   if (!description.manifest.execution?.fullRun) return { description };
   try { return { description, fingerprints: UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, context)) }; }
   catch { context.signal.throwIfAborted(); return { description }; }
+}
+
+function mutationFingerprints(prints: UnitFingerprint[], mutation: Awaited<ReturnType<typeof readCandidateMutations>>): UnitFingerprint[] {
+  return prints.map(print => {
+    const functions = mutation?.selection.selected.filter(fn => fn.file === print.file);
+    return functions?.length ? { ...print, fingerprint: digest(JSON.stringify(['hornhoof-mutation-function-v1', print.fingerprint, functions])) } : print;
+  });
 }
 
 async function runtimeOutput(program: string, args: string[], context: CacheContext): Promise<string | null> {
@@ -156,20 +163,35 @@ function shardCommand(suite: TestSuite, shard: { index: number; count: number } 
   if (suite.run.args.some(arg => arg === '--shard' || arg.startsWith('--shard='))) fail('environment_invalid', 'The pinned suite command already sets shard coordinates.');
   return { ...suite.run, args: [...suite.run.args, `--shard=${shard.index}/${shard.count}`] };
 }
-export async function buildTestInvocation(suite: TestSuite, files: string[], context: { checkout: string; filesPath: string; shard?: { index: number; count: number } }): Promise<{ command: Command; env: Record<string, string> }> {
+type InvocationContext = { checkout: string; filesPath: string; shard?: { index: number; count: number }; snapshot?: EnvironmentSnapshot };
+async function candidateMutationInvocation(suite: TestSuite, files: string[], context: InvocationContext): Promise<{ command: Command; planFile: string } | null> {
+  const candidate = context.snapshot?.candidate, policy = context.snapshot?.description.manifest.mutation;
+  if (!candidate || policy?.status !== 'supported' || !files.some(file => policy.sourcePaths.includes(file))) return null;
+  if (suite.split.kind !== 'json-file' || !policy.candidateRun || !candidate.mutation) fail('environment_invalid', 'Candidate mutation requires a declared narrow invocation and its bound scope.');
+  const mutation = CandidateMutation.parse(candidate.mutation), selected = new Set(mutation.selection.selected.map(fn => fn.file));
+  if (mutation.selection.status !== 'ready' || files.some(file => !selected.has(file))) fail('environment_invalid', 'The mutation selection is blocked or includes an unproved source.');
+  const { delta } = mutation, planFile = `${context.filesPath}.mutation-plan.json`;
+  const plan = { sha: delta.commit, base: delta.baseCommit, changes: delta.changes.map(change => ({ path: change.path, kind: 'modified' })), hunks: Object.fromEntries(delta.changes.map(change => [change.path, change.ranges])) };
+  const output = await open(planFile, 'wx', 0o600);
+  try { await output.writeFile(JSON.stringify(plan)); } finally { await output.close(); }
+  const argumentsFor: Record<string, string> = { '{baseCommit}': delta.baseCommit, '{commit}': delta.commit, '{planFile}': planFile };
+  return { planFile, command: { ...policy.candidateRun, args: policy.candidateRun.args.map(arg => argumentsFor[arg] ?? arg) } };
+}
+export async function buildTestInvocation(suite: TestSuite, files: string[], context: InvocationContext): Promise<{ command: Command; env: Record<string, string> }> {
   if (!files.length) fail('environment_invalid', 'A suite needs a nonempty file inventory.');
-  const command = shardCommand(suite, context.shard);
-  await safeCheckoutPath(context.checkout, suite.run.cwd);
+  const mutation = await candidateMutationInvocation(suite, files, context);
+  const command = mutation?.command ?? shardCommand(suite, context.shard);
+  await safeCheckoutPath(context.checkout, command.cwd);
   for (const file of files) {
     await safeCheckoutPath(context.checkout, file);
     if (!(await lstat(resolve(context.checkout, file))).isFile() || !suite.files.some(pattern => match(file, pattern))) fail('environment_invalid', 'A selection is not a regular file of the suite.');
   }
-  if (suite.split.kind === 'whole-package') return { command: suite.run, env: {} };
-  const paths = files.map(file => `./${relative(resolve(context.checkout, suite.run.cwd), resolve(context.checkout, file))}`);
-  if (suite.split.kind === 'argv-files') return { command: { ...suite.run, args: [...suite.run.args, ...paths] }, env: {} };
+  if (suite.split.kind === 'whole-package') return { command, env: {} };
+  const paths = files.map(file => `./${relative(resolve(context.checkout, command.cwd), resolve(context.checkout, file))}`);
+  if (suite.split.kind === 'argv-files') return { command: { ...command, args: [...command.args, ...paths] }, env: {} };
   const output = await open(context.filesPath, 'wx', 0o600);
   try { await output.writeFile(JSON.stringify(paths)); } finally { await output.close(); }
-  return { command, env: { HH_TEST_FILES: context.filesPath } };
+  return { command, env: { HH_TEST_FILES: context.filesPath, ...(mutation ? { HH_MUTATION_PLAN_FILE: mutation.planFile } : {}) } };
 }
 
 

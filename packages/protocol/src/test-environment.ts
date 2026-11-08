@@ -60,8 +60,9 @@ const MigrationCheck = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('supported'), up: Command, down: Command }),
   z.strictObject({ status: z.literal('unsupported'), reason: Text }),
 ]);
+const CandidateMutationCommand = Command.refine(command => ['{baseCommit}', '{commit}', '{planFile}'].every(token => command.args.filter(arg => arg === token).length === 1), 'A narrow mutation command needs the exact base, head and plan file arguments.');
 export const TestMutation = z.discriminatedUnion('status', [
-  z.strictObject({ status: z.literal('supported'), language: Id, tool: Id, command: Command, sourcePaths: Inputs.min(1), fastTestPaths: Inputs.min(1), coverageCommands: z.array(Command).min(1).max(1000), coverageFiles: Inputs.min(1) }),
+  z.strictObject({ status: z.literal('supported'), language: Id, tool: Id, command: Command, candidateRun: CandidateMutationCommand.optional(), sourcePaths: Inputs.min(1), fastTestPaths: Inputs.min(1), coverageCommands: z.array(Command).min(1).max(1000), coverageFiles: Inputs.min(1) }),
   z.strictObject({ status: z.literal('unsupported'), language: Id, reason: Text }),
 ]);
 const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })

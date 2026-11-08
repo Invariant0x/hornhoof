@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,12 +145,24 @@ function requestOf(args) {
   const request = {};
   while (args.length) takeOption(args, request);
   if (!SHA.test(request.base ?? '') || !SHA.test(request.head ?? '')) throw new Error('Mutation base and head require full commit SHAs.');
+  if (Object.hasOwn(request, 'plan') && Object.hasOwn(request, 'plan-file')) throw new Error('Choose one mutation delta plan.');
+  if (Object.hasOwn(request, 'plan-file')) request.plan = readPlanFile(request['plan-file']);
   return request;
 }
 function takeOption(args, request) {
   const flag = args.shift();
-  if (!['--base', '--head', '--plan'].includes(flag) || !args.length || Object.hasOwn(request, flag.slice(2))) throw new Error('Use --base <SHA> --head <SHA> [--plan <text>].');
+  if (!['--base', '--head', '--plan', '--plan-file'].includes(flag) || !args.length || Object.hasOwn(request, flag.slice(2))) throw new Error('Use --base <SHA> --head <SHA> [--plan <text> | --plan-file <path>].');
   request[flag.slice(2)] = args.shift();
+}
+function readPlanFile(path) {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > 512 * 1024) throw new Error('The mutation delta must be a bounded regular file.');
+    const bytes = readFileSync(fd);
+    if (bytes.length > 512 * 1024) throw new Error('The mutation delta exceeds its limit.');
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } finally { closeSync(fd); }
 }
 const git = args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
 function hasCommit(sha) {
@@ -171,7 +183,8 @@ function deltaFromGit(request) {
 function readDelta(request) {
   if (git(['rev-parse', 'HEAD']) !== request.head) throw new Error('The mutation candidate differs from HEAD.');
   git(['diff', '--quiet', request.head, '--']);
-  const result = hasCommit(request.base) ? deltaFromGit(request) : deltaFromPlan(request);
+  const plan = request.plan === undefined ? null : deltaFromPlan(request);
+  const result = hasCommit(request.base) ? deltaFromGit(request) : plan ?? deltaFromPlan(request);
   return { delta: { baseCommit: request.base, commit: request.head, changes: result.changes.map(change => ({ path: change.path, ranges: result.hunks[change.path] ?? [] })) }, deltaSource: result.deltaSource };
 }
 function scopeFiles(selected, prints) {
