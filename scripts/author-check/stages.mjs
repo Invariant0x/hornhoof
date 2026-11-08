@@ -75,7 +75,8 @@ function testCommand(context, suite, units) {
   const adapter = adapterOf(suite.run);
   if (!adapter) return { command: suite.run, report: null };
   const { cwd } = suite.run;
-  const sources = context.paths.filter(path => isSource(path) && ownerOf(context.suites, path) === suite).map(path => posix.relative(cwd, path));
+  const sourceRoot = adapter === 'vitest' ? suite.root : cwd;
+  const sources = context.paths.filter(path => isSource(path) && ownerOf(context.suites, path) === suite).map(path => posix.relative(sourceRoot, path));
   const { shard = [], files = [], env } = chosenFiles(context, suite, units.map(unit => `./${posix.relative(cwd, unit.file)}`));
   const report = join(context.tmp, `tests-${suite.id}.${REPORT_READER[adapter].extension}`);
   return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](sources, report), ...files], env }, report, reader: REPORT_READER[adapter].read, coverageFile: sources.length ? join(cwd, 'coverage/lcov.info') : null };
