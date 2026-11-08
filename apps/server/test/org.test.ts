@@ -7,7 +7,7 @@ import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { failureCompany } from './failure-company.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import type { EchelonsSnapshot } from '@hornhoof/protocol';
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { as, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 describe('GET /api/org', () => {
