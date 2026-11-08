@@ -71,7 +71,8 @@ function registry() {
     },
     async upload(key, file, digest) { builds.set(key, { builder: null, bundle: await readFile(file), digest }); },
     async download(key, file) { await writeFile(file, builds.get(key)!.bundle!); },
-    async failed(key, error) { if (error) builds.set(key, { builder: null, failed: error }); else builds.delete(key); },
+    /* As Hornhoof does, only the machine that holds a build may give it back or fail it. */
+    async failed(key, error) { if (builds.get(key)?.builder !== name) return; if (error) builds.set(key, { builder: null, failed: error }); else builds.delete(key); },
   });
   return { builds, remote, keysSeen };
 }
