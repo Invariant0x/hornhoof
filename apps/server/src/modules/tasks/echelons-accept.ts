@@ -17,10 +17,14 @@ export type AcceptanceInput = z.infer<typeof AcceptanceInput>;
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
 
-function requireReady(route: Route, input: AcceptanceInput): void {
+function requiredStagesComplete(route: Route): boolean {
   const complete = route.state.stages.every(step => step.status === 'complete' || step.status === 'skipped');
-  const passed = (stage: string) => route.state.stages.some(step => step.stage === stage && step.status === 'complete');
-  if (route.state.resultKind !== 'code' || route.state.phase !== 'ready' || !complete || !passed('review') || !passed('tests') || (route.state.security.required && !passed('security'))) throw refuse(409, 'task_invalid', 'The required stages have not verified this result.');
+  const passed = new Set(route.state.stages.filter(step => step.status === 'complete').map(step => step.stage));
+  return complete && ['review', 'tests', ...(route.state.security.required ? ['security'] : [])].every(stage => passed.has(stage as 'review' | 'tests' | 'security'));
+}
+
+function requireReady(route: Route, input: AcceptanceInput): void {
+  if (route.state.resultKind !== 'code' || route.state.phase !== 'ready' || !requiredStagesComplete(route)) throw refuse(409, 'task_invalid', 'The required stages have not verified this result.');
   if (input.candidateId !== route.state.candidateId || input.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact ready candidate and route revision.');
 }
 
@@ -39,6 +43,19 @@ async function integrationBranch(db: Ctx['db'], task: Task): Promise<string> {
   return `turn-${turn.number}`;
 }
 
+type ObservedHead = Awaited<ReturnType<Ctx['readCommit']>>;
+type Repository = Parameters<Ctx['readCommit']>[0];
+
+function matchesObservedHead(value: ObservedHead, branch: string, commit: string): boolean {
+  return !('problem' in value) && value.branch === branch && value.commitSha === commit;
+}
+
+async function requireInclusion(ctx: Reader, repository: Repository, candidate: string, integration: string): Promise<void> {
+  if (integration === candidate) return;
+  const comparison = await ctx.readCompare?.(repository, { base: candidate, head: integration }, 10_000);
+  if (!comparison || !exactComparison(comparison, candidate, integration)) throw new Error('inclusion unproved');
+}
+
 /* Read-only proof of an integration already performed through the authorized Git route. */
 async function observedIntegration(ctx: Reader, task: Task, candidate: EchelonCandidate, input: AcceptanceInput) {
   if (!ctx.config || !ctx.readCommit) throw refuse(409, 'repo_invalid', 'The repository integration cannot be verified.');
@@ -49,11 +66,8 @@ async function observedIntegration(ctx: Reader, task: Task, candidate: EchelonCa
   try {
     const source = await ctx.readCommit(found.repo, { branch: candidate.branch }, 5_000);
     const target = await ctx.readCommit(found.repo, { branch }, 5_000);
-    if ('problem' in source || source.branch !== candidate.branch || source.commitSha !== candidate.commit || 'problem' in target || target.branch !== branch || target.commitSha !== input.integrationCommit) throw new Error('stale integration');
-    if (target.commitSha !== candidate.commit) {
-      const comparison = await ctx.readCompare?.(found.repo, { base: candidate.commit, head: target.commitSha }, 10_000);
-      if (!comparison || !exactComparison(comparison, candidate.commit, target.commitSha)) throw new Error('inclusion unproved');
-    }
+    if (!matchesObservedHead(source, candidate.branch, candidate.commit) || !matchesObservedHead(target, branch, input.integrationCommit)) throw new Error('stale integration');
+    await requireInclusion(ctx, found.repo, candidate.commit, input.integrationCommit);
   } catch { throw refuse(409, 'task_changed', 'The source or integration changed, or candidate inclusion cannot be verified.'); }
   return { branch, commit: input.integrationCommit, approval, observedAt: new Date().toISOString() };
 }
