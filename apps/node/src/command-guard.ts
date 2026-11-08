@@ -5,8 +5,8 @@
    This is a finite guard of recognized shapes that keeps machines free, not a sandbox. A program it cannot see into runs with
    coverage 'opaque', which is no claim that it is light. At a recognized check or package boundary, what it cannot tell is
    refused. Nothing here says a CLI respects a refusal: each program and mode has to prove that itself. */
-import { lstat as lstatOf, open, realpath as realpathOf } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { lstat as lstatOf, open, readdir, realpath as realpathOf } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path';
 
 export type CommandInput = { command: string | readonly string[]; cwd: string; workspaceRoot: string };
 export type CommandFiles = {
@@ -15,6 +15,8 @@ export type CommandFiles = {
   realpath(path: string): Promise<string | null>;
   /* A regular file's text, or null when it is anything else or longer than maxBytes. */
   read(path: string, maxBytes: number): Promise<string | null>;
+  /* The names a folder holds, or null when it is no folder. */
+  list(path: string): Promise<string[] | null>;
 };
 export type CommandCoverage = 'recognized' | 'opaque';
 export type CommandDenial = { allow: false; code: 'whole_suite_local' | 'command_guard_unavailable'; category: string };
@@ -39,6 +41,7 @@ export const localCommandFiles: CommandFiles = {
     return found.isDirectory() ? 'directory' : 'other';
   },
   realpath: path => realpathOf(path).catch(() => null),
+  list: path => readdir(path).catch(() => null),
   read: async (path, maxBytes) => {
     const found = await lstatOf(path).catch(() => null);
     if (!found?.isFile() || found.size > maxBytes) return null;
@@ -733,7 +736,8 @@ class Guard {
   readonly found: Finding[] = [];
   private reads = 0;
   private walked = 0;
-  private readonly manifests = new Map<string, Record<string, unknown> | null>();
+  private readonly manifests = new Map<string, Manifest | null>();
+  private workspaceList: Promise<Workspace[] | null> | null = null;
 
   constructor(private readonly files: CommandFiles, readonly root: string, private readonly realRoot: string | null) {}
 
@@ -824,7 +828,7 @@ class Guard {
     return (await this.inside(absolute)) ? this.read(absolute) : null;
   }
 
-  private overRead(): boolean {
+  overRead(): boolean {
     return this.reads > COMMAND_LIMITS.fileReads;
   }
 
@@ -896,9 +900,71 @@ class Guard {
   }
 
   private async scriptsOf(folder: string): Promise<Record<string, unknown> | null> {
-    if (!this.manifests.has(folder)) this.manifests.set(folder, parseScripts(await this.read(join(folder, 'package.json'))));
+    return (await this.manifestOf(folder))?.scripts ?? null;
+  }
+
+  private async manifestOf(folder: string): Promise<Manifest | null> {
+    if (!this.manifests.has(folder)) this.manifests.set(folder, parseManifest(await this.read(join(folder, 'package.json'))));
     return this.manifests.get(folder)!;
   }
+
+  /* Whether a workspace's own manifest has this script, for --if-present. */
+  async hasScript(folder: string, name: string): Promise<boolean> {
+    return (await this.hasManifest(folder)) && typeof (await this.scriptsOf(folder))?.[name] === 'string';
+  }
+
+  /* The workspaces of the root manifest, as npm finds them: folders its globs match that hold a manifest. Null when a glob
+     cannot be listed here or the limits run out. */
+  workspaces(): Promise<Workspace[] | null> {
+    this.workspaceList ??= this.findWorkspaces();
+    return this.workspaceList;
+  }
+
+  private async findWorkspaces(): Promise<Workspace[] | null> {
+    const patterns = (await this.hasManifest(this.root)) ? workspaceGlobs((await this.manifestOf(this.root))?.workspaces) : null;
+    if (!patterns) return null;
+    const found: Workspace[] = [];
+    for (const pattern of patterns) {
+      const folders = await this.expand(pattern);
+      if (!folders) return null;
+      for (const folder of folders) if (!found.some(item => item.folder === folder) && (await this.hasManifest(folder))) found.push({ folder, name: (await this.manifestOf(folder))?.name ?? null });
+    }
+    return this.overRead() ? null : found;
+  }
+
+  /* The folders a glob of a manifest matches, one part of its path at a time. */
+  private async expand(pattern: string): Promise<string[] | null> {
+    const parts = pattern.split('/').filter(part => part && part !== '.');
+    if (pattern.startsWith('!') || parts.some(part => part === '..' || part.includes('**'))) return null;
+    let folders = [this.root];
+    for (const part of parts) {
+      const next: string[] = [];
+      for (const folder of folders) {
+        const names = GLOB_LETTERS.test(part) ? await this.listInside(folder) : [part];
+        if (!names) return null;
+        next.push(...names.filter(name => name === part || matchesGlob(name, part)).map(name => join(folder, name)));
+      }
+      if ((this.walked += next.length) > COMMAND_LIMITS.walked) return null;
+      folders = next;
+    }
+    return folders;
+  }
+
+  /* A folder's names count as a read, and only a folder of the workspace, or its root, is listed. */
+  private async listInside(folder: string): Promise<string[] | null> {
+    if (++this.reads > COMMAND_LIMITS.fileReads) return null;
+    const known = folder === this.root ? this.realRoot !== null : await this.inside(folder);
+    return known ? this.files.list(folder) : null;
+  }
+}
+
+type Manifest = { name: string | null; scripts: Record<string, unknown> | null; workspaces: unknown };
+type Workspace = { folder: string; name: string | null };
+
+/* npm reads workspaces as a list of globs, or as an object with one under packages. */
+function workspaceGlobs(value: unknown): string[] | null {
+  const list = Array.isArray(value) ? value : (value as { packages?: unknown } | null)?.packages;
+  return Array.isArray(list) && list.every((item): item is string => typeof item === 'string') ? list : null;
 }
 
 const unknownPath = (word: Word, place: Place): boolean => !word.literal || word.glob || place.cwd === null;
@@ -912,12 +978,16 @@ function stagesOf(scripts: Record<string, unknown>, name: string, forwarded: Wor
   return [scripts[`pre${name}`], called, scripts[`post${name}`]].filter((stage): stage is string => typeof stage === 'string');
 }
 
-function parseScripts(text: string | null): Record<string, unknown> | null {
+function parseManifest(text: string | null): Manifest | null {
   if (text === null) return null;
   try {
-    const manifest: unknown = JSON.parse(text);
-    const scripts = (manifest as { scripts?: unknown } | null)?.scripts;
-    return typeof scripts === 'object' && scripts !== null ? (scripts as Record<string, unknown>) : null;
+    const manifest = JSON.parse(text) as { name?: unknown; scripts?: unknown; workspaces?: unknown } | null;
+    const scripts = manifest?.scripts;
+    return {
+      name: typeof manifest?.name === 'string' ? manifest.name : null,
+      scripts: typeof scripts === 'object' && scripts !== null ? (scripts as Record<string, unknown>) : null,
+      workspaces: manifest?.workspaces,
+    };
   } catch {
     return null;
   }
@@ -1378,8 +1448,10 @@ const wouldFetch = async (guard: Guard, tool: string, place: Place): Promise<boo
 
 const NPX: Handler = (guard, args, place) => runExec(guard, args, place, true);
 
-/* A package manager's call: where it works, whether over many packages, and its first word. */
-type ManagerCall = { sub: Word | null; rest: Word[]; dir: Word | null; workspace: Word | null; many: boolean; atRoot: boolean };
+/* A package manager's call: where it works, whether over many packages, and its first word. workspaces: what npm's -w named,
+   a folder or a package's name; every: npm's --workspaces; withRoot: the root beside them; ifPresent: a package without the
+   script is passed over. */
+type ManagerCall = { sub: Word | null; rest: Word[]; dir: Word | null; workspaces: Word[]; every: boolean; withRoot: boolean; ifPresent: boolean; many: boolean; atRoot: boolean };
 const DIR_FLAGS = new Set(['--prefix', '-C', '--dir', '--cwd']);
 const WORKSPACE_FLAGS = new Set(['-w', '--workspace']);
 const MANY_FLAGS = new Set(['-ws', '--workspaces', '-r', '--recursive', '--filter', '-F', '--include-workspace-root', '-A', '--all']);
@@ -1391,17 +1463,27 @@ function afterManagerFlag(call: ManagerCall, args: Word[], at: number, workspace
   return VALUE_FLAGS.has(name) || (workspaces && WORKSPACE_FLAGS.has(name)) ? after : at + 1;
 }
 
-/* -w is a workspace's name to npm, and the root of them all to pnpm. */
+/* -w is a workspace to npm, and the root of them all to pnpm. */
 function noteManagerFlag(call: ManagerCall, name: string, value: Word | null, workspaces: boolean): void {
+  if (workspaces && noteWorkspaces(call, name)) return;
   if (MANY_FLAGS.has(name)) call.many = true;
   if (DIR_FLAGS.has(name)) call.dir = value;
   if (!WORKSPACE_FLAGS.has(name)) return;
-  if (workspaces) call.workspace = value;
+  if (workspaces) call.workspaces.push(value ?? unknownWord());
   else if (name === '-w') call.atRoot = true;
 }
 
+/* npm runs a script in every workspace it is given, the root too when asked, and only where the script is with --if-present. */
+function noteWorkspaces(call: ManagerCall, name: string): boolean {
+  if (name === '-ws' || name === '--workspaces') call.every = true;
+  else if (name === '--include-workspace-root') call.withRoot = true;
+  else if (name === '--if-present') call.ifPresent = true;
+  else return false;
+  return true;
+}
+
 function readManager(args: Word[], workspaces: boolean): ManagerCall {
-  const call: ManagerCall = { sub: null, rest: [], dir: null, workspace: null, many: false, atRoot: false };
+  const call: ManagerCall = { sub: null, rest: [], dir: null, workspaces: [], every: false, withRoot: false, ifPresent: false, many: false, atRoot: false };
   let at = 0;
   while (at < args.length && isFlag(args[at])) at = afterManagerFlag(call, args, at, workspaces);
   call.sub = args[at] ?? null;
@@ -1472,20 +1554,54 @@ function forwardedWords(manager: Manager, rest: Word[], call: ManagerCall): Word
 /* The folder a flag names is that folder or nothing. With no flag the nearest manifest counts, as npm finds it. */
 function namedFolder(guard: Guard, call: ManagerCall, place: Place): string | null {
   if (call.atRoot) return guard.root;
-  if (call.dir) return call.dir.literal && place.cwd !== null ? resolve(place.cwd, call.dir.text) : null;
-  return call.workspace?.literal ? resolve(guard.root, call.workspace.text) : null;
+  return call.dir?.literal && place.cwd !== null ? resolve(place.cwd, call.dir.text) : null;
 }
 
 async function scriptsFolder(guard: Guard, call: ManagerCall, place: Place): Promise<string | null> {
-  if (!call.atRoot && !call.dir && !call.workspace) return place.cwd;
+  if (!call.atRoot && !call.dir) return place.cwd;
   const folder = namedFolder(guard, call, place);
   return folder !== null && (await guard.hasManifest(folder)) ? folder : null;
 }
 
+/* A workspace npm's -w names: a folder of the workspace with a manifest, or else the workspace of that package name. */
+async function workspaceFolder(guard: Guard, word: Word): Promise<string | null> {
+  if (!word.literal) return null;
+  const folder = resolve(guard.root, word.text);
+  if (!leavesFolder(relative(guard.root, folder)) && (await guard.hasManifest(folder))) return folder;
+  return (await guard.workspaces())?.find(item => item.name === word.text)?.folder ?? null;
+}
+
+/* Every folder a workspace call runs its script in, or null when one cannot be found. */
+async function workspaceFolders(guard: Guard, call: ManagerCall): Promise<string[] | null> {
+  const named = call.every ? ((await guard.workspaces())?.map(item => item.folder) ?? null) : await namedWorkspaces(guard, call.workspaces);
+  return named && [...new Set([...(call.withRoot ? [guard.root] : []), ...named])];
+}
+
+async function namedWorkspaces(guard: Guard, words: Word[]): Promise<string[] | null> {
+  const folders: string[] = [];
+  for (const word of words) {
+    const folder = await workspaceFolder(guard, word);
+    if (folder === null) return null;
+    folders.push(folder);
+  }
+  return folders;
+}
+
+/* A script npm runs in workspaces is told in each of them: the call is refused when any of them is. */
+async function workspaceScripts(guard: Guard, call: ManagerCall, name: string, forwarded: Word[], place: Place): Promise<void> {
+  const folders = await workspaceFolders(guard, call);
+  if (!folders) return guard.note(unavailable(guard.overRead() ? 'over_budget' : 'unresolved_script'));
+  for (const folder of folders) {
+    if (call.ifPresent && !(await guard.hasScript(folder, name))) continue;
+    await guard.packageScript(name, forwarded, folder, place);
+  }
+}
+
 async function runScriptCall(manager: Manager, guard: Guard, call: ManagerCall, name: string, rest: Word[], place: Place): Promise<void> {
-  const scoped: ManagerCall = { ...call };
+  const scoped: ManagerCall = { ...call, workspaces: [...call.workspaces] };
   const forwarded = forwardedWords(manager, rest, scoped);
   if (scoped.many) return guard.note(check('package_scope'));
+  if (scoped.every || scoped.workspaces.length) return workspaceScripts(guard, scoped, name, forwarded, place);
   await guard.packageScript(name, forwarded, await scriptsFolder(guard, scoped, place), place);
 }
 

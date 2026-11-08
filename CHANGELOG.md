@@ -18,6 +18,11 @@ Keep the checks of one change small and in the workspace of whoever builds or re
 - `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests;
   its `--plan` option is gone.
 
+### Fixed
+
+- An agent may run the project's whole types and lint when their scripts build a workspace by its package name or lint
+  every workspace: the node finds a workspace by name and judges the script in each workspace it runs in.
+
 ## [0.8.2] - 2026-11-08
 
 Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,

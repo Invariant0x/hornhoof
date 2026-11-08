@@ -27,6 +27,9 @@ const SCRIPTS: Record<string, string> = {
   light: 'node tools/x.js',
   plain: 'echo hi',
   'behind-script': 'bash scripts/heavy.sh',
+  lint: 'npm run build -w @fx/lib && npm run lint:part --workspaces --include-workspace-root --',
+  'lint:part': 'eslint .',
+  types: 'npm run build -w @fx/lib && tsc --noEmit',
 };
 
 function file(path: string, text = ''): void {
@@ -40,12 +43,15 @@ beforeAll(() => {
   root = join(base, 'work');
   mkdirSync(root);
   node = join(root, 'apps/node');
-  file('package.json', JSON.stringify({ scripts: SCRIPTS }));
+  file('package.json', JSON.stringify({ workspaces: ['apps/*', 'packages/*'], scripts: SCRIPTS }));
   file('test/a.test.ts');
   file('test/b.test.ts');
   file('test/a_test.py');
-  file('apps/node/package.json', JSON.stringify({ scripts: { nested: 'vitest run test/a.test.ts', nestedall: 'vitest run' } }));
+  file('apps/node/package.json', JSON.stringify({ scripts: { nested: 'vitest run test/a.test.ts', nestedall: 'vitest run', 'lint:part': 'eslint src' } }));
   file('apps/node/test/a.test.ts');
+  file('apps/plain/README.md', 'A folder of the workspaces glob with no manifest.');
+  file('packages/lib/package.json', JSON.stringify({ name: '@fx/lib', scripts: { build: 'tsc -p tsconfig.json', test: 'vitest run', one: 'vitest run test/a.test.ts', 'lint:part': 'eslint src' } }));
+  file('packages/lib/test/a.test.ts');
   for (const bin of ['vitest', 'jest', 'tsc', 'eslint', 'playwright', 'something-light']) file(`node_modules/.bin/${bin}`, '#!/bin/sh\n');
   file('scripts/heavy.sh', '#!/bin/sh\nset -e\nnpm ci\n');
   file('scripts/light.sh', '#!/bin/sh\necho hi\n');
@@ -357,7 +363,7 @@ describe('what cannot be told is refused, not allowed', () => {
   });
 
   it('answers a failing file port with a refusal and never throws', async () => {
-    const failing: CommandFiles = { lstat: () => Promise.reject(new Error('no')), realpath: () => Promise.reject(new Error('no')), read: () => Promise.reject(new Error('no')) };
+    const failing: CommandFiles = { lstat: () => Promise.reject(new Error('no')), realpath: () => Promise.reject(new Error('no')), read: () => Promise.reject(new Error('no')), list: () => Promise.reject(new Error('no')) };
     await expect(classifyAgentCommand({ command: 'npm run one', cwd: root, workspaceRoot: root }, failing)).resolves.toEqual(denied('command_guard_unavailable'));
     await expect(classifyRunWork({ command: 'npm run one', cwd: root, workspaceRoot: root }, failing)).resolves.toEqual(denied('command_guard_unavailable'));
   });
@@ -377,8 +383,13 @@ describe('a flag and its value in one word are told like two', () => {
     expect(await agent(command)).toEqual(denied('whole_suite_local'));
   });
 
-  it.each(['pnpm -Fsome run one', 'pnpm --filter=some run one', 'npm -ws run one'])('works over many packages: %s', async command => {
+  it.each(['pnpm -Fsome run one', 'pnpm --filter=some run one'])('works over many packages: %s', async command => {
     expect(await agent(command)).toEqual({ allow: false, code: 'whole_suite_local', category: 'package_scope' });
+  });
+
+  it('takes -ws for every workspace and not for a workspace named s', async () => {
+    expect(await agent('npm -ws run nestedall --if-present')).toEqual({ allow: false, code: 'whole_suite_local', category: 'test_scope' });
+    expect(await agent('npm -ws run nested --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
   });
 
   it.each(['npx --call=tsc', 'npx -ctsc', "npx --call='tsc --noEmit'", 'python3 -mmypy x'])('runs what it carries: %s', async command => {
@@ -630,6 +641,59 @@ describe('a test run of a change keeps the options that pick its project', () =>
 
   it.each(['vitest run --config vitest.config.mjs --project=@hornhoof/server', 'vitest run --config vitest.config.mjs --project=x --shard=1/2 test/a.test.ts'])('refuses %s', async command => {
     expect(await agent(command)).toEqual(denied('whole_suite_local'));
+  });
+});
+
+describe('a workspace is found by its name, as npm finds it', () => {
+  it('reads the script of the workspace a name stands for', async () => {
+    expect(await agent('npm run build -w @fx/lib')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    expect(await agent('npm run one --workspace @fx/lib')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+    expect(await agent('npm run one --workspace=@fx/lib')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+    expect(await agent('npm run test -w @fx/lib')).toEqual(denied('whole_suite_local'));
+  });
+
+  it('allows whole-project types and lint that build a workspace by name and lint every workspace and the root', async () => {
+    expect(await agent('npm run types')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    expect(await agent('npm run lint')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    expect(await agent('npm run lint:part --workspaces --include-workspace-root --', node)).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+  });
+
+  it('refuses a workspaces run when one workspace refuses, and one without the script unless --if-present', async () => {
+    expect(await agent('npm test --workspaces')).toEqual(denied('whole_suite_local'));
+    expect(await agent('npm run nestedall --workspaces --if-present')).toEqual(denied('whole_suite_local'));
+    expect(await agent('npm run nested --workspaces')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+    expect(await agent('npm run nested --workspaces --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+    expect(await agent('npm run lint:part --workspaces --if-present --include-workspace-root')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    expect(await agent('npm run nested -w @fx/lib -w apps/node --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+    expect(await agent('npm run nestedall -w @fx/lib -w apps/node --if-present')).toEqual(denied('whole_suite_local'));
+  });
+
+  it('reads no more manifests and folders than its limits allow', async () => {
+    const many = join(base, 'many');
+    mkdirSync(many);
+    writeFileSync(join(many, 'package.json'), JSON.stringify({ workspaces: ['p/*'] }));
+    for (let i = 0; i <= COMMAND_LIMITS.fileReads; i++) {
+      mkdirSync(join(many, `p/w${i}`), { recursive: true });
+      writeFileSync(join(many, `p/w${i}/package.json`), JSON.stringify({ name: `w${i}`, scripts: { check: 'tsc --noEmit' } }));
+    }
+    const at = (command: string) => classifyAgentCommand({ command, cwd: many, workspaceRoot: many });
+    expect(await at('npm run check --workspaces')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'over_budget' });
+    expect(await at('npm run check -w w3')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'over_budget' });
+    expect(await at('npm run check -w p/w3')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+  });
+
+  it('reads the workspaces npm reads, and cannot tell those it cannot list', async () => {
+    const odd = join(base, 'odd-workspaces');
+    mkdirSync(join(odd, 'a/b'), { recursive: true });
+    writeFileSync(join(odd, 'a/b/package.json'), JSON.stringify({ name: 'deep', scripts: { check: 'tsc --noEmit' } }));
+    const told = async (workspaces: unknown) => {
+      writeFileSync(join(odd, 'package.json'), JSON.stringify({ workspaces }));
+      return classifyAgentCommand({ command: 'npm run check -w deep', cwd: odd, workspaceRoot: odd });
+    };
+    for (const workspaces of [['a/*'], ['a/b'], { packages: ['a/*'] }]) expect(await told(workspaces), JSON.stringify(workspaces)).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    for (const workspaces of [['a/**'], ['!a/*'], ['../*'], 'a/*', [7]]) {
+      expect(await told(workspaces), JSON.stringify(workspaces)).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+    }
   });
 });
 

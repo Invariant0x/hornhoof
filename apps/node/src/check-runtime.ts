@@ -64,7 +64,7 @@ export async function runQueuedPart(message: Parameters<typeof runTests>[0], run
 }
 
 /* No checkout exists at this boundary. Never authorize a script using files left by an older attempt. */
-const unpreparedFiles: CommandFiles = { lstat: async () => null, realpath: async () => null, read: async () => null };
+const unpreparedFiles: CommandFiles = { lstat: async () => null, realpath: async () => null, read: async () => null, list: async () => null };
 async function workCommandRefusal(message: Parameters<typeof runTests>[0], dir: string): Promise<string | null> {
   if (message.kind !== 'work') return null;
   if (message.environment) return refusalText({ allow: false, code: 'whole_suite_local', category: 'product_tests' });
