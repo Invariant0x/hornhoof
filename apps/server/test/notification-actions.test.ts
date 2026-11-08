@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { answer, ask, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wordsForTurn } from '../src/modules/conversation/turn-words.js';
 import { said } from '../src/modules/conversation/live.js';
@@ -20,12 +20,14 @@ async function fixture() {
   const [company] = await db.select().from(companies);
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dept!.id, kind, roleKey, name, model: '', subscriptionId: sub!.id }).returning())[0]!;
+  const [dept] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dept!.id, kind, roleKey, name, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [] }).returning())[0]!;
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'b'.repeat(40) });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const worker = await hire('Bruno', 'worker', 'DEV-ENG');
   const reviewer = await hire('Rita', 'worker', 'DEV-REV');
-  const make = async (gates: string[] = []) => (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: 'Build it.', departmentId: dept!.id, assigneeAgentId: worker.id, executor: true, gates })).task;
+  const make = async () => (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: 'Build it.', departmentId: dept!.id, assigneeAgentId: worker.id, executor: true, small: true, reviewerAgentId: reviewer.id, paths: ['logic/totals.ts'] })).task;
   const notices = async (agentId: string) => (await listEvents(db, agentId, 0)).filter(e => e.kind === 'message' && e.message?.direction === 'in');
   return { app, db, head, worker, reviewer, ceo: ceo!, make, notices };
 }
@@ -39,16 +41,16 @@ function attributed(event: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>
 }
 
 describe('recorded action authors', () => {
-  it('attributes a submitted task and its parent notification to the submitter after outbox recovery', async () => {
+  it('attributes the Review handoff to its producer after outbox recovery', async () => {
     const c = await fixture();
     const parent = (await createTask(c.app.ctx, { personId: c.ceo.id }, { title: 'Whole feature', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
-    const child = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Child', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.worker.id, executor: true, parentId: parent.id })).task;
-    await submit(c.app.ctx, c.worker.id, child.id, { summary: 'Ivan pretends to be the author.', evidence: 'Checks passed.' });
+    const child = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Child', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.worker.id, executor: true, small: true, reviewerAgentId: c.reviewer.id, paths: ['logic/totals.ts'], parentId: parent.id })).task;
+    await submit(c.app.ctx, c.worker.id, child.id, { summary: 'Ivan pretends to be the author.', evidence: 'Checks passed.', review: { baseCommit: 'a'.repeat(40) } });
     await comment(c.app.ctx, { personId: c.ceo.id }, child.id, 'A newer comment by somebody else.');
     await wakeLeftBehind(c.app.ctx, new Date(Date.now() + 60_000));
-    const messages = await c.notices(c.head.id);
-    expect(messages.some(e => e.message?.notification?.source === 'subtasks')).toBe(true);
-    attributed(messages.find(e => e.message?.notification?.source === 'subtasks')!, 'Bruno', 'handed in work');
+    const messages = await c.notices(c.reviewer.id);
+    expect(messages.some(e => e.message?.notification?.source === 'review')).toBe(true);
+    attributed(messages.find(e => e.message?.notification?.source === 'review')!, 'Bruno', 'handed in work');
   });
 
   it.each([true, false])('attributes an approval decision (%s) to the recorded person', async approve => {
@@ -68,13 +70,13 @@ describe('recorded action authors', () => {
     attributed((await c.notices(c.worker.id))[0]!, 'Ivan', 'answered');
   });
 
-  it('attributes a gate return to its reviewer', async () => {
+  it('attributes a wrong-goal escalation to the current reviewer', async () => {
     const c = await fixture();
-    const task = await c.make([c.reviewer.id]);
-    await submit(c.app.ctx, c.worker.id, task.id, { summary: 'Implemented.', evidence: 'Tested.' });
-    const moved = await verdict(c.app.ctx, c.reviewer.id, task.id, { pass: false, comment: 'Missing currency validation.', findings: 1 });
+    const task = await c.make();
+    await submit(c.app.ctx, c.worker.id, task.id, { summary: 'Implemented.', evidence: 'Tested.', review: { baseCommit: 'a'.repeat(40) } });
+    const moved = await verdict(c.app.ctx, c.reviewer.id, task.id, { pass: false, reviewedCommit: 'b'.repeat(40), escalate: true, comment: 'The requested currency behavior is different.' });
     await wakeAll(c.app.ctx, moved.wakes);
-    attributed((await c.notices(c.worker.id))[0]!, 'Rita', 'returned work');
+    attributed((await c.notices(c.head.id))[0]!, 'Rita', 'escalated work');
   });
 
   it('attributes a comment to its person', async () => {
@@ -173,18 +175,14 @@ it('combines a queued direct copy that arrived before the service report', async
 });
 
 
-it.each([true, false])('attributes a gate return to those who requested changes, when the last reviewer passed=%s', async lastPass => {
+it('keeps an ordinary Review finding with its current owner and sends no author return', async () => {
   const c = await fixture();
-  const [last] = await c.db.insert(agents).values({ companyId: c.head.companyId, departmentId: c.head.departmentId, kind: 'worker', roleKey: 'DEV-REV', name: 'Sam', model: '', subscriptionId: c.head.subscriptionId }).returning();
-  const task = await c.make([c.reviewer.id]);
-  await submit(c.app.ctx, c.worker.id, task.id, { summary: 'Implemented.', evidence: 'Tests passed.' });
-  await c.db.update(tasks).set({ panel: [c.reviewer.id, last!.id] }).where(eq(tasks.id, task.id));
-  await verdict(c.app.ctx, c.reviewer.id, task.id, { pass: false, comment: 'Missing validation.' });
-  await wakeAll(c.app.ctx, (await verdict(c.app.ctx, last!.id, task.id, { pass: lastPass, comment: 'Other finding.' })).wakes);
-  const notice = (await c.notices(c.worker.id))[0]!;
-  expect(notice.message!.from.name).toBe('Rita');
-  expect(notice.message!.senders!.map(p => p.name)).toEqual(lastPass ? ['Rita'] : ['Rita', 'Sam']);
-  expect((notice.data as { text: string }).text).toContain(lastPass ? 'Rita returned work' : 'Rita and Sam returned work');
+  const task = await c.make();
+  await submit(c.app.ctx, c.worker.id, task.id, { summary: 'Implemented.', evidence: 'Tests passed.', review: { baseCommit: 'a'.repeat(40) } });
+  const moved = await verdict(c.app.ctx, c.reviewer.id, task.id, { pass: false, reviewedCommit: 'b'.repeat(40), comment: 'I will repair validation.' });
+  expect(moved.task).toMatchObject({ status: 'working', assigneeAgentId: c.reviewer.id });
+  expect(moved.wakes).toEqual([]);
+  expect(await c.notices(c.worker.id)).toEqual([]);
 });
 
 

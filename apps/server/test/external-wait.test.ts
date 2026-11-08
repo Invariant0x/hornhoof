@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, taskWaits, teams } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, taskRoutes, taskWaits, teams } from '../src/db/schema.js';
 import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
 import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
@@ -26,12 +26,14 @@ async function fixture(env?: NodeJS.ProcessEnv) {
   const [company] = await db.select().from(companies);
   const [sub] = await db.select().from(subscriptions);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const [head, worker, peer] = await db.insert(agents).values([
-    { companyId: company!.id, departmentId: department!.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: sub!.id },
-    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Bruno', model: '', subscriptionId: sub!.id },
-    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Rita', model: '', subscriptionId: sub!.id },
+    { companyId: company!.id, departmentId: department!.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: 'claude-opus-5-5', subscriptionId: sub!.id },
+    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Bruno', model: 'claude-opus-5-5', subscriptionId: sub!.id },
+    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Rita', model: 'claude-opus-5-5', subscriptionId: sub!.id },
   ]).returning();
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'b'.repeat(40) });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const clients = new Map<string, Client>();
   const tools = async (agentId = worker!.id) => {
     const existing = clients.get(agentId);
@@ -42,7 +44,7 @@ async function fixture(env?: NodeJS.ProcessEnv) {
     clients.set(agentId, client);
     return client;
   };
-  const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true })).task;
+  const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true, small: true, paths: ['logic/totals.ts'] })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const wait = async (ref: number | string, reason: string, until: string, agentId = worker!.id) => {
     const client = await tools(agentId);
@@ -50,7 +52,12 @@ async function fixture(env?: NodeJS.ProcessEnv) {
     return await client.callTool({ name: 'wait_for', arguments: { task: ref, reason, until } }) as { isError?: boolean; content: { text: string }[] };
   };
   const messageState = async (task: Awaited<ReturnType<typeof read>>) => ({ ...taskWakeOf(task, { why: 'comment' }, routeSnapshot(await routeOf(db, task), task.assigneeAgentId)), why: 'message' });
-  return { app, ctx: app.ctx, db, owner, url, messageState, company: company!, sub: sub!, orchestrator: orchestrator!, department: department!, head: head!, worker: worker!, peer: peer!, task, read, tools, wait };
+  const atReview = async (task: Awaited<ReturnType<typeof read>>) => {
+    const route = await routeOf(db, task);
+    await db.update(tasks).set({ status: 'review', assigneeAgentId: peer!.id, externalWait: null }).where(eq(tasks.id, task.id));
+    await db.update(taskRoutes).set({ state: { ...route.state, stage: 'review' } }).where(eq(taskRoutes.taskId, task.id));
+  };
+  return { app, ctx: app.ctx, db, owner, url, messageState, atReview, company: company!, sub: sub!, orchestrator: orchestrator!, department: department!, head: head!, worker: worker!, peer: peer!, task, read, tools, wait };
 }
 
 async function messaging() {
@@ -232,7 +239,7 @@ describe('external task wait', () => {
       expect((await c.wait(task.number, 'Images', new Date(Date.now() + 60_000).toISOString())).isError).toBeFalsy();
       if (action === 'cancel') await cancel(c.ctx, { agentId: c.head.id }, task.id, 'No longer needed.');
       else {
-        const args = action === 'submit' ? { summary: 'Published.', evidence: 'Checked.' } : { why: 'The build needs a decision.' };
+        const args = action === 'submit' ? { summary: 'Published.', evidence: 'Checked.', review: { baseCommit: 'a'.repeat(40) } } : { why: 'The build needs a decision.' };
         const result = await client.callTool({ name: action, arguments: { task: task.number, ...args } });
         expect(result.isError).toBeFalsy();
       }
@@ -533,26 +540,26 @@ describe('external task wait', () => {
     expect(messages.filter(e => e.kind === 'message').map(e => e.data)).toContainEqual(expect.objectContaining({ text: 'Images are ready.', task: { id: task.id, number: task.number } }));
   });
 
-  it('lets a team worker doing a gate-free subtask and its head both message each other with task', async () => {
+  it('lets a team worker doing a small subtask and its head both message each other with task', async () => {
     const c = await messaging();
     const [team] = await c.db.insert(teams).values({ companyId: c.company.id, departmentId: c.department.id, name: 'Urgent fixes' }).returning();
     const [simon] = await c.db
       .insert(agents)
-      .values({ companyId: c.company.id, departmentId: c.department.id, teamId: team!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: '', subscriptionId: c.sub.id })
+      .values({ companyId: c.company.id, departmentId: c.department.id, teamId: team!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: 'claude-opus-5-5', subscriptionId: c.sub.id })
       .returning();
     const parent = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Urgent server fixes', brief: '', body: '', departmentId: c.department.id, assigneeAgentId: c.head.id })).task;
 
     const headTools = await c.tools(c.head.id);
     const created = (await headTools.callTool({
       name: 'create_task',
-      arguments: { title: 'Fix task messages', brief: 'Subtask without gates.', body: '', executor: simon!.id, parent: parent.number },
+      arguments: { title: 'Fix task messages', brief: 'One small code result.', body: '', executor: simon!.id, parent: parent.number, small: true, paths: ['logic/totals.ts'] },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(created.isError).toBeFalsy();
 
     const simonTools = await c.tools(simon!.id);
-    const listed = JSON.parse(((await simonTools.callTool({ name: 'tasks', arguments: {} })) as { content: { text: string }[] }).content[0]!.text) as { id: string; number: number; gateCount: number; assignee: { id: string } | null }[];
+    const listed = JSON.parse(((await simonTools.callTool({ name: 'tasks', arguments: {} })) as { content: { text: string }[] }).content[0]!.text) as { id: string; number: number; echelons: { stage: string }; assignee: { id: string } | null }[];
     const subtask = listed[0]!;
-    expect(subtask).toMatchObject({ gateCount: 0, assignee: { id: simon!.id } });
+    expect(subtask).toMatchObject({ echelons: { stage: 'development' }, assignee: { id: simon!.id } });
 
     const toSimon = (await headTools.callTool({
       name: 'message_employee',
@@ -576,13 +583,13 @@ describe('external task wait', () => {
 
     const submitted = (await simonTools.callTool({
       name: 'submit',
-      arguments: { task: subtask.number, summary: 'Fixed.', evidence: 'Tests pass.' },
+      arguments: { task: subtask.number, summary: 'Fixed.', evidence: 'Tests pass.', review: { baseCommit: 'a'.repeat(40) } },
     })) as { isError?: boolean };
     expect(submitted.isError).toBeFalsy();
     expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
   });
 
-  it('allows only the assignee, executor and current gate reviewers to act on a task message', async () => {
+  it('allows the current owner and executor to forward task messages without granting an unassigned reviewer', async () => {
     const c = await messaging();
     const [rob, outsider] = await c.db
       .insert(agents)
@@ -593,11 +600,12 @@ describe('external task wait', () => {
       .returning();
 
     const task = await c.task(c.worker.id);
-    /* A future gate reviewer before stage 1 is not on the gate yet. */
-    await c.db.update(tasks).set({ gates: [rob!.id] }).where(eq(tasks.id, task.id));
+    /* Naming a future reviewer does not make it the current owner. */
+    const route = await routeOf(c.db, task);
+    await c.db.update(taskRoutes).set({ state: { ...route.state, stages: route.state.stages.map(step => step.stage === 'review' ? { ...step, ownerAgentId: rob!.id } : step) } }).where(eq(taskRoutes.taskId, task.id));
     const beforeGate = (await (await c.tools(rob!.id)).callTool({
       name: 'message_employee',
-      arguments: { employee: c.head.id, task: task.number, text: 'Not at my gate yet.' },
+      arguments: { employee: c.head.id, task: task.number, text: 'Not assigned this stage yet.' },
     })) as { isError?: boolean; content: { text: string }[] };
     expect(beforeGate.isError).toBe(true);
     expect(beforeGate.content[0]!.text).toBe(`#${task.number} is not with you.`);
@@ -613,16 +621,13 @@ describe('external task wait', () => {
     const [waitingHeadTurn] = (await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id))).filter(j => j.taskId === task.id);
     expect(await discardStaleTurn(c.db, waitingHeadTurn!)).toBe(false);
 
-    /* At stage 1: assignee is peer, panel has peer and rob, executor is worker; head oversees its department. */
-    await c.db
-      .update(tasks)
-      .set({ status: 'review', stage: 1, gates: [c.peer.id], panel: [c.peer.id, rob!.id], assigneeAgentId: c.peer.id, externalWait: null })
-      .where(eq(tasks.id, task.id));
+    /* Review has one current owner; the original executor and head retain their own message rights. */
+    await c.atReview(task);
 
     for (const [from, to] of [
       [outsider!.id, c.peer.id],
       [c.worker.id, c.head.id],
-      [rob!.id, c.head.id],
+      [rob!.id, c.peer.id],
       [c.peer.id, outsider!.id],
       [c.head.id, outsider!.id],
     ] as const) {
@@ -633,6 +638,8 @@ describe('external task wait', () => {
       expect(res.isError, `${from} -> ${to}: ${res.content[0]?.text}`).toBeFalsy();
     }
 
+    const unassigned = (await (await c.tools(rob!.id)).callTool({ name: 'message_employee', arguments: { employee: c.head.id, task: task.number, text: 'Not my current stage.' } })) as { isError?: boolean };
+    expect(unassigned.isError).toBe(true);
     for (const to of [c.worker.id, rob!.id, c.head.id] as const) {
       const res = (await (await c.tools(outsider!.id)).callTool({
         name: 'message_employee',
@@ -649,7 +656,7 @@ describe('external task wait', () => {
     const [simon, creator, opsHead] = await c.db
       .insert(agents)
       .values([
-        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: '', subscriptionId: c.sub.id },
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: 'claude-opus-5-5', subscriptionId: c.sub.id },
         { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Clara', model: '', subscriptionId: c.sub.id },
         { companyId: c.company.id, departmentId: ops!.id, kind: 'head', roleKey: 'OPS-HEAD', name: 'Wanda', model: '', skills: ['ops-task-watch'], subscriptionId: c.sub.id },
       ])
@@ -731,17 +738,14 @@ describe('external task wait', () => {
     expect((await c.read(laidOut.id)).externalWait).toBeNull();
   });
 
-  it('delivers a queued task message to another panel reviewer while the assignee waits externally', async () => {
+  it('delivers the executor message to another employee while the current Review owner waits externally', async () => {
     const c = await messaging();
     const [rob] = await c.db
       .insert(agents)
       .values({ companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rob', model: '', subscriptionId: c.sub.id })
       .returning();
     const task = await c.task(c.worker.id);
-    await c.db
-      .update(tasks)
-      .set({ status: 'review', stage: 1, gates: [c.peer.id], panel: [c.peer.id, rob!.id], assigneeAgentId: c.peer.id })
-      .where(eq(tasks.id, task.id));
+    await c.atReview(task);
     await c.wait(task.number, 'Staging deploy', new Date(Date.now() + 3_600_000).toISOString(), c.peer.id);
 
     const sent = (await (await c.tools(c.worker.id)).callTool({
