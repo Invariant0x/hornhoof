@@ -54,3 +54,55 @@ describe('server versioned execution receipts', () => {
     expect(productReceipt(f.snapshot, f.assigned, f.message, known)).toBeNull();
   });
 });
+
+async function mutationReceiptFixture() {
+  const f = await fixture(), description = structuredClone(f.snapshot.description), file = 'logic/totals.ts';
+  const command = { program: 'node', args: ['mutate.mjs'], cwd: '.' };
+  description.manifest.mutation = { status: 'supported', language: 'typescript', tool: 'mutator', command, sourcePaths: [file], fastTestPaths: ['web/test/a.test.ts'], coverageCommands: [command], coverageFiles: ['coverage.json'] };
+  description.manifest.suites.push({ id: 'mutation', root: '.', files: [file], run: command, split: { kind: 'json-file' }, profiles: ['fast', 'final'] });
+  for (const profile of description.manifest.profiles) profile.requiredSuiteIds.push('mutation');
+  description.inventory.push({ suiteId: 'mutation', file, selectionUnit: file });
+  description.manifestSource = JSON.stringify(description.manifest);
+  description.manifestHash = await hashTestEnvironment(description.manifestSource);
+  const baseCommit = '1'.repeat(40), commit = description.commitSha;
+  const mutation = { delta: { baseCommit, commit, changes: [{ path: file, ranges: [[1, 1] as [number, number]] }] },
+    selection: { version: 1 as const, status: 'ready' as const, baseCommit, commit,
+      selected: [{ file, name: 'total', startLine: 1, endLine: 1, lines: [1], tests: ['web/test/a.test.ts'], reason: 'changed_pure_function' as const }], excluded: [], problems: [] },
+  };
+  const fingerprints = description.inventory.map(unit => ({ suiteId: unit.suiteId, file: unit.file, fingerprint: 'e'.repeat(64) }));
+  const snapshot = EnvironmentSnapshot.parse({ description, profile: 'fast', candidate: { baseCommit, mutation, fingerprints, baseFingerprints: fingerprints.map(print => ({ ...print, fingerprint: 'f'.repeat(64) })) } });
+  const selection = TestExecution.parse({ snapshot, selection: { kind: 'batch', version: 2, expectedCommitSha: commit,
+    selections: [{ kind: 'suite', suiteId: 'mutation', files: [file], shard: { index: 1, count: 1 } }] } }).selection;
+  const receipt = TestEnvironmentReceipt.parse({ ...f.receipt, manifestHash: description.manifestHash, selection, outcomes: [{ index: 0, status: 'passed', exitCode: 0 }] });
+  return { ...f, snapshot, receipt, mutation, assigned: { selection, after: [] } };
+}
+
+it('requires the actual narrow mutation outcome even when the process and batch report passed', async () => {
+  const f = await mutationReceiptFixture();
+  expect(productReceipt(f.snapshot, f.assigned, { ...f.message, environmentReceipt: f.receipt }, f.runtimes)).toBeNull();
+});
+
+it('retains exact base/head/function mutation evidence from the assigned suite', async () => {
+  const f = await mutationReceiptFixture();
+  const receipt = Object.assign({}, f.receipt, { mutations: [{ suiteId: 'mutation', selection: f.mutation.selection }] });
+  expect(productReceipt(f.snapshot, f.assigned, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toEqual(receipt);
+});
+
+it.each(['base', 'head', 'function-lines', 'empty', 'duplicate'] as const)('refuses %s mutation provenance in an otherwise passed batch', async problem => {
+  const f = await mutationReceiptFixture(), selection = structuredClone(f.mutation.selection);
+  if (problem === 'base') selection.baseCommit = '2'.repeat(40);
+  if (problem === 'head') selection.commit = '2'.repeat(40);
+  if (problem === 'function-lines') Object.assign(selection.selected[0]!, { endLine: 2, lines: [1, 2] });
+  if (problem === 'empty') selection.selected = [];
+  const mutations = [{ suiteId: 'mutation', selection }];
+  if (problem === 'duplicate') mutations.push(mutations[0]!);
+  const receipt = Object.assign({}, f.receipt, { mutations });
+  expect(productReceipt(f.snapshot, f.assigned, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toBeNull();
+});
+
+it('refuses a noncanonical legacy receipt even when its unlisted files match the assignment', async () => {
+  const f = await fixture(), selection = { kind: 'suite' as const, suiteId: 'vitest', files: ['web/test/not-in-inventory.test.ts'] };
+  const { profile: _profile, selection: _selection, outcomes: _outcomes, ...identity } = f.receipt as Extract<TestEnvironmentReceipt, { version: 2 }>;
+  const receipt = TestEnvironmentReceipt.parse({ ...identity, version: 1, ...selection });
+  expect(productReceipt(f.snapshot, { selection, after: [] }, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toBeNull();
+});
