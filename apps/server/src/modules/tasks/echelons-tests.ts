@@ -8,7 +8,7 @@ import { sameChecker } from './echelons-policy.js';
 import { agentIdentity } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { verifiedReuse } from './review-reuse.js';
-import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
+import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
 export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
 export type Verification = z.infer<typeof Verification>;
@@ -65,7 +65,8 @@ async function failureKind(db: Ctx['db'] | Tx, task: Task, route: Route, ids: st
 
 async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification): Promise<Moved> {
   const kind = await failureKind(ctx.db, task, route, input.runIds);
-  const wakes = kind === 'content' ? giver(task, 'blocked', agentId, summary) : [];
+  const headId = kind === 'content' ? await testsHead(ctx.db, task) : null;
+  const wakes = headId ? [{ agentId: headId, taskId: task.id, why: 'blocked' as const, text: summary }] : [];
   const state: Route['state'] = { ...route.state, phase: 'escalated', stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
   const row = await move(ctx, task, { status: kind === 'content' ? 'blocked' : 'working', assigneeAgentId: kind === 'content' ? null : agentId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
@@ -76,6 +77,12 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   return { task: row, wakes };
 }
 
+async function testsHead(db: Ctx['db'] | Tx, task: Task): Promise<string> {
+  const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  if (!head) throw refuse(409, 'task_invalid', 'The department needs a head to receive the Tests result.');
+  return head.id;
+}
+
 export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
   const input = Verification.safeParse(value);
@@ -83,13 +90,12 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const identity = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed. Ask the head to assign it again.');
   if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
-  const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
-  if (!head) throw refuse(409, 'task_invalid', 'The department needs a head to accept the checked candidate.');
+  const headId = await testsHead(ctx.db, task);
   const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
   const candidate = await currentCandidate(ctx.db, task, route);
-  const wakes = [{ agentId: head.id, taskId: task.id, why: 'reviewed' as const }];
+  const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
-  const row = await move(ctx, task, { status: 'open', assigneeAgentId: head.id, silent: 0 }, {
+  const row = await move(ctx, task, { status: 'open', assigneeAgentId: headId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } },
   }, async tx => {
     await candidateRunEvidence(tx, task, route, input.data.runIds);
