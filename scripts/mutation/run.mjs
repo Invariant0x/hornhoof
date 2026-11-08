@@ -134,7 +134,9 @@ async function judgesFor(manifest, tracked, sources) {
   const input = { description: { manifest, inventory: [], inputDigests: [], runtimeCapabilities: [] }, tracked, texts };
   const suite = manifest.suites.find(suite => suite.id === 'mutation');
   if (!suite) throw new Error('The mutation suite is missing.');
-  return { tests: fingerprint.fastTestsOf(input, manifest.mutation, sources), prints: fingerprint.mutationJudgesOf(input, manifest.mutation, suite, sources),
+  const conditions = [process.platform, process.arch, process.versions, process.report.getReport().header.glibcVersionRuntime ?? null];
+  const prints = new Map([...fingerprint.mutationJudgesOf(input, manifest.mutation, suite, sources)].map(([file, print]) => [file, digest([print, conditions])]));
+  return { tests: fingerprint.fastTestsOf(input, manifest.mutation, sources), prints,
     select: delta => fingerprint.selectPureMutations(input, { ...manifest.mutation, sourcePaths: manifest.mutation.sourcePaths.filter(source => sources.includes(source)) }, delta) };
 }
 
@@ -178,7 +180,7 @@ function scopeFiles(selected, prints) {
     const selectedLines = [...new Set(functions.flatMap(item => item.lines))].sort((a, b) => a - b);
     const selectedTests = [...new Set(functions.flatMap(item => item.tests))].sort();
     lines.set(file, selectedLines); tests.set(file, selectedTests);
-    scopedPrints.set(file, digest([prints.get(file), selectedLines, selectedTests, process.platform, process.arch, process.versions]));
+    scopedPrints.set(file, digest([prints.get(file), selectedLines, selectedTests]));
   }
   return { tests, lines, prints: scopedPrints };
 }
