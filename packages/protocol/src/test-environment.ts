@@ -227,6 +227,9 @@ function descriptionEvidence(value: DescriptionShape, ctx: z.RefinementCtx): voi
 function descriptionSize(value: unknown, ctx: z.RefinementCtx): void {
   if (byteLength(JSON.stringify(value)) >= TEST_DESCRIPTION_BYTES) ctx.addIssue({ code: 'custom', message: 'The environment evidence exceeds its 3MiB limit.' });
 }
+function descriptionResponseSize(value: unknown, ctx: z.RefinementCtx): void {
+  if (byteLength(JSON.stringify(value)) > 4 * 1024 * 1024) ctx.addIssue({ code: 'custom', message: 'The description response exceeds its 4MiB transport frame limit.' });
+}
 export const EnvironmentDescription = DescriptionShape.superRefine(descriptionSource).superRefine(descriptionEvidence).superRefine(descriptionSize);
 export type EnvironmentDescription = z.infer<typeof EnvironmentDescription>;
 export async function validateEnvironmentDescription(value: unknown): Promise<EnvironmentDescription> {
@@ -414,7 +417,7 @@ export const TestsDescribed = z.strictObject({
     z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
   ]),
 }).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.')
-  .superRefine((value, ctx) => { if (value.result.status === 'ready') boundMutation(value.result.mutation, value.result.description, value.result.baseFingerprints?.commitSha, ctx); }).superRefine(descriptionSize);
+  .superRefine((value, ctx) => { if (value.result.status === 'ready') boundMutation(value.result.mutation, value.result.description, value.result.baseFingerprints?.commitSha, ctx); }).superRefine(descriptionResponseSize);
 export type TestsDescribed = z.infer<typeof TestsDescribed>;
 
 export function runtimeVersionMatches(requested: string, actual: string): boolean {
