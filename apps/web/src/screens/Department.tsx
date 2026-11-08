@@ -18,7 +18,6 @@ import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
-import { useRework } from '../ui/use-rework';
 import { AgentState } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
@@ -28,8 +27,8 @@ import { takeEscape } from '../ui/escape';
 
 export { employeeGroups };
 
-const frameTitle = (f: Frame, language: 'en' | 'ru', others: string) =>
-  f.team ? f.team.name : f.role ? f.role.title[language] : others;
+const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
+  f.echelon ? t.tasks.echelons.stages[f.echelon] : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
@@ -68,17 +67,11 @@ const FLASH_MS = 1400;
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 type Said = { key: number; at: string; text: string } | null;
-type SeenState = { status: EmployeeStatus; taskId: string | null; bounces: number };
+type SeenState = { status: EmployeeStatus; taskId: string | null; revision: number };
 type Seen = Map<string, SeenState>;
 
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
-
-function employeeChange(e: Employee, was: SeenState) {
-  const taskId = e.task?.id ?? null;
-  const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
-  return { taskId, cameBack };
-}
 
 function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
   const t = useT();
@@ -144,41 +137,26 @@ function DeptApprovals({ department, shown }: { department: Department; shown: b
 
 function Wire({ l }: { l: Line }) {
   const d = toD(l.pts);
-  const knock = l.cls === 'pl' || l.cls === 'rl';
+  const knock = l.cls === 'pl';
   return (
     <>
       {knock && <path className="ko" d={d} />}
       <path className={l.cls} d={d} />
-      {l.arrow && <path className={l.cls === 'rl' ? 'rah' : 'ah'} d={arrowD(l.pts)} />}
+      {l.arrow && <path className="ah" d={arrowD(l.pts)} />}
     </>
   );
 }
 
-const ordinaryWork = (f: Frame) => f.stage >= 0 && !f.role?.schema && f.role?.gate == null;
-
-/* Amber signals use the same gate-to-work segments as the return lines, and exist only where those lines are. */
-function reworkPaths(s: Schema, f: Frame, m: Frame['members'][number], back: (from: string, to: string) => Point[] | null): Point[][] {
-  if (!ordinaryWork(f) || !s.lines.some(l => l.cls === 'rl')) return [];
-  return s.frames.filter(g => g.role?.gate != null).flatMap(g => {
-    const from = g.members[0];
-    const pts = from ? back(from.e.id, m.e.id) : null;
-    return pts ? [pts] : [];
-  });
-}
-
-/* Cyan runs from the head to an employee at work; amber returns from each gate over the drawn return line. */
-function MemberLines({ s, toMember, back, stateOf, still }: { s: Schema; toMember(id: string): Point[] | null; back(from: string, to: string): Point[] | null; stateOf(up: string, down: string): LineState; still: boolean }) {
+/* Live work and results follow the actual employee-to-head connection. */
+function MemberLines({ s, toMember, stateOf, still }: { s: Schema; toMember(id: string): Point[] | null; stateOf(up: string, down: string): LineState; still: boolean }) {
   const head = s.head;
   if (!head) return null;
   return s.frames.flatMap(f =>
     f.members.map(m => {
       const state = stateOf(head.id, m.e.id);
-      if (state === 'yellow') {
-        return reworkPaths(s, f, m, back).map((pts, i) => <LiveWay key={`${m.e.id}:${i}`} pts={pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-work': m.e.id }} />);
-      }
       const down = state === 'quiet' ? null : toMember(m.e.id);
       if (!down) return null;
-      return <LiveWay key={m.e.id} pts={down} speed={PULSE_SPEED} tone="c" still={still} data={{ 'data-work': m.e.id }} />;
+      return <LiveWay key={m.e.id} pts={state === 'yellow' ? [...down].reverse() : down} speed={PULSE_SPEED} tone={state === 'yellow' ? 'a' : 'c'} still={still} data={{ 'data-work': m.e.id }} />;
     }),
   );
 }
@@ -333,7 +311,6 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
      a result back, as the server keeps them. */
   const stateOf = useWorkLines(d.workLines, serverNow);
-  const rework = useRework(d.reworkAt, serverNow);
   const stageOf = (id: string) => s.frames.find(f => f.members.some(m => m.e.id === id))?.stage ?? -1;
   /* A message runs amber up to the head and back from a gate, cyan down and on. */
   const wayTone = (from: string, to: string) => (to === s.head?.id || stageOf(to) < stageOf(from) ? 'a' : 'c');
@@ -382,7 +359,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
 
   useEffect(() => {
     const before = seen.current;
-    seen.current = new Map(d.employees.map(e => [e.id, { status: e.status, taskId: e.task?.id ?? null, bounces: e.task?.bounces ?? 0 }]));
+    seen.current = new Map(d.employees.map(e => [e.id, { status: e.status, taskId: e.task?.id ?? null, revision: e.task?.echelons.revision ?? 0 }]));
     if (!before) return;
     const fired: Shot[] = [];
     const changed: string[] = [];
@@ -390,14 +367,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     for (const e of d.employees) {
       const was = before.get(e.id);
       if (!was) continue;
-      const { taskId, cameBack } = employeeChange(e, was);
-      if (!cameBack && was.status === e.status && was.taskId === taskId) continue;
+      const taskId = e.task?.id ?? null;
+      if (was.status === e.status && was.taskId === taskId && was.revision === (e.task?.echelons.revision ?? 0)) continue;
       changed.push(e.id);
-      /* A gate sent the work back: said in words, with no amber dot, which the line of work keeps for a result given back. */
-      if (cameBack) {
-        text = t.dept.cameBack(e.name);
-        continue;
-      }
       text = [`${e.name}: ${t.dept.status[e.status]}`, taskText(e)].filter(Boolean).join(', ');
       const pts = e.status === 'handed' ? paths.onward(e.id) : taskId && taskId !== was.taskId ? paths.toMember(e.id) : null;
       if (pts) fired.push({ key: ++shotKey.current, pts, tone: 'c' });
@@ -447,7 +419,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   };
 
   const working = d.employees.filter(e => e.status === 'working').length;
-  const stats = t.dept.stats(working, d.employees.length, s.frames.length, s.gates.length);
+  const stats = t.dept.stats(working, d.employees.length, d.roles.length, 0);
   const far = view.k < FAR_K;
   const worldStyle = {
     width: s.right,
@@ -468,12 +440,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" style={worldStyle}>
+          <section aria-labelledby={`${id}-members`} className="slayer">
+          <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className={`frame${f.role?.gate != null ? ' gt' : ''}`} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+            <div key={f.key || 'others'} className="frame" role={f.echelon ? 'group' : undefined} aria-label={f.echelon ? t.tasks.echelons.stages[f.echelon] : undefined} data-echelon={f.echelon} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
               <Edge cut={14} corner>
                 <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
-                  <span className="fn">{frameTitle(f, language, t.dept.others)}</span>
+                  <span className="fn">{frameTitle(f, language, t)}</span>
                   {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
+                  <span className="fc">{f.status && t.tasks.echelons.statuses[f.status]}</span>
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
               </Edge>
@@ -488,35 +463,22 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                   onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
+              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - FT} on={selected === m.e.id} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
             </div>
           ))}
+          </section>
           <svg className="wires" width={s.right} height={s.h} viewBox={`0 0 ${s.right} ${s.h}`} aria-hidden="true">
-            {lines('gate')}
             {lines('tr', 'tick')}
             {s.vias.map(([x, y]) => (
               <circle key={`${x}-${y}`} className="via" cx={x} cy={y} r="4" />
             ))}
             {lines('pl')}
-            {s.gates.map(g => (
-              <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
-            ))}
-            {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
-            <MemberLines s={s} toMember={paths.toMember} back={paths.back} stateOf={stateOf} still={still} />
+            <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={x.speed} once tone={x.tone} />
             ))}
           </svg>
-          {s.gates.map(g => (
-            <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
-              {t.dept.gate(g.n)}
-            </span>
-          ))}
-          {rework && s.back && (
-            <span className="llab ret" style={{ left: s.back[0], top: s.back[1] }}>
-              {t.dept.sentBackLine}
-            </span>
-          )}
           {s.report && (
             <span className="llab" style={{ left: s.report.label[0], top: s.report.label[1] }}>
               {t.dept.reportLine}
@@ -551,16 +513,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               </PersonButton>
             </div>
           ))}
-          <section aria-labelledby={`${id}-members`} className="slayer">
-            <h3 id={`${id}-members`} className="sr">
-              {t.dept.members}
-            </h3>
-            {s.frames.flatMap(f =>
-              f.members.map(m => (
-                <Chip key={m.e.id} e={shown(m.e)} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />
-              )),
-            )}
-          </section>
+
         </div>
         {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
       </div>

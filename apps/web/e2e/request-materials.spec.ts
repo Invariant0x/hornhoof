@@ -98,7 +98,7 @@ const ORG_FIXTURE: Org = {
           status: 'working',
           on: true,
           timer: null,
-          task: { id: 't508', number: 508, title: 'Question materials', stage: 0, gateCount: 0, bounces: 0 },
+          task: { echelons: taskRoute(), id: 't508', number: 508, title: 'Question materials', stage: 0, gateCount: 0, bounces: 0 },
           context: null,
           program: null,
           alarm: null,
@@ -195,7 +195,7 @@ async function mountFixtureRoutes(page: Page) {
     materialRevision: 1,
     at: '2026-11-06T01:05:00.000Z',
     agent: { id: 'a-dsn', name: 'Head of Design' },
-    task: { id: 't508', number: 508, title: 'Question materials review', department: { id: 'd-dsn', name: 'Design' } },
+    task: { echelons: taskRoute(), id: 't508', number: 508, title: 'Question materials review', department: { id: 'd-dsn', name: 'Design' } },
     ownerPersonId: 'p-ceo',
     canAnswer: true,
   } as unknown as WaitingRequest;

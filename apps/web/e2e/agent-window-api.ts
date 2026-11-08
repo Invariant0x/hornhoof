@@ -1,3 +1,4 @@
+import { taskRoute } from '../test/task-route';
 import type { Page, Route } from '@playwright/test';
 import type { AgentCardView, Employee, EventView, MachineView, Me, Org, PersonView, RunningAgent, SubView, TaskDetail, TurnRefusal } from '../src/types';
 import { AGENT_HIDDEN, ME, TASKS, serveApi } from './api';
@@ -5,7 +6,7 @@ import { AGENT_HIDDEN, ME, TASKS, serveApi } from './api';
 const ROLE = { en: 'Developer', ru: 'Разработчик' };
 const EMPLOYEE: Employee = {
   id: 'b1', name: 'Bruno', roleId: 'DEV-ENG', title: ROLE, kind: 'worker', model: '', modelName: null, provider: 'codex', effort: null,
-  state: 'sleeping', status: 'idle', on: true, timer: null, task: { id: 't1', number: 1, title: 'Checkout step 1', stage: 0, gateCount: 0, bounces: 0 },
+  state: 'sleeping', status: 'idle', on: true, timer: null, task: { id: 't1', number: 1, title: 'Checkout step 1', echelons: taskRoute(), stage: 0, gateCount: 0, bounces: 0 },
   context: null, program: null, alarm: null, retry: null, failure: null,
 };
 const AGENT: RunningAgent = { id: 'b1', canOpen: true, name: 'Bruno', title: ROLE, department: { id: 'd2', name: 'Development' }, provider: 'codex', busy: false, since: null, task: null, withCeo: false };

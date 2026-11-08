@@ -10,7 +10,12 @@ import { CH, CW } from '../screens/schema';
 
 export const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
 
-const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
+const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
+  if (!e.task) return '';
+  const route = e.task.echelons;
+  const stage = route.ownerAgentId === e.id ? `${t.tasks.echelons.stages[route.stage]} ` : '';
+  return `${stage}#${e.task.number} ${e.task.title}`;
+};
 
 export function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
   /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
@@ -20,7 +25,7 @@ export function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
 
 /* What an employee's third line says: its task, or why it has none. */
 export function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
-  if (e.task) return taskText(e);
+  if (e.task) return taskText(e, t);
   if (!e.on) return t.dept.switchedOff;
   if (e.status === 'off') return t.dept.needsSubscription;
   if (e.timer && e.status === 'idle') return t.dept.onTimer(t.agent.every(e.timer));

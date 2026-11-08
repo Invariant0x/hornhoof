@@ -1,3 +1,4 @@
+import { taskRoute } from './task-route';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,7 +8,7 @@ import type { EventView } from '../src/types';
 import { CARD, DEV_ORG, ME, ORG, PEOPLE, TASK_DETAIL, decisions, mockApi } from './api-mock';
 import { fakeStream } from './fake-stream';
 
-const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 0, bounces: 0 };
+const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute(), stage: 0, gateCount: 0, bounces: 0 };
 function company(hasTask = true, busy = false, events: EventView[] = []) {
   const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(a => a.id === 'b1' ? { ...a, task: hasTask ? task : null } : a) })) };
   const card = { ...CARD, currentTask: hasTask ? { id: task.id, number: task.number, title: task.title } : null };

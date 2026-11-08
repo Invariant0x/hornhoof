@@ -98,7 +98,7 @@ export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 export type EmployeeStatus = 'working' | 'queued' | 'handed' | 'waiting' | 'idle' | 'off';
 
 /* The task an employee is about, for people who reach its department. */
-export type EmployeeTask = { id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
+export type EmployeeTask = { echelons: EchelonsSnapshot; id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
 
 export type ProgramView = TurnProgram;
 

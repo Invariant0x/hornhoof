@@ -1,3 +1,4 @@
+import { taskRoute } from './task-route';
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -175,7 +176,7 @@ describe('Department view', () => {
   it('shows an employee start working while the department is open', async () => {
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 1, bounces: 0 };
+    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute(), stage: 0, gateCount: 1, bounces: 0 };
     const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const, status: 'working' as const, task })) }] };
     let started = false;
     await act(async () => {
@@ -229,35 +230,6 @@ describe('Department view', () => {
     expect(runningDots('c', d)).toHaveLength(2);
   });
 
-  it('runs the yellow signal over the drawn return line from a gate to the employee', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    const [dev] = DEV_ORG.departments;
-    const now = Date.now();
-    const reviewer = { ...dev!.roles[1]!, id: 'DEV-REV', kind: 'member' as const, gate: 1 };
-    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV' };
-    const withGate = { ...dev!, roles: [...dev!.roles, reviewer], employees: [...dev!.employees, rita] };
-    const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
-    shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...withGate, workLines: lines }] });
-    await flyIn(user);
-    const work = () => document.querySelector('.wires path[data-work="b1"]');
-    expect(work()).toHaveClass('tr', 'live', 'a');
-    const s = schemaLayout(withGate, 1);
-    const back = stepPaths(s).back('b2', 'b1')!;
-    expect(work()!.getAttribute('d')).toBe(toD(back));
-    expect(runningDots('a', toD(back))).toHaveLength(2);
-    const drawn = [...document.querySelectorAll('.dview .wires .rl')].map(path => path.getAttribute('d'));
-    for (let i = 1; i < back.length; i++) {
-      const segment = [back[i - 1]!, back[i]!];
-      expect(drawn.some(d => d === toD(segment) || d === toD([...segment].reverse()))).toBe(true);
-    }
-    await act(() => vi.advanceTimersByTimeAsync(30_000));
-    expect(work()).toBeNull();
-  });
-
   it('draws no yellow signal on empty space when the schema has no return line', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
@@ -299,7 +271,7 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     const [dana, bruno] = dev!.employees;
     const qa = { id: 'DEV-QA', title: { en: 'Test engineer', ru: 'Тестировщик' }, description: { en: 'Tests.', ru: 'Тестирует.' }, kind: 'member' as const, gate: 1 };
-    const task = { id: 't1', number: 1, title: 'Checkout', stage: 1, gateCount: 1, bounces: 0 };
+    const task = { id: 't1', number: 1, title: 'Checkout', echelons: taskRoute(), stage: 1, gateCount: 1, bounces: 0 };
     const before: Org = {
       ...DEV_ORG,
       departments: [{ ...dev!, roles: [...dev!.roles, qa], employees: [dana!, { ...bruno!, status: 'handed', task }, { ...bruno!, id: 'q1', name: 'Quinn', roleId: 'DEV-QA', status: 'queued', task }] }],
@@ -351,7 +323,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    const task = { id: 't12', number: 12, title: 'Checkout API', stage: 1, gateCount: 1, bounces: 0 };
+    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute(), stage: 1, gateCount: 1, bounces: 0 };
     const waits: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.id === 'b1' ? { ...e, status: 'waiting' as const, task } : e)) }] };
     let asked = false;
     shell({ 'GET /api/org': () => [200, asked ? waits : DEV_ORG] });

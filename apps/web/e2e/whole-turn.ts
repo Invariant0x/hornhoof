@@ -1,3 +1,4 @@
+import { taskRoute } from '../test/task-route';
 import type { AgentTime, Department, DepartmentTree, Employee, Org, TreeActivity, TreeAgent, TreeLine, TreeReview, TreeSegment } from '../src/types';
 import { ME } from './api';
 
@@ -95,7 +96,7 @@ export function wholeTurn(during: boolean): { tree: DepartmentTree; org: Org; de
     title: { en: a.name === 'Hana' ? 'Head of development' : 'Developer', ru: a.name === 'Hana' ? 'Руководитель разработки' : 'Разработчик' },
     model: '', modelName: null, provider: 'codex', effort: null, state: during && ['Hana', 'Gleb'].includes(a.name) ? 'working' : 'sleeping',
     status: during && ['Hana', 'Gleb'].includes(a.name) ? 'working' : 'idle', on: true, timer: null,
-    task: during && a.name === 'Ostap' ? { id: 't140', number: 140, title: 'Checkout step 140', stage: 0, gateCount: 0, bounces: 0 } : null,
+    task: during && a.name === 'Ostap' ? { id: 't140', number: 140, title: 'Checkout step 140', echelons: taskRoute(), stage: 0, gateCount: 0, bounces: 0 } : null,
     context: null, alarm: null, retry: null, failure: null,
     program: !during ? null : a.name === 'Hana' ? { state: 'idle', since: stamp('11:05'), tool: null, screenAt: stamp('11:05'), signAt: null, retry: null, reportedAt: Date.parse(now) }
       : a.name === 'Gleb' ? { state: 'tool', since: stamp('11:00'), tool: 'Bash', screenAt: Date.parse(now), signAt: null, retry: null, reportedAt: Date.parse(now) } : null,
