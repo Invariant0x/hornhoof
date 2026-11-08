@@ -14,6 +14,7 @@ import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
 import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
+import { runPurpose } from './purpose.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
@@ -92,16 +93,12 @@ function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): Envi
 function planningCosts(history: PlanningHistory | null | undefined) {
   return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000 };
 }
-function planningPurpose(snapshot: EnvironmentSnapshot, requested: string | undefined): 'final' | 'affected' {
-  if (requested) return 'affected';
-  return snapshot.profile === 'final' || snapshot.profile === snapshot.description.manifest.execution?.fullRun?.profile ? 'final' : 'affected';
-}
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
   const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
-  const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: planningPurpose(snapshot, requested), units, reuse,
+  const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
     ...planningCosts(history),
     availableMachines: await freeProductMachines(ctx, run, snapshot) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';

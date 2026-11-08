@@ -88,6 +88,16 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
   return { app, db, agent: agent!, job: job!, task: task!, start, finish, partsOf, runOf, ranFiles, greenRows, told, companyId };
 }
 
+/* What a run asked GitHub to set on a commit, in the order it asked. */
+function marked(f: Awaited<ReturnType<typeof fixture>>): { commit: string; state: string }[] {
+  const marks: { commit: string; state: string }[] = [];
+  f.app.ctx.markCommit = async (_repo, commit, mark) => {
+    marks.push({ commit, state: mark.state });
+    return { ok: true };
+  };
+  return marks;
+}
+
 describe('reusing green test results', () => {
   it('does not run a file again at the same fingerprint, and the run still ends and tells its agent', async () => {
     const f = await fixture();
@@ -329,6 +339,36 @@ describe('reusing green test results', () => {
     await remember('.metrics/mutate/b.edn', 'b'.repeat(600 * 1024));
     const [part] = await f.partsOf(run.id);
     expect((await keptFor(f.app.ctx, run, part!))?.[0]?.files.map(file => file.path)).toEqual(['.metrics/mutate/b.edn']);
+  });
+
+  it('marks the pinned commit on GitHub once a run of the whole product passed, also when every file kept its green result', async () => {
+    const f = await fixture(), marks = marked(f);
+    await f.finish(await f.start({ profile: 'final' }));
+    expect(marks).toEqual([{ commit: TEST_COMMIT, state: 'success' }]);
+    const reused = await f.start({ profile: 'final' });
+    expect(await f.runOf(reused)).toMatchObject({ status: 'passed', parts: 0 });
+    expect(marks).toEqual([{ commit: TEST_COMMIT, state: 'success' }, { commit: TEST_COMMIT, state: 'success' }]);
+  });
+
+  it('marks failure when a run of the whole product failed', async () => {
+    const f = await fixture(), marks = marked(f);
+    await f.finish(await f.start({ profile: 'final' }), { ok: false });
+    expect(marks).toEqual([{ commit: TEST_COMMIT, state: 'failure' }]);
+  });
+
+  it('leaves no mark for the everyday profile or for one suite: neither stands for the whole product', async () => {
+    const f = await fixture(), marks = marked(f);
+    await f.finish(await f.start({}));
+    await f.finish(await f.start({ profile: 'final', suite: 'unit' }));
+    expect(marks).toEqual([]);
+  });
+
+  it('tells the agent on the task that GitHub now shows the mark', async () => {
+    const f = await fixture();
+    marked(f);
+    await f.finish(await f.start({ profile: 'final' }));
+    await until(async () => (await f.told()).includes('Test run 1 passed'));
+    expect(await f.told()).toContain(`GitHub now shows hornhoof/tests = success on ${TEST_COMMIT}.`);
   });
 
   it('does not reuse the green result of another repository', async () => {

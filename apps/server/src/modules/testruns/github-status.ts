@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { departments, testRuns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { publicUrl } from '../link/link.js';
+import { runPurpose } from './purpose.js';
 import type { RepoAddress } from './refs.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -67,14 +68,20 @@ export function markPromise(full: string | null | undefined, command: string): s
     : ` The repository's full test command is ${full}. Only a run of exactly that sets ${TESTS_CONTEXT}, so this one will not.`;
 }
 
-/* The open test run with this id, when it pinned a commit and runs to the letter what its repository declared as the whole suite. */
+/* A run of the product's own environment that stands for the whole product: what GitHub would otherwise run again. Files that kept
+   a green result at their fingerprint count as checked, as they do for the turn; the full run every so many turns checks them. */
+const wholeProduct = (run: Run): boolean => Boolean(run.environmentSnapshot && run.environmentRequest && runPurpose(run.environmentSnapshot, run.environmentRequest.suite) === 'final');
+
+/* The open test run with this id, when it pinned a commit and either runs to the letter what its repository declared as the whole
+   suite, or runs the whole product in its own environment. */
 async function fullRun(db: Ctx['db'], runId: string): Promise<(Run & { commitSha: string }) | null> {
   const [found] = await db
     .select({ run: testRuns, full: departments.repoFullTestCommand })
     .from(testRuns)
     .innerJoin(departments, eq(departments.id, testRuns.departmentId))
     .where(and(eq(testRuns.id, runId), eq(testRuns.status, 'running'), eq(testRuns.kind, 'tests')));
-  if (!found?.run.commitSha || found.run.command !== found.full) return null;
+  if (!found?.run.commitSha) return null;
+  if (found.run.command !== found.full && !wholeProduct(found.run)) return null;
   return { ...found.run, commitSha: found.run.commitSha };
 }
 

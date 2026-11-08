@@ -789,6 +789,22 @@
             "--noEmit"
           ],
           "cwd": "."
+        },
+        {
+          "program": "bash",
+          "args": [
+            "-n",
+            "scripts/install.sh"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "shellcheck",
+          "args": [
+            "scripts/install.sh",
+            "scripts/node-build.sh"
+          ],
+          "cwd": "."
         }
       ]
     },

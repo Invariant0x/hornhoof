@@ -19,6 +19,11 @@ describe('canonical versioned product configuration', () => {
     expect(preparation?.commands.some(command => command.program === 'npm' && ['lint', 'typecheck:tests', 'build'].includes(command.args[1] ?? ''))).toBe(false);
     expect(current.suites.flatMap(suite => suite.finalChecks ?? [])).toEqual([]);
   });
+  it('checks the installer as the GitHub build does, since a passing run of the whole product spares GitHub its own', () => {
+    const commands = manifest().execution?.oncePreparation?.commands;
+    expect(commands).toContainEqual({ program: 'bash', args: ['-n', 'scripts/install.sh'], cwd: '.' });
+    expect(commands).toContainEqual({ program: 'shellcheck', args: ['scripts/install.sh', 'scripts/node-build.sh'], cwd: '.' });
+  });
   it('uses the explicit native adapter for Vitest while retaining the other framework command', () => {
     const current = manifest(), others = ['release-scripts', 'browser', 'browser-matrix', 'mutation'];
     for (const suite of current.suites.filter(suite => !others.includes(suite.id))) {

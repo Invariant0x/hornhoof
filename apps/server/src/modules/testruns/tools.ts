@@ -46,7 +46,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
         'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
-        "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
+        "A run of the whole product (no suite, with the profile a turn ends with or the full run) sets the GitHub status hornhoof/tests on the pinned commit as it ends, files that kept a green result counting as checked, and so does a run of exactly the command its repository declared as its full test command: GitHub then need not run the tests again.",
       inputSchema: {
         command: z.string().trim().min(1).max(4000).optional().describe('Manual command. Dependencies are in place already; omit it for the pinned product environment.'),
         suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
