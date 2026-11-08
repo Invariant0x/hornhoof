@@ -3,7 +3,7 @@ id: DEV-HEAD
 department: development
 kind: head
 title: { en: "Head of development", ru: "Руководитель разработки" }
-description: { en: "Gives each goal out to engineers in large pieces at once and takes the work to a release.", ru: "Раздает каждую цель инженерам крупными частями одновременно и доводит работу до выпуска." }
+description: { en: "Development leader for software goals, engineering coordination and delivery.", ru: "Руководитель разработки программных продуктов и координации инженеров." }
 tier: deep
 effort: high
 perProduct: false

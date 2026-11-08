@@ -31,8 +31,8 @@ describe('standalone employee abilities', () => {
   });
 
   it('keeps unconditional turn workflows out of role descriptions as well as their bodies', () => {
-    const route = /\b(?:each turn|whole turn|before a new or large feature|all at once)\b/i;
-    const violations = [...templates.roles.values()].filter(role => route.test(role.description.en));
+    const route = /\b(?:each turn|whole turn|before a new or large feature|at once)\b|всего хода|работу хода один раз|до того, как строят|частями одновременно/i;
+    const violations = [...templates.roles.values()].filter(role => route.test(`${role.description.en}\n${role.description.ru}`));
     expect(violations.map(role => role.id)).toEqual([]);
   });
 
