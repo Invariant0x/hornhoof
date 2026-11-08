@@ -3,7 +3,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, taskRoutes, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
+import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { departmentPipeline, pipelineReport, turnFacts } from '../src/modules/tasks/pipeline-report.js';
 import { settle } from '../src/modules/tasks/turns.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, ownDatabases } from './helpers.js';
@@ -39,8 +40,18 @@ async function company() {
   let n = 0;
   const turn = async (number: number, status: 'open' | 'closed' | 'planned', from: number | null, to: number | null, title = `Turn ${number}`) =>
     (await db.insert(turns).values({ companyId, number, title, goal: title, status, createdAt: at(from ?? 0), openedAt: from === null ? null : at(from), closedAt: to === null ? null : at(to) }).returning())[0]!;
-  const task = async (turnId: string, number: number, over: Partial<typeof tasks.$inferInsert> = {}) =>
-    (await db.insert(tasks).values({ companyId, number, turnId, title: `Task ${number}`, departmentId: dev!.id, executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'done', createdAt: at(0), closedAt: at(30), updatedAt: at(30), ...over }).returning())[0]!;
+  const task = async (turnId: string, number: number, over: Partial<typeof tasks.$inferInsert> = {}) => {
+    const closed = ['done', 'cancelled'].includes(over.status ?? 'done');
+    const [row] = await db.insert(tasks).values({ companyId, number, turnId, title: `Task ${number}`, departmentId: dev!.id, executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'done', createdAt: at(0), closedAt: at(30), updatedAt: at(30), ...over, ...(closed ? { assigneeAgentId: null } : {}) }).returning();
+    await db.transaction(async tx => {
+      await createRoute(tx, row!, {});
+      if (!closed) return;
+      const route = await routeOf(tx, row!);
+      /* Historical metrics do not fabricate a completed checker or candidate. */
+      await tx.update(taskRoutes).set({ state: { ...route.state, stage: null, phase: 'done', stages: [] } }).where(eq(taskRoutes.taskId, row!.id));
+    });
+    return row!;
+  };
   const event = (taskId: string, kind: typeof taskEvents.$inferInsert.kind, minutes: number, data: Record<string, unknown> = {}) =>
     db.insert(taskEvents).values({ companyId, taskId, kind, data, createdAt: at(minutes) });
   const job = async (agentId: string, taskId: string | null, over: Partial<typeof jobs.$inferInsert> = {}) =>
