@@ -26,7 +26,7 @@ describe('the current echelon on a tree card', () => {
     expect(within(route).getAllByRole('listitem').map(step => step.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita');
-    const findings = screen.getByRole('region', { name: language === 'ru' ? 'Находки' : 'Findings' });
+    const findings = screen.getByRole('region', { name: language === 'ru' ? 'Находки по этапам' : 'Findings by stage' });
     expect(findings).toHaveTextContent('Review');
     expect(findings).toHaveTextContent('Security');
     expect(findings).not.toHaveTextContent('Cleanup');
