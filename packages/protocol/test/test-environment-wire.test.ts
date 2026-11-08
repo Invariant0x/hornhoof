@@ -84,3 +84,19 @@ it('retains additive runtime capability fields in hello and status', () => {
   expect(protocol.parseNodeMessage(JSON.stringify({ type: 'hello', version: 'test', loggedIn: true, running: [], testEnvironmentVersion: 1, testRuntimes: runtimes }))).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: runtimes });
   expect(protocol.parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: runtimes }))).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: runtimes });
 });
+
+it('preserves the exact candidate base on a description request', () => {
+  const value = description();
+  const request = { type: 'tests.describe', requestId: '33333333-3333-4333-8333-333333333333', repositoryScope: value.repositoryScope, repo: { url: 'https://example.test/repo.git', token: '' }, commitSha: value.commitSha, baseCommit: 'a'.repeat(40) };
+  expect(protocol.parseServerMessage(JSON.stringify(request))).toEqual(request);
+  expect(protocol.parseServerMessage(JSON.stringify({ ...request, baseCommit: 'main' }))).toBeNull();
+});
+
+it('preserves both pinned influencing fingerprint sets in a candidate description reply', () => {
+  const value = description(), fingerprint = { suiteId: 'protocol', file: value.inventory[0].file, fingerprint: 'c'.repeat(64) };
+  const reply = { type: 'tests.described', requestId: '33333333-3333-4333-8333-333333333333', commitSha: value.commitSha,
+    result: { status: 'ready', description: value, fingerprints: [fingerprint], baseFingerprints: { commitSha: 'a'.repeat(40), fingerprints: [{ ...fingerprint, fingerprint: 'd'.repeat(64) }] } },
+  };
+  expect(protocol.parseNodeMessage(JSON.stringify(reply))).toEqual(reply);
+  expect(protocol.parseNodeMessage(JSON.stringify({ ...reply, result: { ...reply.result, baseFingerprints: { ...reply.result.baseFingerprints, commitSha: 'main' } } }))).toBeNull();
+});

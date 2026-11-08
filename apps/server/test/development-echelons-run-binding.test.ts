@@ -30,6 +30,14 @@ describe('Tests run ownership and immutable source binding', () => {
       baseCommit: 'a'.repeat(40), commit: f.finalCommit, branch: 'task-1', testerId: f.tester.id,
     } }));
   });
+  it('passes the immutable candidate base into product environment discovery', async () => {
+    const f = await fixture();
+    await startRun(f.ctx, f.job, { task: f.task.number, candidate: f.candidate });
+    const [run] = await f.runs();
+    expect(run!.environmentRequest).toMatchObject({ baseCommit: 'a'.repeat(40) });
+    expect(run!.commitSha).toBe(f.finalCommit);
+  });
+
   it.each(['missing', 'candidate', 'revision', 'branch', 'head'])('refuses a %s mismatch before queuing a run', async problem => {
     const f = await fixture();
     const candidate = { ...f.candidate };

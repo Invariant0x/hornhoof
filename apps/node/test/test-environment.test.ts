@@ -225,3 +225,12 @@ describe('the final candidate influencing fingerprints', () => {
     await expect(describeCandidate(f, f.head, fingerprints)).rejects.toThrow(`${side} fingerprints unavailable`);
   });
 });
+
+it('does not replay a cached description for the same head at another candidate base', async () => {
+  const emitted: unknown[] = [];
+  const control = new environment.NodeTestMessages({ dir: '/unused', capabilities: {}, stopped: () => false, testing: new Map(), unconfirmed: new Map(), run: async () => {}, emit: message => { emitted.push(message); } });
+  const request = { type: 'tests.describe' as const, requestId: '55555555-5555-4555-8555-555555555555', commitSha: 'b'.repeat(40), baseCommit: 'a'.repeat(40), repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'b'.repeat(64) }, repo: { url: 'https://example.test/repo.git', token: '' } };
+  await control.handle(request);
+  await control.handle({ ...request, baseCommit: 'c'.repeat(40) });
+  expect(emitted.at(-1)).toMatchObject({ result: { status: 'error', problem: { code: 'description_mismatch' } } });
+});
