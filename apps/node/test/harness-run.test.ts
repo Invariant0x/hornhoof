@@ -385,10 +385,31 @@ const leftOver = async (options: ReturnType<typeof machine>) => (await readdir(j
 /* The machine's turn for heavy work, held by a test part until it lets go. */
 function heldTurn() {
   let release!: () => void;
-  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 };
-  const slot = async <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> => { asked.count++; await free; return run(signal); };
-  return { slot, release, asked };
+  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 }, inside = { count: 0 };
+  const slot = async <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    asked.count++; await free; inside.count++;
+    try { return await run(signal); } finally { inside.count--; }
+  };
+  return { slot, release, asked, inside };
 }
+/* A machine's registry that notes what it was told and did, and whether it held the machine's turn meanwhile. */
+function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
+  const claims: { state: string; inside: number }[] = [], downloads: number[] = [];
+  return {
+    claims, downloads,
+    remote: {
+      ...remote,
+      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count }); return claim; },
+      async download(key, file, claim, signal) { downloads.push(turn.inside.count); return remote.download(key, file, claim, signal); },
+    } satisfies HarnessRemote,
+  };
+}
+const until = async (check: () => boolean) => {
+  for (const end = Date.now() + 5_000; !check();) {
+    if (Date.now() > end) throw new Error('timed out');
+    await new Promise(resolve => { setTimeout(resolve, 5); });
+  }
+};
 const STILL_WAITING = 'still waiting';
 const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
 
@@ -508,6 +529,34 @@ describe("an agent's worktree", () => {
     expect(await placing).toMatch(PLACED);
     expect(await installed(f)).toBe(1);
     expect([...shared.builds.values()]).toEqual([expect.objectContaining({ bundle: expect.any(Buffer) })]);
+  });
+
+  it("lets the machine's turn go when another machine's build is ready by then, and takes it without the turn", async () => {
+    const f = await fixture(), shared = registry(), turn = heldTurn(), mine = noted(shared.remote('one'), turn);
+    const one = machine(f, 'one', mine.remote), two = machine(f, 'two', shared.remote('two'));
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    await until(() => turn.asked.count === 1);
+    expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
+    turn.release();
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    expect(mine.downloads).toEqual([0]);
+  });
+
+  it("lets the machine's turn go when another machine builds them by then, and waits for it without the turn", async () => {
+    const f = await fixture(), shared = registry(), turn = heldTurn(), mine = noted(shared.remote('one'), turn);
+    const one = machine(f, 'one', mine.remote), two = machine(f, 'two', shared.remote('two'));
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    await until(() => turn.asked.count === 1);
+    /* The other machine claims the unit while this one waits for its turn. */
+    shared.builds.set(shared.keysSeen[0]!, { builder: 'two' });
+    turn.release();
+    await until(() => mine.claims.some(claim => claim.state === 'wait'));
+    expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    expect(mine.claims.filter(claim => claim.inside > 0 && claim.state === 'wait').length).toBeLessThanOrEqual(1);
+    expect(mine.downloads).toEqual([0]);
   });
 
   it('says why when they cannot be built, and leaves nothing behind', async () => {

@@ -11,7 +11,7 @@ import { redact } from './redact.js';
 import { chown as fsChown, copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, rmdir as fsRmdir, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
 import type { AgentFs } from './agent-fs.js';
 import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
 import { collectKept, parseFileReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
@@ -583,6 +583,21 @@ export async function worktreeHarness(tree: Worktree, options: WorktreeOptions):
 
 /* Taking a ready build never waits for the machine's turn for heavy work; only a build here does. */
 const BUILD_HERE = new Error('A build of the dependencies waits for the machine.');
+const BUILT_ELSEWHERE = new Error('Another machine has the dependencies or builds them, so the machine is not held for them.');
+/* The registry for a build in the machine's turn: when another machine built the unit or builds it by then, the turn goes
+   back before anything is taken or waited for. Once the build here starts, its claim is renewed as it is. */
+function forBuildHere(remote: HarnessRemote, elsewhere: AbortController): HarnessRemote {
+  let building = false;
+  return {
+    ...remote,
+    async claim(unit, signal) {
+      const claim = await remote.claim(unit, signal);
+      if (!building && (claim.state === 'ready' || claim.state === 'wait')) { elsewhere.abort(BUILT_ELSEWHERE); throw BUILT_ELSEWHERE; }
+      building ||= claim.state === 'build';
+      return claim;
+    },
+  };
+}
 
 /* They are built or taken in a folder of the node's own, which goes to the worktree's owner only once they are all there, and
    the owner moves each into the worktree: the node writes nothing where an agent's program could change what it writes into. */
@@ -590,9 +605,11 @@ async function placeInWorktree(description: EnvironmentDescription, tree: Worktr
   const root = join(partsFolder(options.dir), `worktree-${tree.id}`), staging = join(root, 'tree'), hidden = productSecrets({ repo: tree.repo }, options.hidden);
   const state: PreparationState = { ...productUser(tree.owner), root, repo: join(root, 'repo'), out: new Output(), deadline, signal, options: { ...options, user: tree.owner }, builder: WORKTREE_BUILDER, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
   /* Its owner's programs keep running meanwhile, so nothing here runs or stops anything as that user. A build takes the
-     commit's own files, never the worktree's. taking: the first pass, which stops where a build here would start. */
-  const contextFor = (phase: AbortSignal, taking?: AbortController): PreparationContext => {
-    const base = preparationContext({ ...state, signal: taking ? AbortSignal.any([phase, taking.signal]) : phase }, '', hidden);
+     commit's own files, never the worktree's. taking: the pass without the machine's turn, which stops where a build here
+     would start. elsewhere: the pass in it, which stops where another machine has the unit or builds it. */
+  const contextFor = (phase: AbortSignal, { taking, elsewhere }: { taking?: AbortController; elsewhere?: AbortController } = {}): PreparationContext => {
+    const stops = [taking, elsewhere].flatMap(stop => (stop ? [stop.signal] : [])), harness = elsewhere && options.harness && forBuildHere(options.harness, elsewhere);
+    const base = preparationContext({ ...state, signal: stops.length ? AbortSignal.any([phase, ...stops]) : phase, ...(harness ? { options: { ...state.options, harness } } : {}) }, '', hidden);
     return {
       ...base, checkout: staging, run: async () => { throw new Error('Nothing runs in a worktree for its dependencies.'); }, quiesce: async () => {},
       builder: async (...args) => {
@@ -605,15 +622,7 @@ async function placeInWorktree(description: EnvironmentDescription, tree: Worktr
   let handed: string[] | null = null;
   try {
     await privateCacheRoot(join(options.dir, 'cache')); remove(root); prepareFolder(root, null); chmodSync(root, 0o755);
-    /* First without the machine's turn: what this machine keeps, what another machine built, or the wait for the one building
-       it. A build here gives the cache lock back and then takes the machine's turn, its own lane and the lock again, in the
-       order a test part takes them. */
-    const taking = new AbortController();
-    const { entry } = await prepareDependencies(description, contextFor(signal, taking), { own: true }).catch(async (error: unknown) => {
-      if (!taking.signal.aborted || signal.aborted) throw error;
-      const slot = options.slot ?? ((granted, run) => run(granted));
-      return slot(signal, granted => worktreeBuilds.withSlot(() => prepareDependencies(description, contextFor(granted), { own: true }), { signal: granted }));
-    });
+    const { entry } = await takeOrBuild(description, signal, options, contextFor);
     const roots = entry ? (entry.ready ?? await readReady(entry, { cacheRoot: join(options.dir, 'cache'), deadline, signal, log: () => {} })).roots : [];
     await fsChown(staging, tree.owner.uid, tree.owner.gid); handed = roots;
     for (const path of roots) {
@@ -621,6 +630,22 @@ async function placeInWorktree(description: EnvironmentDescription, tree: Worktr
       await tree.fs.move(join(staging, path), join(tree.checkout, path));
     }
   } finally { await leaveWorktreeFolder(root, staging, handed && { tree, roots: handed }); }
+}
+
+/* First without the machine's turn: what this machine keeps, what another machine built, or the wait for the one building
+   it. A build here gives the cache lock back and then takes the machine's turn, its own lane and the lock again, in the order
+   a test part takes them. Where another machine has the unit or builds it by then, the turn goes back and it starts over,
+   until the deadline. */
+async function takeOrBuild(description: EnvironmentDescription, signal: AbortSignal, options: WorktreeOptions, contextFor: (phase: AbortSignal, stops?: { taking?: AbortController; elsewhere?: AbortController }) => PreparationContext): Promise<PreparedDependencies> {
+  const slot = options.slot ?? ((granted, run) => run(granted));
+  for (;;) {
+    const taking = new AbortController();
+    try { return await prepareDependencies(description, contextFor(signal, { taking }), { own: true }); }
+    catch (error) { if (!taking.signal.aborted || signal.aborted) throw error; }
+    const elsewhere = new AbortController();
+    try { return await slot(signal, granted => worktreeBuilds.withSlot(() => prepareDependencies(description, contextFor(granted, { elsewhere }), { own: true }), { signal: granted })); }
+    catch (error) { if (!elsewhere.signal.aborted || signal.aborted) throw error; }
+  }
 }
 
 /* The node takes away only what no agent's program could reach. What it handed to the worktree's owner, the owner takes away;
