@@ -125,7 +125,7 @@ describe("Kimi Code's session log", () => {
   });
 
   it('tells when a turn starts, ends, was stopped or failed', () => {
-    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'hi' }], origin: { kind: 'user' } })).toEqual({ events: [], started: true });
+    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'hi' }], origin: { kind: 'user' } })).toEqual({ events: [], started: true, prompt: 'hi' });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 0, reason: 'completed' })).toEqual({ events: [], ended: true });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 1, reason: 'cancelled' })).toEqual({ events: [], aborted: true });
     expect(kimiWire(loop({ type: 'step.begin', turnId: '1', step: 2 }))).toEqual({ events: [], step: true });

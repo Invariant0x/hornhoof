@@ -383,8 +383,31 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
   });
 
-  it.each(KINDS)('%s: what a person sends while the assignment waits is theirs, and the assignment goes in after it, in the same turn', async kind => {
+  /* What the node hears of a person's words, held from their Enter until the assignment starts to go in, as a busy machine
+     can hold it: the program's log, or its prompt hook. */
+  type Late = 'log' | 'hook';
+
+  const heardLate = (late?: Late) => {
+    let held = false;
+    let release = () => {};
+    const released = new Promise<void>(done => { release = () => { held = false; done(); }; });
+    if (late === 'log') {
+      const readLog = host['readLog'].bind(host);
+      vi.spyOn(host as unknown as { readLog: typeof readLog }, 'readLog').mockImplementation(a => { if (!held) readLog(a); });
+    }
+    if (late === 'hook') {
+      const hook = host['hook'].bind(host);
+      vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation(async (at, event, data) => {
+        if (held && event === 'prompt' && JSON.stringify(data).includes(WORDS)) await released;
+        return hook(at, event, data);
+      });
+    }
+    return { hold: () => { held = true; }, release };
+  };
+
+  const sendsWhileWaiting = async (kind: Kind, late?: Late) => {
     const { key, sessionId } = await started(kind, { typingQuietMs: 60_000, readyMs: 8000, enterWaitMs: 1000 });
+    const heard = heardLate(late);
     const pasteWords = tmux.paste.bind(tmux);
     const paste = vi.spyOn(tmux, 'paste');
     const jobId = randomUUID();
@@ -392,6 +415,7 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     const tool = () => fetch(host['bridge'].agent(key).mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'company', arguments: {} } }) }).then(r => r.text());
     let toolAtPaste = '';
     paste.mockImplementation(async (target, text) => {
+      heard.release();
       toolAtPaste = await tool();
       return pasteWords(target, text);
     });
@@ -399,9 +423,11 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     const next = host.run(PROGRAMS[kind](key, 'Next assignment.', { jobId, sessionId })).finally(() => { pastedAtEnd = paste.mock.calls.length; });
     await until(() => host['agents'].get(key)?.turn?.jobId === jobId);
     await new Promise(done => setTimeout(done, 300));
+    heard.hold();
     host.input({ type: 'term.input', termId: `view-${key}`, data: '\r', pressedIn: jobId });
     const result = await next;
-    expect(result).toMatchObject({ ok: true });
+    /* A turn that failed says why. */
+    expect(result.ok ? 'ok' : `${result.error}: ${result.failure?.text ?? ''}`).toBe('ok');
     /* The turn ends with the assignment's answer, not with that of what the person sent. Antigravity's fake answers alike. */
     if (kind !== 'antigravity') expect(result.result).toContain('Next assignment.');
     expect(pastedAtEnd).toBe(1);
@@ -412,8 +438,19 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     expect(await tool()).toContain('No Hornhoof turn');
     expect(lefts()).toEqual([]);
     expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);
-    expect(await host.screen(key)).not.toContain('cut short');
-  });
+    const screen = await host.screen(key);
+    expect(screen).not.toContain('cut short');
+    /* The person's words went in once, and the program answered them once. */
+    if (late) expect(screen.split(`echo: ${WORDS}`)).toHaveLength(2);
+  };
+
+  it.each(KINDS)('%s: what a person sends while the assignment waits is theirs, and the assignment goes in after it, in the same turn', kind => sendsWhileWaiting(kind));
+
+  /* Kimi Code tells of a prompt twice: by its hook, and then in its log. It clears its input as it takes words, so the
+     assignment can go in while it has told of them by neither; Claude Code's fake shows them until it answers. */
+  it('kimi: what a person sends while the assignment waits stays theirs when the log tells of it once the assignment started to go in', () => sendsWhileWaiting('kimi', 'log'));
+
+  it('kimi: what a person sends while the assignment waits stays theirs when the program tells of it once the assignment started to go in', () => sendsWhileWaiting('kimi', 'hook'));
 
   it('says a stopped turn was stopped when it stops while waiting for a person to finish', async () => {
     const { key, sessionId } = await started('codex', { typingQuietMs: 60_000, readyMs: 60_000 });
