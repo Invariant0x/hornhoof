@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, like, lte, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { accessOf, canReach } from '../../auth/access.js';
-import { agents, people, requests, tasks, taskWaits, waitNotices } from '../../db/schema.js';
+import { agents, people, requests, tasks, taskWaits, waitNotices, type ExternalWait } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -23,9 +23,10 @@ export async function recordWaitNotice(db: Writer, notice: NewWaitNotice): Promi
   await db.insert(waitNotices).values(notice).onConflictDoNothing({ target: [waitNotices.companyId, waitNotices.dedupKey] });
 }
 
+/* Nobody is told that they wait for themselves. */
 export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string): Promise<NewWaitNotice | null> {
   const wait = task.externalWait;
-  if (wait?.on?.kind !== 'employee') return null;
+  if (wait?.on?.kind !== 'employee' || wait.on.employee === waiter) return null;
   const [employee] = await ctx.db.select().from(agents).where(eq(agents.id, waiter));
   const text = `As of ${wait.since}, ${employee!.name} waits for you on #${task.number}: ${wait.reason}, until ${wait.until}. Check the task's current state and give the employee what they need.`;
   return {
@@ -33,6 +34,17 @@ export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string):
     message: await notificationMessage(ctx, task.companyId, 'wait_requested', text, { actor: { agentId: waiter }, tasks: [{ id: task.id, number: task.number }] }),
     guard: { tasks: [{ id: task.id, version: task.version }] },
   };
+}
+
+/* Whether the employee a new wait names heard of it already: the task still waits on them, as only its holder can, and the
+   notice of that wait went out. Saying the wait again then changes only its words and date. */
+export async function heardOfWait(db: Pick<Db, 'select'>, task: Task, next: ExternalWait, now: Date): Promise<boolean> {
+  const before = task.externalWait;
+  if (before?.on?.kind !== 'employee' || next.on?.kind !== 'employee' || before.on.employee !== next.on.employee || new Date(before.until) <= now) return false;
+  const [unsent] = await db.select({ id: waitNotices.id }).from(waitNotices).where(and(
+    eq(waitNotices.companyId, task.companyId), eq(waitNotices.agentId, next.on.employee), like(waitNotices.dedupKey, `request:${task.id}:%`), pending,
+  )).limit(1);
+  return !unsent;
 }
 
 /* A notice about a wait holds while that wait stands as it was written for. A task moving on does not spoil it, and a date

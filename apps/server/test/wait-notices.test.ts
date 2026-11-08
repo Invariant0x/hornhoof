@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, tasks, waitNotices } from '../src/db/schema.js';
 import { deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../src/modules/tasks/wait-notices.js';
+import type { mcp } from './helpers.js';
 import { waitCompany } from './wait-company.js';
 
 describe('wait recipient notices', () => {
@@ -76,4 +77,75 @@ describe('wait recipient notices', () => {
     expect((await c.db.select().from(waitNotices))[0]!.cancelledAt).not.toBeNull();
   });
 
+  describe('a wait said again', () => {
+    const later = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const waitOn = (client: Awaited<ReturnType<typeof mcp>>, task: number, employee: string, reason: string, until = later(60_000)) =>
+      client.callTool({ name: 'wait_for', arguments: { task, reason, until, on: { kind: 'employee', employee } } });
+
+    it('tells the employee once while the same wait on it stands, and keeps the new reason and date', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host')).isError).toBeFalsy();
+      const until = later(90_000);
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host, now with the report read', until)).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance on a-host, the report read twice', until)).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(1);
+      expect(await c.db.select().from(waitNotices)).toHaveLength(1);
+      expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Acceptance on a-host, the report read twice', until, on: { kind: 'employee', employee: c.head.id } });
+    });
+
+    it('tells another employee the wait moved to', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run();
+      await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
+      expect((await waitOn(worker.client, task.number, c.watcher.id, 'The alert on a-host')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(1);
+      expect(await c.messages(c.watcher.id)).toHaveLength(1);
+    });
+
+    it('tells the employee again once the wait ended', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run();
+      await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
+      expect((await worker.client.callTool({ name: 'end_wait', arguments: { task: task.number } })).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance of the second part')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(2);
+    });
+
+    it('tells the employee again once the wait ran out', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run();
+      await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
+      const [row] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
+      await c.db.update(tasks).set({ externalWait: { ...row!.externalWait!, until: new Date(Date.now() - 1).toISOString() } }).where(eq(tasks.id, task.id));
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance, asked again')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(2);
+    });
+
+    it('still tells the employee when the notice of the standing wait has not gone out', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const now = new Date();
+      const wait = { reason: 'Acceptance', since: now.toISOString(), until: later(60_000), on: { kind: 'employee' as const, employee: c.head.id, name: c.head.name } };
+      const [standing] = await c.db.update(tasks).set({ externalWait: wait, version: task.version + 1 }).where(eq(tasks.id, task.id)).returning();
+      await recordWaitNotice(c.db, (await requestedWaitNotice(c.ctx, standing!, c.agent.id))!);
+      const worker = await c.run();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance, asked again')).isError).toBeFalsy();
+      const told = await c.messages(c.head.id);
+      expect(told).toHaveLength(1);
+      expect(told[0]!.data).toMatchObject({ text: expect.stringContaining('Acceptance, asked again') });
+    });
+  });
+
+  it('makes no notice for a wait whose employee is the one who waits', async () => {
+    const c = await waitCompany();
+    const task = await c.task();
+    const now = new Date();
+    const wait = { reason: 'My own review', since: now.toISOString(), until: new Date(now.getTime() + 60_000).toISOString(), on: { kind: 'employee' as const, employee: c.agent.id } };
+    expect(await requestedWaitNotice(c.ctx, { ...task, externalWait: wait }, c.agent.id)).toBeNull();
+  });
 });
