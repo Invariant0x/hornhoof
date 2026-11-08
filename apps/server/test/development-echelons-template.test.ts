@@ -34,7 +34,7 @@ describe('development echelon abilities', () => {
     }
   });
 
-  it('offers a stronger review tier without inventing an echelon role', () => {
+  it('offers a deeper review tier without inventing an echelon role', () => {
     expect(templates.roles.get('DEV-ENG')!.tier).toBe('standard');
     expect(templates.roles.get('DEV-REV')!.tier).toBe('deep');
     expect(templates.roster('development').filter(role => role.inDefault).map(role => role.id)).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
@@ -42,7 +42,7 @@ describe('development echelon abilities', () => {
 
   it('teaches the assigned route without installing it merely by selecting a skill', () => {
     const route = body('dev-gates');
-    expect(route).toMatch(/development_echelons/);
+    expect(route).toMatch(/task\.echelons/);
     expect(route).toMatch(/Architecture[\s\S]*Development[\s\S]*Review[\s\S]*Security[\s\S]*Tests/);
     expect(route).toMatch(/small[\s\S]*skip Architecture/i);
     expect(route).toMatch(/Review is always required/);
@@ -57,7 +57,7 @@ describe('development echelon abilities', () => {
 
   it('keeps echelon repairs forward while preserving immutable legacy gate reviews', () => {
     for (const id of ['dev-review-verdict', 'hh-fix-loop']) {
-      expect(body(id), id).toMatch(/development_echelons[\s\S]*current (?:stage )?owner[\s\S]*forward/);
+      expect(body(id), id).toMatch(/task\.echelons[\s\S]*current (?:stage )?owner[\s\S]*forward/);
       expect(body(id), id).toMatch(/wrong goal[\s\S]*head/i);
       expect(body(id), id).toMatch(/legacy/i);
     }
