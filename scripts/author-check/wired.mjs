@@ -1,7 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { exitCodeOf, parseCrapEdn } from './judge.mjs';
 import { buildPlan, cwdOf } from './plan.mjs';
 import { fastSuites, selectTests } from './select.mjs';
@@ -32,15 +33,44 @@ function makePlan({ sha, base }, ports) {
   return buildPlan({ sha, base, cwdOf: path => cwdOf(suites, path) }, { git: ports.git, complexity: complexityAt(ports.git) });
 }
 
-/* What the selector reads, and where each is built. */
-const BUILDS = [['packages/protocol/dist', '@hornhoof/protocol'], ['apps/node/dist', '@hornhoof/node']];
+/* What the selector reads, where each is built, and the files each is built from. The node is built against the protocol. */
+const SHARED = ['tsconfig.base.json', 'package-lock.json'];
+const BUILDS = [
+  { output: 'packages/protocol/dist', workspace: '@hornhoof/protocol', from: ['packages/protocol/src', 'packages/protocol/package.json', 'packages/protocol/tsconfig.json', ...SHARED] },
+  { output: 'apps/node/dist', workspace: '@hornhoof/node', from: ['apps/node/src', 'apps/node/package.json', 'apps/node/tsconfig.json', 'packages/protocol/src', ...SHARED] },
+];
+/* Beside a build: the digest of the files it was built from. */
+const BUILT_FROM = '.built-from';
 
-/* What the product's harness put in place is not done again: a run on a machine without it does all of this. --ignore-scripts keeps
-   the scripts of the dependencies off, and the repository's own prepare with them: a package needs what that links. */
+/* The files under these paths of the workspace, by path and content: a build of other files has another digest. */
+export function sourceDigest(root, paths) {
+  const hash = createHash('sha256');
+  for (const path of [...paths].sort()) for (const file of filesUnder(root, path)) hash.update(`${file}\0`).update(readFileSync(join(root, file))).update('\0');
+  return hash.digest('hex');
+}
+
+function filesUnder(root, path) {
+  const found = statSync(join(root, path), { throwIfNoEntry: false });
+  if (!found?.isDirectory()) return found?.isFile() ? [path] : [];
+  const entries = readdirSync(join(root, path), { recursive: true, withFileTypes: true }).filter(entry => entry.isFile());
+  return entries.map(entry => relative(root, join(entry.parentPath, entry.name))).sort();
+}
+
+const npm = async (ports, args) => (await ports.exec('npm', args, { cwd: '.' })).code === 0;
+
+/* The check runs in a workspace that is used again, so what it imports is built again whenever its files have changed since
+   it was built; dependencies are installed only when missing. --ignore-scripts keeps the scripts of the dependencies off, and
+   the repository's own prepare with them: a package needs what that links. */
 export async function prepare(ports) {
   const install = ports.exists('node_modules') ? [] : [['ci', '--ignore-scripts'], ['run', '-s', 'prepare']];
-  const builds = BUILDS.filter(([output]) => !ports.exists(output)).map(([, workspace]) => ['run', '-s', 'build', '-w', workspace]);
-  for (const args of [...install, ...builds]) if ((await ports.exec('npm', args, { cwd: '.' })).code !== 0) return 'prepare_failed';
+  for (const args of install) if (!(await npm(ports, args))) return 'prepare_failed';
+  for (const build of BUILDS) {
+    const digest = ports.digest(build.from);
+    const stamp = `${build.output}/${BUILT_FROM}`;
+    if (ports.read(stamp) === digest) continue;
+    if (!(await npm(ports, ['run', '-s', 'build', '-w', build.workspace]))) return 'prepare_failed';
+    ports.write(stamp, digest);
+  }
   return null;
 }
 
@@ -68,5 +98,6 @@ async function check(args, plan, ports, root) {
 
 export function wiredPorts(root) {
   const ports = realPorts(root);
-  return { ...ports, prepare: () => prepare(ports), makePlan: args => makePlan(args, ports), check: (args, plan) => check(args, plan, ports, root) };
+  const built = { ...ports, digest: paths => sourceDigest(root, paths) };
+  return { ...ports, prepare: () => prepare(built), makePlan: args => makePlan(args, ports), check: (args, plan) => check(args, plan, ports, root) };
 }

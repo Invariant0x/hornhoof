@@ -6,7 +6,7 @@ One command checks what an author hands in, at an exact commit against its base.
 npm run -s check:author -- --sha <40 hex> --base <40 hex>
 ```
 
-It runs where it is called: in the workspace of whoever builds or reviews the change, with `--sha` checked out (`sha_mismatch` otherwise) and `--base` in the local history (`base_unreachable` otherwise: fetch it). It installs from the lockfile and builds the protocol and the node only when they are missing. It reads `git diff` and the complexity of the changed files at both commits, then runs the stages below on what the change touched.
+It runs where it is called: in the workspace of whoever builds or reviews the change, with `--sha` checked out (`sha_mismatch` otherwise) and `--base` in the local history (`base_unreachable` otherwise: fetch it). It installs from the lockfile when `node_modules` is missing. It builds the protocol and the node again whenever the files they are built from changed since their last build, which `dist/.built-from` records, so a workspace used for another branch never checks with an old build. It reads `git diff` and the complexity of the changed files at both commits, then runs the stages below on what the change touched.
 
 ## What each stage does
 

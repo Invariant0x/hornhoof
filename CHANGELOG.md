@@ -15,8 +15,8 @@ Keep the checks of one change small and in the workspace of whoever builds or re
   A rule of a test environment can now name test files with `tests` beside its suites.
 - Submitting a task starts no test run. The author runs the author check in their own workspace before submitting, and
   the `AUTHOR_CHECK` setting and the `review.authorCheckPlan` field of a submit are gone.
-- `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests;
-  its `--plan` option is gone.
+- `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests,
+  and builds the protocol and the node again when their files changed since their last build; its `--plan` option is gone.
 
 ### Fixed
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { URL } from 'node:url';
@@ -10,7 +10,7 @@ import { buildPlan, grownFunctions, isCode, isDocument, isLintable, isSource, pa
 import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
-import { complexityAt, prepare } from '../author-check/wired.mjs';
+import { complexityAt, prepare, sourceDigest } from '../author-check/wired.mjs';
 import { tracked } from './tracked-files.mjs';
 
 const SHA = '1'.repeat(40), BASE = '2'.repeat(40);
@@ -542,16 +542,60 @@ test('the real git port reads commits, a plan of a real repository included', { 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('preparing a run does only what the harness left undone', async () => {
+test('preparing a run installs only what is missing and builds again what was built from other sources', async () => {
   const asked = [];
-  const ports = have => ({ exists: path => have.includes(path), exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code: 0 }; } });
-  const preparing = async have => { asked.length = 0; assert.equal(await prepare(ports(have)), null); return [...asked]; };
-  assert.deepEqual(await preparing([]), ['npm ci --ignore-scripts', 'npm run -s prepare', 'npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
-  assert.deepEqual(await preparing(['node_modules']), ['npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node']);
-  assert.deepEqual(await preparing(['node_modules', 'packages/protocol/dist']), ['npm run -s build -w @hornhoof/node']);
-  assert.deepEqual(await preparing(['node_modules', 'packages/protocol/dist', 'apps/node/dist']), []);
-  assert.equal(await prepare({ exists: () => false, exec: async () => ({ code: 1 }) }), 'prepare_failed');
-  assert.equal(await prepare({ exists: () => false, exec: async () => ({ code: null }) }), 'prepare_failed');
+  const PROTOCOL = 'packages/protocol/dist/.built-from', NODE = 'apps/node/dist/.built-from';
+  const ports = ({ have = [], stamps = {}, sources = {}, code = 0 } = {}) => {
+    const files = { ...stamps };
+    return {
+      files,
+      exists: path => have.includes(path),
+      read: path => files[path] ?? null,
+      write: (path, text) => { files[path] = text; },
+      digest: paths => paths.map(path => `${path}=${sources[path] ?? 'a'}`).join(','),
+      exec: async (program, args) => { asked.push([program, ...args].join(' ')); return { code }; },
+    };
+  };
+  const preparing = async given => { asked.length = 0; const at = ports(given); assert.equal(await prepare(at), null); return { asked: [...asked], files: at.files }; };
+  const builds = ['npm run -s build -w @hornhoof/protocol', 'npm run -s build -w @hornhoof/node'];
+
+  const first = await preparing();
+  assert.deepEqual(first.asked, ['npm ci --ignore-scripts', 'npm run -s prepare', ...builds]);
+  const built = ['node_modules', 'packages/protocol/dist', 'apps/node/dist'];
+  assert.deepEqual((await preparing({ have: built })).asked, builds, 'a build that does not say what it was built from');
+  const fresh = { have: built, stamps: first.files };
+  assert.deepEqual((await preparing(fresh)).asked, []);
+  assert.deepEqual((await preparing({ ...fresh, sources: { 'packages/protocol/src': 'b' } })).asked, builds, 'the node is built against the protocol');
+  assert.deepEqual((await preparing({ ...fresh, sources: { 'apps/node/src': 'b' } })).asked, [builds[1]]);
+  assert.deepEqual((await preparing({ ...fresh, sources: { 'package-lock.json': 'b' } })).asked, builds);
+
+  const failing = ports({ have: built, code: 1 });
+  assert.equal(await prepare(failing), 'prepare_failed');
+  assert.equal(failing.files[PROTOCOL], undefined, 'a failed build is not marked as built');
+  assert.equal(await prepare(ports({ code: null })), 'prepare_failed');
+  assert.ok(first.files[PROTOCOL] && first.files[NODE]);
+});
+
+test('the sources of a build are told apart by their paths and contents, wherever they lie', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-built-from-'));
+  try {
+    mkdirSync(join(dir, 'src/deep'), { recursive: true });
+    writeFileSync(join(dir, 'src/a.ts'), 'a');
+    writeFileSync(join(dir, 'src/deep/b.ts'), 'b');
+    writeFileSync(join(dir, 'tsconfig.json'), '{}');
+    const of = () => sourceDigest(dir, ['src', 'tsconfig.json', 'missing.json']);
+    const before = of();
+    assert.equal(of(), before);
+    writeFileSync(join(dir, 'src/deep/b.ts'), 'B');
+    const changed = of();
+    assert.notEqual(changed, before);
+    writeFileSync(join(dir, 'src/deep/c.ts'), '');
+    assert.notEqual(of(), changed);
+    rmSync(join(dir, 'src/deep/c.ts'));
+    assert.equal(of(), changed);
+    renameSync(join(dir, 'src/a.ts'), join(dir, 'src/z.ts'));
+    assert.notEqual(of(), changed);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('the tracked files of the index keep paths with spaces', () => {
