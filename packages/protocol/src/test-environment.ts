@@ -240,6 +240,28 @@ const CandidateTestScope = z.strictObject({ baseCommit: ProductCommitSha, baseFi
 export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id, candidate: CandidateTestScope.optional() })
   .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.');
 export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
+
+const fingerprintKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => `${unit.suiteId}\0${unit.file}`;
+function fingerprintIndex(prints: UnitFingerprint[]): Map<string, string> {
+  const index = new Map(prints.map(print => [fingerprintKey(print), print.fingerprint]));
+  if (index.size !== prints.length) throw new Error('Candidate fingerprints must name each test unit once.');
+  return index;
+}
+
+/* The same influencing identity at the original base needs no new check; indivisible groups stay together. */
+export function candidateTestUnits(snapshot: EnvironmentSnapshot): TestUnit[] {
+  const scope = snapshot.candidate;
+  if (!scope) throw new Error('Candidate test selection needs its pinned base and final fingerprints.');
+  const base = fingerprintIndex(scope.baseFingerprints), head = fingerprintIndex(scope.fingerprints);
+  const inventory = snapshot.description.inventory, canonical = new Set(inventory.map(fingerprintKey));
+  const extra = [...head.keys()].some(key => !canonical.has(key) && key !== fingerprintKey(PREPARATION_UNIT));
+  if (extra || inventory.some(unit => !head.has(fingerprintKey(unit)))) throw new Error('The final fingerprints must cover the canonical test inventory exactly.');
+  const required = snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)?.requiredSuiteIds;
+  if (!required) throw new Error('Candidate test selection needs a known profile.');
+  const eligible = inventory.filter(unit => required.includes(unit.suiteId));
+  const changed = new Set(eligible.filter(unit => head.get(fingerprintKey(unit)) !== base.get(fingerprintKey(unit))).map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
+  return eligible.filter(unit => changed.has(`${unit.suiteId}\0${unit.selectionUnit}`));
+}
 const LegacySelection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
 const Shard = z.strictObject({ index: z.number().int().min(1).max(10), count: z.number().int().min(1).max(10) })
   .refine(value => value.index <= value.count, 'A shard index cannot exceed its count.');
@@ -262,6 +284,7 @@ function legacySelection(value: { snapshot: EnvironmentSnapshot; selection: z.in
   if (!selection.files.length || (suite.split.kind === 'whole-package' && selection.files.length !== files.length)) ctx.addIssue({ code: 'custom', message: 'An execution needs a nonempty valid selection; whole-package suites cannot be split.' });
 }
 function oncePreparation(snapshot: EnvironmentSnapshot): z.infer<typeof OncePreparation> | undefined {
+  if (snapshot.candidate) return undefined;
   const preparation = snapshot.description.manifest.execution?.oncePreparation;
   return preparation?.profiles.includes(snapshot.profile) ? preparation : undefined;
 }

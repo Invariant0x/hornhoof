@@ -1,4 +1,4 @@
-import { MAX_TEST_PARTS, TestExecution } from '@hornhoof/protocol';
+import { candidateTestUnits, EnvironmentSnapshot, MAX_TEST_PARTS, ProductCommitSha, TestExecution, validateEnvironmentDescription } from '@hornhoof/protocol';
 import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type EnvironmentPartPlan } from './plan-environment.js';
 import type { TestPartPlan } from './plan.js';
 import type { ReuseDecision } from './reuse.js';
@@ -20,6 +20,7 @@ function finalLeaves(leaves: ProductPlan['leaves'], suiteIds: string[], onceIds:
 function preparationFor(input: PreparedEnvironmentPlanInput) {
   const { manifest } = input.snapshot.description;
   if (!manifest.execution) throw new Error('A versioned product plan needs its pinned execution policy.');
+  if (input.snapshot.candidate) return undefined;
   const policy = manifest.execution.oncePreparation;
   return policy?.profiles.includes(input.snapshot.profile) ? policy : undefined;
 }
@@ -45,6 +46,18 @@ function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null 
   return planned.testPlan;
 }
 type ReusingInput = PreparedEnvironmentPlanInput & { reuse?: ReuseDecision };
+
+async function candidateInput(input: ReusingInput): Promise<ReusingInput> {
+  if (!input.snapshot.candidate) return input;
+  const snapshot = EnvironmentSnapshot.parse(input.snapshot);
+  if (snapshot.description.commitSha !== ProductCommitSha.parse(input.expectedCommitSha)) throw new Error('The environment commit differs from the candidate commit.');
+  await validateEnvironmentDescription(snapshot.description);
+  const units = candidateTestUnits(snapshot), requested = new Map(input.units.map(unit => [unitKey(unit), unit.selectionUnit]));
+  const canonical = new Map(snapshot.description.inventory.map(unit => [unitKey(unit), unit.selectionUnit]));
+  if (requested.size !== input.units.length || input.units.some(unit => canonical.get(unitKey(unit)) !== unit.selectionUnit)) throw new Error('The candidate selection differs from the canonical inventory.');
+  if (units.some(unit => requested.get(unitKey(unit)) !== unit.selectionUnit)) throw new Error('The candidate selection omits an affected canonical unit.');
+  return { ...input, snapshot, units, purpose: 'affected' };
+}
 /* What is left to run once what was reused and what the preparation runs are left out. */
 function remainingWork(input: ReusingInput) {
   const policy = preparationFor(input), onceIds = policy?.suiteIds ?? [];
@@ -55,6 +68,7 @@ function remainingWork(input: ReusingInput) {
 }
 /* Plans what is left to run. No file proves a final check, so it stays; a reused preparation leaves nothing for the rest to wait for. */
 export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
+  input = await candidateInput(input);
   const { onceIds, preparation, remaining } = remainingWork(input);
   const finals = finalSuites(input, onceIds);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
