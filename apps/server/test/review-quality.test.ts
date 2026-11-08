@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskEvents, testParts, testRuns } from '../src/db/schema.js';
-import { AuthorCheckInput, recordAuthorCheck } from '../src/modules/tasks/review-quality.js';
+import { AuthorCheckInput, authorQuality, recordAuthorCheck } from '../src/modules/tasks/review-quality.js';
 import { SHA, OTHER, qualityFixture } from './review-quality-fixture.js';
 
 describe('the consumer of author-check records from task 325', () => {
@@ -81,5 +81,21 @@ describe('the consumer of author-check records from task 325', () => {
     await recordAuthorCheck(f.db, f.task.id, input);
     await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, next!.id));
     expect((await f.read()).quality).toMatchObject({ status: 'unavailable', reason: 'author-check-provenance-changed', record: null });
+  });
+
+  it('retains the producing author receipt after ownership moves to Review', async () => {
+    const f = await qualityFixture();
+    await f.seed();
+    await f.read();
+    expect(await authorQuality(f.db, f.task.id, SHA, f.author.id)).toMatchObject({ status: 'passed', record: { authorId: f.author.id, checkCommit: SHA } });
+  });
+
+  it('refuses a former owner receipt when its submitted candidate names another commit', async () => {
+    const f = await qualityFixture();
+    await f.seed();
+    await f.read();
+    const [event] = (await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id))).filter(event => event.kind === 'submitted');
+    await f.db.update(taskEvents).set({ data: { ...event!.data, candidate: { ...(event!.data.candidate as Record<string, unknown>), commit: OTHER } } }).where(eq(taskEvents.id, event!.id));
+    expect(await authorQuality(f.db, f.task.id, SHA, f.author.id)).toMatchObject({ status: 'unavailable', reason: 'author-check-provenance-changed', record: null });
   });
 });
