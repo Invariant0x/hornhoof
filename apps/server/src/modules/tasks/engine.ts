@@ -4,7 +4,7 @@ import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.js';
-import { producedCandidate, currentCandidate } from './echelons-candidates.js';
+import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { createRoute, routeOf, changeRoute } from './echelons-store.js';
@@ -591,6 +591,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
   if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);
   const candidate = producedCandidate(route, producer, review);
+  if (inputCandidate) await requireRepairHistory(ctx, task, inputCandidate, candidate);
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {

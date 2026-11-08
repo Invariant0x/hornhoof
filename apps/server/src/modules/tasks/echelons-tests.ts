@@ -1,12 +1,12 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, taskEvents, testParts, testRuns } from '../../db/schema.js';
+import { taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { sameChecker } from './echelons-policy.js';
-import { agentIdentity } from './echelons-assign.js';
+import { agentIdentity, departmentHead } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
 import { verifiedReuse } from './review-reuse.js';
@@ -68,7 +68,7 @@ async function failureKind(db: Ctx['db'] | Tx, task: Task, route: Route, ids: st
 
 async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification): Promise<Moved> {
   const kind = await failureKind(ctx.db, task, route, input.runIds);
-  const headId = kind === 'content' ? await testsHead(ctx.db, task) : null;
+  const headId = kind === 'content' ? await departmentHead(ctx.db, task) : null;
   const wakes = headId ? [{ agentId: headId, taskId: task.id, why: 'blocked' as const, text: summary }] : [];
   const state: Route['state'] = { ...route.state, phase: 'escalated', stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
   const row = await move(ctx, task, { status: kind === 'content' ? 'blocked' : 'working', assigneeAgentId: kind === 'content' ? null : agentId, silent: 0 }, {
@@ -80,12 +80,6 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   return { task: row, wakes };
 }
 
-async function testsHead(db: Ctx['db'] | Tx, task: Task): Promise<string> {
-  const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
-  if (!head) throw refuse(409, 'task_invalid', 'The department needs a head to receive the Tests result.');
-  return head.id;
-}
-
 export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
   const input = Verification.safeParse(value);
@@ -93,7 +87,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const identity = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed. Ask the head to assign it again.');
   if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
-  const headId = await testsHead(ctx.db, task);
+  const headId = await departmentHead(ctx.db, task);
   const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
   const candidate = await currentCandidate(ctx.db, task, route);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];

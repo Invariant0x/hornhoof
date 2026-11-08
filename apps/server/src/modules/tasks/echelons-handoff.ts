@@ -1,8 +1,8 @@
 import type { EchelonCandidate, EchelonStage } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import type { Route } from './echelons-store.js';
-import { checkerFor } from './echelons-assign.js';
-import { giver, refuse, type Task, type Wake } from './engine.js';
+import { checkerFor, departmentHead } from './echelons-assign.js';
+import { refuse, type Task, type Wake } from './engine.js';
 
 export const CHECK_ABILITIES: Partial<Record<EchelonStage, string>> = {
   review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment',
@@ -23,6 +23,6 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
     }),
   };
   const wakes: Wake[] = owner ? [{ agentId: owner.agentId, taskId: task.id, why: next.stage === 'tests' ? 'tests' : 'review' }]
-    : giver(task, 'blocked', task.assigneeAgentId ?? undefined, `${next.stage} needs an eligible owner with the required ability and a model not weaker than the producer.`);
+    : [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: `${next.stage} needs an eligible owner with the required ability and a model not weaker than the producer.` }];
   return { state, set: { status: owner ? (next.stage === 'tests' ? 'open' : 'review') : 'waiting', assigneeAgentId: owner?.agentId ?? null, silent: 0 }, wakes };
 }

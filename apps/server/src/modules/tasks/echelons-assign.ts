@@ -9,6 +9,12 @@ import { modelCapability, modelProvider, reviewEligibility, sameChecker, type Ch
 
 type Reader = { db: Ctx['db'] | Tx };
 
+export async function departmentHead(db: Reader['db'], task: Task): Promise<string> {
+  const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt)).limit(1);
+  if (!head) throw new ApiError(409, 'conflict', 'The department needs a head to receive this stage result.', 'task_invalid');
+  return head.id;
+}
+
 export async function agentIdentity(db: Reader['db'], companyId: string, agentId: string): Promise<CheckerIdentity | null> {
   const [row] = await db.select({ id: agents.id, subscriptionId: subscriptions.id, model: agents.model, provider: subscriptions.provider }).from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))

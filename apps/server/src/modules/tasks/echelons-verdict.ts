@@ -1,10 +1,10 @@
 import { issuesForEchelon } from './review-findings.js';
 import type { Ctx } from '../../app.js';
-import { checkingIdentity } from './echelons-assign.js';
+import { checkingIdentity, departmentHead } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf } from './echelons-store.js';
-import { giver, loadTask, move, refuse, type Moved } from './engine.js';
+import { loadTask, move, refuse, type Moved, type Wake } from './engine.js';
 import type { ReviewVerdict } from './review-verdict.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
@@ -32,7 +32,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity, ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   } };
   if (verdict.escalate) {
-    const wakes = giver(task, 'blocked', agentId, verdict.comment.trim());
+    const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: verdict.comment.trim() }];
     const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
     const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, tx => changeRoute(tx, route, escalated), wakes);
     return { task: row, wakes };
