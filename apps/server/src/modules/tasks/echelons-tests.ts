@@ -12,6 +12,7 @@ import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
 import { verifiedReuse } from './review-reuse.js';
 import { productReceipt, scopeKey } from '../testruns/describe.js';
+import { unitKey } from '../testruns/plan-environment.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
 export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
@@ -47,6 +48,20 @@ async function candidateProductSnapshot(run: typeof testRuns.$inferSelect, candi
   } catch { throw refuse(409, 'task_invalid', 'Tests needs the bound base/final fingerprints and valid product environment evidence.'); }
 }
 
+function completeCandidateSelection(snapshot: EnvironmentSnapshot, parts: (typeof testParts.$inferSelect)[]): void {
+  const units = candidateTestUnits(snapshot), expected = new Set(units.map(unitKey));
+  const selections = parts.map(part => part.environmentSelection!.selection);
+  const actual = selections.flatMap(selection => {
+    const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
+    return suites.flatMap(suite => suite.files.map(file => unitKey({ suiteId: suite.suiteId, file })));
+  });
+  if (actual.length !== expected.size || new Set(actual).size !== actual.length || actual.some(key => !expected.has(key))) throw refuse(409, 'task_invalid', 'The receipts do not cover every applicable candidate test unit exactly.');
+  const suites = new Set(units.map(unit => unit.suiteId));
+  const expectedFinals = new Set(snapshot.description.manifest.suites.filter(suite => suites.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id));
+  const finals = selections.flatMap(selection => selection.kind === 'final' ? [selection.suiteId] : []);
+  if (finals.length !== expectedFinals.size || new Set(finals).size !== finals.length || finals.some(id => !expectedFinals.has(id))) throw refuse(409, 'task_invalid', 'The candidate is missing an applicable post-suite check.');
+}
+
 /* Server-owned run and part rows prove the same final source; a status label alone proves nothing. */
 export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision = route.revision) {
   const { candidate, runs } = await boundRuns(db, task, route, ids, testedRevision);
@@ -61,6 +76,7 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
         ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities);
       if (!part.finishedAt || !receipt) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
     }
+    completeCandidateSelection(snapshot, parts);
   }
   return runs.map(run => ({ runId: run.id, commit: candidate.commit }));
 }
