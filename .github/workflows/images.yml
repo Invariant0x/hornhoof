@@ -16,9 +16,8 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/CODEOWNERS'
       - '.github/pull_request_template.md'
-  # Pull requests run the tests only. Images are built by hand, from any branch, under the tag of their commit alone: a real
-  # node of those images then goes through the live check of guide/updates.md. A push to main builds nothing: it moves the
-  # tags every machine reads onto exactly the images the check speaks of, or stops.
+  # Pull requests run the tests only. Images are built by hand, from any branch, under the tag of their commit alone. A push
+  # to main builds nothing: it moves the tags every machine reads onto exactly the images built for its commit, or stops.
   pull_request:
   workflow_dispatch:
 
@@ -230,15 +229,16 @@ jobs:
             ${{ matrix.name == 'hornhoof-node' && 'SOURCE_DATE_EPOCH=315532800' || '' }}
           outputs: ${{ matrix.name == 'hornhoof-node' && 'type=registry,rewrite-timestamp=true' || '' }}
           provenance: ${{ matrix.name != 'hornhoof-node' }}
-          # Every company updates to latest, so this job never moves it: the publish job does, after the live check.
+          # Every company updates to latest, so this job never moves it: the publish job does, once the tests passed on main.
           tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}
           # Our own BuildKit keeps its cache itself: sending it to GitHub from there took longer than the build.
           cache-from: ${{ !vars.BUILDKIT_ENDPOINT && format('type=gha,scope={0}', matrix.name) || '' }}
           cache-to: ${{ !vars.BUILDKIT_ENDPOINT && format('type=gha,mode=max,scope={0}', matrix.name) || '' }}
 
-  # The one way a build reaches machines. It takes the images the live check ran on, as they are: a build made again would
-  # have other digests. A commit without its check stops here, the tags stay where they are, and running this job again
-  # once the check is published goes on. A merge commit is another commit: main takes a checked commit by fast-forward.
+  # The one way a build reaches machines. It takes the images built for this commit, as they are, by the digests their commit's
+  # tag points at: a build made again would have other digests. A commit with no images stops here, the tags stay where they
+  # are, and running this job again once they are built goes on. A merge commit is another commit: main takes a built commit by
+  # fast-forward.
   publish:
     needs: [mark, test]
     # Tests the mark left out count as passed here too.
@@ -268,16 +268,6 @@ jobs:
           else
             echo "version=new" >> "$GITHUB_OUTPUT"
           fi
-      - name: Build the door
-        if: ${{ steps.fresh.outputs.version == 'new' }}
-        run: |
-          npm ci --prefer-offline --no-audit --no-fund
-          npm run build -w @hornhoof/protocol
-          npm run build -w @hornhoof/server
-      - id: checked
-        if: ${{ steps.fresh.outputs.version == 'new' }}
-        name: Ask for the live check of this exact build
-        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --outputs "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
@@ -289,12 +279,26 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Each image by the digest its commit's tag points at now, so what moves below is exactly that image.
+      - id: built
+        name: Find the images built for this commit
+        if: ${{ steps.fresh.outputs.version == 'new' }}
+        run: |
+          for part in app:hornhoof node:hornhoof-node updater:hornhoof-updater; do
+            image="ghcr.io/invariant0x/${part#*:}:$GITHUB_SHA"
+            digest=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$image" | jq -r '.digest // empty' || true)
+            if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "There is no $image. Build the images of this commit by hand, then run this job again."
+              exit 1
+            fi
+            echo "${part%%:*}=$digest" >> "$GITHUB_OUTPUT"
+          done
       - name: Move the version and latest onto exactly those images
         if: ${{ steps.fresh.outputs.version == 'new' }}
         env:
-          APP: ${{ steps.checked.outputs.app }}
-          NODE: ${{ steps.checked.outputs.node }}
-          UPDATER: ${{ steps.checked.outputs.updater }}
+          APP: ${{ steps.built.outputs.app }}
+          NODE: ${{ steps.built.outputs.node }}
+          UPDATER: ${{ steps.built.outputs.updater }}
         run: |
           version=$(node -p "require('./package.json').version")
           move() { docker buildx imagetools create --tag "ghcr.io/invariant0x/$1:latest" --tag "ghcr.io/invariant0x/$1:$version" "ghcr.io/invariant0x/$1@$2"; }
@@ -304,7 +308,21 @@ jobs:
           move hornhoof "$APP"
       - name: Check that latest holds exactly those images
         if: ${{ steps.fresh.outputs.version == 'new' }}
-        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --tag latest
+        env:
+          APP: ${{ steps.built.outputs.app }}
+          NODE: ${{ steps.built.outputs.node }}
+          UPDATER: ${{ steps.built.outputs.updater }}
+        run: |
+          held() {
+            digest=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "ghcr.io/invariant0x/$1:latest" | jq -r '.digest // empty' || true)
+            if [ "$digest" != "$2" ]; then
+              echo "ghcr.io/invariant0x/$1:latest holds ${digest:-nothing that could be read}, not $2."
+              exit 1
+            fi
+          }
+          held hornhoof-updater "$UPDATER"
+          held hornhoof-node "$NODE"
+          held hornhoof "$APP"
 
   release:
     needs: publish

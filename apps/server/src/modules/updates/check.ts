@@ -1,16 +1,10 @@
-import { judgeLiveCheck, type LiveCheckVerdict } from '@hornhoof/protocol/live-check';
-import { FULL_SHA, type Build, type Registry, type Siblings } from './registry.js';
+import type { Build, Registry, Siblings } from './registry.js';
 
-/* liveCheck: what the latest build's live check says; nobody is offered a build it says no to. */
-export type UpdateState = { checkedAt: string | null; latest: Build | null; liveCheck: LiveCheckVerdict | null; versions: Build[]; error: string | null };
-
-const NO_PROOF: LiveCheckVerdict = { ok: false, reason: 'missing' };
+export type UpdateState = { checkedAt: string | null; latest: Build | null; versions: Build[]; error: string | null };
 
 /* Asks the registry for newer builds now and then. A failed check keeps the last good answer and says what went wrong. */
 export class UpdateCheck {
-  #state: UpdateState = { checkedAt: null, latest: null, liveCheck: null, versions: [], error: null };
-  /* The commit this server runs once its live check said yes: a proof stays true of its images. */
-  #provenOwn: string | null = null;
+  #state: UpdateState = { checkedAt: null, latest: null, versions: [], error: null };
   #running: Promise<void> | null = null;
   #timer: NodeJS.Timeout | null = null;
 
@@ -44,44 +38,13 @@ export class UpdateCheck {
     return this.opts.registry.siblings(tag);
   }
 
-  /* The verdict on a build by what the registry holds now, with the node and updater images it was read with. */
-  async liveCheck(build: Build, siblings: Siblings): Promise<LiveCheckVerdict> {
-    if (!FULL_SHA.test(build.commit)) return NO_PROOF;
-    return judgeLiveCheck(await this.opts.registry.liveCheck(build.commit), { ...build, ...siblings });
-  }
-
-  /* The verdict on the build this server runs, which its nodes go to. Nodes ask every few seconds while they wait. */
-  async ownLiveCheck(commit: string): Promise<LiveCheckVerdict> {
-    if (this.#provenOwn === commit) return { ok: true };
-    const build = await this.opts.registry.buildOf(commit);
-    if (!build) return NO_PROOF;
-    const verdict = await this.liveCheck(build, await this.opts.registry.siblings(commit));
-    if (verdict.ok) this.#provenOwn = commit;
-    return verdict;
-  }
-
   async #check(): Promise<void> {
     try {
       const [latest, versions] = await Promise.all([this.opts.registry.latest(), this.opts.registry.versions()]);
-      this.#state = { checkedAt: new Date().toISOString(), latest, versions, ...await this.#verdict(latest) };
+      this.#state = { checkedAt: new Date().toISOString(), latest, versions, error: null };
     } catch (err) {
-      this.#state = { ...this.#state, error: this.#failed(err) };
+      this.#state = { ...this.#state, error: err instanceof Error ? err.message : String(err) };
+      this.opts.onError?.(err);
     }
-  }
-
-  /* A proof that cannot be read is no yes, and takes nothing from what was read of the build itself. */
-  async #verdict(latest: Build | null): Promise<Pick<UpdateState, 'liveCheck' | 'error'>> {
-    if (!latest) return { liveCheck: null, error: null };
-    if (!FULL_SHA.test(latest.commit)) return { liveCheck: NO_PROOF, error: null };
-    try {
-      return { liveCheck: await this.liveCheck(latest, await this.opts.registry.siblings(latest.commit)), error: null };
-    } catch (err) {
-      return { liveCheck: null, error: this.#failed(err) };
-    }
-  }
-
-  #failed(err: unknown): string {
-    this.opts.onError?.(err);
-    return err instanceof Error ? err.message : String(err);
   }
 }

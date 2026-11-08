@@ -465,13 +465,6 @@ describe('updater', () => {
       expect(r.out).toContain('This server is from before nodes wait for their work');
     });
 
-    it('leaves them and their turns on a build without its live check, and says why', () => {
-      const r = runOnce(behind(), null, { ...running041, STUB_NODES: 'unproven' });
-      expect(r.code).toBe(0);
-      expect(installs(r.calls)).toEqual([]);
-      expect(r.out).toContain('This build has no live check yet');
-    });
-
     it.each(['down', 'refused'])('leaves them and their turns when the server is %s, and stays up', state => {
       const r = runOnce(behind(), null, { ...running041, STUB_NODES: state });
       expect(r.code).toBe(0);

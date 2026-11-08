@@ -13,7 +13,7 @@ describe('what the build runs', () => {
   });
 
   /* Every company updates to :latest, so no build, of main or of a branch, may move it: only the publish job does, after the
-     live check, and scripts/test/live-check-workflow.test.mjs holds that job to it. */
+     tests passed on main, and scripts/test/images-workflow.test.mjs holds that job to it. */
   it('pushes a build under its commit tag alone', () => {
     const tags = read('.github/workflows/images.yml').split('\n').filter(l => /^\s+tags: /.test(l)).map(l => l.trim());
     expect(tags).toEqual(['tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}']);

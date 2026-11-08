@@ -5,7 +5,6 @@ import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { identify } from '../nodes/socket.js';
 import { namedServerNodes, type ServerNode } from './drain-work.js';
-import { requireProvenBuild } from './live-check.js';
 import { cancelNodeDrain, requestNodeDrain } from './node-drain.js';
 
 /* nodes: on the whole server, the ones this is about, for an updater that replaces each by itself: the ones that run another
@@ -35,7 +34,6 @@ const allFree = (views: MachineDrain[], free: string[]): boolean => views.length
 export function nodeUpdateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/nodes/update', async req => {
     const asked = await targets(ctx, req);
-    await requireProvenBuild(ctx);
     const views = await Promise.all(asked.map(n => requestNodeDrain(ctx, n.node)));
     const free = asked.filter((_, i) => views[i]!.state === 'restarting').map(n => n.name);
     /* ready, for an updater from before free: all of them together. */

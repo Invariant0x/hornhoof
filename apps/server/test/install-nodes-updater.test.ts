@@ -19,11 +19,11 @@ const CLAUDE = 'hornhoof-claude-1c07dac4';
 const CODEX = 'hornhoof-codex-9f1e2d3c';
 const START = `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ${UPDATER} start-nodes ${SERVER} ${UPDATER} ${HOST}`;
 
-/* install.sh as a server of a checked build serves it: the node and updater images of its build, and its own computer. */
+/* install.sh as a server serves it: the node and updater images of its build, and its own computer. */
 function served(hostId = ELSEWHERE, updater = UPDATER): string {
   const file = join(mkdtempSync(join(tmpdir(), 'hh-nodes-updater-')), 'install.sh');
   writeFileSync(file, readFileSync(SCRIPT, 'utf8').replaceAll('__HORNHOOF_NODE_IMAGE__', NODE).replaceAll('__HORNHOOF_UPDATER_IMAGE__', updater)
-    .replaceAll('__HORNHOOF_HOST_ID__', hostId).replaceAll('__HORNHOOF_NO_NODE__', ''));
+    .replaceAll('__HORNHOOF_HOST_ID__', hostId));
   return file;
 }
 
@@ -102,22 +102,6 @@ describe('install.sh and the updater of the nodes on a computer that is not the 
   });
 });
 
-describe('install.sh for the live check of a build, and the updater of the nodes', () => {
-  const HERE = { STUB_CONTAINERS: `${CLAUDE}=${SERVER}` };
-
-  it('marks the node check-node moves with when, so the updater leaves it on that build for a day', () => {
-    const r = install({ script: served(), args: ['check-node', CLAUDE, COMMIT], env: HERE });
-    expect(r.code).toBe(0);
-    expect(r.calls.find(c => c.startsWith('docker run -d'))).toMatch(/ --label hornhoof\.check=\d{10} /);
-  });
-
-  it('marks nothing when back-node puts it back, so the node follows its server again', () => {
-    const r = install({ script: served(), args: ['back-node', CLAUDE], env: HERE });
-    expect(r.code).toBe(0);
-    expect(r.calls.find(c => c.startsWith('docker run -d'))).not.toContain('hornhoof.check');
-  });
-});
-
 describe('install.sh as the updater of the nodes runs it', () => {
   const fromUpdater = (env: Record<string, string> = {}) => install({
     script: served(),
@@ -161,7 +145,6 @@ describe('install.sh a server serves, for the updater of the nodes', () => {
   async function fromServer(env: Record<string, string>): Promise<string> {
     const { app } = await testApp({ HORNHOOF_VERSION: '0.8.4', HORNHOOF_COMMIT: COMMIT, ...env });
     vi.spyOn(app.ctx.updates, 'siblings').mockResolvedValue({ node: NODE_DIGEST, updater: UPDATER_DIGEST });
-    vi.spyOn(app.ctx.updates, 'ownLiveCheck').mockResolvedValue({ ok: true });
     const file = join(mkdtempSync(join(tmpdir(), 'hh-served-')), 'install.sh');
     writeFileSync(file, (await app.inject({ url: '/install.sh' })).body);
     return file;

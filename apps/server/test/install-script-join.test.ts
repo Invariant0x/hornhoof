@@ -193,14 +193,11 @@ describe('install.sh', () => {
     expect(r.calls).toContain(`stdin http://host.docker.internal:8080 ${SUB_A} claude node-key-aaaaaaaaaaaaaaaa`);
   });
 
-  it('does not start a latest image it could not download: the live check speaks of the one published, not of what is here', () => {
-    for (const pull of ['fail', 'node']) {
-      const r = install({ env: { STUB_PULL: pull, STUB_IMAGE_LOCAL: '1' } });
-      expect(r.code).toBe(1);
-      expect(r.out).toContain('Could not download');
-      expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
-      expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(false);
-    }
+  it('starts the latest image on this computer when it cannot download it', () => {
+    const r = install({ env: { STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Using the local image.');
+    expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith('ghcr.io/invariant0x/hornhoof-node:latest'))).toBe(true);
   });
 
   it('stops when the pull fails and there is no local image', () => {

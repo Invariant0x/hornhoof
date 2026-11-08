@@ -18,13 +18,11 @@ image_by_id() {
   for w in ${STUB_PLAN_NODES:-}; do [ "$(ref_id "${w##*=}")" = "$1" ] && { printf '%s' "${w##*=}"; return; }; done
 }
 case "$1 $2" in
-  # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server, and
-  # STUB_CHECKED_NODES words are "name=seconds", when check-node moved a node.
+  # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server.
   'ps --filter')
     for w in ${STUB_PLAN_NODES:-}; do
       case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
-      checked=''; for c in ${STUB_CHECKED_NODES:-}; do [ "${c%%=*}" = "${w%%=*}" ] && checked=${c#*=}; done
-      rest=${w#*=}; printf '%s %s %s\n' "${w%%=*}" "${rest%%=*}" "$checked"
+      rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
     done ;;
   # STUB_NODES_UPDATERS: the containers of the updater of a server's nodes there are now, and STUB_NODES_UPDATER_IMAGE the
   # image the one of its name runs.

@@ -93,12 +93,12 @@ describe('hornhoof-node wait-update', () => {
     expect(t.said()).toContain('401');
   });
 
-  it('answers 1 at once when the server runs a build without its live check, and says so', async () => {
-    const s = await server([{ status: 409, body: { error: { code: 'conflict', reason: 'live_check_missing', message: 'This build has no live check of Claude, Codex, Kimi and Antigravity.' } } }]);
+  it('answers 1 at once when the server refuses the update, and says why in its words', async () => {
+    const s = await server([{ status: 403, body: { error: { code: 'forbidden', message: 'Only the built-in node may prepare a server update.' } } }]);
     const t = terminal();
     expect(await waitUpdate(nodeFolder(s.url), t.io, async () => {})).toBe(1);
     expect(s.requests).toHaveLength(1);
-    expect(t.said()).toContain('This build has no live check');
+    expect(t.said()).toContain('Only the built-in node may prepare a server update.');
   });
 
   it('answers 1 for a node with no key', async () => {

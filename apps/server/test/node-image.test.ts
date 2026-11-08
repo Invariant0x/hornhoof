@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LIVE_CHECK_REFUSALS, type LiveCheckVerdict } from '@hornhoof/protocol/live-check';
-import { LOCAL_BUILD, nodeImageOfBuild, nodeRefusalOfBuild } from '../src/modules/nodes/image.js';
-import { LIVE_CHECK_UNREAD, needsNoProof } from '../src/modules/updates/live-check.js';
+import { LOCAL_BUILD, nodeImageOfBuild } from '../src/modules/nodes/image.js';
 
 const COMMIT = 'c'.repeat(40);
 const DIGEST = `sha256:${'d'.repeat(64)}`;
@@ -125,60 +123,5 @@ describe('the node image of a build', () => {
     void lacking.image().then(image => got.push(image));
     await vi.advanceTimersByTimeAsync(0);
     expect(got).toEqual([BY_DIGEST, BY_TAG]);
-  });
-});
-
-describe('why a server gives no node of its build', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  const refusal = (verdictOf: () => Promise<LiveCheckVerdict>, free = false) => {
-    const errors: unknown[] = [];
-    return { say: nodeRefusalOfBuild({ commit: COMMIT, free, verdictOf, onError: err => errors.push(err) }), errors };
-  };
-  const after = async <T>(ms: number, value: T) => new Promise<T>(done => { setTimeout(() => done(value), ms); });
-
-  it('waits for a registry that is slow, as its yes is all that lets a machine go on', async () => {
-    const { say } = refusal(() => after(15_000, { ok: true }));
-    const said = say();
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(await said).toBe('');
-  });
-
-  it('says the reason of a no, and asks again only after a minute', async () => {
-    const asked = vi.fn<() => Promise<LiveCheckVerdict>>(async () => ({ ok: false, reason: 'partial' }));
-    const { say } = refusal(asked);
-    expect(await say()).toBe(LIVE_CHECK_REFUSALS.partial);
-    expect(await say()).toBe(LIVE_CHECK_REFUSALS.partial);
-    expect(asked).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(60_000);
-    asked.mockResolvedValue({ ok: true });
-    expect(await say()).toBe('');
-  });
-
-  it('takes a registry that never answers for no yes, and keeps nobody waiting for long', async () => {
-    const { say } = refusal(() => new Promise(() => {}));
-    const said = say();
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(await said).toBe(LIVE_CHECK_UNREAD);
-  });
-
-  it('takes a registry that fails for no yes, and tells why', async () => {
-    const down = new Error('The registry answered 503.');
-    const { say, errors } = refusal(() => Promise.reject(down));
-    expect(await say()).toBe(LIVE_CHECK_UNREAD);
-    expect(errors).toEqual([down]);
-  });
-
-  it('asks nothing where no proof is needed', async () => {
-    const asked = vi.fn<() => Promise<LiveCheckVerdict>>();
-    expect(await refusal(asked, true).say()).toBe('');
-    expect(asked).not.toHaveBeenCalled();
-  });
-
-  it('needs no proof only of a live check stand and of a server CI did not build', () => {
-    expect(needsNoProof({ commit: COMMIT, liveCheckStand: false })).toBe(false);
-    expect(needsNoProof({ commit: COMMIT, liveCheckStand: true })).toBe(true);
-    expect(needsNoProof({ commit: 'local', liveCheckStand: false })).toBe(true);
   });
 });

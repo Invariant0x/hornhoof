@@ -13,7 +13,6 @@ function jobs(workflow) {
 }
 
 const images = jobs(read('images.yml'));
-const proofs = jobs(read('live-check.yml'));
 
 test('only the publish job can move a tag every machine reads', () => {
   for (const [name, text] of Object.entries(images)) {
@@ -22,18 +21,34 @@ test('only the publish job can move a tag every machine reads', () => {
   assert.match(images.publish, /:latest/);
 });
 
-test('the publish job asks the live check before it moves a tag, and looks again after', () => {
-  const asked = images.publish.indexOf('live-check-gate.js --commit "$GITHUB_SHA" --outputs');
+test('the publish job finds the images of its commit before it moves a tag, and looks at latest after', () => {
+  const found = images.publish.indexOf('id: built');
   const moved = images.publish.indexOf('imagetools create');
-  const again = images.publish.indexOf('live-check-gate.js --commit "$GITHUB_SHA" --tag latest');
-  assert.ok(asked > 0 && moved > asked && again > moved, `${asked} ${moved} ${again}`);
+  const again = images.publish.indexOf('Check that latest holds exactly those images');
+  assert.ok(found > 0 && moved > found && again > moved, `${found} ${moved} ${again}`);
+  assert.doesNotMatch(images.publish, /live-check|npm ci/);
 });
 
-test('the publish job moves exactly the images the gate judged, by digest, and the app image last', () => {
-  assert.match(images.publish, /live-check-gate\.js --commit "\$GITHUB_SHA" --outputs "\$GITHUB_OUTPUT"/);
-  assert.doesNotMatch(images.publish, /:\$GITHUB_SHA"/);
+test('the publish job reads each image of its commit by digest, and stops when one is missing', () => {
+  const step = images.publish.slice(images.publish.indexOf('id: built'), images.publish.indexOf('Move the version and latest'));
+  assert.match(step, /for part in app:hornhoof node:hornhoof-node updater:hornhoof-updater; do\n/);
+  assert.match(step, /image="ghcr\.io\/invariant0x\/\$\{part#\*:\}:\$GITHUB_SHA"\n/);
+  assert.match(step, /docker buildx imagetools inspect --format '\{\{json \.Manifest\}\}' "\$image"/);
+  assert.match(step, /if ! \[\[ "\$digest" =~ \^sha256:\[0-9a-f\]\{64\}\$ \]\]; then\n[^]*exit 1\n/);
+  assert.match(step, /echo "\$\{part%%:\*\}=\$digest" >> "\$GITHUB_OUTPUT"\n/);
+});
+
+test('the publish job moves exactly those images, by digest, and the app image last, then finds them under latest', () => {
+  for (const name of ['APP', 'NODE', 'UPDATER']) {
+    const output = new RegExp(`${name}: \\$\\{\\{ steps\\.built\\.outputs\\.${name.toLowerCase()} \\}\\}\\n`, 'g');
+    assert.equal(images.publish.match(output)?.length, 2, name);
+  }
+  assert.match(images.publish, /"ghcr\.io\/invariant0x\/\$1@\$2"; \}/);
   const moved = ['hornhoof-updater "', 'hornhoof-node "', 'hornhoof "'].map(name => images.publish.indexOf(`move ${name}`));
   assert.ok(moved[0] > 0 && moved[1] > moved[0] && moved[2] > moved[1], moved.join(' '));
+  const held = ['hornhoof-updater "$UPDATER"', 'hornhoof-node "$NODE"', 'hornhoof "$APP"'].map(name => images.publish.indexOf(`held ${name}`));
+  assert.ok(held[0] > moved[2] && held[1] > held[0] && held[2] > held[1], held.join(' '));
+  assert.match(images.publish, /"ghcr\.io\/invariant0x\/\$1:latest" \| jq -r '\.digest \/\/ empty'[^]*if \[ "\$digest" != "\$2" \]; then\n[^]*exit 1\n/);
 });
 
 test('a commit on main whose version is out already moves nothing and fails nothing', () => {
@@ -42,7 +57,7 @@ test('a commit on main whose version is out already moves nothing and fails noth
   assert.ok(look > 0, 'the publish job looks whether its version is out');
   assert.match(steps[look], /gh api "repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/v\$version"/);
   assert.match(steps[look], /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
-  assert.ok(images.publish.indexOf('id: fresh') < images.publish.indexOf('live-check-gate.js'), 'it looks before it asks the live check');
+  assert.ok(images.publish.indexOf('id: fresh') < images.publish.indexOf('id: built'), 'it looks before it finds the images');
   for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new' \}\}/, step.split('\n')[0]);
 });
 
@@ -60,27 +75,13 @@ test('a version is released only after its images went out', () => {
   assert.match(images.release, /needs: publish/);
 });
 
-test('a proof is published only from main, and only after the same door said yes', () => {
-  assert.match(proofs.publish, /if: github\.ref == 'refs\/heads\/main'/);
-  const judged = proofs.publish.indexOf('live-check-gate.js --commit');
-  const pushed = proofs.publish.indexOf('--push');
-  assert.ok(judged > 0 && pushed > judged, `${judged} ${pushed}`);
+test('the publish job moves tags on the runner and with the BuildKit the build variables name, as the images are built', () => {
+  assert.match(images.publish, /runs-on: \$\{\{ vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
+  assert.match(images.publish, /driver: \$\{\{ vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ vars\.BUILDKIT_ENDPOINT \}\}\n/);
 });
 
-test('a proof is published on the runner and with the BuildKit the build variables name, as the images are', () => {
-  assert.match(proofs.publish, /runs-on: \$\{\{ vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
-  assert.match(proofs.publish, /driver: \$\{\{ vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ vars\.BUILDKIT_ENDPOINT \}\}\n/);
-});
-
-test('the words of a proof never become part of a command', () => {
-  assert.match(proofs.publish, /PROOF: \$\{\{ inputs\.proof \}\}/);
-  assert.doesNotMatch(proofs.publish.replace(/PROOF: \$\{\{ inputs\.proof \}\}/, ''), /inputs\.proof/);
-});
-
-test('the jobs that may write to the registry build code without keeping the checkout token', () => {
-  for (const job of [images.publish, proofs.publish]) {
-    assert.match(job, /actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+persist-credentials: false\n/);
-  }
+test('the job that may move tags does not keep the checkout token', () => {
+  assert.match(images.publish, /actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+persist-credentials: false\n/);
 });
 
 test('images built with our own BuildKit keep their cache in it, and send none to GitHub', () => {

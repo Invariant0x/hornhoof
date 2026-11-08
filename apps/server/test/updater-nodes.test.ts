@@ -32,17 +32,16 @@ const KIMI = 'hornhoof-kimi-22222222';
 /* Two nodes on the build before, and one on the server's build already. */
 const BEHIND = `${CLAUDE}=${PLAN_A}=${OLD_NODE} ${CODEX}=${PLAN_B}=${OLD_NODE} ${KIMI}=${PLAN_C}=${NEW_NODE}`;
 
-type Served = { build?: string; noNode?: string | null; updater?: string | null; host?: string; extra?: string[] };
+type Served = { build?: string; updater?: string | null; host?: string; extra?: string[] };
 
 /* What GET /install.sh answers: the lines install.sh says its build in, and commands, which nothing may ever run. */
-function serve(dir: string, { build = NEW_NODE, noNode = '', updater = SELF, host = SERVER_HOST, extra = [] }: Served): string {
+function serve(dir: string, { build = NEW_NODE, updater = SELF, host = SERVER_HOST, extra = [] }: Served): string {
   const file = join(dir, 'served.sh');
   writeFileSync(file, [
     '#!/usr/bin/env bash',
     'touch "$STUB_STATE/pwned"',
     'SERVER="${HORNHOOF_SERVER:-https://elsewhere.example.test}"',
     `BUILD_IMAGE="${build}"`,
-    ...(noNode === null ? [] : [`NO_NODE="${noNode}"`]),
     ...(updater === null ? [] : [`UPDATER_BUILD="${updater}"`]),
     `SERVER_HOST_ID="${host}"`,
     ...extra,
@@ -59,10 +58,9 @@ function bundled(dir: string): string {
     '#!/usr/bin/env bash',
     'SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"',
     'BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"',
-    'NO_NODE="__HORNHOOF_NO_NODE__"',
     'UPDATER_BUILD="__HORNHOOF_UPDATER_IMAGE__"',
     'SERVER_HOST_ID="__HORNHOOF_HOST_ID__"',
-    'printf \'bundled installer SERVER=%s BUILD_IMAGE=%s NO_NODE=%s UPDATER_BUILD=%s SERVER_HOST_ID=%s NODES_ONLY=%s FROM_UPDATER=%s TTY=%s\\n\' "$SERVER" "$BUILD_IMAGE" "$NO_NODE" "$UPDATER_BUILD" "$SERVER_HOST_ID" "${HORNHOOF_NODES_ONLY:-}" "${HORNHOOF_FROM_UPDATER:-}" "${HORNHOOF_TTY:-}" >> "$STUB_LOG"',
+    'printf \'bundled installer SERVER=%s BUILD_IMAGE=%s UPDATER_BUILD=%s SERVER_HOST_ID=%s NODES_ONLY=%s FROM_UPDATER=%s TTY=%s\\n\' "$SERVER" "$BUILD_IMAGE" "$UPDATER_BUILD" "$SERVER_HOST_ID" "${HORNHOOF_NODES_ONLY:-}" "${HORNHOOF_FROM_UPDATER:-}" "${HORNHOOF_TTY:-}" >> "$STUB_LOG"',
     '[ -z "${STUB_INSTALLER_FAILS:-}" ] || { echo "Could not start the node." >&2; exit 1; }',
     'echo "Starting the node."',
     '',
@@ -88,7 +86,7 @@ function updater(args: string[], env: Record<string, string> = {}, served: Serve
 
 const look = (env: Record<string, string> = {}, served: Served = {}) => updater(['nodes', SERVER, SELF, HOST, '--once'], { STUB_PLAN_NODES: BEHIND, ...env }, served);
 const installers = (calls: string[]) => calls.filter(c => c.startsWith('bundled installer'));
-const ran = (plan: string) => `bundled installer SERVER=${SERVER} BUILD_IMAGE=${NEW_NODE} NO_NODE= UPDATER_BUILD=${SELF} SERVER_HOST_ID=${SERVER_HOST} NODES_ONLY=${plan} FROM_UPDATER=1 TTY=/dev/null`;
+const ran = (plan: string) => `bundled installer SERVER=${SERVER} BUILD_IMAGE=${NEW_NODE} UPDATER_BUILD=${SELF} SERVER_HOST_ID=${SERVER_HOST} NODES_ONLY=${plan} FROM_UPDATER=1 TTY=/dev/null`;
 const moves = (calls: string[]) => calls.filter(c => c.startsWith('docker run') && c.includes(' start-nodes '));
 
 describe('updater of a server\'s nodes on another computer', () => {
@@ -100,7 +98,7 @@ describe('updater of a server\'s nodes on another computer', () => {
     const r = look();
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('curl') && c.includes(`${SERVER}/install.sh`))).toBe(true);
-    expect(r.calls).toContain(`docker ps --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.check"}}`);
+    expect(r.calls).toContain(`docker ps --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}}`);
     /* Each installer asks the server, with the node's own key in its volume, to let the node's work end, and replaces only it.
        It goes to the address the updater was started with, not one the server's answer names. */
     expect(installers(r.calls).sort()).toEqual([ran(PLAN_A), ran(PLAN_B)].sort());
@@ -164,14 +162,6 @@ describe('updater of a server\'s nodes on another computer', () => {
     expect(installers(r.calls)).toEqual([ran(PLAN_A)]);
   });
 
-  it('leaves a node that check-node moved for a live check on its build for a day, and moves it after that', () => {
-    const now = Math.floor(Date.now() / 1000);
-    const fresh = look({ STUB_CHECKED_NODES: `${CLAUDE}=${now - 3600}` });
-    expect(installers(fresh.calls)).toEqual([ran(PLAN_B)]);
-    const old = look({ STUB_CHECKED_NODES: `${CLAUDE}=${now - 25 * 3600}` });
-    expect(installers(old.calls)).toHaveLength(2);
-  });
-
   it('changes nothing when every node runs the server\'s build', () => {
     const r = look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
     expect(r.code).toBe(0);
@@ -179,18 +169,10 @@ describe('updater of a server\'s nodes on another computer', () => {
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it('changes nothing while the server\'s build has no live check, and says why', () => {
-    const r = look({}, { noNode: 'This build has no live check of Claude, Codex, Kimi and Antigravity.' });
+  it('moves the nodes to every build the server names by digest, whatever else the installer it serves says', () => {
+    const r = look({}, { extra: ['NO_NODE="This build has no live check."'] });
     expect(r.code).toBe(0);
-    expect(installers(r.calls)).toEqual([]);
-    expect(moves(r.calls)).toEqual([]);
-    expect(r.out).toContain('has no live check');
-  });
-
-  it('changes nothing for a server that does not say whether its build has a live check', () => {
-    const r = look({}, { noNode: null });
-    expect(installers(r.calls)).toEqual([]);
-    expect(moves(r.calls)).toEqual([]);
+    expect(installers(r.calls).sort()).toEqual([ran(PLAN_A), ran(PLAN_B)].sort());
   });
 
   it('stands aside on the server\'s own computer, whose own updater moves the nodes', () => {
@@ -226,7 +208,7 @@ describe('updater of a server\'s nodes on another computer', () => {
     const updaterScript = readFileSync(SCRIPT, 'utf8');
     expect(updaterScript).toContain('INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"');
     const placeholders = [...new Set(readFileSync(INSTALL, 'utf8').match(/__HORNHOOF_[A-Z_]+__/g))];
-    expect(placeholders.sort()).toEqual(['__HORNHOOF_HOST_ID__', '__HORNHOOF_NODE_IMAGE__', '__HORNHOOF_NO_NODE__', '__HORNHOOF_SERVER__', '__HORNHOOF_UPDATER_IMAGE__']);
+    expect(placeholders.sort()).toEqual(['__HORNHOOF_HOST_ID__', '__HORNHOOF_NODE_IMAGE__', '__HORNHOOF_SERVER__', '__HORNHOOF_UPDATER_IMAGE__']);
     for (const placeholder of placeholders) expect(updaterScript).toContain(placeholder);
   });
 });

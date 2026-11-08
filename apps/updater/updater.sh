@@ -36,7 +36,7 @@
 # the updater image of the server's build with this computer's Docker, and with the hash that computer goes by (<host>). It
 # has no server folder, no requests and no commands. Every few minutes it reads the installer the server serves, as data and
 # never as a program: the node and updater images of the server's build, each by its digest in Hornhoof's own repository,
-# whether that build has its live check, and the server's own computer. It first moves to that updater image, through a helper
+# and the server's own computer. It first moves to that updater image, through a helper
 # that outlives it. Only then a node of that server on another image goes to that node image, through the installer this
 # image carries, the one of the same build, with these values filled in: it asks the server, with the node's own key from its
 # volume, to let the node's work end, and replaces the node once it is free. So what runs with this computer's Docker is only
@@ -610,10 +610,6 @@ catch_up_nodes() {
       printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'
       NODES_AT=$((now + NODES_RETRY))
       ;;
-    409)
-      printf 'This build has no live check yet, so the nodes stay on their image and what they run goes on.\n'
-      NODES_AT=$((now + NODES_RETRY))
-      ;;
   esac
   rm -f "$answer"
 }
@@ -725,8 +721,6 @@ computer_runs() {
 # How often the updater of a server's nodes looks at them, and how long it waits after a look that failed, in seconds.
 NODES_EVERY=300
 NODES_BACKOFF=900
-# How long a node that install.sh check-node moved to a commit's build for its live check stays on it, in seconds.
-CHECK_HOLD=86400
 SAID=''
 
 # Each thing once until something else is said, so a look every few minutes keeps the log short.
@@ -762,12 +756,11 @@ updater_name() {
 }
 
 # behind_of <server> <image>: the plans of that server's running nodes on this computer, by their labels, whose image Docker
-# does not keep as <image>. A node someone stopped stays as it is, and so does one in its live check, for CHECK_HOLD.
+# does not keep as <image>. A node someone stopped stays as it is.
 behind_of() {
-  local name plan checked id
-  { docker ps --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.check"}}' 2> /dev/null || true; } | while read -r name plan checked; do
+  local name plan id
+  { docker ps --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
     case "$plan" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
-    case "$checked" in '' | *[!0-9]*) ;; *) [ "$(($(date +%s) - checked))" -ge "$CHECK_HOLD" ] || continue ;; esac
     id=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
     [ -n "$id" ] || continue
     case " $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true) " in *" $2 "*) continue ;; esac
@@ -779,7 +772,7 @@ behind_of() {
 # matched its pattern before, so none holds a character sed or bash would take for more.
 fill_installer() {
   sed -e "s|__HORNHOOF_SERVER__|$1|g" -e "s|__HORNHOOF_NODE_IMAGE__|$2|g" -e "s|__HORNHOOF_UPDATER_IMAGE__|$3|g" \
-    -e "s|__HORNHOOF_HOST_ID__|$4|g" -e 's|__HORNHOOF_NO_NODE__||g' "$INSTALLER"
+    -e "s|__HORNHOOF_HOST_ID__|$4|g" "$INSTALLER"
 }
 
 # nodes_look <server> <image> <host>: one look at that server's nodes here. The installers of several nodes wait for them
@@ -797,10 +790,6 @@ nodes_look() {
   server_host=$(served SERVER_HOST_ID "$served")
   if [ -n "$3" ] && [ "$server_host" = "$3" ]; then
     tell "This is the computer of $1, so the updater next to that server moves its nodes here."
-    return 0
-  fi
-  if ! grep -qx 'NO_NODE=""' "$served"; then
-    tell "The build $1 runs has no live check, so its nodes here stay on their image and what they run goes on."
     return 0
   fi
   if ! by_digest "$NODE_IMAGE" "$build" || ! by_digest "$UPDATER_IMAGE" "$updater" || ! plain_host "$server_host"; then

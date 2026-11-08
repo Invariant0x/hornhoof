@@ -6,8 +6,6 @@
 #   install.sh server                                            install or update the Hornhoof server
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
-#   install.sh check-node <node> <commit>                        one node goes to the build of a commit, for that build's live check
-#   install.sh back-node <node>                                  that node goes back to 0.8.3 at once, without waiting for its work
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
@@ -26,40 +24,26 @@
 #
 # The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
 # commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
-# published. A script downloaded on its own and a local build take the latest image; a local build alone takes the one
-# HORNHOOF_NODE_IMAGE names. The script arrives through a pipe, so every question is read from the terminal. It runs on
-# the bash that ships with macOS (3.2).
-#
-# Nothing here puts a build on a machine without the live check of exactly its images, as the update button does not (see
-# guide/updates.md). A server of such a build says so in NO_NODE and gives no node of it. A server install, and a node that
-# would take the latest image, ask the build before anything changes. HORNHOOF_LIVE_CHECK_STAND=1 starts the one server that
-# runs a build to check it: a new one, named with --name, whose nodes are its own. check-node is the one way a real company's node
-# gets a build before that check exists, for the turn the check speaks of: one node, named, of a plan, on a whole commit.
+# published. A script downloaded on its own and a local build take the latest image; HORNHOOF_NODE_IMAGE comes before
+# them all. The script arrives through a pipe, so every question is read from the terminal. It runs on the bash that
+# ships with macOS (3.2).
 set -euo pipefail
 
 SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
-NODE_REPOSITORY=ghcr.io/invariant0x/hornhoof-node
-LATEST_NODE=$NODE_REPOSITORY:latest
-# Where back-node goes: 0.8.3, the last release that passed its live check, by the digest of its image for every computer.
-BACK_NODE=$NODE_REPOSITORY@sha256:81d4bb316b6dd568ddd42fa2d6ef877ddc80b3604b75d291492d361debd5645f
 case "$BUILD_IMAGE" in
-  __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
+  __HORNHOOF_* | local) DEFAULT_IMAGE=ghcr.io/invariant0x/hornhoof-node:latest ;;
   *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
 esac
 IMAGE="${HORNHOOF_NODE_IMAGE:-$DEFAULT_IMAGE}"
-# Why this server gives no node of its build, in words the server fills in. Empty when it does.
-NO_NODE="__HORNHOOF_NO_NODE__"
-case "$NO_NODE" in __HORNHOOF_*) NO_NODE='' ;; esac
 # The updater image of the server's build, which the server names as it does the node image, and the hash its own computer
 # goes by (see host_id), which it fills in when it knows it. The updater of the nodes reads these lines too.
 UPDATER_BUILD="__HORNHOOF_UPDATER_IMAGE__"
 SERVER_HOST_ID="__HORNHOOF_HOST_ID__"
 case "$UPDATER_BUILD" in __HORNHOOF_* | local) UPDATER_BUILD='' ;; esac
 case "$SERVER_HOST_ID" in __HORNHOOF_*) SERVER_HOST_ID='' ;; esac
-STAND="${HORNHOOF_LIVE_CHECK_STAND:-}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
 APP_IMAGE=ghcr.io/invariant0x/hornhoof
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
@@ -95,7 +79,7 @@ LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
-USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall | check-node <node> <commit> | back-node <node>'
+USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall'
 
 OS=''
 ARCH=''
@@ -432,8 +416,6 @@ host_env() {
 }
 
 STARTED=''
-# check-node marks the node it moves with when, so the updater of the nodes leaves it on that build for a day.
-CHECK_LABEL=()
 prepare_node_stop() {
   local name=$1 reason=$2
   "${DOCKER[@]}" exec "$name" node "$NODE_MAIN" prepare-stop "$reason" > /dev/null 2>&1 || true
@@ -458,7 +440,7 @@ start_node() {
   # them and checks which agent calls its tools. Nothing from the host is mounted and no new privileges can be gained.
   # Docker's AppArmor profile on newer Linux, as Debian 13, would stop that root from looking into and stopping its
   # agents' programs, so the node runs outside it; Docker skips the option where AppArmor is off, as on a Mac.
-  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" ${CHECK_LABEL[@]+"${CHECK_LABEL[@]}"} --restart unless-stopped --cap-drop ALL \
+  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
     ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
@@ -479,8 +461,6 @@ wait_for_node() {
   LEFT="$LEFT $name"
   if [ "$code" -eq 3 ]; then
     say "This Hornhoof server is from before nodes wait for their work, so $name stays as it is and what it runs goes on. Update the Hornhoof server first, then run this command again."
-  elif [ -n "$ONE_NODE" ]; then
-    say "Could not learn when $name is free, so it stays as it is and what it runs goes on. Run this command again."
   else
     say "Could not learn when $name is free, so it stays as it is and what it runs goes on. Run this command again, or add --urgent to stop what it runs and replace it now."
   fi
@@ -581,27 +561,11 @@ login_node() {
   wait "$watcher" 2> /dev/null || true
 }
 
-# No server's build stands for the latest image, so that tag answers for itself, and what this computer has under it for nothing.
-latest_node_answers() {
-  [ "$IMAGE" = "$LATEST_NODE" ] || return 0
-  ask_live_check latest 'So the nodes on this machine stay as they are.'
-  "${DOCKER[@]}" pull "$IMAGE" > /dev/null || fail "Could not download $IMAGE. Check the internet connection, then run this command again."
-}
-
-# A node goes to the build of its server, with or without --urgent, and a code stays good for when that build can go.
-refuse_unchecked_node() {
-  [ -z "$NO_NODE" ] || fail "$NO_NODE This Hornhoof gives no node of its build until that check is published, so the nodes on this machine stay as they are."
-  [ "$BUILD_IMAGE" = local ] || [ -z "${HORNHOOF_NODE_IMAGE:-}" ] ||
-    fail "HORNHOOF_NODE_IMAGE is for a Hornhoof built from source: no live check speaks of the image it names, so the nodes on this machine stay as they are."
-}
-
 node_mode() {
   local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late
-  refuse_unchecked_node
   detect_system
   check_server
   ensure_docker
-  latest_node_answers
   pull_image
   node_server
 
@@ -751,112 +715,6 @@ drop_nodes_updater() {
   for id in $(nodes_updaters -aq); do "${DOCKER[@]}" rm -f "$id" > /dev/null 2>&1 || true; done
 }
 
-provider_of() {
-  local provider=${1#hornhoof-}
-  printf '%s' "${provider%-*}"
-}
-
-# A start that failed took the container and left the volume, whose settings say whose node it is. Only the way back goes from there.
-# Only those two lines leave the container: Docker's logs keep what a container prints, and the settings hold the node's key.
-lost_node() {
-  local name=$1 settings id
-  case "$name" in *[!a-z0-9-]*) return 1 ;; hornhoof-*-*) ;; *) return 1 ;; esac
-  "${DOCKER[@]}" volume inspect "$name" > /dev/null 2>&1 || return 1
-  settings=$("${DOCKER[@]}" run --rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges --entrypoint /bin/sed -v "$name:/data:ro" "$IMAGE" -n -E '/^ *"(server|subscriptionId)":/p' /data/node.json 2> /dev/null) || return 1
-  [ "$(printf '%s\n' "$settings" | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')" = "$NODE_SERVER" ] || return 1
-  id=$(printf '%s\n' "$settings" | sed -n 's/^ *"subscriptionId": *"\([^"]*\)".*/\1/p')
-  case "$id" in '' | *[!A-Za-z0-9_-]*) return 1 ;; esac
-  [ "$(node_name "$id" "$(provider_of "$name")")" = "$name" ] || return 1
-  printf '%s:%s' "$name" "$id"
-}
-
-# The node of that name, as "name:id", when this server has it on this machine and it has a plan to check.
-named_node() {
-  local entry
-  case "$1" in hornhoof-machine-*) fail "$1 has no plan to check, so it stays as it is." ;; esac
-  for entry in $(existing_nodes); do
-    if [ "${entry%%:*}" = "$1" ]; then
-      printf '%s' "$entry"
-      return 0
-    fi
-  done
-  if [ "$MODE" = back-node ] && lost_node "$1"; then return 0; fi
-  fail "$SERVER has no node called $1 on this machine, so nothing changed."
-}
-
-# The check of a plan needs one node. Another of the plan on this build would be the start of an update without a check.
-only_one_of_its_plan() {
-  local name=$1 entry other
-  for entry in $(existing_nodes); do
-    other=${entry%%:*}
-    case "$other" in hornhoof-"$(provider_of "$name")"-*) ;; *) continue ;; esac
-    if [ "$other" != "$name" ] && [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$other" 2> /dev/null)" = "$IMAGE" ]; then
-      fail "$other, of the same plan, runs this build already, and one node is what the check of a plan needs. So $name stays as it is."
-    fi
-  done
-}
-
-# start_one <name:id>: the node goes to IMAGE with its volume, and this says once it reached its server. Its settings read ready long before.
-start_one() {
-  local entry=$1 name id tries=${HORNHOOF_NODE_ANSWER_WAIT:-60}
-  name=${entry%%:*}
-  id=${entry#*:}
-  start_node "$name" "$id" "$(provider_of "$name")"
-  # grep reads all of the log: with -q it would stop early, and pipefail would take that for no.
-  until "${DOCKER[@]}" logs "$name" 2>&1 | grep 'Connected to Hornhoof' > /dev/null; do
-    tries=$((tries - 1))
-    [ "$tries" -gt 0 ] || fail "$name runs $IMAGE and has not reached $SERVER: docker logs $name shows why."
-    sleep 1
-  done
-  say "$name runs $IMAGE and reached Hornhoof, $SECONDS s after this command began. It says $(node_status "$name"). Its first turn goes on from here."
-}
-
-one_node_machine() {
-  detect_system
-  check_server
-  ensure_docker
-  node_server
-  RETRY="install.sh back-node $CHECK_NODE brings it back from its volume."
-}
-
-# The digest says what the image is, so a copy here will do: a way back does not wait for a registry that may not answer.
-way_back_here() {
-  "${DOCKER[@]}" image inspect "$BACK_NODE" > /dev/null 2>&1 && return 0
-  say "Getting the way back, $BACK_NODE."
-  "${DOCKER[@]}" pull "$BACK_NODE" > /dev/null || fail "Could not download $BACK_NODE, the way back. Nothing changed."
-}
-
-# The live check of a release gives a real node of the build a turn, before the proof the door asks for can exist, so this does not ask
-# the door. Every machine and everything else still does. See CONTRIBUTING.md.
-check_node_mode() {
-  local entry digest
-  [[ "$CHECK_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed."
-  IMAGE=$NODE_REPOSITORY:$CHECK_COMMIT
-  one_node_machine
-  entry=$(named_node "$CHECK_NODE")
-  only_one_of_its_plan "$CHECK_NODE"
-  # The check speaks of the published image, not of a copy of that name built on this computer.
-  say "Getting the node image $IMAGE."
-  "${DOCKER[@]}" pull "$IMAGE" > /dev/null || fail "Could not download $IMAGE, the published node image of that commit. Nothing changed."
-  way_back_here
-  wait_for_node "$CHECK_NODE" || fail "Nothing changed on this machine."
-  CHECK_LABEL=(--label "hornhoof.check=$(date +%s)")
-  start_one "$entry"
-  # A tag can move, and the record of the check speaks of a digest.
-  digest=$("${DOCKER[@]}" image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2> /dev/null || true)
-  say "For the record of the check, the image by its digest: ${digest:-could not be read, ask docker image inspect $IMAGE}."
-}
-
-# A node whose turn failed goes back at once, whatever it runs: its turns go on after it, as after any restart.
-back_node_mode() {
-  local entry
-  IMAGE=$BACK_NODE
-  one_node_machine
-  way_back_here
-  entry=$(named_node "$CHECK_NODE")
-  start_one "$entry"
-}
-
 uninstall_mode() {
   local entry names='' name answer
   detect_system
@@ -945,36 +803,11 @@ set_env() {
 
 env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
 
-# The build of a tag answers before anything changes here: it carries the door the release went through. A version from before
-# live checks has none to show and stays a way back.
-ask_live_check() {
-  local image="$APP_IMAGE:$1" version commit why
-  say "Asking $image for its live check."
-  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
-  version=$("${DOCKER[@]}" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2> /dev/null || true)
-  case "$version" in 0.[0-6].*) return 0 ;; esac
-  commit=$("${DOCKER[@]}" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2> /dev/null || true)
-  why=$("${DOCKER[@]}" run --rm --entrypoint node "$image" apps/server/dist/live-check-gate.js --image "$APP_IMAGE" --commit "$commit" --tag "$1" 2>&1) && return 0
-  # Its answer is its last line, whatever Docker said before it. A build from before the door has only a stack trace to show.
-  why=$(printf '%s\n' "$why" | tail -1)
-  case "$why" in *' ('[a-z]*')') ;; *) why='This build cannot say it has a live check.' ;; esac
-  fail "$why $2"
-}
-
-# A live check stand checks a candidate before anything of it is published: its images may be on this computer alone.
-stand_image_here() { [ "$STAND" = 1 ] && "${DOCKER[@]}" image inspect "$1" > /dev/null 2>&1; }
-
-# It starts all of a candidate from here or none of it, and only what compose could not download.
-stand_images_here() {
-  stand_image_here "$APP_REF" && stand_image_here "$NODE_REF" && stand_image_here "$UPDATER_REF" || return 1
-  say "Using the images on this computer."
-}
-
 # compose.yaml comes inside the app image, so the compose file always matches the build it starts.
 compose_from_image() {
   local image="$APP_IMAGE:${PIN:-latest}" cid
   say "Getting compose.yaml from $image."
-  "${DOCKER[@]}" pull "$image" > /dev/null || stand_image_here "$image" || fail "Could not download $image. Check the internet connection, then run this command again."
+  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
   cid=$("${DOCKER[@]}" create "$image") || fail "Could not read $image. Run this command again."
   if ! "${DOCKER[@]}" cp "$cid:/app/compose.yaml" "$SERVER_DIR/compose.yaml" > /dev/null; then
     "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
@@ -1090,29 +923,6 @@ start_server_services() {
   fi
 }
 
-# Whether this run is for a live check stand: a new server of its own, with a name, that runs a build to check it. A server
-# with work never becomes one, and an update of one stays one.
-live_check_stand() {
-  local said
-  said=$(env_value HORNHOOF_LIVE_CHECK_STAND)
-  [ -n "$STAND" ] || STAND=$said
-  [ "$STAND" = 1 ] || return 1
-  [ -n "$NAME" ] || fail "A live check stand is a server of its own: name it with --name, then run this command again."
-  [ ! -f "$SERVER_DIR/.env" ] || [ "$said" = 1 ] || fail "A live check stand is a new server of its own, and $SERVER_DIR has one already, which stays as it is. Name another with --name."
-}
-
-# A person gets a server only of a build whose live check speaks of exactly its images, as with the update button. The updater
-# brings only what its server asked of first.
-require_live_check() {
-  local name
-  [ -z "$FROM_UPDATER" ] || return 0
-  for name in HORNHOOF_APP_REF HORNHOOF_NODE_REF HORNHOOF_UPDATER_REF HORNHOOF_NODE_IMAGE; do
-    [ -z "${!name:-}" ] || fail "$name names an image no live check speaks of, so this Hornhoof stays as it is. Choose a build with HORNHOOF_VERSION."
-  done
-  if live_check_stand; then return 0; fi
-  ask_live_check "${PIN:-latest}" "So $APP_IMAGE:${PIN:-latest} goes nowhere, and this Hornhoof stays as it is."
-}
-
 server_mode() {
   local env_file url public port local_url project link fact id i=0
   local -a compose
@@ -1132,7 +942,6 @@ server_mode() {
   # A named server is its own compose project, so its containers, network and volumes never meet another's.
   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
 
-  require_live_check
   mkdir -p "$SERVER_DIR"
   env_file="$SERVER_DIR/.env"
   if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
@@ -1164,7 +973,6 @@ server_mode() {
   set_env COMPOSE_PROJECT_NAME "$project"
   set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
   set_env HORNHOOF_VERSION "${PIN:-latest}"
-  if [ "$STAND" = 1 ]; then set_env HORNHOOF_LIVE_CHECK_STAND 1; fi
   # The exact images compose starts.
   [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
   [ -n "$NODE_REF" ] || NODE_REF="ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}"
@@ -1197,7 +1005,7 @@ server_mode() {
   # The updater downloads them before it saves the database; an updater from before leaves it to this.
   if [ -z "$PULLED" ]; then
     say "Downloading the Hornhoof images."
-    (cd "$SERVER_DIR" && "${compose[@]}" pull) || stand_images_here || fail "Could not download the images. Check the internet connection, then run this command again."
+    (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   start_server_services "${compose[@]}"
@@ -1222,27 +1030,8 @@ server_mode() {
 
 MODE=node
 CODE=''
-CHECK_NODE=''
-CHECK_COMMIT=''
-ONE_NODE=''
-SEEN_MODE=''
 while [ $# -gt 0 ]; do
   case "$1" in
-    check-node)
-      [ $# -ge 3 ] || fail "check-node takes a node and a commit. $USAGE"
-      MODE=check-node
-      ONE_NODE=$((ONE_NODE + 1))
-      CHECK_NODE=$2
-      CHECK_COMMIT=$3
-      shift 2
-      ;;
-    back-node)
-      [ $# -ge 2 ] || fail "back-node takes a node. $USAGE"
-      MODE=back-node
-      ONE_NODE=$((ONE_NODE + 1))
-      CHECK_NODE=$2
-      shift
-      ;;
     --join)
       [ $# -ge 2 ] || fail "--join needs the code from Hornhoof. $USAGE"
       CODE=$2
@@ -1259,18 +1048,9 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --urgent) URGENT=1 ;;
-    node)
-      MODE=node
-      SEEN_MODE=1
-      ;;
-    server)
-      MODE=server
-      SEEN_MODE=1
-      ;;
-    --uninstall)
-      MODE=uninstall
-      SEEN_MODE=1
-      ;;
+    node) MODE=node ;;
+    server) MODE=server ;;
+    --uninstall) MODE=uninstall ;;
     -h | --help)
       say "$USAGE"
       exit 0
@@ -1279,12 +1059,6 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-
-# One node goes alone: no words beside it that would make it more than that, and only the image it is for.
-if [ -n "$ONE_NODE" ]; then
-  [ "$ONE_NODE" = 1 ] && [ -z "$CODE$URGENT$NAME$SEEN_MODE" ] || fail "$MODE takes nothing else. $USAGE"
-  [ -z "${HORNHOOF_NODE_IMAGE:-}" ] || fail "$MODE goes to the image it is for, not the one HORNHOOF_NODE_IMAGE names. Nothing changed."
-fi
 
 if [ -n "$NAME" ]; then
   [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
@@ -1301,6 +1075,4 @@ case "$MODE" in
   node) node_mode "$CODE" ;;
   server) server_mode ;;
   uninstall) uninstall_mode ;;
-  check-node) check_node_mode ;;
-  back-node) back_node_mode ;;
 esac

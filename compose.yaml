@@ -28,7 +28,6 @@ services:
       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
       # writes, so the pool counts that computer once when it joined as a machine too.
       HORNHOOF_HOST_ID: ${HORNHOOF_HOST_ID:-}
-      HORNHOOF_LIVE_CHECK_STAND: ${HORNHOOF_LIVE_CHECK_STAND:-}
     volumes:
       - control:/control
       - harness:/harness

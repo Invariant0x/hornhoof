@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { LIVE_CHECK_LABEL, liveCheckTag } from '@hornhoof/protocol/live-check';
 
 /* Reads Hornhoof's published builds from the container registry, anonymously, the way docker pull does. */
 
@@ -10,7 +9,7 @@ export type Build = { tag: string; digest: string; version: string; commit: stri
    from before the updater. */
 export type Siblings = { node: string; updater: string };
 
-export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Build[]>; siblings(tag: string): Promise<Siblings>; buildOf(tag: string): Promise<Build | null>; liveCheck(commit: string): Promise<unknown> };
+export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Build[]>; siblings(tag: string): Promise<Siblings> };
 
 const INDEX_TYPES = ['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
 const MANIFEST_TYPES = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'];
@@ -30,22 +29,6 @@ export function compareVersions(a: string, b: string): number {
   const pb = b.match(SEMVER)!.slice(1).map(Number);
   for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pb[i]! - pa[i]!;
   return 0;
-}
-
-/* What the label says: text that is no JSON stays text, and nobody takes that for a proof. */
-function parsedLabel(label: string | undefined): unknown {
-  if (label === undefined) return null;
-  try { return JSON.parse(label); }
-  catch { return label; }
-}
-
-const unlessLacking = <T>(res: Response, read: () => Promise<T>): Promise<T | null> => (res.status === 404 ? Promise.resolve(null) : read());
-
-/* The proof is an image of one platform that carries it in a label; anything else under its tag proves nothing. */
-async function proofIn(manifest: Manifest, blob: (digest: string) => Promise<Response>): Promise<unknown> {
-  if (!manifest.config) return null;
-  const image = (await (await blob(manifest.config.digest)).json()) as ConfigBlob;
-  return parsedLabel(image.config?.Labels?.[LIVE_CHECK_LABEL]);
 }
 
 export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?: typeof fetch; base?: string }): Registry {
@@ -124,16 +107,6 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
         }),
       );
       return { node: node!, updater: updater! };
-    },
-    async buildOf(tag) {
-      const auth = await token();
-      const res = await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES], true);
-      return unlessLacking(res, () => build(auth, tag));
-    },
-    async liveCheck(commit) {
-      const auth = await token();
-      const res = await call(`/v2/${path}/manifests/${liveCheckTag(commit)}`, auth, MANIFEST_TYPES, true);
-      return unlessLacking(res, async () => proofIn((await res.json()) as Manifest, digest => call(`/v2/${path}/blobs/${digest}`, auth)));
     },
   };
 }
