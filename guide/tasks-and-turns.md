@@ -46,23 +46,28 @@ In Development, each piece is a whole feature for one developer of the pool. Whe
 
 ## Which checks does a piece go through?
 
-Each piece gets only the gates its size and risk need:
+Development uses one route for each executable task:
 
-- none for research, reports, plans and docs;
-- one review stage for code, where a reviewer of each provider checks the same change in parallel;
-- security only when the change touches access, sign-in, secrets or permissions.
+- Architecture writes the plan when the task is large. Small tasks start at Development.
+- Development produces the change and its checks.
+- Review checks the work and repairs its findings in the same branch.
+- Cleanup runs after Review only when the head explicitly enables it for the task or turn. It is off by default and uses the existing dev-cleanup skill.
+- Security checks sensitive work when the head requires it or Review discovers the risk.
+- Tests verifies the final candidate, including repairs, using applicable checks and verified results at the same influencing fingerprint. Mutations cover only changed pure functions with fast tests.
 
-Acceptance runs once per turn, on the turn's branch.
+Each stage has one current owner. Review is required even when only one provider or subscription is available. The checker must use a model at least as capable as the producer's; an eligible different provider is preferred when available.
+
+A coordination task with no executable result closes with a checked report and valid reviewed child results. An unfinished, unaccepted or stale child blocks that report. A parent that produces its own executable result follows the route above.
 
 ## How does a member work its piece?
 
 1. It works the task in a branch.
 2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again.
 3. It hands the task in, with evidence.
-4. Each gate passes it on, with notes for the rest, or sends it back.
-5. When all gates pass, and the department works in a repository, the task goes back to its member. The member merges the branch into the turn's branch, named after the turn's number like `turn-3`, and reports it, or says what blocks the merge.
+4. The current stage owner checks and repairs the same branch, records its findings and exact candidate, then passes the task forward.
+5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. Main and release still require the authorized person's approval of the exact commit.
 
-A gate sends work back only for what blocks: a failing test, an unmet requirement, a security hole or data loss.
+Review and Security keep their own repairs. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair.
 
 ## When does the head report?
 
@@ -95,8 +100,8 @@ The head or the orchestrator can say what kind of work a task is (bug, known beh
 When there is something for it:
 
 - a task given to it;
-- work at its gate;
-- a task sent back;
+- work assigned to its current stage;
+- a decision or repair assigned by the head;
 - an answer from a person.
 
 ## What if an agent stops moving its task?

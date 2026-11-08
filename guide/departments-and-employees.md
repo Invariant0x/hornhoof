@@ -10,8 +10,8 @@ Click a department to fly into it. Its schema shows:
 
 - the head on top;
 - a frame for each role;
-- work going left to right through the gates;
-- an amber line for what a gate sent back.
+- Development work going left to right through Architecture, Development, Review, Security and Tests;
+- the actual current stage owner and candidate, with findings recorded by the stage that found them. Cleanup appears after Review only when the head enables it.
 
 Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
@@ -107,13 +107,13 @@ The tick on a role's frame switches all of its employees off or on at once.
 
 The head spreads tasks over the implementers that are on, a different task for each.
 
-## How do reviews at a gate work?
+## How does Development review work?
 
-Reviewers of different models find different things. So at each gate, one employee of the gate's role for each maker of models checks the same work at once, such as one on Claude and one on Codex. For each maker, it is the employee that is on with the fewest tasks at a gate.
+Each executable task passes Review with one current owner. The reviewer checks errors, clarity and basic security, repairs its findings in the same task branch, then passes the final candidate forward. Security does the same deeper check when the task's risk requires it. Work that solves the wrong problem goes to the head for a decision.
 
-- The gate passes when all of them pass.
-- A send-back gives the executor all their reasons in one list.
-- Work handed in again goes straight back to that gate, and only to the reviewers who sent it back. Each of them checks the fixes for its own findings.
+The checker must use a model at least as capable as the producer's. Hornhoof prefers an eligible different provider when one is available. A single provider, subscription or tariff is allowed; the task does not wait for a second provider solely for that reason. Unknown model capability needs the head's attention.
+
+Cleanup is optional and off by default. When the head enables it for a task or turn, it follows Review and uses the existing dev-cleanup skill. Tests checks the exact final candidate after all repairs. Findings retain their stage and candidate history; they are counted once.
 
 ## How hard does an employee think?
 
@@ -170,8 +170,8 @@ Deep roles: Architect, Controller, Head of business development, Head of develop
 
 ## What if a role has nobody switched on?
 
-- A role with nobody on takes no part. It gets no tasks, and work passes its gate by, on to the next one, or is done after the last.
-- A gate whose role has people on, but none who can check it, waits with the head and says who they are. That happens, for example, when they have no subscription. It starts again once one of the role who is on can check it, or when the head gives it other gates.
+- A role with nobody on receives no new assignments.
+- A required Development stage with no eligible owner waits for the head. Review and required Security are never skipped because a role is off, a model is weaker or a subscription is unavailable. The head can assign an eligible employee with the stage's check and repair skills.
 - A department whose head is off, or whose employees are all off, gets no work from the orchestrator.
 
 ## Who owns a department's approvals?
