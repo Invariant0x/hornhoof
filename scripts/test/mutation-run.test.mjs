@@ -166,6 +166,32 @@ test('a bound delta plan works on a shallow worker without its base object', t =
   assert.equal(result.report.selection.deltaSource, 'plan');
 });
 
+test('invalid candidate CLI arguments fail before any mutation', t => {
+  const fixture = deltaRepository(t);
+  for (const args of [
+    ['--base', fixture.base], ['--base', 'short', '--head', fixture.head],
+    ['--base', fixture.base, '--head', fixture.head, '--base', fixture.base],
+    ['--base', fixture.base, '--head', fixture.head, '--unknown', 'value'],
+    ['--base', fixture.base, '--head', fixture.head, '--plan'],
+  ]) {
+    const result = fixture.run(args);
+    assert.equal(result.code, 1); assert.deepEqual(result.report.files, []);
+  }
+  assert.deepEqual(fixture.calls(), []);
+});
+
+test('a shallow candidate refuses a missing, mismatched or lineless delta plan', t => {
+  const fixture = deltaRepository(t), shallow = join(fixture.folder, 'shallow');
+  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${fixture.root}`, shallow], { stdio: 'pipe' });
+  const plan = { sha: fixture.head, base: fixture.base, changes: [{ path: fixture.source, kind: 'modified' }], hunks: { [fixture.source]: [[2, 1]] }, grown: {} };
+  const requests = [[], ['--plan', encodePlan({ ...plan, base: '3'.repeat(40) })], ['--plan', encodePlan({ ...plan, sha: '4'.repeat(40) })], ['--plan', encodePlan({ ...plan, hunks: undefined })]];
+  for (const extra of requests) {
+    const result = fixture.run(['--base', fixture.base, '--head', fixture.head, ...extra], [fixture.source], {}, shallow);
+    assert.equal(result.code, 1); assert.deepEqual(result.report.files, []);
+  }
+  assert.deepEqual(fixture.calls(), []);
+});
+
 test('a source is judged again by tests that changed, and keeps what it was judged by only once it went well', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'hh-judges-'));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
