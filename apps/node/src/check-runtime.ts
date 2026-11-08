@@ -67,7 +67,7 @@ export async function runQueuedPart(message: Parameters<typeof runTests>[0], run
 const unpreparedFiles: CommandFiles = { lstat: async () => null, realpath: async () => null, read: async () => null };
 async function workCommandRefusal(message: Parameters<typeof runTests>[0], dir: string): Promise<string | null> {
   if (message.kind !== 'work') return null;
-  if (message.environment) return refusalText({ allow: false, code: 'heavy_check_local', category: 'product_tests' });
+  if (message.environment) return refusalText({ allow: false, code: 'whole_suite_local', category: 'product_tests' });
   const root = join(dir, 'runs', message.partId, message.repo ? 'repo' : 'work');
   const verdict = await classifyRunWork({ command: message.command, cwd: root, workspaceRoot: root }, unpreparedFiles);
   return verdict.allow ? null : refusalText(verdict);

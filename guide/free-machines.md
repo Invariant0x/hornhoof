@@ -1,12 +1,12 @@
 # Tests and heavy work on free machines
 
-> In short: when an agent runs the tests, Hornhoof sends them to whichever machine of the company is freest, and splits them over several machines when it can. Other heavy commands go out the same way. Only machines lent to test runs take this work, and a loaded one takes none.
+> In short: an agent checks its change in its own workspace, including installs, named test files, types, lint, builds and quality checks. Only whole suites or declared profiles go through `run_tests`, split into groups over free machines. Other non-check work can use `run_work`. Only machines lent to test runs take this work, and a loaded one takes none.
 
 The names in `code`, like `run_tests` or `pool`, are tools the agents use. You do not type them.
 
 ## Where do the tests run?
 
-An agent runs the whole test suite of a branch with `run_tests`. The suite does not run on the agent's own machine. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
+An agent runs the whole test suite of a branch with `run_tests`. Checks of the agent's own change need no `run_tests`: they run right away in its own workspace. Install from the lockfile once there, and again when it changes. A test command with no named files, or with a directory, glob, loop or variable as its selection, counts as a whole suite. Named browser test files run locally when the browser is there; installing it is allowed. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
 
 A test runner that can split a suite runs it in parts, one part on each of several machines at once.
 
@@ -108,7 +108,7 @@ Other work, from `run_work`, is different. A part of it may still run on a machi
 
 ## Run other heavy work on free machines
 
-Heads and workers run any other command the same way, with `run_work`:
+Heads and workers run non-check work with `run_work`. It may prepare dependencies, but any check in a work run still goes to `run_tests`. Checks of one's own change stay in one's own workspace:
 
 - With a branch, it runs in a clone of the repository. Without one, it runs in a fresh empty folder.
 - The files it names come from the task.

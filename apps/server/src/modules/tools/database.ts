@@ -19,7 +19,7 @@ export const READS_IN_THIS_TURN = 'In this turn the tool only reads: it answers 
 const DECISIONS = 'Requests, cards and the logs of tasks and conversations change only through the other tools: a request closes only with answer_request.';
 const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
-const TESTS = 'Test runs and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
+const TESTS = 'Whole-suite runs on free machines and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
 const HARNESS = 'Hornhoof keeps where a test harness stands itself and builds it by itself: test_harness shows it, and the tool only reads it.';
 /* What the orchestrator may not do with a table, in the words he acts on. */
 const RULES: Record<string, string> = {

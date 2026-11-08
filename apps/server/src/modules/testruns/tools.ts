@@ -32,15 +32,14 @@ const TaskRef = (what: string) =>
 const Parts = z.number().int().min(1).max(MAX_TEST_PARTS).optional().describe('How many parts to split it into; 1 by default.');
 const Minutes = z.number().int().min(1).max(TEST_MINUTES_MAX).optional().describe(`The time limit of each part, ${TEST_MINUTES} minutes by default.`);
 
-/* An employee runs a task's full test suite, or any other work, on whichever machines of the company are free, not on its
-   own machine. */
+/* Whole suites and assigned non-check work use the free machines. Checks of a change stay in its owner's workspace. */
 export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'run_tests',
     {
       description:
-        "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. A release's profiles take a result only from the repository's main branch or the turn's, so run a release's check on the turn's branch: every so many turns everything runs there and any mismatch with the kept results is named. " +
-        "With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
+        "Runs the whole test suite or a declared profile, split into groups over the free machines. Checks of your own change run in your own workspace and need no run_tests. Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again and a failed file always does. A release's profiles take a result only from the repository's main branch or the turn's, so run a release's check on the turn's branch: every so many turns everything runs there and any mismatch with the kept results is named. " +
+        "With command, runs the manual whole-suite command and returns at once with the run's number. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
         "a part that checked another one fails the run. The product's harness is ready there before the command starts: dependencies and what the repository prepares are in place, so a command needs no installation or build. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
         `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +

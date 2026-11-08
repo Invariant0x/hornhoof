@@ -8,7 +8,7 @@ const body = (id: string) => templates.skills.get(id)!.body;
 describe('pipeline guidance', () => {
   it('chooses author and broader checks from the task without imposing a shared chain', () => {
     expect(body('dev-gates')).toMatch(/assignment, task acceptance, declared risk and actual gates/);
-    expect(body('dev-testing-policy')).toMatch(/T2: Select impact explicitly[\s\S]*affected tests through run_tests[\s\S]*exact commit/);
+    expect(body('dev-testing-policy')).toMatch(/T2: Select impact explicitly[\s\S]*affected tests in your own workspace[\s\S]*run_tests/);
     expect(body('dev-gates')).toMatch(/When broader validation is assigned, one owner freezes the exact candidate/);
     expect(body('dev-implement')).toMatch(/separate branch\/workspace for independent work while a check is pending/);
     expect(body('dev-release-improvements')).toMatch(/assigned|assignment/i);

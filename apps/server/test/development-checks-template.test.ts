@@ -17,7 +17,7 @@ describe('development check ownership', () => {
   it.each(['DEV-ENG', 'DEV-BE', 'DEV-FE'])('delivers %s its selected implementation method separately from identity', id => {
     const implement = filesFor(id).find(file => file.name === 'dev-implement')!.body;
     expect(implement).toMatch(/failing test/i);
-    expect(implement).toMatch(/Run affected checks through run_tests on the exact candidate/);
+    expect(implement).toMatch(/Run affected checks in your own workspace/);
     expect(implement).toMatch(/submit its exact SHA[\s\S]*observed results and concerns/);
   });
 
@@ -30,7 +30,7 @@ describe('development check ownership', () => {
 
   it('makes author verification the same for ordinary and small tasks', () => {
     const implement = body('dev-implement');
-    expect(implement).toMatch(/Run affected checks through run_tests/);
+    expect(implement).toMatch(/Run affected checks in your own workspace/);
     expect(implement).toMatch(/submit its exact SHA, requirements-to-tests, observed results/);
     expect(implement).not.toMatch(/Finish[^\n]*(formatter|linter|type checker|crapper|dryer)/);
     const selection = body('dev-testing-policy').split('\n').find(line => line.startsWith('- **T2:'))!;

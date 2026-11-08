@@ -18,14 +18,14 @@ describe('node-owned command context', () => {
   it.each(['one.test.ts', 'new.test.ts'])('allows one regular test file %s inside the authenticated workspace', async file => {
     const c = workspace();
     writeFileSync(join(c.repo, file), 'export {};');
-    expect(await c.guard(c.key, { command: ['vitest', 'run', file], cwd: c.repo })).toMatchObject({ allow: true, kind: 'single_test_file' });
+    expect(await c.guard(c.key, { command: ['vitest', 'run', file], cwd: c.repo })).toMatchObject({ allow: true, kind: 'test_files' });
   });
 
   it('allows an ordinary command and resolves scripts from the canonical cwd', async () => {
     const c = workspace();
     expect(await c.guard(c.key, { command: ['git', 'status'], cwd: c.repo })).toMatchObject({ allow: true });
-    expect(await c.guard(c.key, { command: ['npm', 'test'], cwd: c.repo })).toMatchObject({ allow: true, kind: 'single_test_file' });
-    expect(await c.guard(c.key, { command: ['npm', 'run', 'build'], cwd: c.repo })).toMatchObject({ allow: false, code: 'heavy_check_local' });
+    expect(await c.guard(c.key, { command: ['npm', 'test'], cwd: c.repo })).toMatchObject({ allow: true, kind: 'test_files' });
+    expect(await c.guard(c.key, { command: ['npm', 'run', 'build'], cwd: c.repo })).toMatchObject({ allow: true });
   });
 
   it.each(['../agent-550', '', 'x/y', 'x'.repeat(65), 'other-agent'])('refuses missing or invalid node-owned key %j', async key => {
