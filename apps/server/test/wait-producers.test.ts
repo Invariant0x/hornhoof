@@ -253,17 +253,23 @@ describe('a candidate at its current checking stage', () => {
     expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.id), eq(taskEvents.kind, 'submitted')))).toEqual([]);
   });
 
-  it('supersedes the old candidate wait when its reviewer submits a repair candidate', async () => {
+  it('supersedes its Review wait when the reviewer hands a repaired candidate to Tests', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const work = await atReview(c);
+    const tester = await c.hire('Tests', 'worker', 'DEV-TEST');
+    const work = await atReview(c, { testsAgentId: tester.id });
+    const input = await c.snapshot(work.id);
     const original = await key(c, work);
     await verdict(c.ctx, c.rita.id, work.id, { pass: false, comment: 'I am fixing it.', reviewedCommit: HEAD });
     c.atCommit('c'.repeat(40));
     await submit(c.ctx, c.rita.id, work.id, { ...code, summary: 'Fixed.' });
-    const repaired = await key(c, work);
-    expect(repaired).not.toBe(original);
-    expect((await c.waitsOf(work)).map(wait => [wait.sourceKey, wait.state])).toEqual([[original, 'superseded'], [repaired, 'active']]);
+    const repaired = await c.snapshot(work.id);
+    expect(repaired).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: tester.id });
+    expect(repaired.candidateId).not.toBe(input.candidateId);
+    expect(repaired.stages.find(step => step.stage === 'tests')!.inputCandidateId).toBe(repaired.candidateId);
+    const submitted = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.id), eq(taskEvents.kind, 'submitted'))).orderBy(asc(taskEvents.id));
+    expect(submitted.at(-1)!.data.candidate).toMatchObject({ id: repaired.candidateId, parentId: input.candidateId, commit: 'c'.repeat(40), producedBy: { agentId: c.rita.id, stage: 'review' } });
+    expect((await c.waitsOf(work)).map(wait => [wait.sourceKey, wait.state])).toEqual([[original, 'superseded']]);
   });
 
   it('binds conditional Security to the same candidate and its own current owner', async () => {
