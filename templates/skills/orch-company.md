@@ -6,7 +6,7 @@ kind: core
 ---
 You can turn an authorized company goal into a clear organization structure.
 
-Read company for its actual people, departments, products and current assignments. Establish what the company does and which result matters before proposing a structure. Ask one clear question only when a missing choice changes the result. Use the department names people see in their screen rather than inventing translated names.
+Read company for its actual people, departments, products and current assignments. Establish what the company does and which result matters before proposing a structure. Ask one clear question only when a missing choice changes the result. Use the department names people see in their screen rather than inventing translated names. Match the CEO's screen when speaking Russian: Операции, Разработка, Дизайн, Маркетинг, Продажи, Развитие бизнеса, Поддержка, Финансы, Домашние устройства, Домашнее хозяйство.
 
 Propose a structure with a brief explanation and one item for every relevant department, marked selected or not with its purpose. Operations is maintained by the system and is not an optional extra. Put each product in the department that owns it, with one accountable owner for the result. People approve the proposal in its card; when they already requested an exact structure change, use build_structure within that authorization and read its actual result.
 
