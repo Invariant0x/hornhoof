@@ -144,6 +144,16 @@ test('tests run once, on the selected files, and crapper reads the coverage of t
   assert.deepEqual(named(ports, 'crapper'), [{ program: 'crapper', args: ['--use-existing-coverage', 'src/a.ts'], cwd: 'apps/node' }]);
 });
 
+test('Vitest coverage includes are relative to its project root when the command runs at the repository root', async () => {
+  const suite = { ...vitestSuite, run: { ...vitestSuite.run, cwd: '.', args: ['--no-install', 'vitest', 'run', '--config', 'vitest.product.config.mjs', '--project=@hornhoof/node'] } };
+  const ports = fake(undefined, { [REPORT]: FILES[REPORT], 'coverage/lcov.info': 'SF:apps/node/src/a.ts\nDA:1,1\nDA:2,1\nDA:3,1\nend_of_record\n', '.metrics/crap.edn': FILES[CRAP] });
+  const result = await runStages(given({ suites: [suite] }), ports);
+  const run = named(ports, 'npx').find(call => call.args.includes('vitest'));
+  assert.ok(run.args.includes('--coverage.include=src/a.ts'));
+  assert.equal(run.args.includes('--coverage.include=apps/node/src/a.ts'), false);
+  assert.deepEqual(result.numbers.changedLines, { covered: 3, total: 3 });
+});
+
 test('a suite run by node has its own coverage and counts from the same run', async () => {
   const suite = { id: 'scripts', root: 'scripts', files: ['scripts/test/*.test.mjs'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, finalChecks: [] };
   const changes = [{ path: 'scripts/a.mjs', kind: 'modified' }];
