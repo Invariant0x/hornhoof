@@ -173,6 +173,17 @@ describe('changed pure function mutation selection', () => {
     const once = await select(files()), twice = await select(files(), { ...delta, changes: [...delta.changes, ...delta.changes] });
     expect(twice).toEqual(once);
   });
+
+  it('excludes a function sharing a mutation line with an unchanged effectful function', async () => {
+    const result = await select({ ...files(), [source]: 'export function changed(value: number) { return value > 0; } export function untouched() { return fetch("/"); }' }, { ...delta, changes: [{ path: source, ranges: [[1, 1]] }] });
+    expect(result.selected).toEqual([]);
+    expect(result.excluded).toContainEqual({ file: source, name: 'changed', reason: 'shared_function_line' });
+  });
+
+  it('excludes unknown module initialization and shadowed builtin calls', async () => {
+    expect(await select({ ...files(), [source]: `const state = initializeExternal();\n${code}` })).toMatchObject({ selected: [], excluded: [{ file: source, reason: 'unsafe_module' }] });
+    expect(await select({ ...files(), [source]: 'export function changed(Math: { abs(): number }) {\n return Math.abs();\n}' })).toMatchObject({ selected: [], excluded: [{ file: source, name: 'changed', reason: 'purity_unproven' }] });
+  });
 });
 
 describe('what the graph does not see', () => {
