@@ -74,6 +74,13 @@ describe('development echelon presentation', () => {
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Tests');
   });
 
+  it('uses the current owner in a task row instead of a stale author assignment', () => {
+    render(<TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />);
+    const row = screen.getByRole('button', { name: /#12/ });
+    expect(row).toHaveTextContent('Owner: reviewer');
+    expect(row).not.toHaveTextContent('Bruno');
+  });
+
   it('lists A in Review and B in Development with their own engine stage', () => {
     const independent = { ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', echelons: { ...ECHELON_WORKFLOW, stage: 'development' as const } };
     render(<><TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />
