@@ -142,6 +142,17 @@ describe('changed pure function mutation selection', () => {
     expect(await select(files(), { ...delta, changes: [] })).toMatchObject({ status: 'ready', selected: [] });
   });
 
+  it.each(['(value: number) => value + offset', 'function (value: number) { return value + offset; }'])('selects a pure function expression %s using a literal module constant', async expression => {
+    const result = await select({ ...files(), [source]: `const offset = 1; let unused: number;\nexport const changed = ${expression};\n` });
+    expect(result).toMatchObject({ status: 'ready', problems: [], selected: [{ file: source, name: 'changed', startLine: 2, endLine: 2, lines: [2], tests: [test] }] });
+    expect(result.selected).toHaveLength(1);
+  });
+
+  it('does not treat a mutable module variable as a constant of a pure function', async () => {
+    const result = await select({ ...files(), [source]: 'let offset = 1;\nexport const changed = (value: number) => value + offset;\n' });
+    expect(result).toMatchObject({ selected: [], excluded: [{ file: source, name: 'changed', reason: 'purity_unproven' }] });
+  });
+
   it.each(['node:child_process', 'node:fs', 'node:http', 'pg'])('excludes a source module importing %s', async dependency => {
     const result = await select({ ...files(), [source]: `import * as effect from '${dependency}';\n${code}` });
     expect(result.selected).toEqual([]);
