@@ -294,8 +294,6 @@ export const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string)
 /* Whoever gave out a task that is done hears it only for a task of its own: work under a bigger task is heard of once,
    when the last of it closes. */
 
-const closing = () => ({ status: 'done' as const, closedAt: new Date(), assigneeAgentId: null, silent: 0 });
-
 /* Whether the task's work lives in a repository: its product's, else its department's. */
 export async function inRepository(db: Db | Tx, task: Pick<Task, 'departmentId' | 'productId'>): Promise<boolean> {
   const ids = [task.productId, task.departmentId].filter((x): x is string => Boolean(x));
@@ -553,7 +551,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
 export async function submissionTask(ctx: Live, agentId: string, taskId: string): Promise<Task> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
-  if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
+  if ((await routeOf(ctx.db, task)).state.resultKind !== 'code') throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
@@ -626,7 +624,6 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: Ver
 
 function requireReporter(task: Task, agentId: string): void {
   stillOpen(task);
-  if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
 }
 
@@ -669,13 +666,14 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     await refuseWaiting(ctx.db, task);
     return coordinationReport(ctx, task, route, agentId, r.summary);
   }
+  if (route.state.resultKind !== 'coordination') throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };
   const unstuck = stuckGoes(ctx, task);
-  if (r.done || task.createdByAgentId) {
-    const wakes = giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary);
-    const row = await move(ctx, task, r.done ? closing() : { status: 'blocked' }, n, unstuck.also, wakes);
+  if (task.createdByAgentId) {
+    const wakes = giver(task, 'blocked', agentId, r.summary);
+    const row = await move(ctx, task, { status: 'blocked' }, n, unstuck.also, wakes);
     unstuck.tell();
     return { task: row, wakes };
   }

@@ -37,7 +37,7 @@ async function samePhase(db: Store, task: Task, state: TaskWake | null): Promise
 /* Messages follow their recipient through status changes within the same workflow stage. */
 const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.status === task.status;
 
-const sameVersion = (task: Task, state: TaskWake): boolean => state.version === undefined || state.version === task.version;
+const sameVersion = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.version === task.version;
 
 export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId;
 const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && task.assigneeAgentId === agentId;
