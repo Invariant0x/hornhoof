@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { FileNote, KEPT_BYTES, RepositoryPath, type FileOutcome } from '@hornhoof/protocol';
+import { MutationSelection, FileNote, KEPT_BYTES, RepositoryPath, type FileOutcome } from '@hornhoof/protocol';
 import { z } from 'zod';
 
 /* What a suite's runner says of its files, in the file $HH_TEST_REPORT names: { files: [{ file, status, ms?, note? }] }, each file
@@ -34,6 +34,17 @@ export function parseFileReport(text: string | null, context: { checkout: string
     return selected.has(path) ? [{ suiteId: context.suiteId, file: path, ...said }] : [];
   });
   return context.suiteFailed && !files.some(file => file.status === 'failed') ? [] : files;
+}
+
+/* Tool diagnostics may add fields beside this contract; only the proved function selection enters a receipt. */
+export function parseMutationReport(text: string | null): MutationSelection | null {
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text)?.selection as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const fields = Object.fromEntries(['version', 'status', 'baseCommit', 'commit', 'selected', 'excluded', 'problems'].map(key => [key, Reflect.get(value, key)]));
+    return MutationSelection.safeParse(fields).data ?? null;
+  } catch { return null; }
 }
 
 const under = (path: string, folder: string): boolean => path === folder || path.startsWith(`${folder}/`);

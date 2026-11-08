@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { mutationSelectionMatches, CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser, playwrightVersionIn } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
@@ -14,7 +14,7 @@ import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContex
 import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
-import { collectKept, parseFileReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
+import { collectKept, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -803,6 +803,18 @@ function keptBySuites(execution: TestExecution, state: ProductState, checkout: s
     return files.length ? [{ suiteId: suite.id, files }] : [];
   })).data ?? [];
 }
+function collectProductMutations(execution: TestExecution, state: ProductState): void {
+  const scope = execution.snapshot.candidate?.mutation, policy = execution.snapshot.description.manifest.mutation;
+  if (!scope || policy.status !== 'supported') return;
+  const mutations = state.reports.flatMap(report => {
+    const files = report.selected.filter(file => policy.sourcePaths.includes(file));
+    if (report.failed || !files.length) return [];
+    const selection = parseMutationReport(readJobFile(report.path, state.user.uid, REPORT_BYTES));
+    if (!selection || !mutationSelectionMatches(scope.selection, selection, files)) environmentError('description_mismatch', 'The mutation report is missing or differs from the assigned candidate functions.');
+    return [{ suiteId: report.suiteId, selection }];
+  });
+  if (mutations.length) state.receipt.mutations = mutations;
+}
 /* Read once the job's processes have stopped, so nothing changes under the reading. What cannot be read only means less is reused. */
 function collectProductResults(execution: TestExecution, state: ProductState, restored: KeptFiles): void {
   try {
@@ -810,6 +822,7 @@ function collectProductResults(execution: TestExecution, state: ProductState, re
     state.files = state.reports.flatMap(report => parseFileReport(readJobFile(report.path, state.user.uid, REPORT_BYTES), { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
     state.kept = keptBySuites(execution, state, checkout, restored);
   } catch (error) { state.out.line(`The results of the part's test files could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+  collectProductMutations(execution, state);
 }
 function rememberProductFailure(error: unknown, firstFailure: ProductCommandFailure | undefined, state: ProductState): ProductCommandFailure | undefined {
   if (error instanceof ProductCommandFailure) firstFailure ??= error;
