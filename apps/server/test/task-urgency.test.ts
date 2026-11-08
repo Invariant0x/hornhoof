@@ -12,9 +12,11 @@ import { agentRole, grantsFor, readerGrantsFor, readerRole, type SqlMode } from 
 import { MIGRATIONS } from '../src/db/client.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
 import { applyTeams } from '../src/modules/departments/routes.js';
-import { cancel, createTask, submit, updateTask, type NewTask } from '../src/modules/tasks/engine.js';
+import { cancel, createTask, report, submit, updateTask, type NewTask } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { mayHoldTask, setUrgent, urgentOnlyAgents } from '../src/modules/tasks/urgency.js';
 import { ONLY_CEO } from '../src/modules/tools/control.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, createTestDb, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -79,7 +81,7 @@ describe('a new task', () => {
     expect((await c.root({ title: 'URGENT: срочно, critical' }, { agentId: c.head.id })).urgent).toBe(false);
     const parent = await c.root();
     const client = await c.tools(c.head);
-    const res = await call(client, 'create_task', { title: 'URGENT', brief: 'срочно', body: 'urgent', executor: c.simon.id, gates: [], parent: parent.number, urgent: true });
+    const res = await call(client, 'create_task', { title: 'URGENT', brief: 'срочно', body: 'urgent', executor: c.simon.id, parent: parent.number, urgent: true });
     expect(res.isError, text(res)).toBeFalsy();
     const [made] = await c.db.select().from(tasks).where(eq(tasks.title, 'URGENT'));
     expect(made!.urgent).toBe(false);
@@ -98,21 +100,20 @@ describe('a new task', () => {
     expect((await c.under((await c.root()).id, { urgent: true })).urgent).toBe(false);
   });
 
-  it('that reviews a turn of urgent work is urgent too', async () => {
+  it('keeps urgent executable work urgent when its candidate moves to required Review', async () => {
     const c = await company();
     await c.db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, c.dev.id));
-    const [rita, rex] = await c.db
-      .insert(agents)
-      .values(['Rita', 'Rex'].map(name => ({ companyId: c.companyId, kind: 'worker' as const, name, roleKey: 'DEV-REV', departmentId: c.dev.id, model: '', subscriptionId: c.bruno.subscriptionId })))
-      .returning();
-    expect([rita, rex]).toHaveLength(2);
+    await c.db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, c.bruno.id));
+    const [rita] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Rita', roleKey: 'DEV-REV', departmentId: c.dev.id, model: 'claude-opus-5-5', subscriptionId: c.bruno.subscriptionId, skills: c.ctx.templates.roles.get('DEV-REV')!.skills.filter(s => s.on).map(s => s.id) }).returning();
+    c.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    c.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
     await makeTurn(c.db, c.companyId);
     const top = await c.root({ urgent: true, riskClass: 'access' });
-    const code = await c.under(top.id, { inTurnReview: true });
-    await submit(c.ctx, c.bruno.id, code.id, { summary: 'Done.', evidence: 'npm test' });
-    await submit(c.ctx, c.bruno.id, code.id, { summary: 'Merged.', evidence: 'git log: 1a2b3c4' });
-    const [review] = await c.db.select().from(tasks).where(and(eq(tasks.companyId, c.companyId), eq(tasks.title, 'Review of turn 4')));
-    expect(review!.urgent).toBe(true);
+    const code = await c.under(top.id, { small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita!.id });
+    const moved = await submit(c.ctx, c.bruno.id, code.id, { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    expect(moved.task).toMatchObject({ urgent: true, assigneeAgentId: rita!.id, status: 'review' });
+    expect(routeSnapshot(await routeOf(c.db, moved.task), rita!.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: rita!.id });
+    expect(await c.db.select().from(tasks).where(and(eq(tasks.companyId, c.companyId), eq(tasks.title, 'Review of turn 4')))).toEqual([]);
   });
 
   it.each(['head', 'worker'] as const)('with nothing above it is refused as urgent from a %s', async who => {
@@ -487,7 +488,7 @@ describe('work for someone in a team that takes only urgent work', () => {
     it('from a head, with who is free named', async () => {
       const c = await only(true);
       const top = await c.root();
-      const res = await call(await c.tools(c.head), 'create_task', { title: 'Ordinary', brief: '', body: 'x', executor: c.simon.id, gates: [], parent: top.number });
+      const res = await call(await c.tools(c.head), 'create_task', { title: 'Ordinary', brief: '', body: 'x', executor: c.simon.id, parent: top.number });
       expect(res.isError, text(res)).toBe(true);
       expect(text(res)).toContain('Simon');
       expect(text(res)).toContain('Quick');
@@ -615,7 +616,7 @@ describe('work for someone in a team that takes only urgent work', () => {
       const c = await only();
       const top = await c.root({ urgent: true });
       const client = await c.tools(c.head);
-      const res = await call(client, 'create_task', { title: 'Hot', brief: '', body: 'x', executor: c.simon.id, gates: [], parent: top.number });
+      const res = await call(client, 'create_task', { title: 'Hot', brief: '', body: 'x', executor: c.simon.id, parent: top.number });
       expect(res.isError, text(res)).toBeFalsy();
       const hot = await made(c, 'Hot');
       expect(hot).toMatchObject({ urgent: true, assigneeAgentId: c.simon.id });
@@ -646,7 +647,8 @@ describe('work for someone in a team that takes only urgent work', () => {
       await updateTask(c.ctx, c.head.id, held.id, { body: 'Now this.' });
       await updateTask(c.ctx, c.head.id, held.id, { executor: c.simon.id });
       expect(await c.read(held.id)).toMatchObject({ body: 'Now this.', executorAgentId: c.simon.id, assigneeAgentId: c.simon.id });
-      expect(await reason(submit(c.ctx, c.simon.id, held.id, { summary: 'Done.', evidence: 'npm test' }))).toBe('ok');
+      const planned = await report(c.ctx, c.simon.id, held.id, { done: true, summary: 'Change the checkout and verify the changed behavior.' });
+      expect(routeSnapshot(await routeOf(c.db, planned.task), c.simon.id)).toMatchObject({ stage: 'development', phase: 'active', ownerAgentId: c.simon.id });
     });
 
     it('when the work stopped being urgent', async () => {
