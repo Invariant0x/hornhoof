@@ -1,4 +1,5 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { candidateTestUnits, EnvironmentSnapshot, validateEnvironmentDescription } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -10,6 +11,7 @@ import { agentIdentity, departmentHead } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
 import { verifiedReuse } from './review-reuse.js';
+import { productReceipt, scopeKey } from '../testruns/describe.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
 export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
@@ -30,14 +32,35 @@ async function boundRuns(db: Ctx['db'] | Tx, task: Task, route: Route, ids: stri
   return { candidate, runs };
 }
 
+async function candidateProductSnapshot(run: typeof testRuns.$inferSelect, candidate: EchelonCandidate): Promise<EnvironmentSnapshot> {
+  try {
+    const snapshot = EnvironmentSnapshot.parse(run.environmentSnapshot), request = run.environmentRequest;
+    const { description } = snapshot, scope = description.repositoryScope;
+    const profile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
+    if (run.command !== '' || !request || request.problem || request.suite || (request.profile !== undefined && request.profile !== profile)
+      || request.baseCommit !== candidate.baseCommit || snapshot.candidate?.baseCommit !== candidate.baseCommit
+      || snapshot.profile !== profile || description.commitSha !== candidate.commit || run.environmentHash !== description.manifestHash
+      || scope.companyId !== run.companyId || scope.repositoryOwnerId !== run.departmentId || scopeKey(scope) !== scopeKey(request.repositoryScope)) throw new Error('The run does not prove the bound candidate scope.');
+    await validateEnvironmentDescription(description);
+    candidateTestUnits(snapshot);
+    return snapshot;
+  } catch { throw refuse(409, 'task_invalid', 'Tests needs the bound base/final fingerprints and valid product environment evidence.'); }
+}
+
 /* Server-owned run and part rows prove the same final source; a status label alone proves nothing. */
 export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision = route.revision) {
   const { candidate, runs } = await boundRuns(db, task, route, ids, testedRevision);
   for (const run of runs) {
     if (run.status !== 'passed') throw refuse(409, 'task_changed', 'A run did not pass.');
+    const snapshot = await candidateProductSnapshot(run, candidate);
     const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
     const complete = run.parts > 0 ? parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null) : await verifiedReuse(run);
     if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
+    for (const part of parts) {
+      const receipt = productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: part.exitCode, error: part.error, log: '',
+        ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities);
+      if (!part.finishedAt || !receipt) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
+    }
   }
   return runs.map(run => ({ runId: run.id, commit: candidate.commit }));
 }
