@@ -51,7 +51,8 @@ describe('development echelon abilities', () => {
     expect(route).toMatch(/Claude reviews Codex[\s\S]*Codex never reviews Claude/);
     expect(route).toMatch(/unknown[\s\S]*waiting[\s\S]*head/i);
     expect(route).toMatch(/same-model[\s\S]*fallback/i);
-    expect(route).toMatch(/Matrix and Performance[\s\S]*outside/);
+    expect(route).toMatch(/non-code[\s\S]*outside/);
+    expect(route).not.toMatch(/\b(?:Matrix|Ivan|David)\b/);
     expect(route).toMatch(/metrics[\s\S]*evidence[\s\S]*head[\s\S]*never automatically/i);
   });
 
@@ -62,5 +63,11 @@ describe('development echelon abilities', () => {
       expect(body(id), id).toMatch(/legacy/i);
     }
     expect(body('dev-review-verdict')).toContain('Never approve your own independent gate or edit the change you are assigned to judge');
+  });
+
+  it.each(['dev-lead', 'dev-task-flow', 'dev-work-pipeline', 'dev-qa-acceptance'])('%s follows the persisted route instead of returning echelon work to its author', id => {
+    expect(body(id)).toMatch(/task\.echelons/);
+    expect(body(id)).toMatch(/legacy/i);
+    expect(body(id)).toMatch(/wrong goal[\s\S]*head/i);
   });
 });
