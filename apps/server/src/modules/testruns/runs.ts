@@ -481,9 +481,10 @@ async function keepLog(ctx: Ctx, run: Run, part: Part, log: string): Promise<voi
   await ctx.db.insert(attachments).values({ companyId: run.companyId, jobId: run.jobId, agentId: run.agentId, taskId: run.taskId, name, mediaType: 'text/plain; charset=utf-8', bytes, size: bytes.length });
 }
 
-/* The node began a part: its time counts from now. */
+/* The node began a part: it has it, and its time counts from now. */
 export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): Promise<void> {
   if (!isId(partId)) return;
+  await partReceived(ctx, id, partId);
   await ctx.db
     .update(testParts)
     .set({ startedAt: new Date() })
@@ -501,9 +502,9 @@ function deliveriesOf(ctx: Ctx): PartDeliveries {
 }
 export function closeTestDeliveries(ctx: Ctx): void { deliveries.get(ctx)?.close(); deliveries.delete(ctx); }
 
-/* The node has a part it was sent: it said so, waits for a slot for it, or started it. A part runs on one machine at a
-   time, so one the node has though it does not run there under that id stops there: it went to another machine after
-   this one said nothing in time, or it ended meanwhile. */
+/* The node has a part it was sent: it said so, or started it. A part runs on one machine at a time, so one the node has
+   though it does not run there under that id stops there: it went to another machine after this one said nothing in
+   time, or it ended meanwhile. */
 export async function partReceived(ctx: Ctx, id: NodeIdentity, partId: string): Promise<void> {
   if (!isId(partId) || deliveriesOf(ctx).received(partId, id)) return;
   const [here] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(id)));
