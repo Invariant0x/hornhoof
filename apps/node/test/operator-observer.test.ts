@@ -31,6 +31,20 @@ function fixture() {
 }
 
 describe('program delivery evidence', () => {
+  it('copies the state at most once when checking many programs and deliveries', () => {
+    const c = fixture();
+    const id = (index: number) => `40000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    for (let index = 0; index < 50; index++) {
+      const current = { ...identity, instance: index === 0 ? instance : id(index) };
+      c.observer.launch(current, 'started');
+      for (let ordinal = 1; ordinal <= 6; ordinal++) c.observer.attempt(current, { id: id(100 + index * 6 + ordinal), ordinal }, 'assignment', 'exact words');
+    }
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    c.at(60000); c.observer.tick();
+    expect(clone.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(c.alarms()).toHaveLength(300);
+  });
+
   it('does not call authenticated queue waiting missing activity, but detects a lost queue connection', async () => {
     const client = new CheckClient(() => true); client.online(true); setCheckClient(client);
     const pending = client.acquire({ agentId: agentKey, jobId });
@@ -206,6 +220,32 @@ function freeOutbox(observer: OperatorObserver, c: ReturnType<typeof fixture>): 
 }
 
 describe('bounded evidence backpressure', () => {
+  it('keeps checking after a full outbox and preserves earlier alarms and later queue checks', async () => {
+    const c = compoundFixture();
+    const current = { ...identity, jobId: nextQuestion.id, instance: nextQuestion.id };
+    const queued = { id: '10000000-0000-4000-8000-000000000010', ordinal: 3 };
+    c.observer.launch(current, 'started'); c.observer.question(current, nextQuestion);
+    c.observer.attempt(current, queued, 'assignment', 'queued words');
+    const client = new CheckClient(() => true); client.online(true); setCheckClient(client);
+    const pending = client.acquire({ agentId: current.agentKey, jobId: current.jobId });
+    const rejected = pending.catch(() => {});
+    try {
+      const observer = fullOutbox(c, 1), before = disk(c);
+      c.at(60000);
+      expect(() => observer.tick()).toThrow(/outbox is full/);
+      expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'question_waiting', questionId: question.id })]);
+      expect(disk(c).instances[current.instance]).toMatchObject({ ordinal: before.instances[current.instance]!.ordinal, question: { alarmed: false } });
+      expect(disk(c).deliveries[queued.id]).toMatchObject({ checkAfter: 121000 });
+      freeOutbox(observer, c);
+      observer.tick();
+      expect(c.alarms()).toEqual([
+        expect.objectContaining({ reason: 'question_waiting', questionId: question.id }),
+        expect.objectContaining({ reason: 'question_waiting', questionId: nextQuestion.id }),
+        expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId }),
+      ]);
+    } finally { client.online(false); await rejected; }
+  });
+
   it.each(['launch', 'attempt', 'receipt', 'finalize', 'alarm', 'activity', 'exit'] as const)('keeps %s retryable without consuming state at capacity', operation => {
     const c = fixture(); c.attempt();
     const observer = fullOutbox(c);
