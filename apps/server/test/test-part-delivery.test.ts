@@ -60,6 +60,8 @@ describe('parts sent to a machine that has not said yet it got them', () => {
     expect([...timers.pending.values()].map(t => t.ms)).toEqual([RECEIVE_MS]);
     timers.fireAll();
     expect(woken).toBe(1);
+    /* Its timer ran, so it is due even by a clock that has not moved since. */
+    expect(sent.due(0)).toEqual([{ partId: part, node: ann }]);
 
     sent.expect(other, bob, 0);
     sent.received(other, bob);

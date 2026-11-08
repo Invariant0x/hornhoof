@@ -137,6 +137,21 @@ describe('a part sent to a machine', () => {
     expect(await gets(back, 'tests.cancel')).toBe(false);
   });
 
+  it('does not run work elsewhere that its machine did not say it got unless the work may run twice', async () => {
+    const c = await company();
+    const silent = await c.machine(c.ceo, 'silent-box', idle(), { receives: false });
+    const { call } = await c.turn(c.bruno);
+    await call('run_work', { command: 'make deploy' });
+    const deploy = await nextOf(silent.node, 'tests.run');
+    const ann = await c.machine(c.ann, 'ann-pc');
+    await checkTestTimes(c.app.ctx, past());
+    expect(await partsOf(c)).toMatchObject([{ id: deploy.partId, status: 'failed', error: 'not_received' }]);
+    expect(await nextOf(silent.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: deploy.partId });
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Work run 1 failed[\s\S]*Part 1 of 1 failed on silent-box[^:]*: its machine did not say it got it within 10 s, and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable/);
+    expect(await gets(ann.node, 'tests.run')).toBe(false);
+  });
+
   it('fails a part no machine says it got once it went out three times, and says why', async () => {
     const c = await company();
     const silent = await c.machine(c.ceo, 'silent-box', idle(), { receives: false });
