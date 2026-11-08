@@ -1,12 +1,30 @@
-import type { EchelonCandidate, EchelonStage } from '@hornhoof/protocol/echelons';
+import type { EchelonCandidate, EchelonStage, EchelonStep } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import type { Route } from './echelons-store.js';
 import { checkerFor, departmentHead } from './echelons-assign.js';
+import type { CheckerIdentity } from './echelons-policy.js';
 import { refuse, type Task, type Wake } from './engine.js';
 
 export const CHECK_ABILITIES: Partial<Record<EchelonStage, string>> = {
   review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment',
 };
+
+function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity | null, candidateId: string): EchelonStep[] {
+  return route.state.stages.map((step): EchelonStep => {
+    if (step.stage === route.state.stage) return { ...step, status: 'complete', candidateId };
+    if (step.stage === next.stage) return { ...step, status: owner ? 'active' : 'pending', ownerAgentId: owner?.agentId ?? null, reason: owner ? null : 'eligible_owner_required', inputCandidateId: candidateId };
+    return step;
+  });
+}
+
+async function handoffWake(ctx: Pick<Ctx, 'db'>, task: Task, stage: EchelonStage, owner: CheckerIdentity | null): Promise<Wake> {
+  if (owner) return { agentId: owner.agentId, taskId: task.id, why: stage === 'tests' ? 'tests' : 'review' };
+  return { agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: `${stage} needs an eligible owner with the required ability and a model not weaker than the producer.` };
+}
+
+function handoffTask(stage: EchelonStage, owner: CheckerIdentity | null): Partial<Task> {
+  return { status: owner ? (stage === 'tests' ? 'open' : 'review') : 'waiting', assigneeAgentId: owner?.agentId ?? null, silent: 0 };
+}
 
 export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: EchelonCandidate): Promise<{ state: Route['state']; set: Partial<Task>; wakes: Wake[] }> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
@@ -16,13 +34,7 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
   if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
   const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
   const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,
-    stages: route.state.stages.map(step => {
-      if (step.stage === route.state.stage) return { ...step, status: 'complete', candidateId: candidate.id };
-      if (step.stage === next.stage) return { ...step, status: owner ? 'active' : 'pending', ownerAgentId: owner?.agentId ?? null, reason: owner ? null : 'eligible_owner_required', inputCandidateId: candidate.id };
-      return step;
-    }),
+    stages: advancedSteps(route, next, owner, candidate.id),
   };
-  const wakes: Wake[] = owner ? [{ agentId: owner.agentId, taskId: task.id, why: next.stage === 'tests' ? 'tests' : 'review' }]
-    : [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: `${next.stage} needs an eligible owner with the required ability and a model not weaker than the producer.` }];
-  return { state, set: { status: owner ? (next.stage === 'tests' ? 'open' : 'review') : 'waiting', assigneeAgentId: owner?.agentId ?? null, silent: 0 }, wakes };
+  return { state, set: handoffTask(next.stage, owner), wakes: [await handoffWake(ctx, task, next.stage, owner)] };
 }

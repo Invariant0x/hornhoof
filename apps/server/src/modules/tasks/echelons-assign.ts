@@ -24,12 +24,16 @@ export async function agentIdentity(db: Reader['db'], companyId: string, agentId
   return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: row.model, provider: modelProvider(row.provider), capability };
 }
 
+function canCheckTask(agent: typeof agents.$inferSelect, task: Task, ability: string, named: string | null): boolean {
+  return !(named && agent.id !== named) && !(agent.productId && agent.productId !== task.productId) && agent.skills.includes(ability);
+}
+
 /* Selection never changes a subscription, model, employee or skill card. */
 export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null): Promise<CheckerIdentity | null> {
   const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
   const eligible: CheckerIdentity[] = [];
   for (const agent of staff) {
-    if ((named && agent.id !== named) || (agent.productId && agent.productId !== task.productId) || !agent.skills.includes(ability)) continue;
+    if (!canCheckTask(agent, task, ability, named)) continue;
     const identity = await agentIdentity(ctx.db, task.companyId, agent.id);
     if (identity && !reviewEligibility(producer, identity)) eligible.push(identity);
   }

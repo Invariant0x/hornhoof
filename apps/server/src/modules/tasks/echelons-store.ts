@@ -9,6 +9,32 @@ import type { Task, Tx } from './engine.js';
 export type Route = typeof taskRoutes.$inferSelect;
 export type RouteInput = { resultKind?: EchelonsSnapshot['resultKind']; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
+function routeStep(name: EchelonStep['stage'], current: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep {
+  return { stage: name, status: name === current ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null };
+}
+
+function architectureStep(task: Task, current: EchelonStep['stage']): EchelonStep {
+  const step = routeStep('architecture', current, task.assigneeAgentId);
+  if (task.small) Object.assign(step, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
+  return step;
+}
+
+function securityState(task: Task, input: RouteInput, current: EchelonStep['stage']): { step: EchelonStep; security: Route['state']['security'] } {
+  const required = task.riskClass !== null && task.riskClass !== 'none';
+  const step = routeStep('security', current, input.securityAgentId ?? null);
+  if (!required) Object.assign(step, { status: 'skipped', reason: 'no_declared_risk' });
+  return { step, security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null } };
+}
+
+function codeState(task: Task, input: RouteInput, cleanup: boolean): Route['state'] {
+  const stage = task.small ? 'development' : 'architecture';
+  const { step: security, security: policy } = securityState(task, input, stage);
+  return { kind: 'development_echelons', version: 1, resultKind: 'code', stage, phase: 'active', candidateId: null, assignment: null,
+    stages: [architectureStep(task, stage), routeStep('development', stage, task.executorAgentId ?? task.assigneeAgentId), routeStep('review', stage, input.reviewerAgentId ?? null),
+      ...(cleanup ? [routeStep('cleanup', stage)] : []), security, routeStep('tests', stage, input.testsAgentId ?? null)], security: policy,
+  };
+}
+
 export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
   const cleanup = input.cleanup ?? await turnCleanupDefault(tx, task);
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
@@ -19,20 +45,7 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
     } });
     return;
   }
-  const stage = task.small ? 'development' : 'architecture';
-  const required = task.riskClass !== null && task.riskClass !== 'none';
-  const step = (name: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep => ({
-    stage: name, status: name === stage ? 'active' : 'pending', ownerAgentId, reason: null, inputCandidateId: null, candidateId: null,
-  });
-  const architecture = step('architecture', task.assigneeAgentId);
-  if (task.small) Object.assign(architecture, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
-  const security = step('security', input.securityAgentId ?? null);
-  if (!required) Object.assign(security, { status: 'skipped', reason: 'no_declared_risk' });
-  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
-    kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), ...(cleanup ? [step('cleanup')] : []), security, step('tests', input.testsAgentId ?? null)],
-    security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null },
-  } });
+  await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: codeState(task, input, cleanup) });
 }
 
 export async function routeOf(db: Db | Tx, task: Pick<Task, 'id' | 'companyId'>): Promise<Route> {

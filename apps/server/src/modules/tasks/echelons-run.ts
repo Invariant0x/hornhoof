@@ -5,7 +5,7 @@ import { taskEvents, tasks } from '../../db/schema.js';
 import { agentIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { sameChecker } from './echelons-policy.js';
-import { routeOf } from './echelons-store.js';
+import { routeOf, type Route } from './echelons-store.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 
 export const EchelonRun = z.object({ candidateId: z.uuid(), revision: z.number().int().positive() }).strict();
@@ -13,6 +13,15 @@ export type EchelonRun = z.infer<typeof EchelonRun>;
 const Binding = z.object({ runId: z.uuid(), candidateId: z.uuid(), routeRevision: z.number().int().positive(), baseCommit: z.string(), commit: z.string(), branch: z.string(), testerId: z.uuid() }).strict();
 type Reader = Ctx['db'] | Tx;
 export type CandidateRun = Omit<z.infer<typeof Binding>, 'runId'>;
+
+function requireCurrentRequest(route: Route, input: EchelonRun | undefined): void {
+  const request = EchelonRun.safeParse(input);
+  if (route.state.phase !== 'active' || !request.success || request.data.candidateId !== route.state.candidateId || request.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current Tests candidate and route revision.');
+}
+
+function requireCandidateBranch(branch: string | undefined, expected: string): void {
+  if (branch !== undefined && branch !== expected) throw refuse(409, 'task_changed', 'Tests must run the current candidate branch.');
+}
 
 export async function candidateForRun(db: Reader, task: Task, agentId: string, input: { candidate?: EchelonRun; branch?: string }, kind: 'tests' | 'work'): Promise<CandidateRun | null> {
   if (kind !== 'tests') return null;
@@ -22,12 +31,11 @@ export async function candidateForRun(db: Reader, task: Task, agentId: string, i
     return null;
   }
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', 'Only the current Tests owner can start candidate verification.');
-  const request = EchelonRun.safeParse(input.candidate);
-  if (route.state.phase !== 'active' || !request.success || request.data.candidateId !== route.state.candidateId || request.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current Tests candidate and route revision.');
+  requireCurrentRequest(route, input.candidate);
   const identity = await agentIdentity(db, task.companyId, agentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed.');
   const candidate = await currentCandidate(db, task, route);
-  if (input.branch !== undefined && input.branch !== candidate.branch) throw refuse(409, 'task_changed', 'Tests must run the current candidate branch.');
+  requireCandidateBranch(input.branch, candidate.branch);
   return { candidateId: candidate.id, routeRevision: route.revision, baseCommit: candidate.baseCommit, commit: candidate.commit, branch: candidate.branch, testerId: agentId };
 }
 
@@ -40,8 +48,14 @@ export async function bindCandidateRun(tx: Tx, task: Task, binding: CandidateRun
   await note(tx, task, { kind: 'comment', actor: { agentId: binding.testerId }, text: 'Tests run bound to the current candidate.', data: { candidateRun: { runId: run.id, ...binding } } });
 }
 
-export async function requireCandidateRun(db: Reader, task: Task, candidate: { id: string; commit: string; baseCommit: string; branch: string }, revision: number, testerId: string | null, run: { id: string; agentId: string }): Promise<void> {
+type RunCandidate = { id: string; commit: string; baseCommit: string; branch: string };
+
+function matchesCandidate(binding: CandidateRun, candidate: RunCandidate, revision: number): boolean {
+  return binding.candidateId === candidate.id && binding.routeRevision === revision && binding.commit === candidate.commit && binding.baseCommit === candidate.baseCommit && binding.branch === candidate.branch;
+}
+
+export async function requireCandidateRun(db: Reader, task: Task, candidate: RunCandidate, revision: number, testerId: string | null, run: { id: string; agentId: string }): Promise<void> {
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'comment'), sql`${taskEvents.data}->'candidateRun'->>'runId' = ${run.id}`)).orderBy(desc(taskEvents.id)).limit(1);
   const parsed = Binding.safeParse(event?.data.candidateRun);
-  if (!parsed.success || event?.agentId !== testerId || run.agentId !== testerId || parsed.data.testerId !== testerId || parsed.data.candidateId !== candidate.id || parsed.data.routeRevision !== revision || parsed.data.commit !== candidate.commit || parsed.data.baseCommit !== candidate.baseCommit || parsed.data.branch !== candidate.branch) throw refuse(409, 'task_changed', 'The run has no server-owned binding to this Tests assignment and candidate.');
+  if (!parsed.success || event?.agentId !== testerId || run.agentId !== testerId || parsed.data.testerId !== testerId || !matchesCandidate(parsed.data, candidate, revision)) throw refuse(409, 'task_changed', 'The run has no server-owned binding to this Tests assignment and candidate.');
 }
