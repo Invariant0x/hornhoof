@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, testParts, testRuns } from '../../db/schema.js';
+import { agents, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { sameChecker } from './echelons-policy.js';
@@ -12,6 +13,7 @@ import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
 export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
 export type Verification = z.infer<typeof Verification>;
+const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })).min(1) });
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
 async function boundRuns(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision: number) {
@@ -102,4 +104,13 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
+}
+
+export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
+  const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
+    .where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`${taskEvents.data} ? 'verifiedCandidate'`)).orderBy(desc(taskEvents.id)).limit(1);
+  const proof = Verified.safeParse(event?.data.verifiedCandidate);
+  const tester = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId;
+  if (!proof.success || event?.agentId !== tester || proof.data.candidateId !== candidate.id || proof.data.commit !== candidate.commit || proof.data.routeRevision !== verifiedRevision || proof.data.evidence.some(run => run.commit !== candidate.commit)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
+  return candidateRunEvidence(db, task, route, proof.data.evidence.map(run => run.runId), proof.data.testedRevision);
 }

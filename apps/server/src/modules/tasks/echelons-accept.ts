@@ -1,12 +1,12 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requests, taskEvents, turns } from '../../db/schema.js';
+import { requests, turns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { candidateRunEvidence } from './echelons-tests.js';
+import { verifiedCandidateEvidence } from './echelons-tests.js';
 import { requireTaskHead } from './echelons-update.js';
 import { giver, move, refuse, type Moved, type Task, type Tx } from './engine.js';
 import { exactComparison } from './review-context.js';
@@ -14,7 +14,7 @@ import { ReviewSha } from './review-schema.js';
 
 export const AcceptanceInput = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), integrationCommit: ReviewSha }).strict();
 export type AcceptanceInput = z.infer<typeof AcceptanceInput>;
-const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })).min(1) });
+
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
 
 function requireReady(route: Route, input: AcceptanceInput): void {
@@ -24,14 +24,6 @@ function requireReady(route: Route, input: AcceptanceInput): void {
   if (input.candidateId !== route.state.candidateId || input.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact ready candidate and route revision.');
 }
 
-async function verifiedProof(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate) {
-  const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
-    .where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`${taskEvents.data} ? 'verifiedCandidate'`)).orderBy(desc(taskEvents.id)).limit(1);
-  const proof = Verified.safeParse(event?.data.verifiedCandidate);
-  const tester = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId;
-  if (!proof.success || event?.agentId !== tester || proof.data.candidateId !== candidate.id || proof.data.commit !== candidate.commit || proof.data.routeRevision !== route.revision || proof.data.evidence.some(run => run.commit !== candidate.commit)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
-  return candidateRunEvidence(db, task, route, proof.data.evidence.map(run => run.runId), proof.data.testedRevision);
-}
 
 async function mainApproval(db: Ctx['db'] | Tx, task: Task, commit: string): Promise<string> {
   const [approval] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.companyId, task.companyId), eq(requests.taskId, task.id),
@@ -73,14 +65,14 @@ export async function acceptCandidate(ctx: Reader, task: Task, route: Route, age
   if (!input.success) throw refuse(400, 'task_invalid', 'Acceptance needs the candidate, route revision and exact integration commit.');
   requireReady(route, input.data);
   const candidate = await currentCandidate(ctx.db, task, route);
-  const evidence = await verifiedProof(ctx.db, task, route, candidate);
+  const evidence = await verifiedCandidateEvidence(ctx.db, task, route, candidate);
   const integration = await observedIntegration(ctx, task, candidate, input.data);
   const wakes = giver(task, 'done', agentId, summary);
   const row = await move(ctx, task, { status: 'done', assigneeAgentId: null, closedAt: new Date(), silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { done: true, acceptedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, evidence, integration } }, returned: true,
   }, async tx => {
     await requireTaskHead({ db: tx }, task, agentId);
-    await verifiedProof(tx, task, route, candidate);
+    await verifiedCandidateEvidence(tx, task, route, candidate);
     if (integration.branch === 'main') await mainApproval(tx, task, integration.commit);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
   }, wakes);
