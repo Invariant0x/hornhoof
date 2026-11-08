@@ -115,16 +115,25 @@ export async function nextOf<T extends ServerMessage['type']>(node: FakeNode, ty
 /* Every node since skill files says in its hello that it writes them, so a stand-in says so too unless its test says
    otherwise. */
 const withSkillFiles = (msg: NodeMessage): NodeMessage => (msg.type === 'hello' && msg.skillFiles === undefined ? { ...msg, skillFiles: true } : msg);
+/* Every node since part receipts says in its hello and status that it confirms the parts it gets, so a stand-in does too
+   unless its test says otherwise. */
+const withTestDispatch = (msg: NodeMessage): NodeMessage => ((msg.type === 'hello' || msg.type === 'status') && msg.testDispatch === undefined ? { ...msg, testDispatch: 1 } : msg);
+
+/* What a stand-in node does by itself. testDispatch: says in its hello and status that it confirms parts; receives: says
+   it got each part of a run the moment it arrives, as such a node does. Both are on unless a test turns them off. */
+export type FakeNodeOptions = { autoPong?: boolean; testDispatch?: boolean; receives?: boolean };
 
 /* A stand-in for a node: connects with a key and collects what the server sends. */
-export function connectNode(url: string, key: string, opts: { autoPong?: boolean } = {}): Promise<FakeNode> {
+export function connectNode(url: string, key: string, opts: FakeNodeOptions = {}): Promise<FakeNode> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, { headers: { authorization: `Bearer ${key}` }, autoPong: opts.autoPong ?? true });
     const queue: ServerMessage[] = [];
     const waiters: ((m: ServerMessage) => void)[] = [];
     const acks: string[] = [];
+    const own = (msg: NodeMessage): NodeMessage => (opts.testDispatch === false ? withSkillFiles(msg) : withTestDispatch(withSkillFiles(msg)));
     ws.on('message', data => {
       const msg = JSON.parse(String(data)) as ServerMessage;
+      if (msg.type === 'tests.run' && opts.receives !== false) ws.send(JSON.stringify({ type: 'tests.received', partId: msg.partId }));
       if (msg.type === 'job.ack') return void acks.push(msg.jobId);
       const waiter = waiters.shift();
       if (waiter) waiter(msg);
@@ -136,7 +145,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
     ws.on('open', () =>
       resolve({
         ws,
-        send: msg => ws.send(JSON.stringify(withSkillFiles(msg))),
+        send: msg => ws.send(JSON.stringify(own(msg))),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
         acks,
         queued: () => queue.length,

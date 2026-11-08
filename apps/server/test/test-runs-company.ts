@@ -5,7 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode, type FakeNodeOptions } from './helpers.js';
 
 export const GIB = 1024 ** 3;
 
@@ -56,12 +56,12 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
     return { job: job!, call };
   };
   /* A machine of a person with one node, online with this load. */
-  const machine = async (token: string, hostname: string, load: object = idle(), { work = true, kind, noRuns }: { work?: boolean; kind?: string; noRuns?: string } = {}) => {
+  const machine = async (token: string, hostname: string, load: object = idle(), { work = true, kind, noRuns, ...stands }: { work?: boolean; kind?: string; noRuns?: string } & Pick<FakeNodeOptions, 'testDispatch' | 'receives'> = {}) => {
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(token) });
     const code = connected.json().command.split('--join ')[1];
     const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64', ...(kind ? { kind } : {}) } })).json();
     const [{ nodeId, subscriptionId, key }] = joined.nodes;
-    const node = await connectNode(url, key);
+    const node = await connectNode(url, key, stands);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work, ...(noRuns ? { noRuns } : {}) });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, key: key as string, nodeId: nodeId as string, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };

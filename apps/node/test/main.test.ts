@@ -1210,6 +1210,24 @@ describe('runNode', () => {
     expect(server.received.findIndex(m => m.type === 'check.release')).toBeGreaterThan(server.received.findIndex(m => m.type === 'tests.started'));
   });
 
+  it('says in its hello that it confirms parts, and that it got a part before it asks for a check slot, once per copy', async () => {
+    const server = await fakeServer(false), ran: string[] = [];
+    const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' }; };
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received.find(m => m.type === 'hello')).toMatchObject({ testDispatch: 1 });
+    const part = { type: 'tests.run', partId: 'received-part', repo: null, branch: null, task: 3, command: 'check', part: 1, parts: 1, timeoutMs: 60000 };
+    server.send(part);
+    await server.wait(() => server.received.some(m => m.type === 'check.acquire'));
+    expect(server.received.filter(m => m.type === 'tests.received' || m.type === 'check.acquire').map(m => m.type)).toEqual(['tests.received', 'check.acquire']);
+    expect(server.received.find(m => m.type === 'tests.received')).toEqual({ type: 'tests.received', partId: 'received-part' });
+    server.send(part);
+    await server.wait(() => server.received.filter(m => m.type === 'tests.received').length === 2);
+    expect(server.received.filter(m => m.type === 'check.acquire')).toHaveLength(1);
+    expect(ran).toEqual([]);
+  });
+
   it('cancels a queued part without starting preparation or claiming execution began', async () => {
     const server = await fakeServer(false), ran: string[] = [];
     const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' }; };
