@@ -1,5 +1,5 @@
 import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { createTask, type NewTask } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { setUpCompany, testApp } from './helpers.js';
 
@@ -21,18 +21,22 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const reviewer = await hire('Reviewer', 'worker', 'DEV-REV', claude!.id, options.reviewerModel ?? 'claude-opus-5-5');
   const security = await hire('Security', 'worker', 'DEV-SEC', claude!.id, 'claude-opus-5-5');
   const tester = await hire('Tests', 'worker', 'DEV-TEST', claude!.id, 'claude-opus-5-5');
-  app.ctx.readCommit = async () => ({ branch: 'task-1', commitSha: HEAD });
-  app.ctx.readCompare = async () => ({ complete: true, baseSha: BASE, headSha: HEAD, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  let commit = HEAD;
+  let changedPaths = ['logic/totals.ts'];
+  app.ctx.readCommit = async () => ({ branch: 'task-1', commitSha: commit });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: changedPaths, diff: '@@ -1 +1 @@\n-old\n+new' });
   const input = {
     title: 'Keep totals', brief: 'Keep the total correct.', body: 'Change logic/totals.ts.',
     departmentId: department!.id, assigneeAgentId: author.id, executor: true,
     cleanup: options.cleanup, small: options.small ?? true, riskClass: options.riskClass ?? 'none', paths: ['logic/totals.ts'], reviewerAgentId: options.autoReviewer ? undefined : reviewer.id, securityAgentId: security.id, testsAgentId: tester.id,
   };
+  const create = (changes: Partial<NewTask> = {}) => createTask(app.ctx, { agentId: head.id }, { ...input, ...changes });
+  const atCommit = (head: string, paths = ['logic/totals.ts']) => { commit = head; changedPaths = paths; };
   const { task } = await createTask(app.ctx, { agentId: options.creator === 'author' ? author.id : head.id }, input);
   const detail = async (id = task.id) => {
     const { loadTask } = await import('../src/modules/tasks/engine.js');
     return taskDetail(app.ctx, await loadTask(db, id), () => true);
   };
-  return { ctx: app.ctx, db, task, head, author, reviewer, security, tester, detail, hire, claude: claude!, codex: codex! };
+  return { ctx: app.ctx, db, task, create, atCommit, head, author, reviewer, security, tester, detail, hire, claude: claude!, codex: codex! };
 }
 
