@@ -84,17 +84,20 @@ it('requires the actual narrow mutation outcome even when the process and batch 
 
 it('retains exact base/head/function mutation evidence from the assigned suite', async () => {
   const f = await mutationReceiptFixture();
-  const receipt = Object.assign({}, f.receipt, { mutations: [{ suiteId: 'mutation', selection: f.mutation.selection }] });
+  const receipt = Object.assign({}, f.receipt, { mutations: [{ suiteId: 'mutation', selection: f.mutation.selection, files: [{ file: 'logic/totals.ts', status: 'passed' }] }] });
   expect(productReceipt(f.snapshot, f.assigned, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toEqual(receipt);
 });
 
-it.each(['base', 'head', 'function-lines', 'empty', 'duplicate'] as const)('refuses %s mutation provenance in an otherwise passed batch', async problem => {
+it.each(['base', 'head', 'function-lines', 'empty', 'duplicate', 'missing-files', 'failed-file', 'duplicate-file', 'foreign-file'] as const)('refuses %s mutation provenance in an otherwise passed batch', async problem => {
   const f = await mutationReceiptFixture(), selection = structuredClone(f.mutation.selection);
   if (problem === 'base') selection.baseCommit = '2'.repeat(40);
   if (problem === 'head') selection.commit = '2'.repeat(40);
   if (problem === 'function-lines') Object.assign(selection.selected[0]!, { endLine: 2, lines: [1, 2] });
   if (problem === 'empty') selection.selected = [];
-  const mutations = [{ suiteId: 'mutation', selection }];
+  const files = [{ file: 'logic/totals.ts', status: problem === 'failed-file' ? 'failed' : 'passed' }];
+  if (problem === 'duplicate-file') files.push(files[0]!);
+  if (problem === 'foreign-file') files[0]!.file = 'logic/other.ts';
+  const mutations = [{ suiteId: 'mutation', selection, ...(problem === 'missing-files' ? {} : { files }) }];
   if (problem === 'duplicate') mutations.push(mutations[0]!);
   const receipt = Object.assign({}, f.receipt, { mutations });
   expect(productReceipt(f.snapshot, f.assigned, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toBeNull();

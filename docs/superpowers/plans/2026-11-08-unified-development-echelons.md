@@ -111,3 +111,5 @@
 - Skill bookkeeping never runs local project checks. Record actual remote receipts in the execution ledger instead of invoking local `task-done` test scripts.
 
 - Current-main integration keeps `impact.fullPackageGlobs[].tests` and its protocol/selector support. Remove only readers whose replaced gate tests were actually deleted; declare the new route readers. Confirm this wiring with affected selector tests. Do not remove applicability fields to satisfy an older deployed parser.
+
+- Candidate mutation execution uses the manifest-declared narrow invocation with a bound private base/head delta file. Function selection contributes to its unit fingerprint. Final evidence must retain the actual exact selection and one passing result per assigned mutation source; a matching plan or process exit alone does not prove those source outcomes.
