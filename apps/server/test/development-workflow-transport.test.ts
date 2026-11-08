@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fixture } from './review-fixture.js';
 
-describe('development workflow transport compatibility', () => {
-  it('exposes a null workflow on a legacy task detail and preserves its owner and gates', async () => {
+describe('development echelon transport compatibility', () => {
+  it('exposes null echelons on a legacy task detail and preserves its owner and gates', async () => {
     const { task, author, reviewer, tools } = await fixture();
     const client = await tools();
     const result = await client.callTool({ name: 'task', arguments: { task: task.number } });
@@ -11,7 +11,7 @@ describe('development workflow transport compatibility', () => {
 
     expect(detail).toMatchObject({
       id: task.id,
-      workflow: null,
+      echelons: null,
       stage: 0,
       gateCount: 1,
       assignee: { id: author.id },
@@ -20,7 +20,7 @@ describe('development workflow transport compatibility', () => {
     });
   });
 
-  it('exposes a null workflow on legacy task list lines without inventing an echelon', async () => {
+  it('exposes null echelons on legacy task list lines without inventing an echelon', async () => {
     const { task, author, tools } = await fixture();
     const client = await tools();
     const result = await client.callTool({ name: 'tasks', arguments: {} });
@@ -30,7 +30,7 @@ describe('development workflow transport compatibility', () => {
     expect(lines).toEqual([
       expect.objectContaining({
         id: task.id,
-        workflow: null,
+        echelons: null,
         stage: 0,
         gateCount: 1,
         assignee: expect.objectContaining({ id: author.id }),
