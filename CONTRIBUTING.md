@@ -94,7 +94,7 @@ The check runs on the nodes of our own plans, one node at a time, and each gets 
    SERVER=<the address of your Hornhoof, as its nodes know it>
    ```
 
-3. Move one node, when the agents of its plan are not in the middle of a turn. It needs a server that can let a node's work end, 0.7.0 or later. It gets the published image and the way back first, lets the work of the node end, says when the node reached its server, and gives the digest of the image for the record:
+3. Move one node, when the agents of its plan are not in the middle of a turn. It needs a server that can let a node's work end, 0.7.0 or later. It gets the published image and the way back first, lets the work of the node end, says when the node reached its server, and gives the digest of the image for the record. The updater of the nodes on that computer leaves the node on that build for a day:
 
    ```sh
    HORNHOOF_SERVER=$SERVER bash hornhoof-install.sh check-node hornhoof-kimi-1c07dac4 $COMMIT

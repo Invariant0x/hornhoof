@@ -28,6 +28,18 @@
 # It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
 # the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
 # computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
+#
+#   updater.sh nodes <server> <image> <host> [--once]   move that server's nodes on this computer to the server's build
+#   updater.sh start-nodes <server> <image> <host>      start the one updater of that server's nodes here, on <image>
+#
+# On a computer that is not the server's own, install.sh starts one updater for each server's nodes there, in a container of
+# the updater image of the server's build with this computer's Docker, and with the hash that computer goes by (<host>). It
+# has no server folder, no requests and no commands. Every few minutes it reads the installer the server serves, which names
+# the node image of the server's build and says whether that build has its live check, as it does for the install line. A
+# node of that server on another image goes to that one, by its digest, through that installer: it asks the server, with the
+# node's own key from its volume, to let the node's work end, and replaces the node once it is free. Then the updater moves to
+# the updater image the build names, through a helper that outlives it. On the server's own computer it does nothing: the
+# updater next to the server moves the nodes there.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -700,6 +712,159 @@ computer_runs() {
     rm -f "$out" "$out.done" "$out.late" "$out.closed" "$CONTROL/computer/$id.started"
   done
 }
+
+# --- A server's nodes on another computer ------------------------------------------------------
+
+# How often the updater of a server's nodes looks at them, and how long it waits after a look that failed, in seconds.
+NODES_EVERY=300
+NODES_BACKOFF=900
+# How long a node that install.sh check-node moved to a commit's build for its live check stays on it, in seconds.
+CHECK_HOLD=86400
+SAID=''
+
+# Each thing once until something else is said, so a look every few minutes keeps the log short.
+tell() {
+  if [ "$*" != "$SAID" ]; then printf '%s\n' "$*"; fi
+  SAID=$*
+}
+
+# An http or https address with nothing in it that a command line or a Docker filter would take for more.
+plain_server() {
+  case "$1" in http://?* | https://?*) ;; *) return 1 ;; esac
+  case "$1" in *[!A-Za-z0-9.:/_-]*) return 1 ;; esac
+  [ "${#1}" -le 200 ]
+}
+
+# The hash a computer goes by, 64 hex digits, or none.
+plain_host() {
+  [ -n "$1" ] || return 0
+  case "$1" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 64 ]
+}
+
+# served <name> <file>: what the installer a server serves says in that line of its own.
+served() { sed -n "s/^$1=\"\\(.*\\)\"\$/\\1/p" "$2" | head -n 1; }
+
+# behind_of <server> <image>: the plans of that server's running nodes on this computer, by their labels, whose image Docker
+# does not keep as <image>. A node someone stopped stays as it is, and so does one in its live check, for CHECK_HOLD.
+behind_of() {
+  local name plan checked id
+  { docker ps --filter label=hornhoof.subscription --filter "label=hornhoof.server=$1" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.check"}}' 2> /dev/null || true; } | while read -r name plan checked; do
+    case "$plan" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
+    case "$checked" in '' | *[!0-9]*) ;; *) [ "$(($(date +%s) - checked))" -ge "$CHECK_HOLD" ] || continue ;; esac
+    id=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
+    [ -n "$id" ] || continue
+    case " $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true) " in *" $2 "*) continue ;; esac
+    printf '%s ' "$plan"
+  done
+}
+
+# run_served <server> <installer> <plans>: the installer replaces the nodes of these plans, each once its work ends, with
+# its output in WORK.
+run_served() {
+  HORNHOOF_SERVER="$1" HORNHOOF_FROM_UPDATER=1 HORNHOOF_NODES_ONLY="$3" HORNHOOF_TTY=/dev/null bash "$2" > "$WORK/${3%% *}.log" 2>&1
+}
+
+# nodes_look <server> <image> <host>: one look at that server's nodes here. The installers of several nodes wait for them
+# side by side, each replacing only its own. One from before 0.8.4 knows no single node and replaces every node of its
+# server, so it runs once. Fails when the server did not answer or an installer failed.
+nodes_look() {
+  local script build updater behind plan pids='' pid failed=''
+  script="$WORK/install.sh"
+  if ! curl -fsS --max-time 30 -o "$script" "$1/install.sh" 2> /dev/null; then
+    tell "Could not reach $1, so its nodes here stay as they are for now."
+    return 1
+  fi
+  build=$(served BUILD_IMAGE "$script")
+  updater=$(served UPDATER_BUILD "$script")
+  if [ -n "$3" ] && [ "$(served SERVER_HOST_ID "$script")" = "$3" ]; then
+    tell "This is the computer of $1, so the updater next to that server moves its nodes here."
+    return 0
+  fi
+  if ! grep -qx 'NO_NODE=""' "$script"; then
+    tell "The build $1 runs has no live check, so its nodes here stay on their image and what they run goes on."
+    return 0
+  fi
+  case "$build" in "$NODE_IMAGE"@*) ;; *) build='' ;; esac
+  if [ -z "$build" ] || ! own "$NODE_IMAGE" "$build"; then
+    tell "$1 names no node image by its digest yet, so its nodes here stay as they are."
+    return 0
+  fi
+  behind=$(behind_of "$1" "$build")
+  if [ -n "$behind" ]; then
+    SAID=''
+    for plan in $behind; do
+      printf 'The node of plan %s runs another build than %s, so it goes to %s once its work ends.\n' "$plan" "$1" "$build"
+    done
+    if grep -q '^UPDATER_BUILD=' "$script"; then
+      for plan in $behind; do
+        run_served "$1" "$script" "$plan" &
+        pids="$pids $!"
+      done
+    else
+      run_served "$1" "$script" "${behind% }" &
+      pids=$!
+    fi
+    for pid in $pids; do wait "$pid" || failed=1; done
+    cat "$WORK"/*.log
+    [ -z "$failed" ] || return 1
+  fi
+  if own "$UPDATER_IMAGE" "$updater" && [ "$updater" != "$2" ]; then
+    tell "Moving to $updater, the updater of the build $1 runs."
+    docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock "$updater" start-nodes "$1" "$updater" "$3" > /dev/null || {
+      tell "Could not start $updater, so this updater goes on as it is."
+      return 1
+    }
+  fi
+}
+
+# nodes_mode <server> <image> <host> [--once]: a look at the nodes every few minutes, and a longer wait after one that failed.
+nodes_mode() {
+  local code
+  if ! plain_server "$1" || ! own "$UPDATER_IMAGE" "$2" || ! plain_host "$3"; then
+    printf 'Usage: updater.sh nodes <server address> <updater image> <host hash> [--once]\n' >&2
+    exit 2
+  fi
+  while true; do
+    WORK=$(mktemp -d)
+    code=0
+    nodes_look "$1" "$2" "$3" || code=1
+    rm -rf "$WORK"
+    if [ "${4:-}" = --once ]; then exit "$code"; fi
+    if [ "$code" = 0 ]; then sleep "$NODES_EVERY"; else sleep "$NODES_BACKOFF"; fi
+  done
+}
+
+# start_nodes <server> <image> <host>: the one updater of that server's nodes on this computer runs <image>, under a name that
+# comes from the server's address, so Docker never lets a second one start. One that runs that image already stays; the others
+# go once the image is here. It starts again with Docker.
+start_nodes() {
+  local name old
+  if ! plain_server "$1" || ! own "$UPDATER_IMAGE" "$2" || ! plain_host "$3"; then
+    printf 'Usage: updater.sh start-nodes <server address> <updater image> <host hash>\n' >&2
+    return 2
+  fi
+  if command -v sha256sum > /dev/null 2>&1; then
+    name="hornhoof-updater-$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+  else
+    name="hornhoof-updater-$(printf '%s' "$1" | shasum -a 256 | cut -c1-12)"
+  fi
+  [ "$(docker inspect --format '{{if .State.Running}}{{.Config.Image}}{{end}}' "$name" 2> /dev/null || true)" != "$2" ] || return 0
+  docker image inspect "$2" > /dev/null 2>&1 || docker pull "$2" > /dev/null || return 1
+  for old in $(docker ps -aq --filter label=hornhoof.updater=nodes --filter "label=hornhoof.server=$1" 2> /dev/null || true); do
+    docker rm -f "$old" > /dev/null 2>&1 || true
+  done
+  docker run -d --name "$name" --label hornhoof.updater=nodes --label "hornhoof.server=$1" --restart unless-stopped \
+    -v /var/run/docker.sock:/var/run/docker.sock "$2" nodes "$1" "$2" "$3" > /dev/null
+}
+
+case "${1:-}" in
+  nodes) nodes_mode "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+  start-nodes)
+    start_nodes "${2:-}" "${3:-}" "${4:-}"
+    exit 0
+    ;;
+esac
 
 mkdir -p "$CONTROL"
 touch "$CONTROL/alive"

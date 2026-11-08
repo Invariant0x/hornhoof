@@ -19,6 +19,11 @@
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
 #
+# On a computer that is not the server's own, joining and updating also start one updater for that server's nodes there, in
+# a container of the updater image of the server's build (see apps/updater/updater.sh). It moves them to the server's build as
+# their work ends, through this script, run with HORNHOOF_FROM_UPDATER=1 and the plan of one node in HORNHOOF_NODES_ONLY, and
+# it goes with the nodes on --uninstall.
+#
 # The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
 # commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
 # published. A script downloaded on its own and a local build take the latest image; a local build alone takes the one
@@ -48,6 +53,12 @@ IMAGE="${HORNHOOF_NODE_IMAGE:-$DEFAULT_IMAGE}"
 # Why this server gives no node of its build, in words the server fills in. Empty when it does.
 NO_NODE="__HORNHOOF_NO_NODE__"
 case "$NO_NODE" in __HORNHOOF_*) NO_NODE='' ;; esac
+# The updater image of the server's build, which the server names as it does the node image, and the hash its own computer
+# goes by (see host_id), which it fills in when it knows it. The updater of the nodes reads these lines too.
+UPDATER_BUILD="__HORNHOOF_UPDATER_IMAGE__"
+SERVER_HOST_ID="__HORNHOOF_HOST_ID__"
+case "$UPDATER_BUILD" in __HORNHOOF_* | local) UPDATER_BUILD='' ;; esac
+case "$SERVER_HOST_ID" in __HORNHOOF_*) SERVER_HOST_ID='' ;; esac
 STAND="${HORNHOOF_LIVE_CHECK_STAND:-}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
 APP_IMAGE=ghcr.io/invariant0x/hornhoof
@@ -393,10 +404,16 @@ host_id() {
 }
 
 # Docker on a Mac runs in a smaller system of its own, so each node hears what the Mac itself has, to show it next to
-# what the node can use: "NAME=value" lines for its processor, cores and memory. On Linux a node sees its machine.
+# what the node can use: "NAME=value" lines for its processor, cores and memory. On Linux a node sees its machine. An updater
+# runs in a container, where no Mac is to be seen, so the node it replaces keeps what it was told.
 host_facts() {
   local cpu cpus mem
-  if [ "$OS" != darwin ]; then return 0; fi
+  if [ "$OS" != darwin ]; then
+    if [ -n "$FROM_UPDATER" ] && [ -n "${1:-}" ]; then
+      "${DOCKER[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2> /dev/null | grep -E '^HORNHOOF_HOST_(CPU|CPUS|MEMORY)=' || true
+    fi
+    return 0
+  fi
   cpu=$(sysctl -n machdep.cpu.brand_string 2> /dev/null | tr -cd 'A-Za-z0-9 ()@.,_-' | cut -c1-200 || true)
   cpus=$(sysctl -n hw.ncpu 2> /dev/null || true)
   mem=$(sysctl -n hw.memsize 2> /dev/null || true)
@@ -411,10 +428,12 @@ host_env() {
   HOST_ENV=()
   while IFS= read -r fact; do
     [ -n "$fact" ] && HOST_ENV+=(-e "$fact")
-  done < <(host_facts)
+  done < <(host_facts "$1")
 }
 
 STARTED=''
+# check-node marks the node it moves with when, so the updater of the nodes leaves it on that build for a day.
+CHECK_LABEL=()
 prepare_node_stop() {
   local name=$1 reason=$2
   "${DOCKER[@]}" exec "$name" node "$NODE_MAIN" prepare-stop "$reason" > /dev/null 2>&1 || true
@@ -431,7 +450,7 @@ start_node() {
       fail "Could not save the key for $name. $RETRY"
   fi
   say "Starting $name."
-  host_env
+  host_env "$name"
   prepare_node_stop "$name" "${5:-node_update}"
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
@@ -439,7 +458,7 @@ start_node() {
   # them and checks which agent calls its tools. Nothing from the host is mounted and no new privileges can be gained.
   # Docker's AppArmor profile on newer Linux, as Debian 13, would stop that root from looking into and stopping its
   # agents' programs, so the node runs outside it; Docker skips the option where AppArmor is off, as on a Mac.
-  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
+  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" ${CHECK_LABEL[@]+"${CHECK_LABEL[@]}"} --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --security-opt apparmor=unconfined --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
     ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
@@ -589,6 +608,7 @@ node_mode() {
   existing=$(existing_nodes)
   for entry in $existing; do
     name=${entry%%:*}
+    named_free "${entry#*:}" || continue
     if [ "$(node_status "$name")" = removed ]; then
       say "Removing $name, which was removed in Hornhoof."
       "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
@@ -618,12 +638,14 @@ node_mode() {
       name=${entry%%:*}
       id=${entry#*:}
       case " $removed $STARTED " in *" $name "*) continue ;; esac
+      named_free "$id" || continue
       provider=${name#hornhoof-}
       provider=${provider%-*}
       if wait_for_node "$name"; then start_node "$name" "$id" "$provider"; fi
     done
   fi
 
+  if [ -z "$FROM_UPDATER" ] && [ -n "$STARTED$LEFT" ]; then nodes_updater; fi
   if [ -z "$STARTED" ] && [ -n "$LEFT" ]; then fail "Nothing changed on this machine."; fi
   if [ -z "$STARTED" ]; then
     say "There are no Hornhoof nodes on this machine yet. Get the install command in Hornhoof under Subscriptions."
@@ -660,7 +682,7 @@ node_mode() {
       *)
         case " $joined_names " in
           *" $name "*) login_node "$name" ;;
-          *) if ! signed_in "$name"; then login_node "$name"; fi ;;
+          *) if [ -z "$FROM_UPDATER" ] && ! signed_in "$name"; then login_node "$name"; fi ;;
         esac
         ;;
     esac
@@ -695,6 +717,34 @@ node_mode() {
       ;;
   esac
   if [ -n "$LEFT" ]; then fail "These nodes stay as they are:$LEFT."; fi
+}
+
+# docker ps of the updater of this server's nodes on this computer, or of every server's when this script does not know its own.
+nodes_updaters() {
+  case "$SERVER" in
+    __HORNHOOF_* | '') "${DOCKER[@]}" ps "$@" --filter label=hornhoof.updater=nodes 2> /dev/null || true ;;
+    *) "${DOCKER[@]}" ps "$@" --filter label=hornhoof.updater=nodes --filter "label=$SERVER_LABEL=$SERVER" 2> /dev/null || true ;;
+  esac
+}
+
+# One updater for each server's nodes on this computer, on the updater image of the server's build, with Docker's socket: it
+# moves them to the server's build as their work ends, and itself to the server's updater. One that runs stays, so it is never
+# stopped while it replaces a node. The server's own computer needs none, as the server knows it or runs on localhost: the
+# updater next to the server moves its nodes.
+nodes_updater() {
+  local host
+  [ -n "$UPDATER_BUILD" ] && [ -z "$LOCAL_SERVER" ] || return 0
+  host=$(host_id)
+  [ -z "$SERVER_HOST_ID" ] || [ "$SERVER_HOST_ID" != "$host" ] || return 0
+  [ -z "$(nodes_updaters -q)" ] || return 0
+  say "Starting the updater of these nodes. When this Hornhoof moves to another build, it moves them too, each once its work ends."
+  "${DOCKER[@]}" run --rm -v /var/run/docker.sock:/var/run/docker.sock "$UPDATER_BUILD" start-nodes "$SERVER" "$UPDATER_BUILD" "$host" > /dev/null ||
+    say "Could not start the updater of these nodes, so they move to a new build of Hornhoof only when you run this command again."
+}
+
+drop_nodes_updater() {
+  local id
+  for id in $(nodes_updaters -aq); do "${DOCKER[@]}" rm -f "$id" > /dev/null 2>&1 || true; done
 }
 
 provider_of() {
@@ -786,6 +836,7 @@ check_node_mode() {
   "${DOCKER[@]}" pull "$IMAGE" > /dev/null || fail "Could not download $IMAGE, the published node image of that commit. Nothing changed."
   way_back_here
   wait_for_node "$CHECK_NODE" || fail "Nothing changed on this machine."
+  CHECK_LABEL=(--label "hornhoof.check=$(date +%s)")
   start_one "$entry"
   # A tag can move, and the record of the check speaks of a digest.
   digest=$("${DOCKER[@]}" image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2> /dev/null || true)
@@ -808,6 +859,7 @@ uninstall_mode() {
   docker_works || fail "Docker is not running, so there are no nodes to remove. Start Docker, then run this again."
   for entry in $(existing_nodes); do names="$names ${entry%%:*}"; done
   if [ -z "$names" ]; then
+    drop_nodes_updater
     say "There are no Hornhoof nodes on this machine."
     return 0
   fi
@@ -822,6 +874,7 @@ uninstall_mode() {
       ;;
   esac
   for name in $names; do "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true; done
+  drop_nodes_updater
   say "The nodes are removed."
   answer=$(ask "Also delete their volumes, with the sign-ins and work files? [y/N] " n)
   case "$answer" in

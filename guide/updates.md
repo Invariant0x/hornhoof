@@ -27,7 +27,11 @@ If the work does not finish in time, nothing stops. The update is put off, the c
 
 Each node on the computer goes by itself: one that has no work left restarts at once, whatever the others still wait for. Versions in the account menu says of each node what it waits for and until when.
 
-A plan's node goes this way only when the server knows it runs on the server's own computer, by the `HORNHOOF_HOST_ID` line in `.env`. The install line writes that line; an update through the updater does not. A node the server does not know is not replaced by itself: it goes on working on its build, and Machines says it is of another build. Run the install line once on that computer: what runs goes on, and the updater replaces such a node when its work ends.
+On the server's own computer, the updater next to the server replaces the nodes. It knows that computer by the `HORNHOOF_HOST_ID` line in `.env`, which `install.sh server` writes; an update through the updater does not.
+
+Every other computer with nodes has a small updater of its own, one for each Hornhoof whose nodes run there, which the install line starts. Every five minutes it asks the server which build its nodes should run, and takes only a build whose live check is published. When a node runs another build, it asks the server to let that node's work end and replaces the node once it is free, so no turn stops. It moves itself to the server's build too, and `install.sh --uninstall` removes it with the nodes.
+
+A computer set up before 0.8.4 has no such updater yet, and Machines says its nodes are of another build. Run the install line once on that computer: what runs goes on, and from then on its nodes follow the server by themselves.
 
 The orchestrator and the heads wait for such a node for three minutes at most. After that their next turn goes to another machine of their plan or, when the plan has no other, to the node that waits, whose work runs on. Other agents' turns wait for the update.
 

@@ -7,6 +7,11 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [Unreleased]
 
+### Added
+
+- Nodes on every computer move to the server's build by themselves, each once its work ends: the install line starts a
+  small updater next to them. A computer set up before 0.8.4 needs the install line once to get it.
+
 ### Changed
 
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A

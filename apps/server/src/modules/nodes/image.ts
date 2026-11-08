@@ -11,17 +11,18 @@ const PROOF_WAIT_MS = 20_000;
 /* Anyone may read install.sh, so a registry that has given no digest is asked again this often at most. */
 const ASK_AGAIN_MS = 60_000;
 
-type Lookup = { image: string; commit: string; digestOf: (tag: string) => Promise<string>; onError: (err: unknown) => void };
+type Lookup = { image: string; commit: string; part?: 'node' | 'updater'; digestOf: (tag: string) => Promise<string>; onError: (err: unknown) => void };
 type Proof = { commit: string; free: boolean; verdictOf: (commit: string) => Promise<LiveCheckVerdict>; onError: (err: unknown) => void };
 
 /* The node image install.sh starts for this server: the one CI built from the server's own commit. CI pushes every build
    under its commit's tag, while a version's tag moves when that version is built again and a build from a branch has
    none. As the update button does, it goes by that tag's digest, and by the tag itself while the registry cannot say:
    an image that is not there yet then stops the installer on the machine, which never gets another build instead. A
-   commit built again is the same code, so a digest once known is kept. */
-export function nodeImageOfBuild({ image, commit, digestOf, onError }: Lookup): () => Promise<string> {
+   commit built again is the same code, so a digest once known is kept. The updater image of the build, which install.sh starts
+   next to the nodes on another computer, goes the same way. */
+export function nodeImageOfBuild({ image, commit, part = 'node', digestOf, onError }: Lookup): () => Promise<string> {
   if (!FULL_SHA.test(commit)) return async () => LOCAL_BUILD;
-  const repository = `${image}-node`;
+  const repository = `${image}-${part}`;
   const byTag = `${repository}:${commit}`;
   let current = byTag;
   const lookUp = askedRarely(() => digestOf(commit).then(digest => { if (digest) current = `${repository}@${digest}`; }).catch(onError), () => current === byTag, WAIT_MS);

@@ -44,6 +44,8 @@ case "$1" in
     fi ;;
   # STUB_STOPPED words are containers that exist and do not run.
   inspect)
+    # STUB_NODE_ENV: the settings a node was started with, one per line.
+    case "${3:-}" in *.Config.Env*) printf '%b' "${STUB_NODE_ENV:-}"; exit 0 ;; esac
     if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
     # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
     if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
@@ -58,7 +60,10 @@ case "$1" in
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
       *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;
     esac ;;
-  ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
+  # STUB_NODES_UPDATER: the container of the updater of this server's nodes, when there is one.
+  ps)
+    case "$*" in *hornhoof.updater=nodes*) [ -z "${STUB_NODES_UPDATER:-}" ] || echo "$STUB_NODES_UPDATER"; exit 0 ;; esac
+    for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     # STUB_WAIT_UPDATE is what the node's wait-update ends with.
     WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi

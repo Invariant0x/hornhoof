@@ -33,8 +33,8 @@ describe('install.sh a server serves', () => {
     const r = install({ script: await fromServer(DIGEST) });
     expect(r.code).toBe(0);
     expect(r.calls).toContain(`docker pull ${BY_DIGEST}`);
-    const runs = r.calls.filter(c => c.startsWith('docker run'));
-    /* The key of each of the two plans goes in, then its node starts. */
+    /* The key of each of the two plans goes in, then its node starts. The updater of the nodes comes after them. */
+    const runs = r.calls.filter(c => c.startsWith('docker run') && !c.includes(' start-nodes '));
     expect(runs).toHaveLength(4);
     for (const run of runs) expect(run).toContain(BY_DIGEST);
     expect(r.calls.join('\n')).not.toContain(':latest');

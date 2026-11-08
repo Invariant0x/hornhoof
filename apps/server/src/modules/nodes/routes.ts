@@ -265,24 +265,29 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { lendsTests };
   });
 
-  const nodeImage = nodeImageOfBuild({
+  const imageOf = (part: 'node' | 'updater') => nodeImageOfBuild({
     image: config.image,
     commit: config.commit,
-    digestOf: async tag => (await ctx.updates.siblings(tag)).node,
-    onError: err => app.log.warn({ error: loggable(err) }, "Could not read this build's node image from the registry, so install.sh names it by its tag."),
+    part,
+    digestOf: async tag => (await ctx.updates.siblings(tag))[part],
+    onError: err => app.log.warn({ error: loggable(err) }, `Could not read this build's ${part} image from the registry, so install.sh names it by its tag.`),
   });
+  const nodeImage = imageOf('node');
+  const updaterImage = imageOf('updater');
 
   const nodeRefusal = refusalOfThisBuild(app, ctx);
 
-  /* Every command that installs or updates a node runs this script, so the machine gets the node of this server's build. */
+  /* Every command that installs or updates a node runs this script, so the machine gets the node of this server's build, and
+     the updater of the nodes reads it for the same. The hash of the server's own computer tells nothing of its key. */
   app.get('/install.sh', async (_req, reply) => {
     const script = await readFile(config.installScript, 'utf8');
     const server = await publicUrl(db, config);
-    const [image, refusal] = await Promise.all([nodeImage(), nodeRefusal()]);
+    const [image, updater, refusal] = await Promise.all([nodeImage(), updaterImage(), nodeRefusal()]);
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'no-cache')
-      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image).replaceAll('__HORNHOOF_NO_NODE__', refusal));
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image).replaceAll('__HORNHOOF_UPDATER_IMAGE__', updater)
+        .replaceAll('__HORNHOOF_HOST_ID__', config.hostId ?? '').replaceAll('__HORNHOOF_NO_NODE__', refusal));
   });
 }
 
