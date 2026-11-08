@@ -36,6 +36,16 @@ test('the publish job moves exactly the images the gate judged, by digest, and t
   assert.ok(moved[0] > 0 && moved[1] > moved[0] && moved[2] > moved[1], moved.join(' '));
 });
 
+test('a commit on main whose version is out already moves nothing and fails nothing', () => {
+  const steps = images.publish.split(/^ {6}- /m).slice(1);
+  const look = steps.findIndex(step => /id: fresh\n/.test(step));
+  assert.ok(look > 0, 'the publish job looks whether its version is out');
+  assert.match(steps[look], /gh api "repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/v\$version"/);
+  assert.match(steps[look], /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  assert.ok(images.publish.indexOf('id: fresh') < images.publish.indexOf('live-check-gate.js'), 'it looks before it asks the live check');
+  for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new' \}\}/, step.split('\n')[0]);
+});
+
 test('the publish job runs only for a push to main, after the tests', () => {
   assert.match(images.publish, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && /);
   assert.match(images.publish, /needs: \[mark, test\]/);
