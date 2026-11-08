@@ -613,9 +613,13 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: Ver
   return echelonVerdict(ctx, agentId, taskId, v);
 }
 
-function requireReporter(task: Task, agentId: string): void {
+function requireOwner(task: Task, agentId: string, refusal: string): void {
   stillOpen(task);
-  if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
+  if (task.assigneeAgentId !== agentId) throw notYours(task, refusal);
+}
+
+function requireReporter(task: Task, agentId: string): void {
+  requireOwner(task, agentId, 'is not yours to report');
 }
 
 async function reportToResolver(ctx: Live, agentId: string, task: Task, summary: string, n: Note): Promise<Moved> {
@@ -938,13 +942,12 @@ const namesItsWork = (q: Ask): boolean => q.approval !== undefined || COMMIT.tes
 
 const approvalColumns = (a: Ask['approval']) => ({ approvalChannel: a?.channel ?? null, approvalKind: a?.kind ?? null, approvalAmount: a?.amount ?? null });
 
-/* The agent that holds the task, or any reviewer at its gate, is the one who asks on it. */
+/* Only the current task owner asks on it. */
 export function mayAsk(task: Task, agentId: string): void {
-  stillOpen(task);
-  if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not with you');
+  requireOwner(task, agentId, 'is not with you');
 }
 
-/* The agent that holds the task, or any reviewer at its gate, asks a person and the task waits for the answer. */
+/* The current task owner asks a person and the task waits for the answer. */
 export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
   const task = await loadTask(ctx.db, taskId);
   mayAsk(task, agentId);
