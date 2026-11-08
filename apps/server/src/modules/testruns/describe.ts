@@ -1,4 +1,4 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -55,17 +55,22 @@ export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | nu
 export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
   return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
 }
-function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest): EnvironmentSnapshot {
+type DescribedBase = Extract<TestsDescribed['result'], { status: 'ready' }>['baseFingerprints'];
+function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase): EnvironmentSnapshot {
   const profile = request.profile ?? description.manifest.defaultProfile;
-  const snapshot = EnvironmentSnapshot.parse({ description, profile });
+  if (request.baseCommit && (request.suite || !base || base.commitSha !== request.baseCommit)) throw new Error('Candidate verification needs its bound base and every applicable suite.');
+  const candidate = request.baseCommit ? { baseCommit: request.baseCommit, baseFingerprints: base!.fingerprints, fingerprints } : undefined;
+  const snapshot = EnvironmentSnapshot.parse({ description, profile, ...(candidate ? { candidate } : {}) });
+  if (candidate) candidateTestUnits(snapshot);
   return snapshot;
 }
 function requestedSuiteIds(snapshot: EnvironmentSnapshot, requested?: string): string[] {
   return requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
 }
 function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestEnvironmentSelection[] {
-  const { manifest, inventory } = snapshot.description;
-  const ids = requestedSuiteIds(snapshot, requested);
+  const { manifest } = snapshot.description;
+  const inventory = requestedUnits(snapshot, requested);
+  const ids = snapshot.candidate ? [...new Set(inventory.map(unit => unit.suiteId))] : requestedSuiteIds(snapshot, requested);
   const leaves: TestEnvironmentSelection[] = [];
   for (const suiteId of ids) {
     const selection = { kind: 'suite' as const, suiteId, files: inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) };
@@ -85,6 +90,7 @@ async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnap
   return new Set(free.map(computerKey)).size;
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
+  if (snapshot.candidate) return candidateTestUnits(snapshot);
   const ids = requestedSuiteIds(snapshot, requested);
   const units = snapshot.description.inventory.filter(unit => ids.includes(unit.suiteId));
   if (ids.some(id => !units.some(unit => unit.suiteId === id))) throw new Error('A requested suite has no canonical files.');
@@ -131,11 +137,11 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
     return true;
   });
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[]): Promise<void> {
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
-  const snapshot = snapshotFor(description, mode ? { ...request, profile: mode.profile } : request);
+  const snapshot = snapshotFor(description, mode ? { ...request, profile: mode.profile } : request, prints, base);
   const reuse = await reuseFor(ctx, mode, snapshot, mode ? requestedUnits(snapshot, request.suite) : [], prints);
   const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
   const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
@@ -148,7 +154,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     if (await retryDescription(ctx, run, message, message.result.problem)) return;
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
-  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? []); }
+  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints); }
   catch { await descriptionProblem(ctx, run, message, { code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }); }
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {
