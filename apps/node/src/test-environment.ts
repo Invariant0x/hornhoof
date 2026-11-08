@@ -164,28 +164,35 @@ function shardCommand(suite: TestSuite, shard: { index: number; count: number } 
   return { ...suite.run, args: [...suite.run.args, `--shard=${shard.index}/${shard.count}`] };
 }
 type InvocationContext = { checkout: string; filesPath: string; shard?: { index: number; count: number }; snapshot?: EnvironmentSnapshot };
-async function candidateMutationInvocation(suite: TestSuite, files: string[], context: InvocationContext): Promise<{ command: Command; planFile: string } | null> {
-  const candidate = context.snapshot?.candidate, policy = context.snapshot?.description.manifest.mutation;
-  if (!candidate || policy?.status !== 'supported' || !files.some(file => policy.sourcePaths.includes(file))) return null;
+function selectedCandidateMutation(suite: TestSuite, files: string[], candidate: NonNullable<EnvironmentSnapshot['candidate']>, policy: Extract<TestEnvironmentV1['mutation'], { status: 'supported' }>) {
   if (suite.split.kind !== 'json-file' || !policy.candidateRun || !candidate.mutation) fail('environment_invalid', 'Candidate mutation requires a declared narrow invocation and its bound scope.');
   const mutation = CandidateMutation.parse(candidate.mutation), selected = new Set(mutation.selection.selected.map(fn => fn.file));
   if (mutation.selection.status !== 'ready' || files.some(file => !selected.has(file))) fail('environment_invalid', 'The mutation selection is blocked or includes an unproved source.');
+  return { mutation, run: policy.candidateRun };
+}
+async function candidateMutationInvocation(suite: TestSuite, files: string[], context: InvocationContext): Promise<{ command: Command; planFile: string } | null> {
+  const candidate = context.snapshot?.candidate, policy = context.snapshot?.description.manifest.mutation;
+  if (!candidate || policy?.status !== 'supported' || !files.some(file => policy.sourcePaths.includes(file))) return null;
+  const { mutation, run } = selectedCandidateMutation(suite, files, candidate, policy);
   const { delta } = mutation, planFile = `${context.filesPath}.mutation-plan.json`;
   const plan = { sha: delta.commit, base: delta.baseCommit, changes: delta.changes.map(change => ({ path: change.path, kind: 'modified' })), hunks: Object.fromEntries(delta.changes.map(change => [change.path, change.ranges])) };
   const output = await open(planFile, 'wx', 0o600);
   try { await output.writeFile(JSON.stringify(plan)); } finally { await output.close(); }
   const argumentsFor: Record<string, string> = { '{baseCommit}': delta.baseCommit, '{commit}': delta.commit, '{planFile}': planFile };
-  return { planFile, command: { ...policy.candidateRun, args: policy.candidateRun.args.map(arg => argumentsFor[arg] ?? arg) } };
+  return { planFile, command: { ...run, args: run.args.map(arg => argumentsFor[arg] ?? arg) } };
+}
+async function validateSuiteFiles(suite: TestSuite, files: string[], checkout: string): Promise<void> {
+  for (const file of files) {
+    await safeCheckoutPath(checkout, file);
+    if (!(await lstat(resolve(checkout, file))).isFile() || !suite.files.some(pattern => match(file, pattern))) fail('environment_invalid', 'A selection is not a regular file of the suite.');
+  }
 }
 export async function buildTestInvocation(suite: TestSuite, files: string[], context: InvocationContext): Promise<{ command: Command; env: Record<string, string> }> {
   if (!files.length) fail('environment_invalid', 'A suite needs a nonempty file inventory.');
   const mutation = await candidateMutationInvocation(suite, files, context);
   const command = mutation?.command ?? shardCommand(suite, context.shard);
   await safeCheckoutPath(context.checkout, command.cwd);
-  for (const file of files) {
-    await safeCheckoutPath(context.checkout, file);
-    if (!(await lstat(resolve(context.checkout, file))).isFile() || !suite.files.some(pattern => match(file, pattern))) fail('environment_invalid', 'A selection is not a regular file of the suite.');
-  }
+  await validateSuiteFiles(suite, files, context.checkout);
   if (suite.split.kind === 'whole-package') return { command, env: {} };
   const paths = files.map(file => `./${relative(resolve(context.checkout, command.cwd), resolve(context.checkout, file))}`);
   if (suite.split.kind === 'argv-files') return { command: { ...command, args: [...command.args, ...paths] }, env: {} };
