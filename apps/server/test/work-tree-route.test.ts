@@ -177,6 +177,33 @@ describe('GET /api/departments/:id/tree', () => {
     expect(await c.db.select().from(tasks).where(eq(tasks.title, 'Review of turn 4'))).toEqual([]);
   });
 
+  it('preserves observed time across current ownership without counting the author period for the checker', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Checkout API');
+    const start = new Date(Date.now() - 40 * 60_000), finished = new Date(Date.now() - 60_000);
+    await c.db.update(tasks).set({ createdAt: start }).where(eq(tasks.id, task.id));
+    await c.db.update(taskEvents).set({ createdAt: start }).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'created')));
+    const [author] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.claude.id, agentId: c.bruno.id, taskId: task.id,
+      kind: 'conversation', prompt: 'Build the API', timeoutMs: 3_600_000, status: 'done', createdAt: start, startedAt: start, finishedAt: finished }).returning();
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, jobId: author!.id, kind: 'program', createdAt: start,
+      data: { program: { state: 'thinking', since: start.getTime(), tool: null }, alarm: null } });
+    await submit(c.ctx, c.bruno.id, task.id, c.code);
+    const checking = new Date();
+    const [reviewer] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.claude.id, agentId: c.rita.id, taskId: task.id,
+      kind: 'conversation', prompt: 'Check the candidate', timeoutMs: 3_600_000, status: 'running', createdAt: checking, startedAt: checking }).returning();
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.rita.id, jobId: reviewer!.id, kind: 'program', createdAt: checking,
+      data: { program: { state: 'thinking', since: checking.getTime(), tool: null }, alarm: null } });
+    const response = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) });
+    expect(response.statusCode).toBe(200);
+    const { tree } = response.json<{ tree: DepartmentTree }>();
+    expect(tree.time.find(time => time.agent.id === c.bruno.id)?.work).toBeGreaterThanOrEqual(2300);
+    const checker = tree.time.find(time => time.agent.id === c.rita.id);
+    expect(checker).toBeDefined();
+    expect(checker!.work).toBeGreaterThanOrEqual(0);
+    expect(checker!.work).toBeLessThan(60);
+    expect(checker!.unknown).toBeLessThan(60);
+  });
+
   it('keeps an old action timestamp without guessing the program state during forty quiet minutes', async () => {
     const { app, db, companyId, ceoToken, claude, dev, bruno, member } = await company();
     const api = await member(bruno.id, 'Checkout API');
