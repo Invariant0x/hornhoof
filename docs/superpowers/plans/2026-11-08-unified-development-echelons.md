@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, Drizzle/PostgreSQL, Fastify/MCP, Solid web components, Vitest and Playwright.
 
-**Spec:** Current Hornhoof task #719, CEO instructions 200/201/205. The older `docs/superpowers/specs/2026-11-08-development-echelons.md` is source material only; its compatibility, opt-in and strict pair policies are superseded.
+**Spec:** Current Hornhoof task #719, CEO instructions 200/201/205/206. The older `docs/superpowers/specs/2026-11-08-development-echelons.md` is source material only; its compatibility, opt-in and strict pair policies are superseded.
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - No `echelonsEnabled`, opt-in, nullable second route, author returns or compatibility implementation.
 - No automated old-record conversion before 1.0. Generate schema normally for fresh installation; record exact manual release data work separately. Never change the live database.
 - A reviewer must not be weaker than the producer. Prefer another underlying provider when available; the same provider, subscription and tariff are allowed without waiting for a second provider. Equal capability is allowed. Unknown capability blocks assignment. Instruction 205 replaces the former provider barrier.
-- Review is mandatory for executable work, followed by Cleanup. Small, low-risk work combines Review and Cleanup in one assignment; large or risky work has a separate Cleanup owner. Security is mandatory for declared sensitive risk and can be added by Review. Coordination-group/report completion semantics await David; leaf work continues independently.
+- Review is mandatory for executable work. Instruction 206 keeps the five ordered stages Architecture, Development, Review, Security and Tests; unrelated refactoring belongs to separate turns. Security is mandatory for declared sensitive risk and can be added by Review. Coordination-group/report completion semantics await David; leaf work continues independently.
 - Every change has a test written first. Author checks use `run_tests`, on exact pushed SHAs, with explicit selection; no local installs/builds/types/lint/tests or full-product author suite.
 - Existing receipts prove their original inputs only. Formatter, producer quality, comparator and browser readiness gaps remain explicit.
 - English repository text, no em dash; user-visible text in English and Russian. Commits by Ivan Korol, without trailers.
@@ -60,8 +60,8 @@
 
 **Interfaces:** `reviewEligibility(producer, checker)` compares trusted capability bands and normalized providers; no pair whitelist, provider barrier or strictly-greater requirement. `moveEchelon(ctx, actor, task, command)` consumes expected task version, route revision, candidate ID and idempotency key, and owns the sole transactional completion path.
 
-- [ ] Write RED tests for equal-capability acceptance on the same provider/subscription/tariff; prefer an eligible different provider without waiting for one. Refuse weaker or unknown capability. Test combined small Review/Cleanup and separate large/risky Cleanup immediately after Review.
-- [ ] Write RED tests for Review/Cleanup/Security retaining their own fixes, final candidate parent/producer provenance, wrong-goal escalation, optional Security insertion, and no author wake.
+- [ ] Write RED tests for equal-capability acceptance on the same provider/subscription/tariff; prefer an eligible different provider without waiting for one. Refuse weaker or unknown capability. Test direct Review-to-Tests or Review-to-Security handoff.
+- [ ] Write RED tests for Review/Security retaining their own fixes, final candidate parent/producer provenance, wrong-goal escalation, optional Security insertion, and no author wake.
 - [ ] Implement trusted capability resolution, capability-based stage selection, path leases, immutable candidates and CAS/idempotent handoff.
 - [ ] Remove panel fan-out, author-return, old turn review/fix loops and unused entities/tests. Preserve unrelated task comments, dependencies and requests through the new engine. Keep group/report completion pending David's scope answer.
 - [ ] Prove stale owner/model, cross-company/path and duplicate-completion cases; prove independent A/Review and B/Development overlap. Run affected checks and commit.
@@ -82,12 +82,11 @@
 
 **Files:** organization/task/tree projections, relevant `apps/web/src` task/map components, both dictionaries, adapted #721 tests, `templates/**`, loader/tests and guides.
 
-**Interfaces:** Task/detail/list/org all carry the same required route snapshot; `EchelonFindingsView` is derived from visible events. Stage labels are literally Architecture, Development, Review, Cleanup, Security and Tests in every locale. Any capable assigned agent can check/fix; no new special role exists.
+**Interfaces:** Task/detail/list/org all carry the same required route snapshot; `EchelonFindingsView` is derived from visible events. Stage labels are literally Architecture, Development, Review, Security and Tests in every locale. Any capable assigned agent can check/fix; no new special role exists.
 
 - [ ] Adapt material tests into RED for actual stage owners, skips/added Security, live refresh, finding provenance and no old author-return display. Remove cancelled null/disabled cases and invalid test helper options.
 - [ ] Implement UI on the existing design system; integrate only the useful portions of the saved material. Resolve the known empty-coverage seam and fixture 404 causes.
-- [ ] Write RED for Cleanup checking callers/tests beyond the diff, deleting obsolete code/tests/docs/settings and redundant paths/layers in the same branch, without returning to the author.
-- [ ] Adapt standalone Review/Cleanup/Security check-and-fix skills and short roles for the sole new route. Remove cancelled old-path text and inventory assumptions.
+- [ ] Adapt standalone Review/Security check-and-fix skills and short roles for the sole new route. Remove cancelled old-path text and inventory assumptions.
 - [ ] Run affected unit/type/language/browser checks remotely. Verify longest/shortest shipped locales, narrow/desktop, light/dark and applicable browser engines. Missing readiness is not PASS.
 - [ ] Commit the proved increment.
 

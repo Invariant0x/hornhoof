@@ -16,13 +16,11 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
   });
   const architecture = step('architecture', task.assigneeAgentId);
   if (task.small) Object.assign(architecture, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
-  const cleanup = step('cleanup');
-  if (task.small && !required) Object.assign(cleanup, { status: 'skipped', reason: 'combined_with_review' });
   const security = step('security');
   if (!required) Object.assign(security, { status: 'skipped', reason: 'no_declared_risk' });
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
     kind: 'development_echelons', version: 1, stage, phase: 'active', candidateId: null,
-    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), cleanup, security, step('tests')],
+    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), security, step('tests')],
     security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null },
   } });
 }

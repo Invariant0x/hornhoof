@@ -17,20 +17,6 @@ describe('the only Development work route', () => {
     });
   });
 
-  it('combines Cleanup with Review for a small low-risk change', async () => {
-    const { detail } = await fixture();
-    expect(await detail()).toMatchObject({ echelons: { stages: expect.arrayContaining([
-      expect.objectContaining({ stage: 'cleanup', status: 'skipped', reason: 'combined_with_review' }),
-    ]) } });
-  });
-
-  it.each([{ small: false }, { riskClass: 'security' as const }])('keeps a separate Cleanup for large or risky work: %j', async options => {
-    const { detail } = await fixture(options);
-    expect(await detail()).toMatchObject({ echelons: { stages: expect.arrayContaining([
-      expect.objectContaining({ stage: 'cleanup', status: 'pending', reason: null }),
-    ]) } });
-  });
-
   it('hands code to Review even when the head did not supply old gates', async () => {
     const { ctx, task, author, reviewer, detail } = await fixture();
     const moved = await submit(ctx, author.id, task.id, { summary: 'Keep totals.', evidence: 'Changed source ready for review.', review: { baseCommit: BASE } });

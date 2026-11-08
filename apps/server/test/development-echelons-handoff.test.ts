@@ -7,7 +7,7 @@ import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 const submitted = { summary: 'Keep totals.', evidence: 'The changed source and tests are on the task branch.', review: { baseCommit: BASE } };
 const passed = { pass: true, comment: 'Checked the candidate and its callers.', reviewedCommit: HEAD };
 
-describe('forward handoff and instruction 205', () => {
+describe('forward handoff and instructions 205/206', () => {
   it('keeps equal-capability Review available on the same subscription and provider', async () => {
     const f = await fixture({ authorProvider: 'claude' });
     await submit(f.ctx, f.author.id, f.task.id, submitted);
@@ -33,13 +33,13 @@ describe('forward handoff and instruction 205', () => {
     expect(moved.task.assigneeAgentId).toBe(crossProvider.id);
   });
 
-  it('hands risky work to a separate Cleanup immediately after Review', async () => {
+  it('hands risky work to Security immediately after Review', async () => {
     const f = await fixture({ riskClass: 'security' });
     await submit(f.ctx, f.author.id, f.task.id, submitted);
     const moved = await verdict(f.ctx, f.reviewer.id, f.task.id, passed);
-    expect(moved.task.assigneeAgentId).toBe(f.cleanup.id);
-    expect(await f.detail()).toMatchObject({ echelons: { stage: 'cleanup', phase: 'active', ownerAgentId: f.cleanup.id } });
-    expect(moved.wakes.map(w => w.agentId)).toEqual([f.cleanup.id]);
+    expect(moved.task.assigneeAgentId).toBe(f.security.id);
+    expect(await f.detail()).toMatchObject({ echelons: { stage: 'security', phase: 'active', ownerAgentId: f.security.id } });
+    expect(moved.wakes.map(w => w.agentId)).toEqual([f.security.id]);
   });
 
   it('retains a review finding with its checker and never wakes the author', async () => {

@@ -19,7 +19,6 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const head = await hire('Head', 'head', 'DEV-HEAD', claude!.id, 'claude-opus-5-5');
   const author = await hire('Author', 'worker', 'DEV-BE', options.authorProvider === 'claude' ? claude!.id : codex!.id, options.authorProvider === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol');
   const reviewer = await hire('Reviewer', 'worker', 'DEV-REV', claude!.id, options.reviewerModel ?? 'claude-opus-5-5');
-  const cleanup = await hire('Cleanup', 'worker', 'DEV-REV', claude!.id, 'claude-opus-5-5');
   const security = await hire('Security', 'worker', 'DEV-SEC', claude!.id, 'claude-opus-5-5');
   const tester = await hire('Tests', 'worker', 'DEV-TEST', claude!.id, 'claude-opus-5-5');
   app.ctx.readCommit = async () => ({ branch: 'task-1', commitSha: HEAD });
@@ -27,13 +26,13 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const input = {
     title: 'Keep totals', brief: 'Keep the total correct.', body: 'Change logic/totals.ts.',
     departmentId: department!.id, assigneeAgentId: author.id, executor: true,
-    small: options.small ?? true, riskClass: options.riskClass ?? 'none', paths: ['logic/totals.ts'], reviewerAgentId: options.autoReviewer ? undefined : reviewer.id, cleanupAgentId: cleanup.id, securityAgentId: security.id, testsAgentId: tester.id,
+    small: options.small ?? true, riskClass: options.riskClass ?? 'none', paths: ['logic/totals.ts'], reviewerAgentId: options.autoReviewer ? undefined : reviewer.id, securityAgentId: security.id, testsAgentId: tester.id,
   };
   const { task } = await createTask(app.ctx, { agentId: head.id }, input);
   const detail = async (id = task.id) => {
     const { loadTask } = await import('../src/modules/tasks/engine.js');
     return taskDetail(app.ctx, await loadTask(db, id), () => true);
   };
-  return { ctx: app.ctx, db, task, head, author, reviewer, cleanup, security, tester, detail, hire, claude: claude!, codex: codex! };
+  return { ctx: app.ctx, db, task, head, author, reviewer, security, tester, detail, hire, claude: claude!, codex: codex! };
 }
 
