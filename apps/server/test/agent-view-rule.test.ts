@@ -52,15 +52,13 @@ describe('who sees an agent', () => {
 });
 
 describe('who sees a task', () => {
-  const task = (over: Partial<TaskPlace> = {}): TaskPlace => ({ departmentId: 'dev', productId: null, createdByPersonId: null, createdByAgentId: null, assigneeAgentId: null, executorAgentId: null, gates: [], panel: [], ...over });
+  const task = (over: Partial<TaskPlace> = {}): TaskPlace => ({ departmentId: 'dev', productId: null, createdByPersonId: null, createdByAgentId: null, assigneeAgentId: null, executorAgentId: null, ...over });
   const viewer = person(listed(['dev']));
 
   const roles: [string, Partial<TaskPlace>][] = [
     ['assignee', { assigneeAgentId: 'seen' }],
     ['executor', { executorAgentId: 'seen' }],
     ['the agent who made it', { createdByAgentId: 'seen' }],
-    ['a gate', { gates: ['other', 'seen'] }],
-    ['the panel', { panel: ['seen'] }],
   ];
 
   it.each(roles)('goes with a seen agent as %s', (_name, over) => {

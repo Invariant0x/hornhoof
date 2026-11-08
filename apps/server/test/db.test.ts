@@ -15,7 +15,7 @@ describe('database', () => {
     expect(rows.map(r => r.name)).toEqual(['Acme']);
   });
 
-  it('refuses rows that cannot happen: a second head, a task in review without its executor, a task under itself', async () => {
+  it('refuses rows that cannot happen: a second head, negative counters, or a task under itself', async () => {
     const db = await createTestDb();
     const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
     const companyId = company!.id;
@@ -27,8 +27,6 @@ describe('database', () => {
     let n = 0;
     const kept = (p: Promise<unknown>) => p.then(() => 'kept', () => 'refused');
     const task = (row: Partial<typeof tasks.$inferInsert>) => kept(db.insert(tasks).values({ companyId, number: ++n, title: 'Checkout', ...row }));
-    expect(await task({ status: 'review', stage: 1 })).toBe('refused');
-    expect(await task({ stage: -1 })).toBe('refused');
     expect(await task({ silent: -1 })).toBe('refused');
     expect(await task({ status: 'done' })).toBe('refused');
     const [mine] = await db.insert(tasks).values({ companyId, number: ++n, title: 'Checkout', executorAgentId: bruno!.id, assigneeAgentId: bruno!.id }).returning();
