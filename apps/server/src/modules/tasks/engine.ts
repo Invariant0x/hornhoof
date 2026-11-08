@@ -968,6 +968,13 @@ export async function stuckAtGate(db: Db | Tx, task: Task, stage: number, actorI
   return Number(sent?.n ?? 0) >= GATE_ROUNDS ? giver(task, 'stuck_at_gate', actorId) : [];
 }
 
+/* Whether this employee still waits for an answer to its own question. */
+async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
+  const [mine] = await db.select({ id: requests.id }).from(requests)
+    .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open'), ne(requests.kind, 'stuck'))).limit(1);
+  return Boolean(mine);
+}
+
 type Verdict = ReviewVerdict & { comment: string; findings?: number; evidence?: object[] };
 
 /* One current checker owns both its verdict and its fixes. */
