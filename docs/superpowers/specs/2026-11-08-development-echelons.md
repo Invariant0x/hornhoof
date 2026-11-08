@@ -90,7 +90,7 @@ expectedCandidateId, idempotencyKey}` plus operation-specific input. Scope the
 key to company, task, actor and operation; identical retries return the stored
 result, a reused key with different input conflicts. In the same transaction,
 check current ownership/CAS, append the event/candidate, replace the pointer,
-advance assignment epoch and persist the wake. Duplicate or stale completion
+advance assignment epoch when ownership changes and persist the wake. Duplicate or stale completion
 cannot grant two owners or add a second finding. Resumption after restart reads
 events and pointer, never reconstructs an assignment from role names.
 
@@ -205,6 +205,9 @@ legacy numeric stage/gateCount fields. The department view exposes
 `echelonsEnabled`; detailed task reads provide candidate/event evidence. List
 and org reads project the same persisted pointer under existing visibility
 filters. Hidden tasks must not disclose owners, candidate IDs, findings or paths.
+An additive `echelonFindings` read projection may carry per-stage reported and
+confirmed counts plus source finding/event IDs; compute it from events rather
+than persisting counters in `tasks.echelons`.
 
 The web maps stage keys to literal English Architecture, Development, Review,
 Security and Tests in every locale. It shows actual skipped/added entries and
