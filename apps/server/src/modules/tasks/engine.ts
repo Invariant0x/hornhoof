@@ -1,5 +1,6 @@
 import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { testsReport, type Verification } from './echelons-tests.js';
+import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.js';
@@ -645,9 +646,14 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string; verification?: Verification }): Promise<Moved> {
+export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
+  if (r.done && route.state.phase === 'ready') {
+    stillOpen(task);
+    await refuseWaiting(ctx.db, task);
+    return acceptCandidate(ctx, task, route, agentId, r.summary, r.acceptance);
+  }
   if (r.done && route.state.stage === 'tests' && route.state.phase === 'active') {
     stillOpen(task);
     await refuseWaiting(ctx.db, task);

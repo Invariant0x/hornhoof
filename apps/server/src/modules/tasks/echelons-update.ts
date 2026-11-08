@@ -7,7 +7,7 @@ import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { RepoPath } from './review-schema.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
 
-export async function requireTaskHead(ctx: Pick<Ctx, 'db'>, task: Task, agentId: string): Promise<void> {
+export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, agentId: string): Promise<void> {
   const [actor] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!actor || (actor.kind !== 'orchestrator' && !(actor.kind === 'head' && actor.departmentId === task.departmentId))) throw refuse(403, 'task_not_yours', 'Only this department head or the orchestrator may revise the route.');
 }

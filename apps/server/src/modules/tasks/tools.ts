@@ -1,4 +1,5 @@
 import { Verification } from './echelons-tests.js';
+import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -549,14 +550,14 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; coordination closes a checked report only over accepted child results. Code never bypasses Review through a report.',
-        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional() },
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; the accepting head names the ready candidate/revision and observed integration commit. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
-      async ({ task: ref, done, summary, verification }) =>
+      async ({ task: ref, done, summary, verification, acceptance }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary);
-          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification });
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification, acceptance });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );
