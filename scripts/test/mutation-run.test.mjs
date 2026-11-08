@@ -170,11 +170,11 @@ test('a source is judged again by tests that changed, and keeps what it was judg
 });
 
 /* Run the real cache/runner with tiny command stand-ins. No mutants or database are needed to observe --mutate-all. */
-for (const changed of ['helper', 'config', 'mode', 'source', 'unknown', 'unknown-config']) {
+for (const changed of ['helper', 'config', 'mode', 'source', 'unknown', 'unknown-config', 'runtime']) {
   test(`saved mutation judges invalidate ${changed} changes without editing the test`, t => {
     const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-judges-'));
     t.after(() => rmSync(folder, { recursive: true, force: true }));
-    const root = join(folder, 'repo'), bin = join(folder, 'bin'), calls = join(folder, 'calls');
+    const root = join(folder, 'repo'), bin = join(folder, 'bin'), calls = join(folder, 'calls'), conditions = join(folder, 'conditions.cjs');
     mkdirSync(root); mkdirSync(bin);
     const write = (path, text) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); };
     const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
@@ -191,9 +191,11 @@ for (const changed of ['helper', 'config', 'mode', 'source', 'unknown', 'unknown
     write('scripts/mutation/config-helper.mjs', 'export const strict = true;');
     writeFileSync(join(bin, 'npx'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(bin, 'mutator'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nprintf 'Total 1 0 0 1 100.0%%\\n'\n`, { mode: 0o755 });
+    const setConditions = version => writeFileSync(conditions, `const original=process.report.getReport.bind(process.report); process.report.getReport=()=>{const report=original(); return {...report,header:{...report.header,glibcVersionRuntime:${JSON.stringify(version)}}};};`);
+    if (changed === 'runtime') setConditions('fixture-before');
     git('init', '--quiet'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test'); git('add', '.'); git('commit', '--quiet', '-m', 'First');
     const run = () => {
-      execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url))], { cwd: root, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: '', HH_TEST_REPORT: '' }, stdio: 'pipe' });
+      execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url))], { cwd: root, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: '', HH_TEST_REPORT: '', ...(changed === 'runtime' ? { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require=${conditions}` } : {}) }, stdio: 'pipe' });
       return readFileSync(calls, 'utf8').trim().split('\n').at(-1).includes('--mutate-all');
     };
     assert.equal(run(), true);
@@ -204,7 +206,8 @@ for (const changed of ['helper', 'config', 'mode', 'source', 'unknown', 'unknown
     if (changed === 'mode') chmodSync(join(root, helper), 0o755);
     if (changed === 'unknown') write('apps/a/test/unknown.ts', 'export const skipped = true;');
     if (changed === 'unknown-config') write('apps/b/judge-options.json', '{"strict":false}');
-    git('add', '.'); git('commit', '--quiet', '-m', 'Judges changed');
+    if (changed === 'runtime') setConditions('fixture-after');
+    else { git('add', '.'); git('commit', '--quiet', '-m', 'Judges changed'); }
     assert.equal(run(), true, `${changed} invalidates the persisted judges receipt`);
   });
 }
