@@ -6,7 +6,7 @@
 
 **Architecture:** Store one required route record per task, with one current owner and an ordered stage history. Keep candidate and finding provenance in immutable task events. Pure transition/model/metric functions sit behind one authorized transactional command handler consumed by tools and HTTP.
 
-**Tech Stack:** TypeScript, Zod, Drizzle/PostgreSQL, Fastify/MCP, Solid web components, Vitest and Playwright.
+**Tech Stack:** TypeScript, Zod, Drizzle/PostgreSQL, Fastify/MCP, React web components, Vitest and Playwright.
 
 **Spec:** Current Hornhoof task #719, CEO instructions 200/201/205/206/207. The older `docs/superpowers/specs/2026-11-08-development-echelons.md` is source material only; its compatibility, opt-in and strict pair policies are superseded.
 
@@ -48,8 +48,8 @@
 
 **Interfaces:** `EchelonsSnapshot` is a required public snapshot with ordered stages, current owner, phase, revision, candidate ID and security reason. `task_routes` holds one route for each task; missing historical records are invalid data requiring manual release correction, not an alternate workflow. `createTask` inserts task and route atomically.
 
-- [ ] Write real engine/view tests: small work starts at Development with Review pending, including the existing Development template; omitted gates cannot bypass Review.
-- [ ] Push, print `check:author --sha HEAD --base e54dd0e5...`, execute its exact plan through `run_tests`; expect missing-route/mandatory-Review assertions, not import/setup errors.
+- [x] Write real engine/view tests: small work starts at Development with Review pending, including the existing Development template; omitted gates cannot bypass Review.
+- [x] Push, print `check:author --sha HEAD --base e54dd0e5...`, execute its exact plan through `run_tests`; expect missing-route/mandatory-Review assertions, not import/setup errors.
 - [ ] Add required protocol/schema/store and task creation/read projection. Delete old gate/panel/stage/bounce/merge fields and their replaced consumers; update relevant fixture contracts.
 - [ ] Generate schema through the project Drizzle tool remotely. Schema DDL only, no old-row updates or route backfill.
 - [ ] Run affected acceptance/schema/type checks remotely; commit the proved increment.
