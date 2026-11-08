@@ -21,6 +21,9 @@ type ShareOptions = { renewMs?: number; tail?: () => string };
 const RENEW_MS = 60_000;
 const TRIES = 3;
 const PAUSE_MS = 10_000;
+/* Letting a unit go runs while the cache lock and the machine's turn are held, often after the work's own signal has
+   stopped, so it never waits long for an answer. A unit left unanswered goes back when its claim runs out. */
+const RELEASE_MS = 10_000;
 
 function sleep(ms: number, context: CacheContext): Promise<void> {
   checkCacheContext(context);
@@ -119,7 +122,7 @@ async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise
 
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
-export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS): HarnessRemote {
+export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS): HarnessRemote {
   const at = (path: string) => `${server}/api/harness${path}`;
   const headers = { authorization: `Bearer ${nodeKey}` };
   const fenced = (lease: HarnessLease) => ({ ...headers, 'x-harness-company': lease.companyId, 'x-harness-attempt': lease.attempt });
@@ -151,7 +154,7 @@ export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_M
       if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
     },
     async failed(key, error, lease) {
-      await answered(await fetch(at(`/${key}/failed`), { ...json({ error }), headers: { ...fenced(lease), 'content-type': 'application/json' } }));
+      await answered(await fetch(at(`/${key}/failed`), { ...json({ error }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: AbortSignal.timeout(releaseMs) }));
     },
   };
 }
