@@ -27,10 +27,14 @@ export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, age
   const paths = change.paths ?? route.paths;
   if (paths.some(path => !RepoPath.safeParse(path).success)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
   state = withRisk(state, agentId, change.riskClass);
-  if (change.executor && !['architecture', 'development'].includes(state.stage ?? '')) throw refuse(409, 'task_invalid', 'Change the current checking owner, not the original producer.');
+  requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
   const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
   return { ...owner, paths };
+}
+
+function requireProducerChange(state: Route['state'], executor: TaskChange['executor']): void {
+  if (executor && !['architecture', 'development'].includes(state.stage ?? '')) throw refuse(409, 'task_invalid', 'Change the current checking owner, not the original producer.');
 }
 
 function withRisk(state: Route['state'], agentId: string, risk: TaskChange['riskClass']): Route['state'] {
