@@ -184,7 +184,10 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     const pid = await recorderPid(tmux);
     await exitProgram(tmux);
     expect(await tmux.ended('agent')).toContain('boom-final-output');
-    if ((await recorders(tmux)).includes(pid)) process.kill(pid, 'SIGTERM');
+    /* The recorder may end by itself between the look and the signal; one already gone is what this wants. */
+    if ((await recorders(tmux)).includes(pid)) {
+      try { process.kill(pid, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    }
     await until(async () => {
       await tmux.run(['run-shell', 'true']);
       return !(await recorders(tmux)).includes(pid);
