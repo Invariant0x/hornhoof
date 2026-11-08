@@ -50,6 +50,18 @@ describe('coordination results in the required engine', () => {
     await expect(report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'The child receipt changed.' }).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await loadTask(f.db, f.group.id)).status).not.toBe('done');
   });
+  it.each([false, true])('revalidates nested accepted results (invalid evidence=%s)', async invalid => {
+    const f = await groupFixture(true);
+    await report(f.ctx, f.head.id, f.group.id, { done: true, summary: 'Checked the child result.' });
+    const outer = (await f.create({ title: 'Outer checked group', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
+    await f.db.update(tasks).set({ parentId: outer.id }).where(eq(tasks.id, f.group.id));
+    if (invalid) await f.db.update(testParts).set({ status: 'failed', exitCode: 1 }).where(eq(testParts.runId, f.checkedRun.id));
+    const complete = () => report(f.ctx, f.head.id, outer.id, { done: true, summary: 'Checked the nested results.' });
+    if (invalid) {
+      await expect(complete().then(() => null)).rejects.toMatchObject({ status: 409 });
+      expect((await loadTask(f.db, outer.id)).status).not.toBe('done');
+    } else expect((await complete()).task.status).toBe('done');
+  });
   it('refuses to hide executable work behind a coordination name', async () => {
     const f = await fixture();
     await expect(report(f.ctx, f.author.id, f.task.id, { done: true, summary: 'Coordination, actually code.' })).rejects.toMatchObject({ status: 400 });
