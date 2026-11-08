@@ -609,7 +609,9 @@ export const Repo = z.object({
     .optional(),
 });
 export type RepoAuthor = NonNullable<z.infer<typeof Repo>['author']>;
-const Workspace = z.object({ key: Id, repo: Repo.nullable() });
+/* repositoryScope: the repository as the company's registry of what is built knows it, so the agent's worktree can take the
+   dependencies a machine built for its commit. */
+const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional() });
 /* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
 export const MAX_SKILLS = 200;
 const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });

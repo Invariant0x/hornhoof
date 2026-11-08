@@ -25,7 +25,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { captureReview, type Review } from './review-context.js';
+import { captureReview } from './review-context.js';
 import type { ReviewVerdict } from './review-verdict.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
@@ -559,18 +559,15 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
   return task;
 }
 
-export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
-type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome; validate?: (tx: Tx, before: Task) => Promise<void> };
-
 /* The current producing owner records an immutable candidate and hands it forward. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: Submission, checked?: CheckedSubmission): Promise<Moved> {
+export async function submit(ctx: Live, agentId: string, taskId: string, r: Submission): Promise<Moved> {
   const before = await loadTask(ctx.db, taskId);
   await liveAgent(ctx.db, before.companyId, agentId);
   const operation = submissionOperation(r);
   const replay = await replayedSubmission(ctx.db, before, agentId, operation);
   if (replay) return replay;
   try {
-    return await submitCandidate(ctx, agentId, taskId, r, operation, checked);
+    return await submitCandidate(ctx, agentId, taskId, r, operation);
   } catch (error) {
     if (operation && error instanceof ApiError && [403, 409].includes(error.status)) {
       const repeated = await replayedSubmission(ctx.db, await loadTask(ctx.db, taskId), agentId, operation);
@@ -580,12 +577,12 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: Subm
   }
 }
 
-async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>, checked?: CheckedSubmission): Promise<Moved> {
+async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');
   if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
-  const review = checked?.review ?? await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
   const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
@@ -596,25 +593,14 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary,
-    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
   }, async tx => {
-    await checked?.validate?.(tx, task);
     if (inputCandidate) await checkingIdentity({ db: tx }, task, route, inputCandidate);
     await changeRoute(tx, route, next.state);
     await unstuck.also(tx);
   }, next.wakes);
   unstuck.tell();
   return { task: row, wakes: next.wakes };
-}
-
-export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }, validate?: (tx: Tx, before: Task) => Promise<void>): Promise<Moved> {
-  const task = await submissionTask(ctx, agentId, taskId);
-  const third = input.outcome.attempt >= 3;
-  const wakes = third ? giver(task, 'blocked', agentId, input.text) : [{ agentId, taskId: task.id, why: 'changes' as const, text: input.text }];
-  const row = await move(ctx, task, { status: third ? 'blocked' : 'working', silent: 0 }, {
-    kind: third ? 'blocked' : 'comment', actor: { agentId }, text: input.text, data: { authorCheckOutcome: input.outcome }, ...(third ? { returned: true } : {}),
-  }, validate ? tx => validate(tx, task) : undefined, wakes);
-  return { task: row, wakes };
 }
 
 type Verdict = ReviewVerdict & { comment: string; findings?: number; evidence?: object[] };

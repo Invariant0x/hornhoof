@@ -260,6 +260,14 @@ describe('job.run', () => {
     for (const url of ['https://[', 'https://', 'https://exa mple.com/x', 'https://github.com:99999/acme/app.git']) expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url } } }))).toBeNull();
   });
 
+  it("may name the repository in the company's registry of what is built, so its dependencies come from a build of it", () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };
+    const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'a'.repeat(64) };
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, repositoryScope } }))).toMatchObject({ workspace: { key: 'a1', repo, repositoryScope } });
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo, repositoryScope: { ...repositoryScope, repoUrlHash: 'not a digest' } } }))).toBeNull();
+  });
+
   it("may name the author of the agents' commits, as one plain line and an address", () => {
     const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
     const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };

@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { judgedAgain, keepJudges, mutateSources, mutatorArgs, outcomeOf, selectedSources, testCommand } from '../mutation/run.mjs';
-import { encodePlan } from '../author-check/plan.mjs';
+
+const encodePlan = ({ sha, base, changes, hunks }) => JSON.stringify({ sha, base, changes, hunks: hunks ?? null });
 
 const table = (killed, survived, uncovered, sites) => `name   ns  killed survived uncovered sites score\n-----\nfoo    a        ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n-----\nTotal         ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n\n`;
 

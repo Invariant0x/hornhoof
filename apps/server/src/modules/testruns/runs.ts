@@ -15,9 +15,6 @@ import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun }
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
-import { endAuthorCheckWait, finishAuthorCheck, pendingAuthorCheckRun } from '../tasks/author-check-completion.js';
-import { settle, tell } from '../tasks/turns.js';
-import { orchestratorOf } from '../conversation/queue.js';
 import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
@@ -357,12 +354,6 @@ async function told(ctx: Ctx, end: RunEnd): Promise<void> {
   await wakeAll(ctx, end.wakes);
 }
 
-async function toldSubmission(ctx: Ctx, actorId: string, moved: { task: Task; wakes: Wake[] }): Promise<void> {
-  const settled = await settle(ctx, moved.task);
-  const orchestrator = settled ? await orchestratorOf(ctx, moved.task.companyId) : null;
-  await wakeAll(ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task.id, actorId));
-}
-
 /* What a mark on the run's commit adds: a line in the log of its task, where the one who decides reads it later. It is no
    move of the task, whoever's turn is running. */
 async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Promise<string> {
@@ -371,9 +362,7 @@ async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Pro
   return `\n\n${mark.line}`;
 }
 
-type FinishedRun = RunEnd | { authorCheck: string };
-
-async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'passed' | 'failed', mark: RunMark | null): Promise<FinishedRun | null> {
+async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'passed' | 'failed', mark: RunMark | null): Promise<RunEnd | null> {
   return ctx.db.transaction(async tx => {
     /* The task first, then the run: the order every write that holds both takes. */
     const [found] = await tx.select({ task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId)).where(eq(testRuns.id, runId)).for('update', { of: tasks });
@@ -386,21 +375,10 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
       .returning();
     if (!ended) return null;
     const run = await closeFileCache(tx, ended);
-    if (await pendingAuthorCheckRun(tx, task.id, run.id)) {
-      await endAuthorCheckWait(tx, run, task);
-      return { authorCheck: run.agentId };
-    }
     const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
     const marked = await keepMark(tx, run, task, mark);
     return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
   });
-}
-
-async function publishRunEnd(ctx: Ctx, runId: string, end: FinishedRun): Promise<void> {
-  if ('authorCheck' in end) {
-    const moved = await finishAuthorCheck(ctx, runId);
-    await toldSubmission(ctx, end.authorCheck, moved);
-  } else await told(ctx, end);
 }
 
 /* A described run planned with no part at all: nothing was left to run. Before its description a run has no parts either. */
@@ -418,7 +396,7 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
   const mark = await markRun(ctx, runId, status);
   const end = await recordRunEnd(ctx, runId, parts, status, mark);
-  if (end) await publishRunEnd(ctx, runId, end);
+  if (end) await told(ctx, end);
 }
 
 /* Parts that end without a word from their node, and the runs they finish. */
@@ -561,7 +539,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 }
 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
-export type RunInput = { candidate?: EchelonRun; task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
+export type RunInput = { candidate?: EchelonRun; task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -628,14 +606,7 @@ async function prepareRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, ki
   if (heldReason) throw refuse(409, 'browser_failed', heldReason);
   const pin = await pinCommit(ctx, task, kind, input.branch, found);
   checkProductPin(mode.mode, pin.commitSha);
-  if (input.expectedCommit !== undefined && pin.commitSha !== input.expectedCommit) throw refuse(409, 'task_changed', `#${task.number} moved while its author check was being pinned. Read the branch and submit again.`);
   return { department, pin };
-}
-
-async function existingRun(tx: Tx, task: Task, agentId: string, input: RunInput, kind: RunKind, pin: RunSetup['pin']): Promise<Run | undefined> {
-  if (!input.dedupe || !pin.commitSha || !pin.branch) return;
-  const [existing] = await tx.select().from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.companyId, task.companyId), eq(testRuns.agentId, agentId), eq(testRuns.branch, pin.branch), eq(testRuns.kind, kind), eq(testRuns.commitSha, pin.commitSha), eq(testRuns.command, input.command ?? ''))).limit(1);
-  return existing;
 }
 
 function workRunValues(input: RunInput, kind: RunKind) {
@@ -657,11 +628,6 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
-    const existing = await existingRun(tx, task, job.agentId, input, kind, pin);
-    if (existing) {
-      if (binding) await bindCandidateRun(tx, task, binding, existing);
-      return existing;
-    }
     const number = await nextRunNumber(tx, job.companyId);
     const [row] = await tx
       .insert(testRuns)
@@ -783,10 +749,6 @@ async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other
       .where(and(eq(testParts.runId, run.id), inArray(testParts.status, ['queued', 'running'])))
       .returning();
     await closeFileCache(tx, row);
-    if (await pendingAuthorCheckRun(tx, task.id, row.id)) {
-      await endAuthorCheckWait(tx, row, task);
-      return { parts, authorCheck: row.agentId };
-    }
     return { parts, end: await tellEnd(tx, row, task, `${named(run)} was stopped by ${stopper}. ${readAgain(run)}`, other) };
   });
 }
@@ -809,7 +771,7 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
   if (!stopped) throw refuse(409, 'task_invalid', `${named(run)} ended meanwhile.`);
   cancelParts(ctx, stopped.parts);
   cancelDescription(ctx, run.environmentRequest);
-  await publishRunEnd(ctx, run.id, 'authorCheck' in stopped ? { authorCheck: run.agentId } : stopped.end);
+  await told(ctx, stopped.end);
   await pumpTests(ctx);
   return `${named(run)} is stopped.`;
 }

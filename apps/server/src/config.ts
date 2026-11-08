@@ -33,8 +33,6 @@ export type Config = {
   nodeDrainMs: number;
   nodeUpdateRetryMs: number;
   nodeLeaderHoldMs: number;
-  /* Run the repository's author check on submit; off until the head enables it. */
-  authorCheck: boolean;
   /* Persisted on a new external recovery episode; later edits do not reset it. */
   externalFailureOpsMs: number;
   /* The folder the app shares with the updater service. */
@@ -143,7 +141,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeDrainMs: set.NODE_DRAIN_MS,
     nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
-    authorCheck: env.AUTHOR_CHECK === '1',
     externalFailureOpsMs: set.EXTERNAL_FAILURE_OPS_MS,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,

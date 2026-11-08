@@ -228,6 +228,12 @@ describe('what the graph does not see', () => {
     expect(await changed(input(files, rule), input({ ...files, 'shared/data.json': '{"more":1}' }, rule))).toEqual(['b:apps/b/test/b.test.ts']);
   });
 
+  it('a rule that names the tests reading a file still counts that file for the whole of their suites', async () => {
+    const files = { ...app, 'shared/data.json': '{}' };
+    const rule = manifest(suites, { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['shared/**'], suiteIds: ['a'], tests: ['apps/a/test/used.test.ts'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
+    expect(await changed(input(files, rule), input({ ...files, 'shared/data.json': '{"more":1}' }, rule))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
+  });
+
   it('a file of no package reaches everyone', async () => {
     const files = { ...app, 'Dockerfile': 'FROM node' };
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'Dockerfile': 'FROM other' }, manifest(suites)))).toHaveLength(3);

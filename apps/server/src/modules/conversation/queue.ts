@@ -17,7 +17,7 @@ import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
-import { repoFor, repoLine } from '../departments/repository.js';
+import { repoAt, repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
@@ -29,6 +29,7 @@ import { addressed, preface } from './prompt.js';
 import { originalPromptOf } from './requested-prompt.js';
 import { effortOfTurn } from './turn-effort.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
+import { repositoryScope } from '../testruns/describe.js';
 import { queuedInput, queuedUsed } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn, type TurnWords } from './turn-words.js';
 import { cancelUnsentDelivery, reserveDelivery } from '../program-operator/deliveries.js';
@@ -940,7 +941,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const job = await dueTurn(ctx, agent, sub);
   if (!job) return;
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
-  const repo = await repoFor(ctx, agent);
+  const at = await repoAt(ctx, [agent.productId, agent.departmentId]);
+  const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
@@ -997,8 +999,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       operatorSourceDelivery: await sourceDeliveryMetadataForJob(db, agentId, job.id),
       context: job.prompt ? null : catchUp,
       guidance: job.prompt || !repo ? null : repoLine(repo),
-      /* Each agent keeps one folder on the node, with its repository's clone inside. */
-      workspace: { key: agent.id, repo },
+      /* Each agent keeps one folder on the node, with its repository's clone inside, which gets the dependencies the
+         company's machines built for its commit. */
+      workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}) },
       ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {

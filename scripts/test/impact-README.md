@@ -4,7 +4,7 @@
 
 `test-impact-adapters.ts` maps project/file collection rows to canonical suite/file units. Supply an explicit project-to-suite map and a complete inventory; an unknown row or missing inventory unit makes the graph unavailable. For mixed-language inventory, independently declare `requiredSuiteIds` for this adapter; absent that declaration, every inventory suite must be covered. Root Vitest collection uses the separate `related-probe.mjs` provider, one changed path per invocation, in a child whose cwd is the checkout root. Collection is not test execution.
 
-Whole-package policy keeps known consumer packages and expands them completely. When no complete graph bounds those consumers, selection widens to all declared packages. Overlapping policy rules are combined. Canonical `(suiteId, selectionUnit)` groups always remain complete, including newly added tests.
+Whole-package policy keeps known consumer packages and expands them completely. When no complete graph bounds those consumers, selection widens to all declared packages. A manifest rule with `tests` instead selects only those test files of its suites, adds no consumers, and still lets the graph select for a code file; the fingerprints of kept results count its files for the whole of those suites. Overlapping policy rules are combined. Canonical `(suiteId, selectionUnit)` groups always remain complete, including newly added tests.
 
 A changed `.test` or `.spec` file absent from the Vitest collection makes that adapter unavailable, even if other tests were selected. An E2E test outside the configured projects cannot prove an empty impact. Whole-package fallback covers the declared inventory; supplying other runners and their complete inventories remains the caller's responsibility.
 

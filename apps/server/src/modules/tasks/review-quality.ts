@@ -1,4 +1,4 @@
-import { EchelonCandidate, EchelonModel } from '@hornhoof/protocol/echelons';
+import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -41,17 +41,15 @@ function assertJob(task: Binding['task'], run: Binding['run'], job: Binding['job
   if (job.companyId !== task.companyId || job.agentId !== run.agentId || (job.taskId !== null && job.taskId !== task.id)) throw invalid();
 }
 
-/* The producing owner, or its immutable submission/check binding, owns a quality receipt. */
+/* The producing owner, or its immutable submission, owns a quality receipt. */
 async function assertProducer(db: Store, task: Binding['task'], run: Binding['run']): Promise<void> {
   const [route] = await db.select({ state: taskRoutes.state }).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
   if (task.assigneeAgentId === run.agentId && route?.state.resultKind === 'code' && route.state.phase === 'active' && ['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '')) return;
   const events = await db.select().from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, run.agentId)));
-  const PendingProducer = z.object({ runId: z.uuid(), producer: EchelonModel, routeRevision: z.number().int().positive(), review: z.object({ commit: ReviewSha, branch: z.string() }) });
   if (events.some(event => {
     const candidate = EchelonCandidate.safeParse(event.data.candidate);
     if (event.kind === 'submitted' && candidate.success && candidate.data.producedBy.agentId === run.agentId && candidate.data.commit === run.commitSha) return true;
-    const pending = PendingProducer.safeParse(event.data.authorCheckPending);
-    return event.kind === 'updated' && pending.success && pending.data.runId === run.id && pending.data.producer.agentId === run.agentId && pending.data.review.commit === run.commitSha && pending.data.review.branch === run.branch;
+    return false;
   })) return;
   throw invalid();
 }

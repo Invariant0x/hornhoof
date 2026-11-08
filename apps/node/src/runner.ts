@@ -9,7 +9,8 @@ import { plainOutput, programEnded, signalName, type ProgramOutput } from './pro
 import { carrySession, CARRIES, freshStart, programDirOf, readyProgramFolder } from './program-folder.js';
 import { placeSkills, skillPaths, superpowersIn } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
-import { prepareRepo, type Git } from './workspace.js';
+import type { Worktree } from './tests.js';
+import { headOf, prepareRepo, type Git } from './workspace.js';
 
 /* The task's folder a turn runs in, from the node itself once it admitted and prepared it, and never from a message. The
    worktree stands right inside the task's context folder. binding: what retiring its program goes by. catchUp: what a session
@@ -133,10 +134,10 @@ function sessionInTask(msg: JobRun, programDir: string, known: string | undefine
 }
 
 /* The agent's files as its program's user has them, for the time this work takes. */
-async function withOwnFs(adapter: ProviderAdapter, work: (own: AgentFs) => Promise<void>): Promise<void> {
+async function withOwnFs<T>(adapter: ProviderAdapter, work: (own: AgentFs) => Promise<T>): Promise<T> {
   const own = adapter.owner?.fs ?? (adapter.owner?.user ? agentFs(adapter.owner.user) : ownFs);
   try {
-    await work(own);
+    return await work(own);
   } finally {
     if (own !== adapter.owner?.fs) own.stop();
   }
@@ -195,7 +196,48 @@ type RunOptions = {
   workspace?: ProgramWorkspace;
   /* The programs that take a session along into a task's folder; those a live check proved by default. */
   carries?: ReadonlySet<ProviderId>;
+  /* Puts the prepared dependencies of a worktree's commit in it. It says in one line what it put there, or nothing when
+     there was nothing to put, and throws what kept it from that. None: the agent installs them itself. */
+  dependencies?: (worktree: Worktree, signal?: AbortSignal) => Promise<string | null>;
+  /* How long the program waits for them at most, whatever holds them. */
+  dependenciesMs?: number;
 };
+
+const DEPENDENCIES_MS = 10 * 60_000;
+const span = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`);
+
+/* The dependencies of the worktree's commit go in place before its program starts, as its user's own files, so the agent's
+   first check finds them there. What keeps them away only leaves the agent to install them, and one line says so. */
+async function placeDependencies(adapter: ProviderAdapter, msg: JobRun, place: TurnPlace, { dependencies, dependenciesMs = DEPENDENCIES_MS, git, signal }: Pick<RunOptions, 'dependencies' | 'dependenciesMs' | 'git' | 'signal'>): Promise<string | null> {
+  const repo = msg.workspace?.repo, repositoryScope = msg.workspace?.repositoryScope, user = adapter.owner?.user;
+  if (!dependencies || !repo || !repositoryScope || !user) return null;
+  const checkout = place.programDir ?? join(place.workDir, repoFolder(repo.url));
+  const without = (why: string) => `The program starts without the shared dependencies, so it may install them itself: ${why}`;
+  const limit = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(dependenciesMs)]);
+  const placing = withOwnFs(adapter, async fs => {
+    const commitSha = await headOf(checkout, { user, home: adapter.owner?.home ?? null }, git);
+    if (!commitSha) return without('the commit of its worktree could not be read.');
+    return dependencies({ id: msg.jobId, checkout, commitSha, repo: { url: repo.url, token: repo.token }, repositoryScope, owner: user, fs }, limit).catch((err: unknown) => {
+      signal?.throwIfAborted();
+      /* A failed build tells its whole output elsewhere; the feed keeps its first line. */
+      return without(message(err).split('\n').map(line => line.trim()).find(Boolean) ?? 'no reason was given.');
+    });
+  });
+  /* Whatever holds them, the program waits no longer, and a stopped turn ends here. The work is told to stop as well, and
+     tidies up by itself after the program has started. */
+  placing.catch(() => {});
+  let stop = () => {};
+  const gaveUp = new Promise<string>((resolve, reject) => {
+    stop = () => (signal?.aborted ? reject(signal.reason) : resolve(without(`they did not come within ${span(dependenciesMs)}.`)));
+  });
+  if (limit.aborted) stop();
+  else limit.addEventListener('abort', stop, { once: true });
+  try {
+    return await Promise.race([placing, gaveUp]);
+  } finally {
+    limit.removeEventListener('abort', stop);
+  }
+}
 
 /* The repository a turn works in, with its lockfile's browser. A browser that cannot start is told in browser-error, and the
    turn goes on. */
@@ -223,7 +265,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), workspace, carries = CARRIES }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), workspace, carries = CARRIES, dependencies, dependenciesMs }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -244,6 +286,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   try {
     const place = await placeOfTurn(adapter, msg, dir, emit, { workspace, carries, superpowers });
     const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
+    const placed = await placeDependencies(adapter, msg, place, { dependencies, dependenciesMs, git, signal });
+    if (placed) emit({ kind: 'text', text: placed });
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;

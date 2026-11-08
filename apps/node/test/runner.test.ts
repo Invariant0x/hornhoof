@@ -5,6 +5,7 @@ import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ownFs } from '../src/agent-fs.js';
 import { jobDone, runJob, type ProgramWorkspace, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
+import type { Worktree } from '../src/tests.js';
 import { readSessions, rememberSession } from '../src/state.js';
 
 const SECRET = 'oauth-token-0123456789abcdef';
@@ -393,6 +394,15 @@ describe('a turn in a task\'s folder', () => {
     expect(adapter.inputs).toEqual([]);
   });
 
+  it("puts the dependencies in the task's worktree, where its program checks its change", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const place = workspace(dir);
+    const asked: Worktree[] = [];
+    const adapter = { ...fakeAdapter(async () => ok()), owner: { user: me, home: dir, prepare: () => {}, fs: ownFs } };
+    await runJob(adapter, agentJob({ workspace: { key: 'agent-1', repo: SHOP, repositoryScope: SCOPE } }), dir, { workspace: place, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: async tree => (asked.push(tree), null) });
+    expect(asked).toMatchObject([{ checkout: place.programDir, commitSha: HEAD }]);
+  });
+
   it('keeps the old folder rule for a turn with no task\'s folder', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(async () => ok());
@@ -403,3 +413,114 @@ describe('a turn in a task\'s folder', () => {
   });
 });
 
+
+const HEAD = 'c'.repeat(40);
+const SHOP = { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop0123' };
+const SCOPE = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'a'.repeat(64) };
+/* git in the agent's clone: it names the commit there and does nothing else. */
+const headAt = (sha: string | Error) => async (args: string[]) => {
+  if (args[0] !== 'rev-parse') return '';
+  if (sha instanceof Error) throw sha;
+  return sha;
+};
+
+describe("the dependencies of an agent's worktree", () => {
+  const owned = (dir: string, run: (input: RunInput) => Promise<RunResult> = async () => ok(), user: { uid: number; gid: number } | null = me) => ({ ...fakeAdapter(run), owner: { user, home: dir, prepare: () => {}, fs: ownFs } });
+  const shopJob = (over: Partial<Extract<ServerMessage, { type: 'job.run' }>> = {}) => job({ workspace: { key: 'dev-1', repo: SHOP, repositoryScope: SCOPE }, ...over });
+
+  it('go in place for its commit before its program starts, as its user\'s files, and one line says how it went', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const happened: string[] = [];
+    const asked: Worktree[] = [];
+    const events: AgentEvent[] = [];
+    const adapter = owned(dir, async () => (happened.push('program'), ok()));
+    const done = await runJob(adapter, shopJob(), dir, {
+      git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event),
+      dependencies: async tree => {
+        happened.push('dependencies');
+        asked.push(tree);
+        return 'Dependencies in place from the shared harness after 12 s.';
+      },
+    });
+    expect(done.ok).toBe(true);
+    expect(happened).toEqual(['dependencies', 'program']);
+    expect(asked).toEqual([{ id: 'job-1', checkout: join(dir, 'work', 'agents', 'dev-1', 'shop'), commitSha: HEAD, repo: { url: SHOP.url, token: SHOP.token }, repositoryScope: SCOPE, owner: me, fs: ownFs }]);
+    expect(events).toEqual([{ kind: 'text', text: 'Dependencies in place from the shared harness after 12 s.' }]);
+  });
+
+  it('say nothing when there was nothing to put in place', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    const adapter = owned(dir);
+    await runJob(adapter, shopJob(), dir, { git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependencies: async () => null });
+    expect(adapter.inputs).toHaveLength(1);
+    expect(events).toEqual([]);
+  });
+
+  it("are not asked for without the repository's place in the registry, without its repository, or for a program with no user of its own", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const asked: string[] = [];
+    const dependencies = async (tree: Worktree) => (asked.push(tree.checkout), null);
+    const options = { git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies };
+    await runJob(owned(dir), job({ workspace: { key: 'dev-1', repo: SHOP } }), dir, options);
+    await runJob(owned(dir), job({ workspace: { key: 'dev-1', repo: null, repositoryScope: SCOPE } }), dir, options);
+    await runJob(owned(dir, async () => ok(), null), shopJob(), dir, options);
+    expect(asked).toEqual([]);
+  });
+
+  it('leave the program to install them itself when they cannot be placed, and say so', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    const adapter = owned(dir);
+    await runJob(adapter, shopJob(), dir, { git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependencies: async () => { throw new Error('Hornhoof answered 502.'); } });
+    expect(adapter.inputs).toHaveLength(1);
+    expect(events).toEqual([{ kind: 'text', text: expect.stringMatching(/^The program starts without the shared dependencies.*Hornhoof answered 502\.$/) }]);
+    const asked: string[] = [];
+    await runJob(adapter, shopJob({ jobId: 'job-2' }), dir, { git: headAt(new Error('fatal: not a git repository')), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependencies: async tree => (asked.push(tree.checkout), null) });
+    expect(asked).toEqual([]);
+    expect(adapter.inputs).toHaveLength(2);
+    expect(events[1]).toEqual({ kind: 'text', text: expect.stringMatching(/^The program starts without the shared dependencies.*commit/) });
+    /* What another machine's failed build said stays one short line here. */
+    const failed = `The harness unit dependencies failed to build: npm ERR! code E404\n${'npm ERR! 404 Not Found\n'.repeat(200)}`;
+    await runJob(adapter, shopJob({ jobId: 'job-3' }), dir, { git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependencies: async () => { throw new Error(failed); } });
+    expect(events[2]).toEqual({ kind: 'text', text: expect.stringMatching(/failed to build: npm ERR! code E404$/) });
+  });
+
+  it('give up on them at their deadline whatever holds them there, and the program starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    const adapter = owned(dir);
+    let told: AbortSignal | undefined;
+    const done = await runJob(adapter, shopJob(), dir, {
+      git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependenciesMs: 50,
+      dependencies: (_tree, signal) => { told = signal; return new Promise<null>(() => {}); },
+    });
+    expect(done.ok).toBe(true);
+    expect(adapter.inputs).toHaveLength(1);
+    expect(events).toEqual([{ kind: 'text', text: expect.stringMatching(/^The program starts without the shared dependencies.*did not come within 1 s\.$/) }]);
+    /* The work that holds them is told to stop, and tidies up by itself. */
+    expect(told?.aborted).toBe(true);
+  });
+
+  it('end a turn stopped while something holds them, before its program starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const stop = new AbortController();
+    const adapter = owned(dir);
+    setTimeout(() => stop.abort(), 20);
+    const done = await runJob(adapter, shopJob(), dir, { signal: stop.signal, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: () => new Promise<null>(() => {}) });
+    expect(done).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(adapter.inputs).toEqual([]);
+  });
+
+  it('end a turn stopped while they were being placed, before its program starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const stop = new AbortController();
+    const adapter = owned(dir);
+    const done = await runJob(adapter, shopJob(), dir, {
+      signal: stop.signal, git: headAt(HEAD), prepareRepoBrowser: async () => {},
+      dependencies: async () => { stop.abort(); throw new DOMException('Stopped.', 'AbortError'); },
+    });
+    expect(done).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(adapter.inputs).toEqual([]);
+  });
+});

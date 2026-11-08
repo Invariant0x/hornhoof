@@ -22,7 +22,8 @@ vi.mock('../src/isolation.js', async original => {
 import { pruneCache } from '../src/test-cache.js';
 import { dependencyCacheKey, environmentCacheKey, harnessVersion, readTestEnvironment } from '../src/test-environment.js';
 import { type HarnessRemote } from '../src/test-harness.js';
-import { runTests, syncHarness } from '../src/tests.js';
+import { agentFs, ownFs } from '../src/agent-fs.js';
+import { runTests, syncHarness, worktreeHarness, type Worktree } from '../src/tests.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) { await rm(root, { recursive: true, force: true }); } });
@@ -370,6 +371,228 @@ describe('a manual command', () => {
     expect(part, part.log).toMatchObject({ ok: true }); expect(await installed(f)).toBe(0);
     /* An author installs only when the log says so, and here nothing else would. */
     expect(part.log).toContain('starts without the prepared harness');
+  });
+});
+
+/* An agent's clone of the repository, as the node makes it for the agent's program in the machine's folder. */
+async function worktree(f: Fixture, options: ReturnType<typeof machine>, commitSha = f.head()): Promise<Worktree> {
+  const checkout = join(options.dir, 'work', 'agents', randomUUID(), 'shop');
+  execFileSync('git', ['clone', '-q', f.source, checkout]);
+  return { id: randomUUID(), checkout, commitSha, repo: f.repo, repositoryScope: f.repositoryScope, owner: { uid: ids.jobUid, gid: ids.jobUid }, fs: ownFs };
+}
+const PLACED = /^Dependencies in place from the shared harness after \d+ s\.$/;
+const leftOver = async (options: ReturnType<typeof machine>) => (await readdir(join(options.dir, 'runs')).catch(() => [] as string[])).filter(name => name.startsWith('worktree-'));
+/* The machine's turn for heavy work, held by a test part until it lets go. */
+function heldTurn() {
+  let release!: () => void;
+  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 }, inside = { count: 0 }, grants = { count: 0 };
+  const slot = async <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    asked.count++; await free; inside.count++; grants.count++;
+    try { return await run(signal); } finally { inside.count--; }
+  };
+  return { slot, release, asked, inside, grants };
+}
+/* A machine's registry that notes what it was told and did, and which of its turns it held meanwhile (0: none). */
+function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
+  const claims: { state: string; inside: number; turn: number }[] = [], downloads: number[] = [];
+  return {
+    claims, downloads,
+    remote: {
+      ...remote,
+      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count, turn: turn.inside.count ? turn.grants.count : 0 }); return claim; },
+      async download(key, file, claim, signal) { downloads.push(turn.inside.count); return remote.download(key, file, claim, signal); },
+    } satisfies HarnessRemote,
+  };
+}
+const until = async (check: () => boolean) => {
+  for (const end = Date.now() + 5_000; !check();) {
+    if (Date.now() > end) throw new Error('timed out');
+    await new Promise(resolve => { setTimeout(resolve, 5); });
+  }
+};
+const STILL_WAITING = 'still waiting';
+const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
+
+describe("an agent's worktree", () => {
+  it('gets the dependencies of its commit before its program starts, built once and taken by every other machine and by test runs', async () => {
+    const f = await fixture(), shared = registry();
+    const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
+    const mine = await worktree(f, one), theirs = await worktree(f, two);
+    expect(await worktreeHarness(mine, one)).toMatch(PLACED);
+    expect(await worktreeHarness(theirs, two)).toMatch(PLACED);
+    for (const tree of [mine, theirs]) expect(await readFile(join(tree.checkout, 'node_modules', 'ready'), 'utf8')).toBe('dep');
+    expect(await installed(f)).toBe(1);
+    /* The key of a test run of the same commit, so a part there takes the same build. */
+    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(two.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    expect(new Set(shared.keysSeen)).toEqual(new Set([dependencyCacheKey(description)]));
+    const part = await runTests(await productPart(f, two), two);
+    expect(part, part.log).toMatchObject({ ok: true, environmentReceipt: { dependencies: { hit: true } } });
+    expect(await installed(f)).toBe(1);
+    expect(await leftOver(one)).toEqual([]);
+  });
+
+  it("gives them as the agent's own files to change, not as links to what the machine keeps", async () => {
+    const f = await fixture(), one = machine(f, 'one', registry().remote('one')), tree = await worktree(f, one);
+    ids.chowned.length = 0;
+    expect(await worktreeHarness(tree, one)).toMatch(PLACED);
+    const ready = join(tree.checkout, 'node_modules', 'ready'), placed = await stat(ready);
+    expect(placed.nlink).toBe(1);
+    expect(placed.mode & 0o200).toBe(0o200);
+    expect((await stat(join(tree.checkout, 'node_modules', '.bin', 'tool'))).mode & 0o111).toBe(0o111);
+    expect(ids.chowned.some(path => path.endsWith('/node_modules/ready'))).toBe(true);
+    await writeFile(ready, 'changed by the agent');
+    const part = await runTests(await productPart(f, one), one);
+    expect(part, part.log).toMatchObject({ ok: true, environmentReceipt: { dependencies: { hit: true } } });
+  });
+
+  it('waits for the machine that builds them and takes its build', async () => {
+    const f = await fixture(), shared = registry();
+    const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
+    const [a, b] = await Promise.all([worktreeHarness(await worktree(f, one), one), worktreeHarness(await worktree(f, two), two)]);
+    expect([a, b]).toEqual([expect.stringMatching(PLACED), expect.stringMatching(PLACED)]);
+    expect(await installed(f)).toBe(1);
+  });
+
+  it('leaves a worktree that holds them already as it is, without reading its commit', async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
+    const tree = await worktree(f, one, 'f'.repeat(40));
+    await mkdir(join(tree.checkout, 'node_modules'));
+    await writeFile(join(tree.checkout, 'node_modules', 'mine'), 'own install');
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    expect(await readdir(join(tree.checkout, 'node_modules'))).toEqual(['mine']);
+    expect(shared.keysSeen).toEqual([]);
+    expect(await installed(f)).toBe(0);
+  });
+
+  it('leaves a worktree as it is where a link stands in their place, even one that leads nowhere', async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
+    const tree = await worktree(f, one);
+    execFileSync('ln', ['-s', join(f.root, 'gone'), join(tree.checkout, 'node_modules')]);
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    expect((await lstat(join(tree.checkout, 'node_modules'))).isSymbolicLink()).toBe(true);
+    expect(shared.keysSeen).toEqual([]);
+    expect(await installed(f)).toBe(0);
+  });
+
+  it('costs nothing and says nothing where the repository keeps no test environment', async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
+    /* A commit nobody could fetch, so any reading of it would fail. */
+    const tree = await worktree(f, one, 'f'.repeat(40));
+    await rm(join(tree.checkout, '.hornhoof'), { recursive: true });
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    await expect(lstat(join(one.dir, 'cache'))).rejects.toThrow(/ENOENT/);
+    expect(shared.keysSeen).toEqual([]);
+    /* One that is there but cannot be read is read from the commit, and what goes wrong there is said. */
+    const broken = await worktree(f, one, 'f'.repeat(40));
+    await writeFile(join(broken.checkout, '.hornhoof/test-environment.json'), 'not a manifest');
+    await expect(worktreeHarness(broken, one)).rejects.toThrow();
+  });
+
+  it('reads its manifest only as a plain file, never through a link and never waiting on a pipe', async () => {
+    const f = await fixture(), one = machine(f, 'one', registry().remote('one'));
+    const manifest = (tree: Worktree) => join(tree.checkout, '.hornhoof/test-environment.json');
+    /* A manifest elsewhere that would say there is nothing to share, if the link to it were followed. */
+    const elsewhere = join(f.root, 'elsewhere.json');
+    await writeFile(elsewhere, (await readFile(join(f.source, '.hornhoof/test-environment.json'), 'utf8')).replace('"cache":"link"', '"cache":"none"'));
+    const linked = await worktree(f, one, 'f'.repeat(40));
+    await rm(manifest(linked)); execFileSync('ln', ['-s', elsewhere, manifest(linked)]);
+    await expect(worktreeHarness(linked, one)).rejects.toThrow(/not our ref|fetch/);
+    /* A pipe nobody writes into, read by the agents' own user as a node that runs as root does. */
+    const piped = await worktree(f, one, 'f'.repeat(40)), helper = agentFs({ uid: process.getuid!(), gid: process.getgid!() });
+    await rm(manifest(piped)); execFileSync('mkfifo', [manifest(piped)]);
+    try {
+      expect(await settled(worktreeHarness({ ...piped, fs: helper }, one).catch((error: unknown) => String(error)), 5_000)).not.toBe(STILL_WAITING);
+    } finally { helper.stop(); }
+  });
+
+  it("takes a ready build while a test part holds the machine's turn for heavy work", async () => {
+    const f = await fixture(), shared = registry();
+    const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
+    expect(await worktreeHarness(await worktree(f, one), one)).toMatch(PLACED);
+    const turn = heldTurn();
+    try {
+      /* Another machine downloads it, and this one has it already. */
+      expect(await settled(worktreeHarness(await worktree(f, two), { ...two, slot: turn.slot }), 5_000)).toMatch(PLACED);
+      expect(await settled(worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot }), 5_000)).toMatch(PLACED);
+    } finally { turn.release(); }
+    expect(turn.asked.count).toBe(0);
+    expect(await installed(f)).toBe(1);
+  });
+
+  it("builds them only in the machine's turn for heavy work, and shares them then", async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one')), turn = heldTurn();
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    expect(await settled(placing, 500)).toBe(STILL_WAITING);
+    expect(turn.asked.count).toBe(1);
+    expect(await installed(f)).toBe(0);
+    turn.release();
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    expect([...shared.builds.values()]).toEqual([expect.objectContaining({ bundle: expect.any(Buffer) })]);
+  });
+
+  it("lets the machine's turn go when another machine's build is ready by then, and takes it without the turn", async () => {
+    const f = await fixture(), shared = registry(), turn = heldTurn(), mine = noted(shared.remote('one'), turn);
+    const one = machine(f, 'one', mine.remote), two = machine(f, 'two', shared.remote('two'));
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    await until(() => turn.asked.count === 1);
+    expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
+    turn.release();
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    expect(mine.downloads).toEqual([0]);
+  });
+
+  it("lets the machine's turn go when another machine builds them by then, and waits for it without the turn", async () => {
+    const f = await fixture(), shared = registry(), turn = heldTurn(), mine = noted(shared.remote('one'), turn);
+    const one = machine(f, 'one', mine.remote), two = machine(f, 'two', shared.remote('two'));
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    await until(() => turn.asked.count === 1);
+    /* The other machine claims the unit while this one waits for its turn. */
+    shared.builds.set(shared.keysSeen[0]!, { builder: 'two' });
+    turn.release();
+    await until(() => mine.claims.some(claim => claim.state === 'wait'));
+    expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    /* A busy machine may go round more than once, as the other machine's claim comes and goes; each time it holds the
+       machine's turn, the first wait gives the turn back. */
+    const waitsInTurns = mine.claims.filter(claim => claim.inside > 0 && claim.state === 'wait').map(claim => claim.turn);
+    expect(new Set(waitsInTurns).size).toBe(waitsInTurns.length);
+    expect(mine.downloads).toEqual([0]);
+  });
+
+  it('says why when they cannot be built, and leaves nothing behind', async () => {
+    const f = await fixture(manifest => { manifest.dependencies.install = [sh('process.exit(3)')]; }), one = machine(f, 'one', registry().remote('one'));
+    const tree = await worktree(f, one);
+    await expect(worktreeHarness(tree, one)).rejects.toThrow(/exit 3/);
+    await expect(lstat(join(tree.checkout, 'node_modules'))).rejects.toThrow(/ENOENT/);
+    expect(await leftOver(one)).toEqual([]);
+  });
+
+  it('waits only so long for another machine', async () => {
+    const f = await fixture(), shared = registry();
+    const busy: HarnessRemote = { ...shared.remote('one'), claim: async () => ({ state: 'wait', afterMs: 5 }) };
+    const one = { ...machine(f, 'one', busy), limitMs: 300 }, started = Date.now();
+    await expect(worktreeHarness(await worktree(f, one), one)).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(await installed(f)).toBe(0);
+  });
+
+  it('leaves the dependencies to the agent where the repository shares none', async () => {
+    const f = await fixture(manifest => { manifest.dependencies.cache = 'none'; manifest.prepare = []; }), one = machine(f, 'one', registry().remote('one'));
+    const tree = await worktree(f, one);
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    await expect(lstat(join(tree.checkout, 'node_modules'))).rejects.toThrow(/ENOENT/);
+    expect(await installed(f)).toBe(0);
+  });
+
+  it('stops with the turn it was for', async () => {
+    const f = await fixture(), one = machine(f, 'one', registry().remote('one')), stop = new AbortController();
+    const tree = await worktree(f, one);
+    stop.abort();
+    await expect(worktreeHarness(tree, { ...one, signal: stop.signal })).rejects.toThrow();
+    expect(await installed(f)).toBe(0);
   });
 });
 
