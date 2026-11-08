@@ -17,7 +17,7 @@ export async function testsFixture(fix = false) {
   } else await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
   const snapshot = (await f.detail()).echelons;
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.tester.id, subscriptionId: f.tester.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Verify final candidate', timeoutMs: 1000 }).returning();
-  const run = async (commit = finalCommit, parts = 1) => {
+  const manualRun = async (commit = finalCommit, parts = 1) => {
     await startRun(f.ctx, { id: job!.id, companyId: f.task.companyId, agentId: f.tester.id, agentKind: f.tester.kind, departmentId: f.tester.departmentId }, {
       task: f.task.id, command: 'Changed tests', candidate: { candidateId: snapshot.candidateId!, revision: snapshot.revision },
     });
@@ -28,6 +28,6 @@ export async function testsFixture(fix = false) {
     return finished!;
   };
   const verified = (ids: string[]) => ({ done: true, summary: 'Verified the final changed scope.', ...{ verification: { candidateId: snapshot.candidateId!, revision: snapshot.revision, runIds: ids } } });
-  return { ...f, run, verified, snapshot, finalCommit };
+  return { ...f, run: manualRun, manualRun, verified, snapshot, finalCommit };
 }
 

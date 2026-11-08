@@ -15,6 +15,14 @@ describe('Tests verifies the final candidate without changing it', () => {
     expect((await f.detail()).echelons).toMatchObject({ phase: 'ready', candidateId: f.snapshot.candidateId });
     expect(moved.wakes.map(w => w.agentId)).toEqual([f.head.id]);
   });
+  it('does not accept a passed manual command as proof of the candidate applicable test scope', async () => {
+    const f = await testsFixture();
+    const run = await f.manualRun();
+    expect(run.command).toBe('Changed tests');
+    expect(run.environmentSnapshot).toBeNull();
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.phase).toBe('active');
+  });
   it('rejects an author receipt made before the checker changed the commit', async () => {
     const f = await testsFixture(true);
     const run = await f.run(HEAD);
