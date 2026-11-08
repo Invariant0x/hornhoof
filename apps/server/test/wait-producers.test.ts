@@ -4,9 +4,12 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { answer, ask, cancel, createTask, leaveWork, report, submit, updateTask, verdict, type Task } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { backOn } from '../src/modules/tasks/wake.js';
 import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { resolveStuck } from '../src/modules/tasks/stuck.js';
 import { afterSourceKey, recordRunWait, requestSourceKey, reviewSourceKey, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 const HOUR = 3_600_000;
@@ -19,15 +22,20 @@ async function company() {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dev, ops] = await db.insert(departments).values([{ companyId, templateKey: 'development', roleCode: 'DEV' }, { companyId, templateKey: 'operations', roleCode: 'OPS' }]).returning();
+  const [dev, ops] = await db.insert(departments).values([{ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }, { companyId, templateKey: 'operations', roleCode: 'OPS' }]).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId = dev!.id) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const ctx = app.ctx;
+  let commit = HEAD;
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: commit });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  const atCommit = (sha: string) => { commit = sha; };
+  const snapshot = async (id: string) => { const [task] = await db.select().from(tasks).where(eq(tasks.id, id)); return routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId); };
   const CEO = { personId: ceo!.id };
-  const task = async (title: string, change: Partial<Parameters<typeof createTask>[2]> = {}) => (await createTask(ctx, CEO, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, ...change })).task;
+  const task = async (title: string, change: Partial<Parameters<typeof createTask>[2]> = {}) => (await createTask(ctx, CEO, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], ...change })).task;
   const policy = (change: Partial<typeof waitPolicies.$inferInsert> = {}) => db.insert(waitPolicies).values({
     companyId, departmentId: dev!.id, kind: 'after', stage: '', version: 1, ownerMs: HOUR, headMs: 2 * HOUR, decisionMs: 3 * HOUR, reviewIntervalMs: 4 * HOUR, createdByPersonId: ceo!.id, ...change,
   });
@@ -38,17 +46,18 @@ async function company() {
     finalReview: { headAgentId: head.id, anchorAt: later(4), intervalMs: HOUR },
     ...change,
   });
-  return { ctx, db, companyId, CEO, ceo: ceo!, dev: dev!, ops: ops!, head, bruno, rita, task, policy, waitsOf, plan, hire };
+  return { ctx, db, atCommit, snapshot, companyId, CEO, ceo: ceo!, dev: dev!, ops: ops!, head, bruno, rita, task, policy, waitsOf, plan, hire };
 }
 
+const code = { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } };
 const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: string }) => err.reason ?? String(err));
 
 describe('a task that comes after others', () => {
   it('in a department with no policy keeps a wait with no dates for each open edge, its holder answering for it', async () => {
     const c = await company();
     const first = await c.task('First', { assigneeAgentId: c.rita.id });
-    const finished = await c.task('Finished');
-    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, finished.id));
+    const finished = await c.task('Finished decision', { executor: false, resultKind: 'coordination' });
+    await report(c.ctx, c.bruno.id, finished.id, { done: true, summary: 'Checked the scope decision.' });
     const follow = await c.task('Follow', { after: [first.id, finished.id], independentNone: 'One piece.' });
     expect(await c.waitsOf(follow)).toMatchObject([{
       kind: 'after', sourceKey: afterSourceKey(first.id), state: 'legacy_needs_plan', ownerAgentId: c.rita.id, plan: null, ownerDueAt: null, nextActionAt: null, level: 0,
@@ -143,16 +152,16 @@ describe('a task that comes after others', () => {
   it('ends its edge when the task before it is done, also after that task changed hands, and starts only with the last', async () => {
     const c = await company();
     await c.policy();
-    const [one, two] = [await c.task('One', { assigneeAgentId: c.rita.id }), await c.task('Two', { assigneeAgentId: c.rita.id })];
+    const [one, two] = [await c.task('One decision', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' }), await c.task('Two decisions', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' })];
     const follow = await c.task('Follow', { after: [one.id, two.id], independentNone: 'One piece.' });
-    await updateTask(c.ctx, c.head.id, one.id, { executor: c.bruno.id });
-    await submit(c.ctx, c.bruno.id, one.id, { summary: 'Done.', evidence: 'Seen.' });
+    await updateTask(c.ctx, c.head.id, one.id, { ownerAgentId: c.bruno.id });
+    await report(c.ctx, c.bruno.id, one.id, { done: true, summary: 'Checked the first decision.' });
     const rows = await c.waitsOf(follow);
     const edge = (t: Task) => rows.find(w => w.sourceKey === afterSourceKey(t.id))!;
     expect([edge(one).state, edge(two).state]).toEqual(['resolved', 'active']);
     expect(edge(one).proofRef).toBe(`task:${one.id}:done`);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, follow.id), eq(taskEvents.kind, 'started'))))).toEqual([]);
-    await submit(c.ctx, c.rita.id, two.id, { summary: 'Done.', evidence: 'Seen.' });
+    await report(c.ctx, c.rita.id, two.id, { done: true, summary: 'Checked the second decision.' });
     expect((await c.waitsOf(follow)).map(w => w.state)).toEqual(['resolved', 'resolved']);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, follow.id), eq(taskEvents.kind, 'started'))))).toHaveLength(1);
   });
@@ -200,104 +209,116 @@ describe('a task that comes after others', () => {
   });
 });
 
-describe('a task at its gate', () => {
-  const atGate = async (c: Awaited<ReturnType<typeof company>>, gates: string[]) => {
-    const work = await c.task('Work', { gates });
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' });
+describe('a candidate at its current checking stage', () => {
+  const atReview = async (c: Awaited<ReturnType<typeof company>>, change: Parameters<typeof c.task>[1] = {}) => {
+    const work = await c.task('Work', { reviewerAgentId: c.rita.id, ...change });
+    await submit(c.ctx, c.bruno.id, work.id, code);
     return work;
   };
-  /* Two reviewers of one role on two makers' subscriptions check it at once. */
-  const atPanel = async (c: Awaited<ReturnType<typeof company>>) => {
-    const [other] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'codex', kind: 'personal', label: 'Other', ownerPersonId: c.ceo.id, status: 'ready' }).returning();
-    await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Sara', roleKey: 'DEV-REV', departmentId: c.dev.id, model: '', subscriptionId: other!.id });
-    const made = await c.task('Work', { gates: [c.rita.id] });
-    await submit(c.ctx, c.bruno.id, made.id, { summary: 'Done.', evidence: 'Seen.' });
-    const [work] = await c.db.select().from(tasks).where(eq(tasks.id, made.id));
-    expect(work!.panel).toHaveLength(2);
-    return { work: work!, first: work!.panel[0]! };
+  const key = async (c: Awaited<ReturnType<typeof company>>, work: Task, owner = c.rita.id) => {
+    const snapshot = await c.snapshot(work.id);
+    return reviewSourceKey(work.id, snapshot.stage!, snapshot.candidateId!, owner);
+  };
+  const securityTask = async (c: Awaited<ReturnType<typeof company>>) => {
+    const checker = await c.hire('Security', 'worker', 'DEV-SEC');
+    const work = await atReview(c, { riskClass: 'security', securityAgentId: checker.id });
+    return { checker, work };
   };
 
-  it('in a department with no policy keeps a wait with no dates for its reviewer', async () => {
+  it('keeps an undated wait for one exact Review candidate and owner when no policy exists', async () => {
     const c = await company();
-    const work = await atGate(c, [c.rita.id]);
-    expect(await c.waitsOf(work)).toMatchObject([{ kind: 'review', sourceKey: reviewSourceKey(work.id, 0, c.rita.id), state: 'legacy_needs_plan', ownerAgentId: c.rita.id }]);
+    const work = await atReview(c);
+    expect(await c.waitsOf(work)).toMatchObject([{ kind: 'review', sourceKey: await key(c, work), state: 'legacy_needs_plan', ownerAgentId: c.rita.id }]);
   });
 
-  it('gives its reviewer the department\'s dates and ends with the verdict, whose event proves it', async () => {
+  it('keeps its policy dates during owner repair and ends with the recorded forward verdict', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const work = await atGate(c, [c.rita.id]);
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'active', ownerAgentId: c.rita.id, plan: { provenance: { kind: 'department_policy' } } }]);
-    await verdict(c.ctx, c.rita.id, work.id, { pass: false, comment: 'Fix it.' });
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'resolved', proofRef: expect.stringMatching(/^verdict:\d+$/) as string }]);
+    const work = await atReview(c);
+    const [before] = await c.waitsOf(work);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: false, comment: 'I am fixing it.', reviewedCommit: HEAD });
+    expect(await c.waitsOf(work)).toMatchObject([{ id: before!.id, state: 'active', generation: before!.generation, ownerDueAt: before!.ownerDueAt, proofRef: null }]);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Checked.', reviewedCommit: HEAD });
+    const [event] = (await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.id), eq(taskEvents.kind, 'verdict')))).filter(event => event.data.pass === true);
+    expect(await c.waitsOf(work)).toMatchObject([{ state: 'resolved', proofRef: `moved:${event!.id}` }]);
   });
 
-  it('refuses the hand-in whole where the department set dates but none for reviews', async () => {
+  it('refuses the whole handoff if a strict department has no Review policy', async () => {
     const c = await company();
     await c.policy();
-    const work = await c.task('Work', { gates: [c.rita.id] });
-    expect(await reason(submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' }))).toBe('task_invalid');
-    expect((await c.db.select().from(tasks).where(eq(tasks.id, work.id)))[0]).toMatchObject({ status: 'open', stage: 0, version: work.version });
+    const work = await c.task('Work', { reviewerAgentId: c.rita.id });
+    expect(await reason(submit(c.ctx, c.bruno.id, work.id, code))).toBe('task_invalid');
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, work.id)))[0]).toMatchObject({ status: 'open', version: work.version });
+    expect((await c.snapshot(work.id)).stage).toBe('development');
     expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, work.id), eq(taskEvents.kind, 'submitted')))).toEqual([]);
   });
 
-  it('binds again on the next round: the one before cannot come back', async () => {
+  it('supersedes the old candidate wait when its reviewer submits a repair candidate', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const work = await atGate(c, [c.rita.id]);
-    await verdict(c.ctx, c.rita.id, work.id, { pass: false, comment: 'Fix it.' });
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Fixed.', evidence: 'Seen.' });
-    expect((await c.waitsOf(work)).map(w => [w.sourceKey, w.state])).toEqual([
-      [reviewSourceKey(work.id, 0, c.rita.id), 'resolved'], [reviewSourceKey(work.id, 1, c.rita.id), 'active'],
-    ]);
+    const work = await atReview(c);
+    const original = await key(c, work);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: false, comment: 'I am fixing it.', reviewedCommit: HEAD });
+    c.atCommit('c'.repeat(40));
+    await submit(c.ctx, c.rita.id, work.id, { ...code, summary: 'Fixed.' });
+    const repaired = await key(c, work);
+    expect(repaired).not.toBe(original);
+    expect((await c.waitsOf(work)).map(wait => [wait.sourceKey, wait.state])).toEqual([[original, 'superseded'], [repaired, 'active']]);
   });
 
-  it('binds the next gate of the same round to its own reviewer', async () => {
+  it('binds conditional Security to the same candidate and its own current owner', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const tess = await c.hire('Tess', 'worker', 'DEV-TEST');
-    const work = await atGate(c, [c.rita.id, tess.id]);
-    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Fine.' });
-    expect((await c.waitsOf(work)).map(w => [w.ownerAgentId, w.state])).toEqual([[c.rita.id, 'resolved'], [tess.id, 'active']]);
+    const { checker, work } = await securityTask(c);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Checked.', reviewedCommit: HEAD });
+    expect((await c.snapshot(work.id)).stage).toBe('security');
+    expect((await c.waitsOf(work)).map(wait => [wait.ownerAgentId, wait.state])).toEqual([[c.rita.id, 'resolved'], [checker.id, 'active']]);
+    expect((await c.waitsOf(work))[1]!.sourceKey).toBe(await key(c, work, checker.id));
   });
 
-  it('waits for each one on a panel, and one verdict ends only that one', async () => {
+  it('creates only the named owner wait even when another provider has an eligible reviewer', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const panel = await atPanel(c);
-    const [other] = panel.work.panel.filter(id => id !== panel.first);
-    await verdict(c.ctx, panel.first, panel.work.id, { pass: true, comment: 'Fine.' });
-    const rows = await c.waitsOf(panel.work);
-    expect(Object.fromEntries(rows.map(w => [w.ownerAgentId, w.state]))).toEqual({ [panel.first]: 'resolved', [other!]: 'active' });
+    const [other] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'codex', kind: 'personal', label: 'Other', ownerPersonId: c.ceo.id, status: 'ready' }).returning();
+    const reviewer = await c.hire('Sara', 'worker', 'DEV-REV');
+    await c.db.update(agents).set({ subscriptionId: other!.id, model: 'gpt-6.1-sol' }).where(eq(agents.id, reviewer.id));
+    const work = await atReview(c);
+    expect(await c.waitsOf(work)).toMatchObject([{ ownerAgentId: c.rita.id, sourceKey: await key(c, work) }]);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Checked.', reviewedCommit: HEAD });
+    expect((await c.waitsOf(work)).map(wait => wait.state)).toEqual(['resolved']);
   });
 
-  it('is not stopped where its reviewers have no dates once the work was handed in before the department set any', async () => {
+  it('never refuses an automatic Security handoff when a later policy omits checking dates', async () => {
     const c = await company();
-    const tess = await c.hire('Tess', 'worker', 'DEV-TEST');
-    const work = await atGate(c, [c.rita.id, tess.id]);
+    const { checker, work } = await securityTask(c);
     await c.policy();
-    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Fine.' });
-    expect((await c.waitsOf(work)).map(w => [w.ownerAgentId, w.state])).toEqual([[c.rita.id, 'resolved'], [tess.id, 'legacy_needs_plan']]);
+    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Checked.', reviewedCommit: HEAD });
+    expect((await c.waitsOf(work)).map(wait => [wait.ownerAgentId, wait.state])).toEqual([[c.rita.id, 'resolved'], [checker.id, 'legacy_needs_plan']]);
   });
 
-  it('with nobody on to check it answers to whoever gave it out, and passes to the reviewer given later', async () => {
+  it('waits for an eligible owner without inventing a head check and binds the assigned reviewer later', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const rev = await c.hire('Gus', 'worker', 'DEV-SEC');
-    const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [rev.id] })).task;
-    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, rev.id));
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' });
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'active', ownerAgentId: c.head.id, sourceKey: reviewSourceKey(work.id, 0, c.head.id) }]);
-    await updateTask(c.ctx, c.head.id, work.id, { gates: [c.rita.id] });
-    expect((await c.waitsOf(work)).map(w => [w.ownerAgentId, w.state])).toEqual([[c.head.id, 'cancelled'], [c.rita.id, 'active']]);
+    const unavailable = await c.hire('Gus', 'worker', 'DEV-REV');
+    const work = await c.task('Work', { reviewerAgentId: unavailable.id });
+    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, unavailable.id));
+    await submit(c.ctx, c.bruno.id, work.id, code);
+    const candidateId = (await c.snapshot(work.id)).candidateId;
+    expect(await c.waitsOf(work)).toEqual([]);
+    expect(await c.snapshot(work.id)).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null });
+    await updateTask(c.ctx, c.head.id, work.id, { ownerAgentId: c.rita.id });
+    expect(await c.snapshot(work.id)).toMatchObject({ stage: 'review', candidateId, ownerAgentId: c.rita.id });
+    expect(await c.waitsOf(work)).toMatchObject([{ state: 'active', ownerAgentId: c.rita.id, sourceKey: await key(c, work) }]);
   });
 
-  it('resolves what is left when the last verdict closes it', async () => {
+  it('ends Review once without declaring the executable result complete before Tests', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
-    const work = await atGate(c, [c.rita.id]);
-    await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Fine.' });
-    expect((await c.waitsOf(work)).map(w => w.state)).toEqual(['resolved']);
+    const work = await atReview(c);
+    const moved = await verdict(c.ctx, c.rita.id, work.id, { pass: true, comment: 'Checked.', reviewedCommit: HEAD });
+    expect(moved.task.status).not.toBe('done');
+    expect((await c.snapshot(work.id)).stage).toBe('tests');
+    expect((await c.waitsOf(work)).map(wait => wait.state)).toEqual(['resolved']);
   });
 });
 
@@ -428,17 +449,19 @@ describe('a run', () => {
 });
 
 describe('someone leaving', () => {
-  it('moves the review on without dates where none are set for reviews, rather than leaving work with one who left', async () => {
+  it('resumes the same required Review with an eligible replacement without inventing checking dates', async () => {
     const c = await company();
-    const tess = await c.hire('Tess', 'worker', 'DEV-TEST');
-    const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [c.rita.id, tess.id] })).task;
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' });
+    const replacement = await c.hire('Replacement', 'worker', 'DEV-REV');
+    const work = await c.task('Work', { reviewerAgentId: c.rita.id });
+    await submit(c.ctx, c.bruno.id, work.id, code);
+    const candidateId = (await c.snapshot(work.id)).candidateId;
     await c.policy();
     await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, c.rita.id));
-    await leaveWork(c.ctx, c.CEO, { id: c.rita.id, name: c.rita.name, companyId: c.companyId });
-    const [moved] = await c.db.select().from(tasks).where(eq(tasks.id, work.id));
-    expect(moved!.panel).toEqual([tess.id]);
-    expect((await c.waitsOf(work)).map(w => [w.ownerAgentId, w.state])).toEqual([[c.rita.id, 'cancelled'], [tess.id, 'legacy_needs_plan']]);
+    await leaveWork(c.ctx, c.CEO, c.rita);
+    expect(await c.snapshot(work.id)).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null, candidateId });
+    await backOn(c.ctx, c.CEO, replacement.id);
+    expect(await c.snapshot(work.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: replacement.id, candidateId });
+    expect((await c.waitsOf(work)).map(wait => [wait.ownerAgentId, wait.state])).toEqual([[c.rita.id, 'superseded'], [replacement.id, 'legacy_needs_plan']]);
   });
 });
 
@@ -465,9 +488,9 @@ describe('a wait_for', () => {
     const c = await company();
     await c.policy({ kind: 'external' });
     await c.policy({ kind: 'review' });
-    const work = await c.task('Work', { gates: [c.rita.id] });
+    const work = await c.task('Work', { reviewerAgentId: c.rita.id });
     await waitFor(c.ctx, c.bruno.id, work.id, { reason: 'The build', until: until() });
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' });
+    await submit(c.ctx, c.bruno.id, work.id, code);
     expect((await c.waitsOf(work)).map(w => [w.kind, w.state])).toEqual([['external', 'superseded'], ['review', 'active']]);
   });
 
@@ -481,13 +504,14 @@ describe('a wait_for', () => {
   it('ends once the holder moves the work on, while a comment that resumes it leaves it standing', async () => {
     const c = await company();
     await c.policy({ kind: 'external' });
+    await c.policy({ kind: 'review' });
     const work = await c.task('Work');
     await waitFor(c.ctx, c.bruno.id, work.id, { reason: 'The build', until: until() });
     const { comment } = await import('../src/modules/tasks/engine.js');
     await comment(c.ctx, { agentId: c.head.id }, work.id, 'Any news?');
     const [resumed] = await c.waitsOf(work);
     expect(resumed).toMatchObject({ state: 'active', generation: 1 });
-    await submit(c.ctx, c.bruno.id, work.id, { summary: 'Done.', evidence: 'Seen.' });
-    expect((await c.waitsOf(work)).map(w => w.state)).toEqual(['resolved']);
+    await submit(c.ctx, c.bruno.id, work.id, code);
+    expect((await c.waitsOf(work)).map(w => [w.kind, w.state])).toEqual([['external', 'superseded'], ['review', 'active']]);
   });
 });
