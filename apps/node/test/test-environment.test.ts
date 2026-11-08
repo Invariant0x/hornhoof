@@ -297,3 +297,19 @@ it('refuses a broad mutation command when the candidate has no declared narrow i
   const suite = result.description.manifest.suites.find(suite => suite.id === 'mutation')!;
   await expect(environment.buildTestInvocation(suite, ['app/logic.ts'], Object.assign({ checkout: f.root, filesPath: join(f.root, 'selected.json') }, { snapshot }))).rejects.toThrow(/mutation/i);
 });
+
+it('keeps different pure function selections out of the same final-file mutation cache key', async () => {
+  const f = await mutationCandidate();
+  await writeFile(join(f.root, 'app/logic.ts'), 'export function total(n: number) { return n + 2; }\nexport function untouched(n: number) { return n * 1; }\n');
+  git(f.root, 'commit', '--quiet', '-am', 'Another candidate base');
+  const otherBase = git(f.root, 'rev-parse', 'HEAD');
+  await writeFile(join(f.root, 'app/logic.ts'), 'export function total(n: number) { return n + 2; }\nexport function untouched(n: number) { return n * 2; }\n');
+  git(f.root, 'commit', '--quiet', '-am', 'Same final code, different delta');
+  const head = git(f.root, 'rev-parse', 'HEAD');
+  const original = await environment.describeTestEnvironment(f.source, f.scope, head, f.context, undefined, f.base);
+  const later = await environment.describeTestEnvironment(f.source, f.scope, head, f.context, undefined, otherBase);
+  expect(original.mutation?.selection.selected.map(fn => fn.name)).toEqual(['total']);
+  expect(later.mutation?.selection.selected.map(fn => fn.name)).toEqual(['untouched']);
+  const fingerprint = (value: typeof original) => value.fingerprints!.find(print => print.suiteId === 'mutation' && print.file === 'app/logic.ts')!.fingerprint;
+  expect(fingerprint(original)).not.toBe(fingerprint(later));
+});

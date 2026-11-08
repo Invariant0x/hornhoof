@@ -134,3 +134,11 @@ it.each(['delta-head', 'delta-base', 'selection-head', 'selection-base', 'invali
   };
   expect(protocol.parseNodeMessage(JSON.stringify(reply))).toBeNull();
 });
+
+it('accepts only an explicitly bound narrow mutation invocation template', () => {
+  const value = description().manifest;
+  const candidateRun = { program: 'node', args: ['scripts/mutation/run.mjs', '--base', '{baseCommit}', '--head', '{commit}', '--plan-file', '{planFile}'], cwd: '.' };
+  const withCommand = { ...value, mutation: { ...value.mutation, candidateRun } };
+  expect(protocol.TestEnvironmentV1.safeParse(withCommand).success).toBe(true);
+  expect(protocol.TestEnvironmentV1.safeParse({ ...withCommand, mutation: { ...withCommand.mutation, candidateRun: { ...candidateRun, args: ['scripts/mutation/run.mjs'] } } }).success).toBe(false);
+});
