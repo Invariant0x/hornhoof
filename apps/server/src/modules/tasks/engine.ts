@@ -852,7 +852,6 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     }
     if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
     if (set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId) {
-      await changeRoute(tx, route, state);
       await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.taskId, task.id), eq(jobs.agentId, task.assigneeAgentId!), eq(jobs.status, 'queued')));
       await letStuckGo(tx, task.id);
     }
