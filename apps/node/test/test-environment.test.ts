@@ -234,3 +234,42 @@ it('does not replay a cached description for the same head at another candidate 
   await control.handle({ ...request, baseCommit: 'c'.repeat(40) });
   expect(emitted.at(-1)).toMatchObject({ result: { status: 'error', problem: { code: 'description_mismatch' } } });
 });
+
+async function mutationCandidate(hasFastJudge = true) {
+  const value = manifest();
+  const sourcePaths = ['app/logic.ts', 'app/process.ts'];
+  const f = await fixture({ ...value,
+    profiles: [{ id: 'fast', requiredSuiteIds: ['api', 'mutation'] }],
+    suites: [...value.suites, { id: 'mutation', root: '.', files: sourcePaths, run: { program: 'node', args: ['mutate.mjs'], cwd: '.' }, split: { kind: 'json-file' }, profiles: ['fast'] }],
+    mutation: { status: 'supported', language: 'typescript', tool: 'mutator', command: { program: 'node', args: ['mutate.mjs'], cwd: '.' }, sourcePaths,
+      fastTestPaths: ['app/test/a.test.ts'], coverageCommands: [value.suites[0].run], coverageFiles: ['coverage.json'] },
+  });
+  await writeFile(join(f.root, 'app/logic.ts'), 'export function total(n: number) { return n + 1; }\nexport function untouched(n: number) { return n * 2; }\n');
+  await writeFile(join(f.root, 'app/process.ts'), 'export function start() { return process.cwd(); }\n');
+  await writeFile(join(f.root, 'app/test/a.test.ts'), hasFastJudge ? "import { expect, it } from 'vitest';\nimport { total } from '../logic.js';\nit('total', () => { expect(total(1)).toBe(3); });\n" : '// No fast test reaches total.');
+  git(f.root, 'add', '.'); git(f.root, 'commit', '--quiet', '-m', 'Candidate base');
+  const base = git(f.root, 'rev-parse', 'HEAD');
+  await writeFile(join(f.root, 'app/logic.ts'), 'export function total(n: number) { return n + 2; }\nexport function untouched(n: number) { return n * 2; }\n');
+  await writeFile(join(f.root, 'app/process.ts'), 'export function start() { return process.env.NODE_ENV; }\n');
+  git(f.root, 'commit', '--quiet', '-am', 'Candidate head');
+  return { ...f, base, head: git(f.root, 'rev-parse', 'HEAD') };
+}
+
+it('describes the pinned candidate delta and only its changed pure functions with safe fast judges', async () => {
+  const f = await mutationCandidate();
+  const result = await environment.describeTestEnvironment(f.source, f.scope, f.head, f.context, undefined, f.base);
+  expect(result).toMatchObject({ mutation: {
+    delta: { baseCommit: f.base, commit: f.head, changes: expect.arrayContaining([{ path: 'app/logic.ts', ranges: [[1, 1]] }]) },
+    selection: { status: 'ready', baseCommit: f.base, commit: f.head,
+      selected: [{ file: 'app/logic.ts', name: 'total', lines: [1], tests: ['app/test/a.test.ts'] }],
+      excluded: [expect.objectContaining({ file: 'app/process.ts', reason: 'purity_unproven' })],
+    },
+  } });
+  await expect(access(join(f.root, 'executed'))).rejects.toThrow();
+});
+
+it('keeps missing fast mutation judges blocked instead of treating the file fingerprint as mutation evidence', async () => {
+  const f = await mutationCandidate(false);
+  const result = await environment.describeTestEnvironment(f.source, f.scope, f.head, f.context, undefined, f.base);
+  expect(result).toMatchObject({ mutation: { selection: { status: 'blocked', selected: [], problems: [{ file: 'app/logic.ts', code: 'no_safe_fast_tests' }] } } });
+});
