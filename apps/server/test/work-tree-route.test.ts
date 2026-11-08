@@ -204,6 +204,25 @@ describe('GET /api/departments/:id/tree', () => {
     expect(checker!.unknown).toBeLessThan(60);
   });
 
+  it('keeps candidate and finding details private for a scoped tree reader', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security' });
+    await submit(c.ctx, c.bruno.id, task.id, c.code);
+    await verdict(c.ctx, c.rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: 'Checking the boundary.', issues: [{ category: 'data', blocking: false, path: 'logic/totals.ts', line: 1, harm: 'The boundary needs a contract.' }] });
+    const token = await invitePerson(c.app, c.ceoToken, { name: 'Dev', email: 'dev@acme.com', access: { departments: [c.dev.id] } });
+    await ownPlan(c.db, 'dev@acme.com', c.bruno.id, c.rita.id);
+    const response = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(token) });
+    expect(response.statusCode).toBe(200);
+    const { tree } = response.json<{ tree: DepartmentTree }>();
+    expect(tree.lines.find(line => line.taskId === task.id)).toMatchObject({
+      echelons: { stage: 'review', ownerAgentId: c.rita.id, candidateId: null, assignment: null,
+        stages: expect.arrayContaining([expect.objectContaining({ stage: 'security', ownerAgentId: null, inputCandidateId: null, candidateId: null })]) },
+      echelonFindings: { uniqueReported: 0, uniqueConfirmed: 0, issues: [] },
+    });
+    expect(response.body).not.toContain('logic/totals.ts');
+    expect(response.body).not.toContain(HEAD);
+  });
+
   it('keeps an old action timestamp without guessing the program state during forty quiet minutes', async () => {
     const { app, db, companyId, ceoToken, claude, dev, bruno, member } = await company();
     const api = await member(bruno.id, 'Checkout API');

@@ -45,7 +45,7 @@ export function routeSnapshot(route: Route, ownerAgentId: string | null): Echelo
   return { ...route.state, revision: route.revision, ownerAgentId };
 }
 
-export async function routeSnapshots(db: Db, rows: Pick<Task, 'id' | 'companyId' | 'assigneeAgentId'>[]): Promise<Map<string, EchelonsSnapshot>> {
+export async function routeSnapshots(db: Db | Tx, rows: Pick<Task, 'id' | 'companyId' | 'assigneeAgentId'>[]): Promise<Map<string, EchelonsSnapshot>> {
   const routes = rows.length ? await db.select().from(taskRoutes).where(inArray(taskRoutes.taskId, rows.map(t => t.id))) : [];
   return new Map(rows.map(task => {
     const route = routes.find(r => r.taskId === task.id && r.companyId === task.companyId);

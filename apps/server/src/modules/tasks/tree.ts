@@ -1,3 +1,4 @@
+import { ECHELON_STAGES, type EchelonsSnapshot, type EchelonFindingsView, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { TurnAlarm, TurnProgram } from '@hornhoof/protocol/map';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { countedSegments, turnSegments, withExternalWait, withPrograms, type FactTurn } from './tree-programs.js';
@@ -19,6 +20,9 @@ export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; 
 export type TreeMove = { kind: TaskEventKind; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
 export type TreeLine = {
+  echelons: EchelonsSnapshot;
+  echelonFindings: EchelonFindingsView;
+  ownerSince: string;
   taskId: string;
   number: number;
   title: string;
@@ -30,7 +34,7 @@ export type TreeLine = {
   createdAt: string;
   /* When the work started: the 'started' event when the task waited for others, else createdAt; null while it still waits. */
   cutAt: string | null;
-  /* The first 'submitted' event with data.merged = true. */
+  /* The report recording the checked candidate integration. */
   mergedAt: string | null;
   /* closedAt of a task done without a merge. */
   doneAt: string | null;
@@ -85,6 +89,9 @@ export type DepartmentTree = {
 
 export type FactAgent = { id: string; name: string; createdAt: Date };
 export type FactTask = {
+  ownerSince: Date;
+  echelons: EchelonsSnapshot;
+  echelonFindings: EchelonFindingsView;
   /* Who answers for each thing it waits on: for work going on now, not for a turn that is over. */
   waits?: TaskWaitView[];
   id: string;
@@ -402,7 +409,7 @@ function cutDateOf(task: FactTask, moves: FactTaskEvent[], afterTasks: FactRelat
 }
 
 function lineEndDates(task: FactTask, moves: FactTaskEvent[]): { mergedAt: Date | null; doneAt: Date | null } {
-  const merged = moves.find(e => e.kind === 'submitted' && e.data.merged === true);
+  const merged = moves.find(e => e.kind === 'report' && e.data.acceptedCandidate && typeof e.data.acceptedCandidate === 'object' && 'integration' in e.data.acceptedCandidate);
   if (merged) return { mergedAt: merged.createdAt, doneAt: null };
   return { mergedAt: null, doneAt: task.status === 'done' ? task.closedAt : null };
 }
@@ -421,7 +428,24 @@ function lineSigns(taskId: string, moves: FactTaskEvent[], ix: Indexed): Date[] 
 }
 
 export function taskActor(task: FactTask): string | null {
-  return task.executorAgentId ?? task.assigneeAgentId ?? null;
+  return task.assigneeAgentId ?? task.executorAgentId ?? null;
+}
+
+/* A checker starts at its real handoff, not when its author's task was created. */
+export function treeOwnerSince(task: Pick<FactTask, 'createdAt' | 'echelons' | 'assigneeAgentId' | 'executorAgentId'>, moves: FactTaskEvent[]): Date {
+  let since = task.createdAt;
+  const workflow = task.echelons;
+  const current = workflow.stage ? ECHELON_STAGES.indexOf(workflow.stage) : -1;
+  for (const event of moves) {
+    const candidate = event.data.candidate as { id?: unknown } | undefined;
+    const input = event.kind === 'submitted' && candidate?.id === workflow.candidateId;
+    const previous = typeof event.data.stage === 'string' ? ECHELON_STAGES.indexOf(event.data.stage as EchelonStage) : -1;
+    const checked = event.kind === 'verdict' && event.data.pass === true && event.data.candidateId === workflow.candidateId && previous >= 0 && previous < current;
+    const reassigned = event.kind === 'updated' && Array.isArray(event.data.fields)
+      && event.data.fields.some(field => ['owner', 'ownerAgentId', 'executor'].includes(String(field)));
+    if ((reassigned || (task.assigneeAgentId && task.assigneeAgentId !== task.executorAgentId && current >= 2 && (input || checked))) && event.createdAt > since) since = event.createdAt;
+  }
+  return since;
 }
 
 function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; idle: IdleSource } | null {
@@ -434,10 +458,12 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   const afterTasks = afterOf(task, ix.tasks);
   const cutDate = cutDateOf(task, moves, afterTasks);
   const ends = lineEndDates(task, moves);
+  const since = task.ownerSince;
+  const ownerCut = cutDate && cutDate < since ? since : cutDate;
   const asks = listOf(ix.asksByPair, `${task.id}:${agent.id}`);
   const segments = withExternalWait(withPrograms(lineSegments({
-    createdAt: task.createdAt,
-    cutAt: cutDate,
+    createdAt: since,
+    cutAt: ownerCut,
     endAt: ends.mergedAt ?? ends.doneAt,
     now,
     requests: asks,
@@ -449,6 +475,9 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   const afterNumbers = visibleAfter.map(a => a.number);
 
   const line: TreeLine = {
+    echelons: task.echelons,
+    echelonFindings: task.echelonFindings,
+    ownerSince: since.toISOString(),
     taskId: task.id,
     number: task.number,
     title: task.title,
@@ -456,7 +485,7 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
     part: partOf(task.parentId, ix.tasks),
     branch: task.inRepository ? `task-${task.number}` : null,
     createdAt: task.createdAt.toISOString(),
-    cutAt: isoOrNull(cutDate),
+    cutAt: isoOrNull(ownerCut),
     mergedAt: isoOrNull(ends.mergedAt),
     doneAt: isoOrNull(ends.doneAt),
     waitsFor,
@@ -568,6 +597,7 @@ function observedEntry(turn: FactTurn, agent: TreeAgent, ix: Indexed, now: Date)
 
 function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], reviews: TreeReview[], now: Date): ObservedEntry[] {
   const known = representedPairs(lines, reviews), visible = participants(lines, reviews);
+  for (const turn of turnsOf(facts)) if (turn.taskId && ix.tasks.get(turn.taskId)?.visible) visible.add(turn.agentId);
   return turnsOf(facts).filter(turn => unrepresentedTurn(turn, known, visible, ix)).flatMap(turn => {
     const agent = ix.agents.get(turn.agentId);
     return agent ? [observedEntry(turn, agent, ix, now)] : [];

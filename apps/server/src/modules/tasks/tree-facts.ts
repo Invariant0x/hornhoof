@@ -4,8 +4,11 @@ import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks, turns } from '../../db/schema.js';
 import type { Task, Tx } from './engine.js';
-import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
+import { NUDGES, treeOwnerSince, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
+import { routeSnapshots } from './echelons-store.js';
+import { countedFindings } from './review-findings.js';
+import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { readTurnHistory, upTo } from './tree-history.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
 
@@ -78,16 +81,12 @@ async function readJobStates(db: Reader, taskIds: string[]): Promise<FactJobStat
   }));
 }
 
-function panelFromEvent(e: FactTaskEvent): string[] {
-  if (e.kind !== 'created' || !Array.isArray(e.data.panel)) return [];
-  return e.data.panel.filter((p): p is string => typeof p === 'string');
-}
-
-function collectAgentIds(turnTasks: Task[], events: FactTaskEvent[], asks: FactRequest[]): string[] {
+function collectAgentIds(turnTasks: Task[], events: FactTaskEvent[], asks: FactRequest[], jobStates: FactJobState[]): string[] {
   const raw = [
     ...turnTasks.flatMap(t => [t.executorAgentId, t.assigneeAgentId]),
     ...asks.map(r => r.agentId),
-    ...events.flatMap(e => [e.agentId, ...panelFromEvent(e)]),
+    ...events.map(e => e.agentId),
+    ...jobStates.map(job => job.agentId),
   ];
   return [...new Set(raw.filter((x): x is string => Boolean(x)))];
 }
@@ -102,8 +101,11 @@ function hasRepository(t: Task, repoIds: Set<string>): boolean {
   return Boolean(t.productId && repoIds.has(t.productId));
 }
 
-const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean, waits: TaskWaitView[]): FactTask => ({
+const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean, waits: TaskWaitView[], echelons: EchelonsSnapshot, echelonFindings: EchelonFindingsView, events: FactTaskEvent[]): FactTask => ({
   waits,
+  echelons,
+  echelonFindings,
+  ownerSince: treeOwnerSince({ ...t, echelons }, events),
   id: t.id,
   number: t.number,
   title: t.title,
@@ -154,6 +156,8 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
 
   const events = await db
     .select({
+      id: taskEvents.id,
+      companyId: taskEvents.companyId,
       taskId: taskEvents.taskId,
       agentId: taskEvents.agentId,
       kind: taskEvents.kind,
@@ -183,7 +187,14 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
   const from = turn.openedAt ?? turn.createdAt;
   const signs = await readSigns(db, taskIds, from, until);
   const jobStates = await readJobStates(db, taskIds);
-  const agentIds = collectAgentIds(turnTasks, events, asks);
+  const agentIds = collectAgentIds(turnTasks, events, asks, jobStates);
+  const workflows = await routeSnapshots(db, turnTasks);
+  const byTask = new Map<string, typeof events>();
+  for (const event of events) {
+    const own = byTask.get(event.taskId) ?? [];
+    own.push(event);
+    byTask.set(event.taskId, own);
+  }
   const history = await readTurnHistory(db, companyId, agentIds, from, until);
   const agentRows = agentIds.length
     ? await db.select({ id: agents.id, name: agents.name, createdAt: agents.createdAt }).from(agents).where(inArray(agents.id, agentIds)).orderBy(asc(agents.createdAt))
@@ -193,7 +204,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
     repository,
     turn,
     agents: agentRows,
-    tasks: turnTasks.map(t => toFactTask(t, repoIds, sees, shownWaits(waits.get(t.id) ?? [], id => seenAfter.has(id)))),
+    tasks: turnTasks.map(t => toFactTask(t, repoIds, sees, shownWaits(waits.get(t.id) ?? [], id => seenAfter.has(id)), workflows.get(t.id)!, countedFindings(byTask.get(t.id) ?? []), byTask.get(t.id) ?? [])),
     related: extraTasks.map(t => ({ id: t.id, number: t.number, title: t.title, status: t.status, visible: sees(t) })),
     events,
     requests: asks,

@@ -107,7 +107,7 @@ export function factsFor(viewer: AgentViewer, facts: TreeFacts): TreeFacts {
   const sees = (id: string | null | undefined) => seesAgentId(viewer, id);
   return {
     ...facts,
-    tasks: facts.tasks.map(t => (t.waits ? { ...t, waits: maskWaits(viewer, t.waits) } : t)),
+    tasks: facts.tasks.map(t => ({ ...t, echelons: shownEchelons(viewer, t.echelons), echelonFindings: emptyEchelonFindings(), waits: t.waits ? maskWaits(viewer, t.waits) : [] })),
     agents: facts.agents.filter(a => sees(a.id)),
     events: facts.events.map(e => (sees(e.agentId) ? e : { ...e, text: '' })),
     requests: facts.requests.filter(r => sees(r.agentId)),
