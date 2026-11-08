@@ -28,7 +28,8 @@ export function TaskRow({ task, on, place, onOpen, showTurn = true }: { task: Ta
             {roleAfter(task.assignee, language)}
           </span>
         )}
-        {task.status === 'review' && task.stage > 0 && <span className="trow-gate">{t.tasks.gateOf(task.stage, task.gateCount)}</span>}
+        {task.echelons ? <span className="trow-gate">{t.tasks.echelons.stages[task.echelons.stage]}</span>
+          : task.status === 'review' && task.stage > 0 && <span className="trow-gate">{t.tasks.gateOf(task.stage, task.gateCount)}</span>}
         {task.bounces > 0 && <span className="trow-back">{t.tasks.sentBack(task.bounces)}</span>}
         {showTurn && task.turn !== null && <span>{t.tasks.turn(task.turn)}</span>}
       </span>

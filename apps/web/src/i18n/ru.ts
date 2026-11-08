@@ -1112,6 +1112,13 @@ export const ru: Messages = {
     sentBack: n => `возвращена ${n} ${plural('ru', n, { one: 'раз', few: 'раза', many: 'раз', other: 'раза' })}`,
     nobody: 'Никто',
     gates: 'Ворота',
+    echelons: {
+      heading: 'Маршрут задачи',
+      stages: { architecture: 'Architecture', development: 'Development', review: 'Review', security: 'Security', tests: 'Tests' },
+      statuses: { pending: 'Следующий', active: 'В работе', complete: 'Завершен', skipped: 'Пропущен' },
+      phases: { active: 'В работе', waiting: 'Ждет исполнителя', escalated: 'У руководителя для решения', ready: 'Можно сливать', done: 'Завершено', cancelled: 'Отменено' },
+      owner: name => `Исполнитель: ${name}`,
+    },
     gateStates: { working: 'работает над ней', did: 'сделал работу', merging: 'соединяет работу с остальной работой хода', passed: 'пропустил', current: 'проверяет сейчас', next: 'следующий', returned: 'нашел, что блокирует', skipped: 'не проверял' },
     partOf: 'Часть задачи',
     after: 'Начнется после',

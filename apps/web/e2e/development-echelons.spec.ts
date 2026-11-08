@@ -43,7 +43,7 @@ async function fits(panel: Locator, route: Locator) {
   });
   expect(sizes.scroll).toBeLessThanOrEqual(sizes.width + 1);
   expect(sizes.escaped).toEqual([]);
-  await expect(panel.getByRole('button', { name: dictionaries[await panel.page().evaluate(() => localStorage.getItem('hh-lang')) as Language].common.close, exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: dictionaries[await panel.page().evaluate(() => localStorage.getItem('hh-lang')) as Language].window.close, exact: true })).toBeVisible();
 }
 
 for (const locale of locales) for (const theme of ['light', 'dark']) for (const width of [375, 1440]) {

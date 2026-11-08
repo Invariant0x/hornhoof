@@ -1077,6 +1077,13 @@ export const en = {
     sentBack: (n: number) => (n === 1 ? 'sent back once' : `sent back ${n} times`),
     nobody: 'Nobody',
     gates: 'Gates',
+    echelons: {
+      heading: 'Task workflow',
+      stages: { architecture: 'Architecture', development: 'Development', review: 'Review', security: 'Security', tests: 'Tests' },
+      statuses: { pending: 'Next', active: 'In progress', complete: 'Complete', skipped: 'Skipped' },
+      phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed', cancelled: 'Cancelled' },
+      owner: (name: string) => `Owner: ${name}`,
+    },
     gateStates: { working: 'working on it', did: 'did the work', merging: 'puts the work together with the rest of the turn', passed: 'passed', current: 'checking now', next: 'next', returned: 'found what blocks', skipped: 'did not check' },
     partOf: 'Part of',
     after: 'Starts after',

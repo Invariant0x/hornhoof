@@ -5,6 +5,7 @@ import type { ConnectionEnd, FailureKind, Limits, MachineDrain, MaterialManifest
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
+import type { TaskEchelons } from './echelons';
 
 export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
@@ -346,6 +347,7 @@ export type TaskLine = {
   brief: string;
   status: TaskStatus;
   externalWait?: ExternalWait | null;
+  echelons?: TaskEchelons | null;
   /* What kind of work it is and what a mistake in it would cost, when someone said so. An older server sends neither. */
   workKind?: WorkKind | null;
   riskClass?: RiskClass | null;
