@@ -35,7 +35,7 @@ vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();
   return { ...module, userFor: () => ({ uid: sharedState.builderUid, gid: sharedState.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
 });
-import { readTestEnvironment } from '../src/test-environment.js';
+import { describeTestEnvironment, readTestEnvironment } from '../src/test-environment.js';
 import { runTests } from '../src/tests.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -240,4 +240,44 @@ describe('versioned node execution', () => {
     expect(result.log).not.toContain('suffix must not execute');
     await expect(access(join(f.dir, 'runs', f.msg.partId))).rejects.toThrow();
   });
+});
+
+
+async function mutationProductFixture(problem: 'valid' | 'missing' | 'wrong-head') {
+  const candidateRun = { program: 'node', args: ['narrow.cjs', '--base', '{baseCommit}', '--head', '{commit}', '--plan-file', '{planFile}'], cwd: '.' };
+  const f = await fixture(manifest => {
+    manifest.suites = [{ id: 'mutation', root: '.', files: ['logic.ts'], run: { program: 'node', args: ['broad.cjs'], cwd: '.' }, split: { kind: 'json-file' }, profiles: ['fast'] }];
+    manifest.profiles[0]!.requiredSuiteIds = ['mutation'];
+    manifest.mutation = { status: 'supported', tool: 'mutator', language: 'typescript', command: candidateRun, candidateRun, sourcePaths: ['logic.ts'], fastTestPaths: ['judge.test.ts'], coverageCommands: [candidateRun], coverageFiles: ['coverage.json'] };
+  }, {
+    'logic.ts': 'export function total(n: number) { return n + 1; }\n',
+    'judge.test.ts': "import { it, expect } from 'vitest';\nimport { total } from './logic.js';\nit('total', () => expect(total(1)).toBe(3));\n",
+    'broad.cjs': "throw Error('A candidate must never run the broad command.');",
+    'narrow.cjs': `const fs=require('node:fs'),args=process.argv.slice(2),arg=flag=>args[args.indexOf(flag)+1];
+const base=arg('--base'),head=arg('--head'),plan=JSON.parse(fs.readFileSync(arg('--plan-file'),'utf8'));
+if(plan.base!==base||plan.sha!==head)throw Error('Wrong bound delta');
+const files=JSON.parse(fs.readFileSync(process.env.HH_TEST_FILES,'utf8'));
+if(JSON.stringify(files)!==JSON.stringify(['./logic.ts']))throw Error('Wrong selected sources');
+const selection={version:1,status:'ready',baseCommit:base,commit:${problem === 'wrong-head' ? "'f'.repeat(40)" : 'head'},selected:[{file:'logic.ts',name:'total',startLine:1,endLine:1,lines:[1],tests:['judge.test.ts'],reason:'changed_pure_function'}],excluded:[],problems:[]};
+fs.writeFileSync(process.env.HH_TEST_REPORT,JSON.stringify({files:[{file:'logic.ts',status:'passed'}],${problem === 'missing' ? '' : 'selection'}}));
+console.log('narrow candidate',base,head);`,
+  });
+  const baseCommit = f.msg.commitSha!;
+  await writeFile(join(f.source, 'logic.ts'), 'export function total(n: number) { return n + 2; }\n');
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qam', 'Candidate'], { cwd: f.source, stdio: 'pipe' });
+  const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.source, encoding: 'utf8' }).trim();
+  const metadata = await describeTestEnvironment(f.msg.repo!, f.msg.repositoryScope!, commitSha, { cacheRoot: join(f.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} }, undefined, baseCommit);
+  f.msg.commitSha = commitSha;
+  f.msg.environment = { snapshot: { description: metadata.description, profile: 'fast', candidate: { baseCommit, fingerprints: metadata.fingerprints!, baseFingerprints: metadata.baseFingerprints!.fingerprints, mutation: metadata.mutation! } },
+    selection: { kind: 'suite', suiteId: 'mutation', files: ['logic.ts'] } };
+  return { ...f, baseCommit, commitSha };
+}
+
+it.each(['valid', 'missing', 'wrong-head'] as const)('records only actual bound mutation results through product execution: %s', async problem => {
+  const f = await mutationProductFixture(problem);
+  const done = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
+  expect(done.log).toContain('narrow candidate');
+  if (problem === 'valid') {
+    expect(done, done.log).toMatchObject({ ok: true, environmentReceipt: { mutations: [{ suiteId: 'mutation', selection: { baseCommit: f.baseCommit, commit: f.commitSha, selected: [{ name: 'total', lines: [1] }] } }] } });
+  } else expect(done, done.log).toMatchObject({ ok: false, error: 'failed' });
 });
