@@ -4,7 +4,9 @@ import { agentEvents, agents, companies, departments, jobs, people, subscription
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -12,7 +14,7 @@ const NODE_KEY = 'k'.repeat(40);
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null };
 type Exit = { code: number | null; signal: string | null };
 
-/* A company on the built-in node: Development with Hana at its head, Bruno who does the work and Rita at its gate, and
+/* A company on the built-in node: Development with Hana at its head, Bruno who does the work and Rita checking its candidate, and
    Rob of Operations, who has a timer. */
 async function company() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -28,13 +30,16 @@ async function company() {
   const dept = async (templateKey: 'development' | 'operations', roleCode: string) => (await db.insert(departments).values({ companyId, templateKey, roleCode }).returning())[0]!;
   const [dev, ops] = [await dept('development', 'DEV'), await dept('operations', 'OPS')];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [] }).returning())[0]!;
   const hana = await hire('Hana', 'head', 'DEV-HEAD', dev.id);
-  const bruno = await hire('Bruno', 'worker', 'DEV-ENG', dev.id);
+  const bruno = await hire('Bruno', 'worker', 'DEV-BE', dev.id);
   const rita = await hire('Rita', 'worker', 'DEV-REV', dev.id);
   const rob = await hire('Rob', 'worker', 'OPS-FIX', ops.id);
   const ctx = app.ctx;
-  const task = (await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id] })).task;
+  await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  const task = (await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id })).task;
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt));
   const jobOf = async (id: string) => (await db.select().from(jobs).where(eq(jobs.id, id)))[0]!;
   const taskNow = async () => (await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!;
@@ -67,7 +72,7 @@ async function company() {
     return nextTurn(bruno.id);
   };
   /* What Bruno hands in while his turn runs, and the wakes it brings. */
-  const handIn = async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'POST /checkout works.', evidence: 'npm test: 12 passed' })).wakes);
+  const handIn = async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'POST /checkout works.', evidence: 'Changed total tests.', review: { baseCommit: BASE } })).wakes);
   const settle = () => new Promise(r => setTimeout(r, 150));
   return { app, db, ctx, companyId, sub: sub!, node, hana, bruno, rita, rob, task, turnsOf, jobOf, taskNow, runOf, nextTurn, failed, ended, brunoAtWork, handIn, settle };
 }
@@ -124,12 +129,14 @@ describe("a turn whose program ended without the work done", () => {
     await c.handIn();
     await c.ended(work);
     const check = await c.nextTurn(c.rita.id);
-    await wakeAll(c.ctx, (await verdict(c.ctx, c.rita.id, c.task.id, { pass: true, comment: 'Looks right.' })).wakes);
+    await wakeAll(c.ctx, (await verdict(c.ctx, c.rita.id, c.task.id, { pass: true, comment: 'Looks right.', reviewedCommit: HEAD })).wakes);
     await c.failed(check, { code: 1, signal: null }, { tail: 'Verdict pass: true recorded.\n› ' });
     expect(await c.jobOf(check.jobId)).toMatchObject({ status: 'done', error: null, exitCode: 1, exitSignal: null, tail: expect.stringContaining('Verdict pass: true recorded.') });
     await c.settle();
     expect((await c.turnsOf(c.rita.id)).map(j => j.id)).toEqual([check.jobId]);
-    expect((await c.taskNow()).status).not.toBe('review');
+    const current = await c.taskNow();
+    expect(current.status).not.toBe('done');
+    expect(routeSnapshot(await routeOf(c.db, current), current.assigneeAgentId).stage).toBe('tests');
     const shown = await c.db.select({ kind: agentEvents.kind }).from(agentEvents).where(eq(agentEvents.jobId, check.jobId));
     expect(shown.map(e => e.kind)).not.toContain('failed');
   });
