@@ -4,7 +4,7 @@ import type { Route } from './echelons-store.js';
 import { checkerFor } from './echelons-assign.js';
 import { giver, refuse, type Task, type Wake } from './engine.js';
 
-const ABILITIES: Partial<Record<EchelonStage, string>> = {
+export const CHECK_ABILITIES: Partial<Record<EchelonStage, string>> = {
   review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment',
 };
 
@@ -12,7 +12,7 @@ export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Ro
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const next = route.state.stages.slice(at + 1).find(step => step.status !== 'skipped');
   if (!next) throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');
-  const ability = ABILITIES[next.stage];
+  const ability = CHECK_ABILITIES[next.stage];
   if (!ability) throw refuse(409, 'task_invalid', 'This stage needs its authorized work assignment.');
   const owner = await checkerFor(ctx, task, candidate.producedBy, ability, next.ownerAgentId);
   const state: Route['state'] = { ...route.state, stage: next.stage, phase: owner ? 'active' : 'waiting', candidateId: candidate.id, assignment: owner,

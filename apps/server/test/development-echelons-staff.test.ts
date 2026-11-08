@@ -23,6 +23,7 @@ describe('staff changes keep the current required stage', () => {
     await submit(f.ctx, f.author.id, f.task.id, code);
     await f.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, f.reviewer.id));
     await leaveWork(f.ctx, { agentId: f.head.id }, f.reviewer);
+    expect((await f.detail()).echelons.phase).toBe('waiting');
     await f.db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, f.reviewer.id));
     await backOn(f.ctx, { agentId: f.head.id }, f.reviewer.id);
     expect((await f.detail()).echelons).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: f.reviewer.id });

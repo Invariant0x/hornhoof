@@ -13,9 +13,9 @@ import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
-import { CLOSED, dropGate } from '../tasks/engine.js';
+import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
-import { backOn, leaveForTeam, leaveIfOff, resumeAgent } from '../tasks/wake.js';
+import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
@@ -507,7 +507,7 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
     const held = await db
       .select({ number: tasks.number })
       .from(tasks)
-      .where(and(or(eq(tasks.assigneeAgentId, agent.id), eq(tasks.executorAgentId, agent.id), sql`${tasks.panel} @> ${JSON.stringify([agent.id])}::jsonb`), notInArray(tasks.status, [...CLOSED])))
+      .where(and(eq(tasks.assigneeAgentId, agent.id), notInArray(tasks.status, [...CLOSED])))
       .orderBy(asc(tasks.number));
     if (held.length) {
       const list = held.map(t => `#${t.number}`).join(', ');
@@ -522,8 +522,8 @@ async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: 
         .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
       await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'removed', before: null, after: null });
     });
-    const gated = await db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED])));
-    for (const task of gated.filter(t => t.gates.includes(agent.id))) await dropGate(ctx, actorOf(me), task, agent.id);
+    const left = await leaveWork(ctx, actorOf(me), agent);
+    await wakeAll(ctx, left.wakes);
   });
   ctx.bus.publish(found.companyId, { type: 'org' });
   return reply.code(204).send();

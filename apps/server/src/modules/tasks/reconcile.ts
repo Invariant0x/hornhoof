@@ -5,7 +5,7 @@ import { agentState, liveSubscription } from '../conversation/queue.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
-import { CLOSED, gateVerdicts, giver, lastMove, openAfter, reviewWake, stuckAtGate, type Task, type Wake } from './engine.js';
+import { CLOSED, giver, lastMove, openAfter, type Task, type Wake } from './engine.js';
 import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
 import { checkSilentTurns, SILENT_TURN_MS } from './silent.js';
 import { wakeAll } from './wake.js';
@@ -32,23 +32,10 @@ async function failAwayTurns(ctx: Ctx, now: Date): Promise<void> {
 
 type Move = Awaited<ReturnType<typeof lastMove>>;
 
-/* Reviewers who have not answered this stage and round still need a turn. */
-async function reviewWakes(ctx: Ctx, task: Task): Promise<Wake[]> {
-  const given = new Set((await gateVerdicts(ctx.db, task)).map(v => v.agentId));
-  const due = new Set([task.assigneeAgentId, ...task.panel]);
-  const prompt = await reviewWake(ctx.db, task);
-  return [...due].filter((id): id is string => id !== null && !given.has(id)).map(agentId => ({ agentId, taskId: task.id, ...prompt }));
-}
-
-/* The task's current state says who should act on its last move. */
-async function wakesDue(ctx: Ctx, task: Task, move: Move): Promise<Wake[]> {
-  if (task.status === 'blocked') return giver(task, 'blocked', task.executorAgentId ?? undefined, move?.text);
-  if (task.status === 'review') return reviewWakes(ctx, task);
-  const wakes: Wake[] = task.assigneeAgentId ? [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'assigned' }] : [];
-  if (task.stage === 0 && move?.kind === 'verdict' && Number(move.data.round) + 1 === task.bounces) {
-    wakes.push(...(await stuckAtGate(ctx.db, task, Number(move.data.stage), move.agentId ?? undefined)));
-  }
-  return wakes;
+/* Only the current owner acts on an executable candidate. */
+async function wakesDue(_ctx: Ctx, task: Task, move: Move): Promise<Wake[]> {
+  if (task.status === 'blocked') return giver(task, 'blocked', task.assigneeAgentId ?? undefined, move?.text);
+  return task.assigneeAgentId ? [{ agentId: task.assigneeAgentId, taskId: task.id, why: task.status === 'review' ? 'review' : 'assigned' }] : [];
 }
 
 /* Tasks waiting for other work or an answer already have a way to continue. */

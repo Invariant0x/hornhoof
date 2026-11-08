@@ -8,7 +8,7 @@ import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, resumeWaitingRoutes, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
@@ -16,6 +16,7 @@ import { afterRestart, afterRestartOutsideTask } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
 import { afterFailure } from './failures.js';
 import { settle, tell } from './turns.js';
+import { routeOf } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
@@ -24,12 +25,11 @@ type Agent = typeof agents.$inferSelect;
 
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
-  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
-  if (task.merging && task.executorAgentId === agentId) return { finish: "merge your branch into the turn's branch and report it with submit", stuck: 'report what blocks the merge with blocked' };
-  if (task.executorAgentId === agentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
-  /* Member work that waits with whoever gave it out, while nobody who does or checks it is on. */
-  if (task.executorAgentId) return { finish: 'give it to someone who is on with update_task', stuck: 'tell the CEO it waits' };
-  return { finish: 'report it', stuck: 'report it as not done, with what stands in the way' };
+  if (task.assigneeAgentId === agentId) return {
+    finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; report verified final-candidate runs in Tests; integrate only with the head authorization',
+    stuck: 'use blocked or escalate a wrong goal to the head',
+  };
+  return { finish: 'assign an eligible current owner with update_task, or report the checked coordination result', stuck: 'report what is missing to the head' };
 }
 
 /* Wakes whose text an employee wrote: the reasons of a gate, a report, a block, a cancellation. */
@@ -44,14 +44,14 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
 /* What a reviewer may take from the test runs on a task. */
-const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and gateCounts without rerunning author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
+const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and candidate identity without rerunning unchanged author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const { finish, stuck } = nextStep(task, w.agentId);
   if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
-  return `${ref} is your department's. ${READ_TASK} Give each connected block to one generalist developer to finish end to end. Give independent blocks to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
+  return `${ref} is your department's. ${READ_TASK} Give each connected block to one generalist developer to finish end to end. Give independent blocks to different members at once with create_task, each under it (parent ${task.number}) with its executor. Every executable result must pass its required Review. Report the checked child results when they are accepted.`;
 }
 
 const waitEndedPrompt = (task: Task, text?: string): string =>
@@ -70,41 +70,14 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return assignedPrompt(agent, task, w);
     case 'wait_ended':
       return waitEndedPrompt(task, w.text);
-    case 'review': {
-      /* Its text is what this reviewer sent the work back for in the last round. */
-      if (w.text) return `${ref} came back to your gate. You sent it back for${said}${READ_PROOF} Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
-      const together = task.panel.length > 1 ? ' Reviewers of other models check the same work at once; give your own verdict.' : '';
-      return (
-        `${ref} is at your gate. ${read} ${READ_PROOF} Check the work yourself, then give your verdict: pass it, with notes for what does not block, or send it back only for blocking findings ` +
-        `(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line.${together}`
-      );
-    }
-    case 'turn_review': {
-      /* Its text names the turn's branch. */
-      const branch = w.text ?? "the turn's branch";
-      return (
-        `${ref} is the review of everything ${branch.replace('-', ' ')} changed in your department, once for the whole turn. ${read} ${READ_PROOF} Check it on the turn's branch: git diff <main line>...${branch}. ` +
-        'Other reviewers check the same branch at once, each for what their role looks at. Give your verdict: pass it, with notes for what does not block, or send it back for blocking findings ' +
-        '(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line. Your findings go only in your verdict: write to nobody while you review.'
-      );
-    }
+    case 'review':
+      return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
-      return (
-        `The reviewers of ${ref} gave their verdicts, and some of them block:\n\n${quote(w.text ?? '')}\n\n` +
-        "Give each blocking finding as a fix task without gates (gates: []) under your department's task, to the member whose change it is, all at once with create_task. " +
-        'Each fix starts with a test that fails and then passes; there is no second review. Take a note that does not block into those tasks only when it is cheap. Once the fixes are in, give the final check.'
-      );
-    case 'review_passed':
-      return `Nobody found anything that blocks in the ${task.title.toLowerCase()}:\n\n${quote(w.text ?? '')}\n\nWhere it says someone did not check, decide first whether the turn needs their check, then give the final check.`;
+      return `${ref} passed Tests on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
-    case 'merge':
-      /* Its text names the turn's branch. */
-      return `${ref} passed its gates. Merge your branch into ${w.text ? `${w.text}, the turn's branch,` : "the turn's branch"} and report: submit it with what you merged and the commit. If the merge fails, report what blocks it with blocked.`;
-    case 'stuck_at_gate':
-      return `${ref}, which you gave out, went back from the same gate ${GATE_ROUNDS} times. Read its log, then step in: rewrite it with update_task, give it another executor or other gates, or cancel it.`;
     case 'done':
-      return `${ref}, which you gave out, passed its gates and is done. Read the result with the task tool, then go on with ${own}.`;
+      return `${ref}, which you gave out, has an accepted result and is done. Read the result with the task tool, then go on with ${own}.`;
     case 'reported':
       return `${ref}, which you gave out, was reported done${said}Go on with ${own}.`;
     case 'blocked':
@@ -164,8 +137,8 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
   const actor = change?.personId ? { personId: change.personId } : { agentId: orchestrator?.id ?? agentId };
   const left = await leaveWork(ctx, actor, agent);
   const { handed } = left;
-  /* With it the last of its role may be off, which takes that role's gates out of the way of the work waiting at them. */
-  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} was switched off.`);
+  /* Another eligible checker may become available; the required stage is never skipped. */
+  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched off.`);
   const wakes = [...left.wakes, ...regated.wakes];
   const closed = [...left.closed, ...regated.closed];
   /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
@@ -188,19 +161,19 @@ async function settled(ctx: Ctx, companyId: string, wakes: Wake[], closed: Task[
   return all;
 }
 
-/* An agent switched on again picks up the gates that waited for someone of its role, and the turns it missed go out. */
+/* A newly available checker can resume the same required stage and candidate. */
 export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<void> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || agent.switchedOffAt) return;
-  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} was switched on.`);
+  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} was switched on.`);
   await wakeAll(ctx, await settled(ctx, agent.companyId, regated.wakes, regated.closed));
   await pump(ctx, agentId);
 }
 
-/* An employee moved into a sub-unit leaves every gate it stood at, and queued turns for those gates end. */
+/* An employee moved out of scope leaves its current assignment, not the route's required stage. */
 export async function leaveForTeam(ctx: Ctx, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<void> {
-  const left = await leaveGates(ctx, actor, agent);
-  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} moved to a sub-unit.`);
+  const left = await leaveWork(ctx, actor, agent);
+  const regated = await resumeWaitingRoutes(ctx, actor, agent, `${agent.name} moved to a sub-unit.`);
   const wakes = [...left.wakes, ...regated.wakes];
   const closed = [...left.closed, ...regated.closed];
   if (left.handed.length) {
@@ -321,10 +294,8 @@ export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
 /* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn,
    also each one it checks at a gate. */
 export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
-  const checks = and(eq(tasks.status, 'review'), sql`${tasks.panel} @> ${JSON.stringify([agentId])}::jsonb`);
-  const held = await ctx.db.select().from(tasks).where(or(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])), checks));
-  const wakes: Wake[] = [];
-  for (const t of held) wakes.push({ agentId, taskId: t.id, ...(t.panel.includes(agentId) ? await reviewWake(ctx.db, t) : { why: t.status === 'review' ? 'review' : 'assigned' }) });
+  const held = await ctx.db.select().from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])));
+  const wakes: Wake[] = held.map(task => ({ agentId, taskId: task.id, why: task.status === 'review' ? 'review' : 'assigned' }));
   await wakeAll(ctx, wakes);
 }
 
@@ -410,7 +381,7 @@ async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: T
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */
 async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task | null> {
-  const holds = (t: Task | undefined) => (t && (t.assigneeAgentId === agentId || t.panel.includes(agentId)) && !CLOSED.includes(t.status) ? t : null);
+  const holds = (t: Task | undefined) => (t && t.assigneeAgentId === agentId && !CLOSED.includes(t.status) ? t : null);
   const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!task) return null;
   if (holds(task)) return task;
@@ -521,8 +492,13 @@ async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
   return { me, peers: await peersOfRole(ctx, member, anotherProvider ? me.provider : undefined) };
 }
 
+async function transferableWork(ctx: Ctx, task: Task): Promise<boolean> {
+  const route = await routeOf(ctx.db, task);
+  return route.state.resultKind === 'code' && !route.state.candidateId && ['architecture', 'development'].includes(route.state.stage ?? '');
+}
+
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
-  if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
+  if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || !await transferableWork(ctx, task) || !['open', 'working'].includes(task.status)) return null;
   /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
      anything on goes to another. */
   const ran = await ctx.db
@@ -541,10 +517,10 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   return null;
 }
 
-const isUnstartedMemberWork = (task: Task, agentId: string): boolean => task.executorAgentId === agentId && task.assigneeAgentId === agentId && task.stage === 0 && task.status === 'open';
+const isUnstartedMemberWork = (task: Task, agentId: string): boolean => task.executorAgentId === agentId && task.assigneeAgentId === agentId && task.status === 'open';
 
 async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string } | null> {
-  if (!isUnstartedMemberWork(task, agentId)) return null;
+  if (!isUnstartedMemberWork(task, agentId) || !await transferableWork(ctx, task)) return null;
   const [started] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.taskId, task.id), isNotNull(jobs.startedAt))).limit(1);
   if (started) return null;
   const found = await rolePeers(ctx, agentId, false);

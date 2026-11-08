@@ -2,7 +2,8 @@ import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { testRuns, turns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
-import { isTurnReview, type Task } from '../tasks/engine.js';
+import { type Task } from '../tasks/engine.js';
+import { routeOf } from '../tasks/echelons-store.js';
 import { commandShown } from './commit-proof.js';
 import type { CommitAt } from './refs.js';
 
@@ -54,7 +55,7 @@ export async function evidenceOf(ctx: Reader, run: Pick<Run, 'branch' | 'commitS
 
 /* The turn's branch, for the tasks about the turn's work as a whole: its review and the department's task of the turn. */
 async function turnBranchOf(db: Reader['db'], task: Task): Promise<string | null> {
-  if (!task.turnId || (task.executorAgentId && !(await isTurnReview(db, task.id)))) return null;
+  if (!task.turnId || (await routeOf(db, task)).state.resultKind !== 'coordination') return null;
   const [turn] = await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId));
   return `turn-${turn!.number}`;
 }
