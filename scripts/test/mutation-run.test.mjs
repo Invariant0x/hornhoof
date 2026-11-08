@@ -167,6 +167,31 @@ test('a bound delta plan works on a shallow worker without its base object', t =
   assert.equal(result.report.selection.deltaSource, 'plan');
 });
 
+test('a private bound delta file works on a shallow mutation worker', t => {
+  const fixture = deltaRepository(t), shallow = join(fixture.folder, 'shallow');
+  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${fixture.root}`, shallow], { stdio: 'pipe' });
+  const planFile = join(fixture.folder, 'candidate-delta.json');
+  writeFileSync(planFile, encodePlan({ sha: fixture.head, base: fixture.base, changes: [{ path: fixture.source, kind: 'modified' }], hunks: { [fixture.source]: [[2, 1]] } }), { mode: 0o600 });
+  const result = fixture.run(['--base', fixture.base, '--head', fixture.head, '--plan-file', planFile], [fixture.source], {}, shallow);
+  assert.equal(result.code, 0, result.output);
+  assert.equal(result.report.selection.deltaSource, 'plan');
+  assert.equal(fixture.calls().length, 1);
+  assert.equal(fixture.calls()[0][fixture.calls()[0].indexOf('--lines') + 1], '1,2,3');
+});
+
+test('a mutation delta file cannot bypass its source binding or size limit', t => {
+  const fixture = deltaRepository(t), shallow = join(fixture.folder, 'shallow');
+  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${fixture.root}`, shallow], { stdio: 'pipe' });
+  const planFile = join(fixture.folder, 'candidate-delta.json');
+  for (const text of [encodePlan({ sha: fixture.head, base: 'f'.repeat(40), changes: [], hunks: {} }), ' '.repeat(513 * 1024)]) {
+    writeFileSync(planFile, text);
+    const result = fixture.run(['--base', fixture.base, '--head', fixture.head, '--plan-file', planFile], [fixture.source], {}, shallow);
+    assert.equal(result.code, 1);
+    assert.deepEqual(result.report.files, []);
+  }
+  assert.deepEqual(fixture.calls(), []);
+});
+
 test('invalid candidate CLI arguments fail before any mutation', t => {
   const fixture = deltaRepository(t);
   for (const args of [
