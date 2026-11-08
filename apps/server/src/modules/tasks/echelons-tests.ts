@@ -1,5 +1,5 @@
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
-import { candidateTestUnits, EnvironmentSnapshot, validateEnvironmentDescription } from '@hornhoof/protocol';
+import { candidateTestUnits, EnvironmentSnapshot, ProductCommitSha, UnitFingerprint, validateEnvironmentDescription } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -10,7 +10,6 @@ import { sameChecker } from './echelons-policy.js';
 import { agentIdentity, departmentHead } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
-import { verifiedReuse } from './review-reuse.js';
 import { productReceipt, scopeKey } from '../testruns/describe.js';
 import { unitKey } from '../testruns/plan-environment.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
@@ -48,13 +47,21 @@ async function candidateProductSnapshot(run: typeof testRuns.$inferSelect, candi
   } catch { throw refuse(409, 'task_invalid', 'Tests needs the bound base/final fingerprints and valid product environment evidence.'); }
 }
 
-function completeCandidateSelection(snapshot: EnvironmentSnapshot, parts: (typeof testParts.$inferSelect)[]): void {
+const ReusedUnit = UnitFingerprint.safeExtend({ runId: z.uuid(), commitSha: ProductCommitSha });
+function reusedCandidateUnits(run: typeof testRuns.$inferSelect, snapshot: EnvironmentSnapshot): z.infer<typeof ReusedUnit>[] {
+  const cache = run.fileCache, units = z.array(ReusedUnit).safeParse(cache?.reusedUnits ?? []);
+  if (!units.success || (cache?.reused ?? 0) !== units.data.length || (units.data.length && (cache?.mode !== 'cached' || cache.preparationReused))) throw refuse(409, 'task_invalid', 'The run has no complete per-unit reuse evidence.');
+  const prints = new Map(snapshot.candidate!.fingerprints.map(unit => [unitKey(unit), unit.fingerprint]));
+  if (units.data.some(unit => prints.get(unitKey(unit)) !== unit.fingerprint || unit.runId === run.id)) throw refuse(409, 'task_invalid', 'The reused unit does not have the final influencing fingerprint and a prior source.');
+  return units.data;
+}
+function completeCandidateSelection(snapshot: EnvironmentSnapshot, parts: (typeof testParts.$inferSelect)[], reused: z.infer<typeof ReusedUnit>[]): void {
   const units = candidateTestUnits(snapshot), expected = new Set(units.map(unitKey));
   const selections = parts.map(part => part.environmentSelection!.selection);
-  const actual = selections.flatMap(selection => {
+  const actual = [...reused.map(unitKey), ...selections.flatMap(selection => {
     const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
     return suites.flatMap(suite => suite.files.map(file => unitKey({ suiteId: suite.suiteId, file })));
-  });
+  })];
   if (actual.length !== expected.size || new Set(actual).size !== actual.length || actual.some(key => !expected.has(key))) throw refuse(409, 'task_invalid', 'The receipts do not cover every applicable candidate test unit exactly.');
   const suites = new Set(units.map(unit => unit.suiteId));
   const expectedFinals = new Set(snapshot.description.manifest.suites.filter(suite => suites.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id));
@@ -69,14 +76,14 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
     if (run.status !== 'passed') throw refuse(409, 'task_changed', 'A run did not pass.');
     const snapshot = await candidateProductSnapshot(run, candidate);
     const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-    const complete = run.parts > 0 ? parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null) : await verifiedReuse(run);
+    const complete = parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null);
     if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
     for (const part of parts) {
       const receipt = productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: part.exitCode, error: null, log: '',
         ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities);
       if (!part.finishedAt || !receipt) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
     }
-    completeCandidateSelection(snapshot, parts);
+    completeCandidateSelection(snapshot, parts, reusedCandidateUnits(run, snapshot));
   }
   return runs.map(run => ({ runId: run.id, commit: candidate.commit }));
 }

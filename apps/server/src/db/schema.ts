@@ -1013,6 +1013,7 @@ export type TestFileKey = { suiteId: string; file: string };
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
 export type TestRunFileCache = {
   mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
+  reusedUnits?: (UnitFingerprint & { runId: string; commitSha: string })[];
   wouldSkip: TestFileKey[]; compared: number; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
 };
 

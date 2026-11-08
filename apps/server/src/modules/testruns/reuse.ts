@@ -146,10 +146,11 @@ export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEn
 const ofRepository = (table: typeof testFileResults | typeof testSuiteMemory, scope: RepositoryScope) => and(eq(table.companyId, scope.companyId), eq(table.repositoryOwnerId, scope.repositoryOwnerId), eq(table.repoUrlHash, scope.repoUrlHash));
 
 /* What was green at these fingerprints in this one repository, with what each result came to. */
-async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, string | null>> {
+type GreenSource = Pick<typeof testFileResults.$inferSelect, 'suiteId' | 'file' | 'fingerprint' | 'note' | 'runId' | 'commitSha'>;
+async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, GreenSource>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
-  return new Map(rows.map(row => [printKey(row, row.fingerprint), row.note]));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note, runId: testFileResults.runId, commitSha: testFileResults.commitSha }).from(testFileResults).where(and(ofRepository(testFileResults, scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
+  return new Map(rows.map(row => [printKey(row, row.fingerprint), row]));
 }
 /* The profiles of a release, which take a result only from its own line. */
 function ofRelease(manifest: TestEnvironmentV1, profile: string): boolean {
@@ -157,12 +158,9 @@ function ofRelease(manifest: TestEnvironmentV1, profile: string): boolean {
   return profile === fullRun?.replaces || profile === fullRun?.profile;
 }
 /* What the results a run takes over came to. */
-function notesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<string, string | null>, taken: ReuseDecision): TestRunFileCache['notes'] {
+function sourcesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<string, GreenSource>, taken: ReuseDecision): GreenSource[] {
   const byUnit = new Map(prints.map(print => [keyOf(print), print.fingerprint]));
-  return units.filter(unit => taken.reused.has(keyOf(unit))).flatMap(unit => {
-    const note = green.get(printKey(unit, byUnit.get(keyOf(unit))!));
-    return note ? [{ file: unit.file, note }] : [];
-  });
+  return units.filter(unit => taken.reused.has(keyOf(unit))).map(unit => green.get(printKey(unit, byUnit.get(keyOf(unit))!))!);
 }
 
 type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
@@ -171,11 +169,14 @@ export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: En
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
   const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const green = await greenAt(ctx.db, description.repositoryScope, prints, ofRelease(description.manifest, snapshot.profile)), decision = decideReuse({ units, prints, green, once });
+  const green = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile)), decision = decideReuse({ units, prints, green, once });
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];
   const taken = mode.mode === 'cached' ? decision : NO_REUSE;
-  return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, mainLine: mode.mainLine, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation, wouldSkip, compared: 0, mismatches: [], notes: notesOf(units, prints, green, taken) } };
+  const sources = sourcesOf(units, prints, green, taken), notes = sources.flatMap(source => source.note ? [{ file: source.file, note: source.note }] : []);
+  const reusedUnits = sources.map(source => ({ suiteId: source.suiteId, file: source.file, fingerprint: source.fingerprint, runId: source.runId, commitSha: source.commitSha }));
+  return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, mainLine: mode.mainLine, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation,
+    ...(snapshot.candidate ? { reusedUnits } : {}), wouldSkip, compared: 0, mismatches: [], notes } };
 }
 
 const printsOf = (cache: TestRunFileCache): Map<string, string> => new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
