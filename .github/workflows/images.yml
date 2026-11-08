@@ -103,7 +103,10 @@ jobs:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    runs-on: ubuntu-latest
+    # While the repository is private, the repository variable BUILD_RUNS_ON can send the image, publish and release jobs
+    # to our own runner, and BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. Remove both before the
+    # repository goes public, together with TESTS_RUNS_ON.
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -129,8 +132,13 @@ jobs:
           echo "migrations=$(ls apps/server/drizzle/*.sql | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
           node=$(bash scripts/node-build.sh)
           echo "node=$node" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      # Our own builder's machine runs other platforms' programs already.
+      - if: ${{ !vars.BUILDKIT_ENDPOINT }}
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
+          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
@@ -171,7 +179,7 @@ jobs:
     needs: [mark, test]
     # Tests the mark left out count as passed here too.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -192,6 +200,9 @@ jobs:
         name: Ask for the live check of this exact build
         run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --outputs "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
+          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
@@ -216,7 +227,7 @@ jobs:
     needs: publish
     # Tests skipped further back would skip this job too, so it asks only that the images went out.
     if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: write
     steps:
