@@ -2,11 +2,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
 import { cancel, comment, createTask as createTaskEngine, report, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { candidateChecks } from './development-echelons-verification.js';
@@ -63,6 +64,13 @@ async function company() {
     await verdict(ctx, task.assigneeAgentId!, id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
     return accept(id);
   };
+  /* A durable queued wake needs the same authenticated task snapshot as normal dispatch. */
+  const queueTask = async (id: string, agentId: string, prompt: string, createdAt = new Date()) => {
+    const task = await read(id);
+    const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId, taskId: id, kind: 'conversation', prompt, timeoutMs: 900000, createdAt }).returning();
+    await db.insert(agentEvents).values({ companyId, agentId, jobId: job!.id, kind: 'message', data: { text: prompt, taskWake: taskWakeOf(task, { why: 'assigned' }, await snapshot(id)) } });
+    return job!;
+  };
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId));
   let n = 0;
   /* Hornhoof's tools as a running turn of this agent sees them. */
@@ -77,7 +85,7 @@ async function company() {
     const [sid] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Sid', roleKey: 'SAL-HEAD', departmentId: sales!.id, model: '', subscriptionId: sub!.id }).returning();
     return (await createTask(ctx, { personId: ceo!.id }, { title: 'Big deal', brief: '', body: '', departmentId: sales!.id, assigneeAgentId: sid!.id })).task;
   };
-  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, snapshot, accept, complete, turnsOf, tools, outside };
+  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, snapshot, accept, complete, queueTask, turnsOf, tools, outside };
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -215,33 +223,33 @@ describe('a task that comes after others', () => {
     expect(await reason(updateTask(ctx, head.id, api.id, { after: [docs.id] }))).toBe('task_invalid');
     const freed = await updateTask(ctx, head.id, tests.id, { after: [] });
     expect(freed.task.after).toEqual([]);
-    expect(woken(freed)).toEqual([[tess.id, 'assigned']]);
+    expect(woken(freed)).toEqual([[tess.id, 'updated']]);
     const client = await tools(head);
     const again = await call(client, 'update_task', { task: tests.number, after: [api.number], independentNone: NONE });
     expect(again.isError).toBeFalsy();
     expect(text(again)).toContain(`It starts once #${api.number} is done.`);
   });
 
-  it('ends the turn its holder has waiting on it once it comes to wait, and wakes the holder again once it can start', async () => {
+  it('drops its obsolete queued turn before dispatch while blocked and queues a fresh turn after acceptance', async () => {
     const { ctx, head, bruno, tess, member, turnsOf, complete } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const tests = await member('End-to-end tests', tess.id);
     await wakeAll(ctx, tests.wakes);
     expect((await turnsOf(tess.id)).map(j => j.status)).toEqual(['queued']);
     expect(woken(await updateTask(ctx, head.id, tests.task.id, { after: [api.id] }))).toEqual([]);
-    expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
+    await pump(ctx, tess.id);
+    expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['obsolete', 'stale']]);
     await wakeAll(ctx, (await complete(api.id)).wakes);
     expect((await turnsOf(tess.id)).filter(j => j.status === 'queued').map(j => j.taskId)).toEqual([tests.task.id]);
   });
 
   it('sends no turn of its holder that was left waiting on it, nor sets it to work by one', async () => {
-    const { ctx, db, companyId, bruno, tess, member, read, turnsOf } = await company();
+    const { ctx, bruno, tess, member, read, turnsOf, queueTask } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
     /* As a wake that raced the change to what it comes after would leave one. */
-    const [sub] = await db.select().from(subscriptions);
-    const [left] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: tess.id, kind: 'conversation', prompt: 'Go on.', timeoutMs: 900000, taskId: tests.id }).returning();
-    await startWork(ctx, left!.id);
+    const left = await queueTask(tests.id, tess.id, 'Go on.');
+    await startWork(ctx, left.id);
     expect((await read(tests.id)).status).toBe('open');
     vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
     vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
@@ -253,14 +261,12 @@ describe('a task that comes after others', () => {
   });
 
   it("leaves such a turn out of the head's turn that takes in the others waiting for it", async () => {
-    const { ctx, db, companyId, ceo, dev, head, bruno, parent, member, turnsOf } = await company();
+    const { ctx, db, ceo, dev, head, bruno, parent, member, turnsOf, queueTask } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [api.id] })).task;
-    const [sub] = await db.select().from(subscriptions);
-    const turn = (taskId: string, prompt: string) => ({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation' as const, prompt, timeoutMs: 900000, taskId });
     await db.delete(jobs).where(eq(jobs.agentId, head.id));
-    await db.insert(jobs).values(turn(parent.id, 'Payments moved.'));
-    await db.insert(jobs).values({ ...turn(launch.id, 'Launch moved.'), createdAt: new Date(Date.now() + 1000) });
+    await queueTask(parent.id, head.id, 'Payments moved.');
+    await queueTask(launch.id, head.id, 'Launch moved.', new Date(Date.now() + 1000));
     vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
     vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
     vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
