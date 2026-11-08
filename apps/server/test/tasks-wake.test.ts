@@ -6,8 +6,9 @@ import { agentEvents, agents, companies, departments, jobs, machines, nodes, pen
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
-import { ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask, verdict, type NewTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
@@ -17,15 +18,17 @@ async function company(env?: NodeJS.ProcessEnv) {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(skill => skill.on).map(skill => skill.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const ctx = app.ctx;
-  const memberTask = async (gates = [rita.id]) =>
-    (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates })).task;
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  const memberTask = async (over: Partial<NewTask> = {}) =>
+    (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, ...over })).task;
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt));
   /* The agent's oldest waiting turn runs and ends; what it did in between is up to the test. */
   const finish = async (agentId: string, during: () => Promise<unknown> = async () => {}, status: 'done' | 'failed' = 'done') => {
@@ -44,16 +47,15 @@ async function company(env?: NodeJS.ProcessEnv) {
 /* A spy a test leaves behind would answer for the instructions of whichever test runs next. */
 afterEach(() => { vi.restoreAllMocks(); });
 
-describe('a delayed merge wake on a closed task', () => {
-  it.each(['done', 'cancelled'] as const)('logs a skipped merge on %s without waking anyone', async status => {
+describe('a delayed assignment wake on a closed task', () => {
+  it.each(['done', 'cancelled'] as const)('logs a skipped assignment on %s without waking anyone', async status => {
     const c = await company();
     const task = await c.memberTask();
     await c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task.id));
-    await c.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId: c.bruno.id, kind: 'submitted', text: 'Merged.', data: { merged: true } });
-    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'merge', text: 'turn-5' }]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned', text: 'turn-5' }]);
     expect(await c.db.select().from(jobs)).toEqual([]);
     const log = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
-    expect(log.filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ agentId: c.bruno.id, text: 'Run skipped: task is already closed. Bruno: merge.', data: { wake: 'merge', job: null } })]);
+    expect(log.filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ agentId: c.bruno.id, text: 'Run skipped: task is already closed. Bruno: assigned.', data: { wake: 'assigned', job: null } })]);
     expect(await c.db.select().from(agentEvents)).toEqual([]);
   });
 });
@@ -143,7 +145,7 @@ describe('words for an agent at work', () => {
 
   it("types a person's comment into the turn on that task, and a comment on another task waits for its own turn", async () => {
     const w = await atWork(true, true);
-    const other = (await createTask(w.ctx, { agentId: w.head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: w.dev.id, assigneeAgentId: w.bruno.id, executor: true, gates: [w.rita.id] })).task;
+    const other = (await createTask(w.ctx, { agentId: w.head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: w.dev.id, assigneeAgentId: w.bruno.id, executor: true, small: true, reviewerAgentId: w.rita.id })).task;
     await wakeAll(w.ctx, (await comment(w.ctx, { personId: w.ceo.id }, w.task!.id, 'EUR only.')).wakes);
     expect(w.says.map(s => s.text)).toEqual([expect.stringContaining('EUR only.')]);
     expect(await queuedOf(w, w.bruno.id)).toEqual([]);
@@ -434,7 +436,7 @@ describe("Hornhoof's note that a task stands still", () => {
 
   it('goes away when the executor hands its work in after all', async () => {
     const c = await stuck();
-    await submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
+    await submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test: 12 passed', review: { baseCommit: BASE } });
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'withdrawn' }]);
     expect(await taskOf(c, c.task.id)).toMatchObject({ status: 'review' });
   });
@@ -453,7 +455,7 @@ describe("Hornhoof's note that a task stands still", () => {
     await c.db.update(requests).set({ status: 'answered' });
     await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, c.task.id));
     await ask(c.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'EUR or USD?' });
-    await expect(submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test' })).rejects.toThrow(/waits for a person's answer/);
+    await expect(submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test', review: { baseCommit: BASE } })).rejects.toThrow(/waits for a person's answer/);
   });
 
   it('asks the member head to answer the internal stuck request', async () => {
@@ -625,7 +627,7 @@ describe('waking agents for their tasks', () => {
     const { ctx, db, bruno, rita, memberTask, turnsOf, finish } = await company();
     const task = await memberTask();
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
-    await finish(bruno.id, async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' })).wakes));
+    await finish(bruno.id, async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test', review: { baseCommit: BASE } })).wakes));
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
     expect((await turnsOf(rita.id)).map(j => j.taskId)).toEqual([task.id]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(0);
@@ -962,26 +964,25 @@ async function busyQueue() {
 }
 
 describe('obsolete task turns', () => {
-  it.each(['done', 'cancelled'] as const)('drops the three queued assignment and merge turns after their tasks are %s', async status => {
+  it.each(['done', 'cancelled'] as const)('drops three queued assignments after their tasks are %s', async status => {
     const c = await busyQueue();
-    const [first, second, merge] = await Promise.all([c.memberTask([]), c.memberTask([]), c.memberTask([])]);
-    await c.db.update(tasks).set({ merging: true }).where(eq(tasks.id, merge!.id));
+    const [first, second, last] = await Promise.all([c.memberTask(), c.memberTask(), c.memberTask()]);
     await wakeAll(c.ctx, [
       { agentId: c.bruno.id, taskId: first!.id, why: 'assigned' },
       { agentId: c.bruno.id, taskId: second!.id, why: 'assigned' },
-      { agentId: c.bruno.id, taskId: merge!.id, why: 'merge', text: 'turn-4' },
+      { agentId: c.bruno.id, taskId: last!.id, why: 'assigned', text: 'turn-4' },
     ]);
     const queued = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(3);
     /* These are the old rows of the incident, before wake snapshots existed. */
     await c.db.update(agentEvents).set({ data: sql`${agentEvents.data} - 'taskWake'` }).where(inArray(agentEvents.jobId, queued.map(j => j.id)));
-    await c.close([first!.id, second!.id, merge!.id], status);
+    await c.close([first!.id, second!.id, last!.id], status);
     const next = await enqueueTurn(c.ctx, { companyId: c.dev.companyId, agentId: c.bruno.id, prompt: 'A new message.', createdBy: c.ceo.id });
     await c.release();
 
     expect((await nextRun(c.builtin)).jobId).toBe(next);
     expect(c.builtin.queued()).toBe(0);
-    for (const [i, task] of [first!, second!, merge!].entries()) {
+    for (const [i, task] of [first!, second!, last!].entries()) {
       const [stale] = await c.db.select().from(jobs).where(eq(jobs.id, queued[i]!.id));
       expect(stale).toMatchObject({ status: 'obsolete', error: 'stale', startedAt: null });
       expect(stale!.result).toContain(`#${task.number}`);
@@ -991,22 +992,22 @@ describe('obsolete task turns', () => {
     }
   });
 
-  it('drops a late merge signal before it queues a turn, and forgets the kept signal', async () => {
+  it('drops a late assignment signal before it queues a turn, and forgets the kept signal', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.close([task.id]);
-    await c.db.insert(pendingWakes).values({ companyId: task.companyId, agentId: c.bruno.id, taskId: task.id, why: 'merge', createdAt: new Date(Date.now() - 60_000) });
+    await c.db.insert(pendingWakes).values({ companyId: task.companyId, agentId: c.bruno.id, taskId: task.id, why: 'assigned', createdAt: new Date(Date.now() - 60_000) });
     await wakeLeftBehind(c.ctx, new Date(Date.now() + 60_000));
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
     expect(await c.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, task.id))).toEqual([]);
   });
 
-  it('keeps comments on a done task in its log without waking its executor or reviewers', async () => {
+  it('keeps comments on a done task in its log without waking its producer or checking owners', async () => {
     const c = await company();
     const task = await c.memberTask();
-    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: c.bruno.id, panel: [c.rita.id] }).where(eq(tasks.id, task.id));
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: c.bruno.id }).where(eq(tasks.id, task.id));
     for (const actor of [{ personId: c.ceo.id }, { agentId: c.head.id }]) {
-      const moved = await comment(c.ctx, actor, task.id, 'A note for the turn review.');
+      const moved = await comment(c.ctx, actor, task.id, 'A note for the task history.');
       expect(moved.wakes).toEqual([]);
       await wakeAll(c.ctx, moved.wakes);
     }
@@ -1025,10 +1026,10 @@ describe('obsolete task turns', () => {
     expect((await c.turnsOf(c.bruno.id)).map(j => j.prompt)).toEqual([expect.stringContaining('Use the current schema.')]);
   });
 
-  it.each(['done', 'reported', 'reviewed', 'review_passed'] as const)('preserves the %s notice to the head after a task closes', async why => {
+  it.each(['done', 'reported', 'reviewed'] as const)('preserves the %s notice to the head after a task closes', async why => {
     const c = await busyQueue();
     const held = await c.hold(c.head.id);
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.close([task.id]);
     await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why, text: 'The checks passed.' }]);
     const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
@@ -1040,10 +1041,9 @@ describe('obsolete task turns', () => {
   it.each([
     { name: 'another executor', set: { assigneeAgentId: null } },
     { name: 'work already started', set: { status: 'working' as const } },
-    { name: 'the merge phase', set: { merging: true } },
   ])('drops an assignment that now belongs to $name', async ({ set }) => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
     await c.db.update(tasks).set(set).where(eq(tasks.id, task.id));
@@ -1052,14 +1052,15 @@ describe('obsolete task turns', () => {
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'obsolete', error: 'stale', startedAt: null });
   });
 
-  it('drops a review from a previous stage even when the same reviewer is on the next panel', async () => {
+  it('drops a queued Review after the same owner advances the candidate to Tests', async () => {
     const c = await busyQueue();
     const held = await c.hold(c.rita.id);
-    const task = await c.memberTask();
-    await c.db.update(tasks).set({ status: 'review', stage: 1, panel: [c.rita.id], assigneeAgentId: c.rita.id }).where(eq(tasks.id, task.id));
-    await wakeAll(c.ctx, [{ agentId: c.rita.id, taskId: task.id, why: 'review' }]);
+    await c.db.update(agents).set({ skills: [...c.rita.skills, 'dev-test-environment'] }).where(eq(agents.id, c.rita.id));
+    const task = await c.memberTask({ testsAgentId: c.rita.id });
+    await wakeAll(c.ctx, (await submit(c.ctx, c.bruno.id, task.id, { summary: 'Ready.', evidence: 'Total checks.', review: { baseCommit: BASE } })).wakes);
     const [queued] = (await c.turnsOf(c.rita.id)).filter(j => j.status === 'queued');
-    await c.db.update(tasks).set({ stage: 2 }).where(eq(tasks.id, task.id));
+    expect(queued).toBeDefined();
+    await verdict(c.ctx, c.rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the current candidate.' });
     await c.release(held.id);
     expect(c.builtin.queued()).toBe(0);
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
@@ -1067,7 +1068,7 @@ describe('obsolete task turns', () => {
 
   it('still dispatches a current assignment after the busy turn ends', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'comment', text: 'The same current work.' }]);
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
@@ -1082,7 +1083,7 @@ describe('obsolete task turns', () => {
 
   it('checks the task again at take if it closes while instructions are being built', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
     const next = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.bruno.id, prompt: 'A current message.', createdBy: c.ceo.id });
@@ -1103,7 +1104,7 @@ describe('obsolete task turns', () => {
     const own = async (title: string) => (await createTask(c.ctx, { personId: c.ceo.id }, { title, brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
     const current = await own('Current work');
     const old = await own('Obsolete work');
-    const child = await c.memberTask([]);
+    const child = await c.memberTask();
     await c.close([child.id]);
     await wakeAll(c.ctx, [
       { agentId: c.head.id, taskId: current.id, why: 'assigned' },
@@ -1130,7 +1131,7 @@ describe('obsolete task turns', () => {
   it('drops a head update after the task it created is handed to another holder', async () => {
     const c = await busyQueue();
     const held = await c.hold(c.head.id);
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.db.update(tasks).set({ assigneeAgentId: c.head.id }).where(eq(tasks.id, task.id));
     await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why: 'updated' }]);
     const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
@@ -1141,7 +1142,7 @@ describe('obsolete task turns', () => {
 
   it('drops a legacy task turn when its worker also created the task', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.db.update(tasks).set({ createdByAgentId: c.bruno.id }).where(eq(tasks.id, task.id));
     const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.bruno.id, taskId: task.id, prompt: 'An old assignment.', createdBy: null });
     await c.close([task.id]);
@@ -1151,7 +1152,7 @@ describe('obsolete task turns', () => {
 
   it('still dispatches a current legacy task turn', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     const [queued] = await c.db.insert(jobs).values({ companyId: task.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: task.id, kind: 'conversation', prompt: 'A current legacy assignment.', timeoutMs: 900000 }).returning();
     await c.release();
     expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
@@ -1160,17 +1161,17 @@ describe('obsolete task turns', () => {
   it('still dispatches a legacy completion notice to the giver', async () => {
     const c = await busyQueue();
     const held = await c.hold(c.head.id);
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.close([task.id]);
     const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.head.id, taskId: task.id, prompt: wakePrompt(c.head, task, { agentId: c.head.id, taskId: task.id, why: 'done' }), createdBy: null });
     await c.release(held.id);
     expect((await nextRun(c.builtin)).jobId).toBe(queued);
   });
 
-  it.each(['blocked', 'stuck_at_gate', 'tests', 'work'] as const)('preserves current %s news for the giver', async why => {
+  it.each(['blocked', 'tests', 'work'] as const)('preserves current %s news for the giver', async why => {
     const c = await busyQueue();
     const held = await c.hold(c.head.id);
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why, text: 'Current news.' }]);
     const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
     expect(queued).toBeDefined();
@@ -1179,22 +1180,21 @@ describe('obsolete task turns', () => {
   });
 
   it.each([
-    { why: 'assigned', status: 'blocked', merging: false, stage: 0, holder: 'bruno', receiver: 'bruno', panel: [] },
-    { why: 'merge', status: 'open', merging: false, stage: 0, holder: 'bruno', receiver: 'bruno', panel: [] },
-    { why: 'merge', status: 'open', merging: true, stage: 0, holder: 'head', receiver: 'bruno', panel: [] },
-    { why: 'review', status: 'open', merging: false, stage: 0, holder: 'bruno', receiver: 'rita', panel: ['rita'] },
-    { why: 'review', status: 'review', merging: false, stage: 1, holder: 'bruno', receiver: 'rita', panel: ['bruno'] },
-  ] as const)('rejects $why before queueing when its current phase or recipient does not match ($status, $holder)', async ({ why, status, merging, stage, holder, receiver, panel }) => {
+    { why: 'assigned', status: 'blocked', holder: 'bruno', receiver: 'bruno' },
+    { why: 'assigned', status: 'open', holder: 'head', receiver: 'bruno' },
+    { why: 'review', status: 'open', holder: 'bruno', receiver: 'rita' },
+    { why: 'review', status: 'review', holder: 'bruno', receiver: 'rita' },
+  ] as const)('rejects $why before queueing when its current phase or recipient does not match ($status, $holder)', async ({ why, status, holder, receiver }) => {
     const c = await company();
-    const task = await c.memberTask([]);
-    await c.db.update(tasks).set({ status, merging, stage, assigneeAgentId: c[holder].id, panel: panel.map(p => c[p].id) }).where(eq(tasks.id, task.id));
+    const task = await c.memberTask();
+    await c.db.update(tasks).set({ status, assigneeAgentId: c[holder].id }).where(eq(tasks.id, task.id));
     await wakeAll(c.ctx, [{ agentId: c[receiver].id, taskId: task.id, why }]);
     expect(await c.turnsOf(c[receiver].id)).toEqual([]);
   });
 
   it('resumes current working tasks when the agent gets its subscription back', async () => {
     const c = await company();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, task.id));
     await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.bruno.id));
     const response = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.bruno.id}`, payload: { subscription: c.sub.id }, ...as(c.owner) });
@@ -1204,7 +1204,7 @@ describe('obsolete task turns', () => {
 
   it('discards obsolete work even if its instructions can no longer be built', async () => {
     const c = await busyQueue();
-    const task = await c.memberTask([]);
+    const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     await c.close([task.id]);
     vi.spyOn(instructionBuilder, 'instructionsOf').mockRejectedValue(new Error('These obsolete instructions are unavailable.'));
