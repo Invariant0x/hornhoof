@@ -76,7 +76,11 @@ describe('recorded action authors', () => {
     await submit(c.app.ctx, c.worker.id, task.id, { summary: 'Implemented.', evidence: 'Tested.', review: { baseCommit: 'a'.repeat(40) } });
     const moved = await verdict(c.app.ctx, c.reviewer.id, task.id, { pass: false, reviewedCommit: 'b'.repeat(40), escalate: true, comment: 'The requested currency behavior is different.' });
     await wakeAll(c.app.ctx, moved.wakes);
-    attributed((await c.notices(c.head.id))[0]!, 'Rita', 'escalated work');
+    const notice = (await c.notices(c.head.id))[0]!;
+    const text = (notice.data as { text: string }).text;
+    expect(text).toContain('current stage owner');
+    expect(text).not.toContain('opens it again for its executor');
+    attributed(notice, 'Rita', 'escalated work');
   });
 
   it('attributes a comment to its person', async () => {
