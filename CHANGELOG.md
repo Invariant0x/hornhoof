@@ -7,8 +7,8 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.8.4] - 2026-11-08
 
-Let the nodes on every computer follow the server to a new build by themselves, and let GitHub test each commit once and
-only where its change reaches.
+Let the nodes on every computer follow the server to a new build by themselves, let GitHub test each commit once and only
+where its change reaches, and tell an employee once that someone waits for them.
 
 ### Before you update
 
@@ -25,6 +25,16 @@ only where its change reaches.
 
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
   change that reaches everything, such as one of the lockfile, still runs every test.
+
+### Fixed
+
+- An employee hears once that someone waits for them on a task. The one who waits can say its wait again with new words
+  or a new date while it stands, or within ten minutes after the employee answered on the task, and that tells the
+  employee nothing new. A wait on someone else, one after an older answer, or one after the last ran out or its holder
+  ended it still tells them.
+- An employee can no longer wait for itself by writing its own id in capitals, and is never told that it waits for itself.
+- A push to main whose version is out already no longer shows as a failed run on GitHub: the publish job sees the
+  version's tag and moves nothing.
 
 ## [0.8.3] - 2026-11-08
 
