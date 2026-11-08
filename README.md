@@ -172,13 +172,16 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 
 ## What comes next
 
-- **Machines in different homes, connected directly**, without going through the public link.
-- **More machines holding the company's data**, five out of ten instead of three.
-- **Phones and tablets as workers.** One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests, and checks on a real device.
-- **Departments on their own turns.** Development on turn 8 while marketing is on turn 3, each with its own progress on the map.
-- **Checkpoints for every department.** Marketing, content and sales get stages and checks between them, the way development has them.
-- **Schemes to share.** Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working.
-- **Styles for the interface.** Pick the look you like in Settings.
+| What is coming | What it gives you |
+| --- | --- |
+| Direct links between machines in different homes | Machines connect to each other directly, without going through the public link |
+| More machines holding the company's data | The company's data lives on five machines out of ten instead of three |
+| Phones and tablets as workers | One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests and checks on a real device |
+| Checkpoints for every department | Marketing, content and sales get stages and checks between them, the way development has them |
+| Schemes to share | Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working |
+| Styles for the interface | Pick the look you like in Settings |
+
+Want to add something? [Write to us](https://github.com/Invariant0x/hornhoof/issues) and let's build it.
 
 ## Questions
 
