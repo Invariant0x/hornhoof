@@ -4,7 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, requests, taskWaits } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { candidates, decisionOwner } from './decisions.js';
-import { routeOf } from './echelons-store.js';
+import { routeOf, type Route } from './echelons-store.js';
 import { CLOSED, refuse, requestSubject, type Actor, type Request, type Task, type Tx } from './engine.js';
 import { departmentHead, planFromPolicy, setsWaitDates } from './wait-policy.js';
 import { afterSourceKey, endOpenSource, endTaskWaits, lastOfSource, moveWaitOwner, recordLegacyWait, requestSourceKey, reviewSourceKey, syncSourceWaits, type TaskWait } from './wait-state.js';
@@ -117,12 +117,15 @@ async function endWithdrawn(tx: Tx, row: Task, step: WaitStep, open: TaskWait[])
   }
 }
 
+function currentReviewSource(row: Task, route: Route): string | null {
+  const checking = route.state.phase === 'active' && ['review', 'security', 'cleanup'].includes(route.state.stage ?? '') && !CLOSED.includes(row.status);
+  return checking && row.assigneeAgentId && route.state.candidateId
+    ? reviewSourceKey(row.id, route.state.stage!, route.state.candidateId, row.assigneeAgentId) : null;
+}
+
 /* A check waits on one candidate, stage and owner, including the owner's own repairs. */
 async function keepReviews(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {
-  const route = await routeOf(tx, row);
-  const checking = route.state.phase === 'active' && ['review', 'security', 'cleanup'].includes(route.state.stage ?? '') && !CLOSED.includes(row.status);
-  const key = checking && row.assigneeAgentId && route.state.candidateId
-    ? reviewSourceKey(row.id, route.state.stage!, route.state.candidateId, row.assigneeAgentId) : null;
+  const key = currentReviewSource(row, await routeOf(tx, row));
   for (const wait of open.filter(wait => wait.kind === 'review')) {
     if (wait.sourceKey === key) continue;
     const resolved = step.kind === 'verdict' && wait.ownerAgentId === step.actor.agentId;

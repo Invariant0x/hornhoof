@@ -7,7 +7,7 @@ import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.j
 import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
-import { createRoute, routeOf, changeRoute } from './echelons-store.js';
+import { createRoute, routeOf, changeRoute, type Route } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -230,6 +230,18 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
   if (changed) ctx.bus.publish(changed.companyId, { type: 'org' });
 }
 
+async function lockMovePrerequisites(tx: Tx, task: Task, after: string[]): Promise<void> {
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+  await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, after)).orderBy(asc(tasks.id)).for('share');
+  await refuseCircle(tx, task, after);
+}
+
+async function lockClosingParent(tx: Tx, task: Task, set: Partial<Task>): Promise<void> {
+  if (!set.status || !CLOSED.includes(set.status) || !task.parentId) return;
+  if (!set.after?.length) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+  await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('update');
+}
+
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
@@ -241,18 +253,10 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
     if (n.data?.turnCleanup) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
-    if (set.after?.length) {
-      await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
-      await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, set.after)).orderBy(asc(tasks.id)).for('share');
-      await refuseCircle(tx, task, set.after);
-    }
+    if (set.after?.length) await lockMovePrerequisites(tx, task, set.after);
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
-    if (set.status && CLOSED.includes(set.status) && task.parentId) {
-      /* The last of it may open the review of its turn, a new task: the company first, as a new task takes it. */
-      if (!set.after?.length) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
-      await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('update');
-    }
+    await lockClosingParent(tx, task, set);
     const [row] = await tx
       .update(tasks)
       .set({ externalWait: null, ...set, version: task.version + 1, updatedAt: new Date() })
@@ -431,20 +435,28 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
+  await requireNewCleanup(ctx, actor, assignee.companyId, input);
+  await requireNewReviewer(ctx, assignee, input);
+  const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
+  if (parent) stillOpen(parent);
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
+  return { assignee, parent, declaration };
+}
+
+async function requireNewCleanup(ctx: Ctx, actor: Actor, companyId: string, input: NewTask): Promise<void> {
   if (input.cleanup !== undefined) {
-    const head = actor.agentId ? await liveAgent(ctx.db, assignee.companyId, actor.agentId) : null;
+    const head = actor.agentId ? await liveAgent(ctx.db, companyId, actor.agentId) : null;
     if (head?.kind !== 'head' || head.departmentId !== input.departmentId) throw refuse(403, 'task_not_yours', 'Only the department head may request optional Cleanup.');
   }
+}
+
+async function requireNewReviewer(ctx: Ctx, assignee: typeof agents.$inferSelect, input: NewTask): Promise<void> {
   if (input.reviewerAgentId) {
     const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
     if (reviewer.id === assignee.id || reviewer.departmentId !== input.departmentId || (reviewer.productId && reviewer.productId !== input.productId)) {
       throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
     }
   }
-  const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
-  if (parent) stillOpen(parent);
-  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
-  return { assignee, parent, declaration };
 }
 
 async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
@@ -580,11 +592,15 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: Subm
   }
 }
 
+function requireSubmissionStage(task: Task, route: Route): void {
+  if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');
+  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
+}
+
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
-  if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');
-  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
+  requireSubmissionStage(task, route);
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
@@ -638,29 +654,33 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
   return { task: row, wakes };
 }
 
-export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput }): Promise<Moved> {
+type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput };
+type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination';
+
+function reportedStage(route: Route, done: boolean): ReportStage | null {
+  if (done && route.state.phase === 'ready') return 'acceptance';
+  if (route.state.stage === 'tests' && route.state.phase === 'active') return 'tests';
+  if (done && route.state.stage === 'architecture') return 'architecture';
+  if (done && route.state.resultKind === 'coordination') return 'coordination';
+  return null;
+}
+
+async function reportStage(ctx: Live, task: Task, route: Route, agentId: string, input: ReportInput, stage: ReportStage): Promise<Moved> {
+  stillOpen(task);
+  await refuseWaiting(ctx.db, task);
+  switch (stage) {
+    case 'acceptance': return acceptCandidate(ctx, task, route, agentId, input.summary, input.acceptance);
+    case 'tests': return testsReport(ctx, task, route, agentId, input.summary, input.verification, input.done);
+    case 'architecture': return architectureReport(ctx, task, route, agentId, input.summary);
+    case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
+  }
+}
+
+export async function report(ctx: Live, agentId: string, taskId: string, r: ReportInput): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
-  if (r.done && route.state.phase === 'ready') {
-    stillOpen(task);
-    await refuseWaiting(ctx.db, task);
-    return acceptCandidate(ctx, task, route, agentId, r.summary, r.acceptance);
-  }
-  if (route.state.stage === 'tests' && route.state.phase === 'active') {
-    stillOpen(task);
-    await refuseWaiting(ctx.db, task);
-    return testsReport(ctx, task, route, agentId, r.summary, r.verification, r.done);
-  }
-  if (r.done && route.state.stage === 'architecture') {
-    stillOpen(task);
-    await refuseWaiting(ctx.db, task);
-    return architectureReport(ctx, task, route, agentId, r.summary);
-  }
-  if (r.done && route.state.resultKind === 'coordination') {
-    stillOpen(task);
-    await refuseWaiting(ctx.db, task);
-    return coordinationReport(ctx, task, route, agentId, r.summary);
-  }
+  const stage = reportedStage(route, r.done);
+  if (stage) return reportStage(ctx, task, route, agentId, r, stage);
   if (route.state.resultKind !== 'coordination') throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
@@ -758,6 +778,13 @@ async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>)
 
 type Leaver = { id: string; name: string; companyId: string };
 
+function releasedRoute(route: Route, agentId: string, current: boolean): Route['state'] {
+  return { ...route.state, ...(current ? { phase: 'waiting', assignment: null } : {}), stages: route.state.stages.map(step => {
+    if (step.ownerAgentId !== agentId || ['complete', 'skipped'].includes(step.status)) return step;
+    return { ...step, ownerAgentId: null, status: 'pending', reason: 'eligible_owner_required' };
+  }) };
+}
+
 /* Leaving an assignment never skips the stage or erases an immutable candidate. */
 export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.id));
@@ -767,10 +794,7 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
     const current = task.assigneeAgentId === agent.id;
     const future = route.state.stages.some(step => step.status === 'pending' && step.ownerAgentId === agent.id);
     if (!current && !future) return null;
-    const state = { ...route.state, ...(current ? { phase: 'waiting' as const, assignment: null } : {}), stages: route.state.stages.map(step => {
-      if (step.ownerAgentId !== agent.id || ['complete', 'skipped'].includes(step.status)) return step;
-      return { ...step, ownerAgentId: null, status: 'pending' as const, reason: 'eligible_owner_required' };
-    }) };
+    const state = releasedRoute(route, agent.id, current);
     const due = current ? giver(task, 'switched', agent.id, `${agent.name} is no longer available. Assign the current stage to an eligible employee.`) : [];
     await move(ctx, task, current ? { assigneeAgentId: null, status: 'waiting' } : {}, { kind: 'updated', actor, text: `${agent.name} left the assignment.`, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), due);
     handed.push(task.id); wakes.push(...due);
@@ -779,15 +803,19 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
   return { wakes, handed, closed: [] };
 }
 
+async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
+  if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
+  const ability = CHECK_ABILITIES[route.state.stage];
+  if (!ability) return null;
+  return checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, null);
+}
+
 export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[]; closed: Task[] }> {
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), eq(tasks.status, 'waiting'), isNull(tasks.assigneeAgentId))).orderBy(asc(tasks.id));
   const wakes: Wake[] = [];
   for (const row of rows) await onFresh(ctx, row, async task => {
     const route = await routeOf(ctx.db, task);
-    if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
-    const ability = CHECK_ABILITIES[route.state.stage];
-    if (!ability) return null;
-    const owner = await checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, null);
+    const owner = await waitingRouteChecker(ctx, task, route);
     if (!owner) return null;
     const state = { ...route.state, phase: 'active' as const, assignment: owner, stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, ownerAgentId: owner.agentId, status: 'active' as const, reason: null } : step) };
     const due: Wake[] = [{ agentId: owner.agentId, taskId: task.id, why: route.state.stage === 'tests' ? 'tests' : 'review' }];
@@ -822,27 +850,12 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   if (c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
   const set = revised.set;
-  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (c[key] !== undefined) Object.assign(set, { [key]: c[key] });
-  const rewritten = (['title', 'brief', 'body'] as const).some(key => c[key] !== undefined && c[key] !== task[key]);
-  if (rewritten && task.status === 'blocked' && task.assigneeAgentId && revised.state.phase === 'active') {
-    Object.assign(set, { status: ['review', 'cleanup', 'security'].includes(revised.state.stage ?? '') ? 'review' : 'open', silent: 0 });
-  }
-  if (c.after !== undefined) {
-    if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
-    checkAfterPlans(c.after, c.afterPlans);
-    await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
-    await refuseAbove(ctx.db, task.parentId, c.after);
-    await refuseBelow(ctx.db, task, c.after);
-    set.after = c.after;
-  }
-  const changesIndependent = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
-  const existing = changesIndependent ? await currentIndependent(ctx.db, task.id) : null;
-  const declaration = changesIndependent ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
-  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
-  const partOwner = createsIndependent && declaration?.kind === 'part' ? declaration.part.executor : null;
-  const newOwner = revised.set.assigneeAgentId === task.assigneeAgentId ? null : revised.set.assigneeAgentId;
-  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, [newOwner, partOwner].filter((id): id is string => Boolean(id)));
+  copyChangedFields(c, set);
+  reopenRewrittenTask(task, revised.state, c, set);
+  await changePrerequisites(ctx, task, route, c, set);
+  const independentChange = await prepareIndependentChange(ctx, task, c);
+  const { declaration } = independentChange;
+  await requireChangeUrgency(ctx, agentId, task, set, independentChange.partOwner);
   let independent: Task | null = null;
   let changed: Task[] = [];
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
@@ -852,20 +865,79 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     if (c.cleanupForTurn) changed = await applyTurnCleanup(tx, task, agentId, c.cleanup!, wakes);
     await changeRoute(tx, route, revised.state, revised.paths);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
-    if (createsIndependent && declaration?.kind === 'part') {
-      const made = await insertIndependent(tx, row, declaration.part, { agentId });
-      independent = made.child;
-      wakes.push(made.wake);
-    }
-    if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
-    if (set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId) {
-      await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.taskId, task.id), eq(jobs.agentId, task.assigneeAgentId!), eq(jobs.status, 'queued')));
-      await letStuckGo(tx, task.id);
-    }
+    independent = await insertIndependentChange(tx, row, agentId, independentChange, wakes);
+    await wakeUpdatedHolder(tx, task, row, set, holder, wakes);
+    await endFormerOwnerTurns(tx, task, set);
   }, wakes);
   if (independent) published(ctx, independent);
   publishRouteChanges(ctx, changed);
   return { task: row, wakes };
+}
+
+function copyChangedFields(change: TaskChange, set: Partial<Task>): void {
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (change[key] !== undefined) Object.assign(set, { [key]: change[key] });
+}
+
+function rewrittenText(task: Task, change: TaskChange): boolean {
+  return (['title', 'brief', 'body'] as const).some(key => change[key] !== undefined && change[key] !== task[key]);
+}
+
+function reopenRewrittenTask(task: Task, state: Route['state'], change: TaskChange, set: Partial<Task>): void {
+  if (rewrittenText(task, change) && task.status === 'blocked' && task.assigneeAgentId && state.phase === 'active') {
+    Object.assign(set, { status: ['review', 'cleanup', 'security'].includes(state.stage ?? '') ? 'review' : 'open', silent: 0 });
+  }
+}
+
+async function changePrerequisites(ctx: Ctx, task: Task, route: Route, change: TaskChange, set: Partial<Task>): Promise<void> {
+  if (change.after === undefined) return;
+  if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
+  checkAfterPlans(change.after, change.afterPlans);
+  await checkAfter(ctx.db, task.companyId, task.turnId, change.after);
+  await refuseAbove(ctx.db, task.parentId, change.after);
+  await refuseBelow(ctx.db, task, change.after);
+  set.after = change.after;
+}
+
+function changesIndependence(change: TaskChange): boolean {
+  return change.after !== undefined || change.independentPart !== undefined || change.independentNone !== undefined;
+}
+
+type IndependentChange = { declaration: IndependentDeclaration | null; createsIndependent: boolean; partOwner: string | null };
+
+function independentAddition(declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): Omit<IndependentChange, 'declaration'> {
+  if (declaration?.kind !== 'part' || existing?.kind === 'part') return { createsIndependent: false, partOwner: null };
+  return { createsIndependent: true, partOwner: declaration.part.executor };
+}
+
+async function prepareIndependentChange(ctx: Ctx, task: Task, change: TaskChange): Promise<IndependentChange> {
+  if (!changesIndependence(change)) return { declaration: null, createsIndependent: false, partOwner: null };
+  const existing = await currentIndependent(ctx.db, task.id);
+  const declaration = checkIndependent(change.after ?? task.after, change.independentPart, change.independentNone, existing);
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
+  return { declaration, ...independentAddition(declaration, existing) };
+}
+
+async function requireChangeUrgency(ctx: Ctx, agentId: string, task: Task, set: Partial<Task>, partOwner: string | null): Promise<void> {
+  const newOwner = set.assigneeAgentId === task.assigneeAgentId ? null : set.assigneeAgentId;
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, [newOwner, partOwner].filter((id): id is string => Boolean(id)));
+}
+
+async function insertIndependentChange(tx: Tx, row: Task, agentId: string, change: IndependentChange, wakes: Wake[]): Promise<Task | null> {
+  if (!change.createsIndependent || change.declaration?.kind !== 'part') return null;
+  const made = await insertIndependent(tx, row, change.declaration.part, { agentId });
+  wakes.push(made.wake);
+  return made.child;
+}
+
+async function wakeUpdatedHolder(tx: Tx, task: Task, row: Task, set: Partial<Task>, holder: string | null, wakes: Wake[]): Promise<void> {
+  if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
+}
+
+async function endFormerOwnerTurns(tx: Tx, task: Task, set: Partial<Task>): Promise<void> {
+  if (set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId) {
+    await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.taskId, task.id), eq(jobs.agentId, task.assigneeAgentId!), eq(jobs.status, 'queued')));
+    await letStuckGo(tx, task.id);
+  }
 }
 
 /* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
@@ -1024,7 +1096,7 @@ async function remindOnSilence(ctx: Live, agentId: string, task: Task): Promise<
    limit: one note in the task says why, and the turns that waited for the one who did it are over. */
 export async function handOver(ctx: Live, task: Task, to: string, text: string): Promise<Moved> {
   const route = await routeOf(ctx.db, task);
-  if (route.state.resultKind !== 'code' || route.state.candidateId || !['architecture', 'development'].includes(route.state.stage ?? '') || task.assigneeAgentId !== task.executorAgentId) throw refuse(409, 'task_invalid', 'Only unsubmitted work can change executor automatically.');
+  requireUnsubmittedWork(task, route);
   const owner = await workingAgent(ctx.db, task.companyId, to);
   if (owner.departmentId !== task.departmentId || (owner.productId && owner.productId !== task.productId)) throw refuse(403, 'task_not_yours', 'The replacement is outside the task scope.');
   const state = { ...route.state, assignment: null, stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, ownerAgentId: to } : step) };
@@ -1042,6 +1114,10 @@ export async function handOver(ctx: Live, task: Task, to: string, text: string):
     wakes,
   );
   return { task: row, wakes };
+}
+
+function requireUnsubmittedWork(task: Task, route: Route): void {
+  if (route.state.resultKind !== 'code' || route.state.candidateId || !['architecture', 'development'].includes(route.state.stage ?? '') || task.assigneeAgentId !== task.executorAgentId) throw refuse(409, 'task_invalid', 'Only unsubmitted work can change executor automatically.');
 }
 
 /* The agent's turns on the task keep breaking as soon as they start: Hornhoof stops waking it there, and whoever gave the
