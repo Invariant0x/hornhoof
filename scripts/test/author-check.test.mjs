@@ -274,6 +274,23 @@ test('notes of the selection reach the log', async () => {
   assert.ok(isLine(ports, /^NOTE migration_check_unsupported/));
 });
 
+test('selection evidence names the candidate, base, inventory and reasons separately from execution', async () => {
+  const input = given(); input.selection.packages[0].reasons = [{ code: 'changed_test', path: 'apps/node/test/a.test.ts' }];
+  const ports = fake();
+  await runStages(input, ports);
+  const line = ports.lines.find(item => item.startsWith('TEST_SELECTION '));
+  assert.ok(line, 'the selection has a separate auditable receipt');
+  const receipt = JSON.parse(line.slice('TEST_SELECTION '.length));
+  assert.equal(receipt.commit, SHA); assert.equal(receipt.baseCommit, BASE);
+  assert.equal(receipt.status, 'selected');
+  assert.deepEqual(receipt.packages, input.selection.packages);
+  assert.deepEqual(receipt.sourcePaths, CHANGES.map(change => change.path));
+  assert.equal(receipt.fullSuiteComparator, 'unavailable');
+  const unavailable = fake();
+  await runStages(given({ selection: { unavailable: 'selection_failed', notes: [] } }), unavailable);
+  assert.equal(JSON.parse(unavailable.lines.find(item => item.startsWith('TEST_SELECTION ')).slice('TEST_SELECTION '.length)).status, 'NOT_RUN');
+});
+
 test('stages with nothing to run can all be unavailable for one reason', () => {
   const result = allUnavailable(SHA, 'base_unreachable', [], line => assert.match(line, /reason=base_unreachable/));
   assert.deepEqual(result.stages.map(item => [item.status, item.exitCode]), Array(6).fill(['unavailable', null]));
