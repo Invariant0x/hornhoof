@@ -27,6 +27,10 @@ where its change reaches, and tell an employee once that someone waits for them.
   change that reaches everything, such as one of the lockfile, still runs every test.
 - A release no longer runs every test on GitHub because it moves the version in the package files and the lockfile:
   where only our own versions moved, the file counts as unchanged. Any other change of them still runs every test.
+- A release builds its images faster. A new version alone no longer installs the dependencies or downloads the browser
+  of an image again, and each image keeps its build cache next to it on GitHub, so a builder that dropped its own, or a
+  new one, does not build the heavy parts again. GitHub's own cache, which took longer to fill than the build, is no
+  longer used.
 
 ### Fixed
 
