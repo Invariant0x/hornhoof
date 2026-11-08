@@ -176,7 +176,7 @@ describe('Department view', () => {
   it('shows an employee start working while the department is open', async () => {
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute(), stage: 0, gateCount: 1, bounces: 0 };
+    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute() };
     const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const, status: 'working' as const, task })) }] };
     let started = false;
     await act(async () => {
@@ -188,7 +188,7 @@ describe('Department view', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
     expect(bruno).toHaveTextContent('free');
-    expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
+    expect(screen.getByText('The map shows the current task stages and their owners.')).toBeInTheDocument();
     started = true;
     await act(async () => {
       stream.send({ type: 'working', working: 2 });
@@ -265,28 +265,25 @@ describe('Department view', () => {
     }
   });
 
-  it('says when a gate sent work back, without an amber dot that would look like a result given back', async () => {
+  it('follows a Review owner handoff without showing an ordinary return to the author', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
-    const [dev] = DEV_ORG.departments;
-    const [dana, bruno] = dev!.employees;
-    const qa = { id: 'DEV-QA', title: { en: 'Test engineer', ru: 'Тестировщик' }, description: { en: 'Tests.', ru: 'Тестирует.' }, kind: 'member' as const, gate: 1 };
-    const task = { id: 't1', number: 1, title: 'Checkout', echelons: taskRoute(), stage: 1, gateCount: 1, bounces: 0 };
-    const before: Org = {
-      ...DEV_ORG,
-      departments: [{ ...dev!, roles: [...dev!.roles, qa], employees: [dana!, { ...bruno!, status: 'handed', task }, { ...bruno!, id: 'q1', name: 'Quinn', roleId: 'DEV-QA', status: 'queued', task }] }],
-    };
-    const after: Org = {
-      ...DEV_ORG,
-      departments: [{ ...before.departments[0]!, employees: [dana!, { ...bruno!, status: 'working', task: { ...task, stage: 0, bounces: 1 } }, before.departments[0]!.employees[2]!] }],
-    };
-    let back = false;
-    shell({ 'GET /api/org': () => [200, back ? after : before] });
+    const dev = DEV_ORG.departments[0]!;
+    const bruno = dev.employees.find(e => e.id === 'b1')!;
+    const rita = { ...bruno, id: 'b2', name: 'Rita' };
+    const task = { id: 't1', number: 1, title: 'Checkout', echelons: taskRoute('development', bruno.id) };
+    let moved = false;
+    const before = { ...dev, employees: [...dev.employees.map(e => e.id === bruno.id ? { ...e, status: 'working' as const, task } : e), rita] };
+    const after = { ...before, employees: before.employees.map(e => e.id === bruno.id ? { ...e, status: 'handed' as const, task: null } : e.id === rita.id ? { ...e, status: 'working' as const, task: { ...task, echelons: { ...taskRoute('review', rita.id), revision: 2 } } } : e) };
+    shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [moved ? after : before] }] });
     await flyIn(user);
-    back = true;
-    stream.send({ type: 'task', id: 't1' });
-    expect(await screen.findByText('Bruno: work came back for rework')).toBeInTheDocument();
-    expect(document.querySelectorAll('.dview circle.pt.a')).toHaveLength(0);
+    expect(within(screen.getByRole('group', { name: 'Development' })).getByRole('button', { name: /Bruno/ })).toBeInTheDocument();
+    moved = true;
+    stream.send({ type: 'task', id: task.id });
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Review' })).getByRole('button', { name: /Rita/ })).toBeInTheDocument());
+    expect(within(screen.getByRole('group', { name: 'Review' })).queryByRole('button', { name: /Bruno/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/work came back for rework/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.dview .rl, .dview .rah')).toHaveLength(0);
   });
 
   it('shows how hard each employee thinks next to its model', async () => {
@@ -323,7 +320,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute(), stage: 1, gateCount: 1, bounces: 0 };
+    const task = { id: 't12', number: 12, title: 'Checkout API', echelons: taskRoute() };
     const waits: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.id === 'b1' ? { ...e, status: 'waiting' as const, task } : e)) }] };
     let asked = false;
     shell({ 'GET /api/org': () => [200, asked ? waits : DEV_ORG] });
@@ -368,38 +365,19 @@ describe('Department view', () => {
       ]);
   });
 
-  it('lays out the gates after the work, the way back from them and the report to the head', async () => {
+  it('keeps idle reviewers outside task stages without inventing gates or return arrows', async () => {
     const user = userEvent.setup();
-    const [dev] = DEV_ORG.departments;
-    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV', title: { en: 'Code reviewer', ru: 'Ревьюер кода' } };
+    const dev = DEV_ORG.departments[0]!;
+    const rita = { ...dev.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV', title: { en: 'Code reviewer', ru: 'Ревьюер кода' } };
     const reviewer = { id: 'DEV-REV', title: rita.title, description: { en: 'Reviews every change.', ru: 'Смотрит каждое изменение.' }, kind: 'member' as const, gate: 1 };
-    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [...dev!.employees, rita], roles: [...dev!.roles, reviewer] }] });
+    shell({}, { ...DEV_ORG, departments: [{ ...dev, employees: [...dev.employees, rita], roles: [...dev.roles, reviewer] }] });
     await flyIn(user);
     const schema = screen.getByRole('region', { name: 'Department schema' });
-    expect(within(schema).getByText('Code reviewer')).toBeInTheDocument();
-    expect(within(schema).getByText('gate 1')).toBeInTheDocument();
-    expect(within(schema).queryByText('Sent back for rework')).not.toBeInTheDocument();
-    expect(schema.querySelectorAll('.wires .rl, .wires .rah').length).toBeGreaterThan(0);
-    expect(within(schema).getByText('Report to the head')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles, 1 gate');
-  });
-
-  it('shows a real rework for the remaining ten minutes, including after reloading', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    onTestFinished(() => { vi.useRealTimers(); });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    const [dev] = DEV_ORG.departments;
-    const reviewer = { ...dev!.roles[1]!, id: 'DEV-REV', kind: 'member' as const, gate: 1 };
-    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV' };
-    const at = Date.now();
-    const org = { ...DEV_ORG, serverNow: new Date(at).toISOString(), departments: [{ ...dev!, reworkAt: new Date(at - 9 * 60_000).toISOString(), roles: [...dev!.roles, reviewer], employees: [...dev!.employees, rita] }] };
-    shell({}, org);
-    await flyIn(user);
-    expect(screen.getByText('Sent back for rework')).toBeVisible();
-    expect(document.querySelectorAll('.dview .wires .rl').length).toBeGreaterThan(0);
-    await act(() => vi.advanceTimersByTimeAsync(60_000));
-    expect(screen.queryByText('Sent back for rework')).not.toBeInTheDocument();
-    expect(document.querySelectorAll('.dview .wires .rl, .dview .wires .rah').length).toBeGreaterThan(0);
+    expect(within(schema).getByRole('button', { name: /Rita/ })).toBeInTheDocument();
+    expect(schema.querySelectorAll('.frame[data-echelon], .rl, .rah')).toHaveLength(0);
+    expect(schema).not.toHaveTextContent('gate 1');
+    expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles');
+    expect(screen.getByRole('region', { name: 'Head' })).not.toHaveTextContent('gate');
   });
 
   it('hires through the orchestrator', async () => {
@@ -544,7 +522,8 @@ describe('Department view', () => {
     await drawer(user, 'Department tasks');
     const tasks = screen.getByRole('region', { name: 'Tasks' });
     const row = await within(tasks).findByRole('button', { name: /#12 Checkout API/ });
-    expect(row).toHaveTextContent('Gate 2 of 3');
+    expect(row).toHaveTextContent('Review');
+    expect(row).toHaveTextContent('Owner: Rita');
     expect(within(tasks).getAllByRole('button', { name: /^#/ }).map(b => b.querySelector('b')!.textContent)).toEqual(['#9', '#12', '#11']);
     await user.click(row);
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();

@@ -1,3 +1,4 @@
+import { taskRoute } from './task-route';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MaterialManifest } from '../src/types';
@@ -158,40 +159,24 @@ describe('a task', () => {
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
   });
 
-  it.each([
-    ['en', ['Rita, Code reviewer, passed', 'Rex, Code reviewer, found what blocks', 'Tom, Test engineer, checking now', 'Sam, Security engineer, did not check']],
-    ['ru', ['Rita, Ревьюер кода, пропустил', 'Rex, Ревьюер кода, нашел, что блокирует', 'Tom, Инженер по тестам, проверяет сейчас', 'Sam, Инженер безопасности, не проверял']],
-  ])('shows the review of a turn with every reviewer checking at once, in %s', async (language, rows) => {
+  it.each(['en', 'ru'])('shows the current Review owner and ordered stages in %s', async language => {
     localStorage.setItem('hh-lang', language);
-    const user = userEvent.setup();
-    const review = {
-      ...TASK_DETAIL,
-      title: 'Review of turn 4',
-      turnReview: true,
-      stage: 1,
-      gates: [
-        { ...TASK_DETAIL.gates[0]!, state: 'passed' as const },
-        { ...TASK_DETAIL.gates[0]!, id: 'b5', name: 'Rex', state: 'returned' as const },
-        { ...TASK_DETAIL.gates[1]!, state: 'current' as const },
-        { ...TASK_DETAIL.gates[2]!, state: 'skipped' as const },
-      ],
-    };
-    shell({ 'GET /api/tasks?status=all': [200, { tasks: [{ ...TASKS[0]!, title: 'Review of turn 4' }] }], 'GET /api/tasks/t12': [200, { task: review }] });
-    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
-    await user.click(await screen.findByRole('button', { name: /#12/ }));
-    const panel = await screen.findByRole('complementary', { name: '#12 Review of turn 4' });
-    const gates = within(panel).getByRole('list', { name: language === 'ru' ? 'Ворота' : 'Gates' });
-    /* The head gave the work and gets the verdicts: no executor row. */
-    expect(within(gates).getAllByRole('listitem').map(li => li.textContent)).toEqual(rows);
-    localStorage.removeItem('hh-lang');
-  });
-
-  it('opens with where it stands at its gates, its brief, body, subtasks and log', async () => {
     const user = userEvent.setup();
     shell();
     const panel = await openTask(user);
-    const gates = within(panel).getByRole('list', { name: 'Gates' });
-    expect(within(gates).getAllByRole('listitem').map(li => li.textContent)).toEqual(['Bruno, Backend engineer, did the work', 'Rita, Code reviewer, passed', 'Tom, Test engineer, checking now', 'Sam, Security engineer, next']);
+    const workflow = within(panel).getByRole('list', { name: language === 'ru' ? 'Маршрут задачи' : 'Task workflow' });
+    expect(within(workflow).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Architecture', 'Development', 'Review', 'Security', 'Tests']);
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita');
+    expect(workflow).not.toHaveTextContent('Cleanup');
+  });
+
+  it('opens with its current workflow, brief, body, subtasks and log', async () => {
+    const user = userEvent.setup();
+    shell();
+    const panel = await openTask(user);
+    const workflow = within(panel).getByRole('list', { name: 'Task workflow' });
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('ReviewIn progressOwner: Rita');
     expect(panel).toHaveTextContent('Take card payments.');
     expect(within(panel).getByText('card token').tagName).toBe('STRONG');
     expect(within(panel).getByRole('button', { name: /#13 Refunds/ })).toBeInTheDocument();
@@ -209,7 +194,8 @@ describe('a task', () => {
     const waiting = {
       ...TASK_DETAIL,
       status: 'open' as const,
-      stage: 0,
+      assignee: TASK_DETAIL.executor,
+      echelons: { ...taskRoute(), phase: 'waiting' as const, ownerAgentId: null },
       waitsFor: [11],
       after: [
         { id: 't9', number: 9, title: 'Pick a payment provider', status: 'done' as const },
@@ -218,8 +204,8 @@ describe('a task', () => {
       log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
     };
     for (const [lang, words] of [
-      ['en', { gates: 'Gates', first: 'Bruno, Backend engineer, waits for #11', after: 'Starts after', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
-      ['ru', { gates: 'Ворота', first: 'Bruno, Бэкенд-разработчик, ждет #11', after: 'Начнется после', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+      ['en', { workflow: 'Task workflow', phase: 'Waiting for an owner', after: 'Starts after', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { workflow: 'Маршрут задачи', phase: 'Нужен исполнитель', after: 'Начнется после', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
     ] as const) {
       localStorage.setItem('hh-lang', lang);
       const user = userEvent.setup();
@@ -238,8 +224,9 @@ describe('a task', () => {
       await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
       await user.click(await screen.findByRole('button', { name: /#12/ }));
       const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
-      const gates = within(panel).getByRole('list', { name: words.gates });
-      expect(within(gates).getAllByRole('listitem')[0]!.textContent).toBe(words.first);
+      const workflow = within(panel).getByRole('list', { name: words.workflow });
+      expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Development');
+      expect(within(panel).getByRole('status')).toHaveTextContent(words.phase);
       const after = within(panel).getByRole('region', { name: words.after });
       expect(within(after).getAllByRole('listitem').map(li => li.textContent)).toEqual([expect.stringMatching(new RegExp(`#9 Pick a payment provider.*${words.done}`)), expect.stringContaining('#11 Cart page')]);
       expect(within(after).getByRole('button', { name: /#11 Cart page/ })).toBeInTheDocument();
@@ -314,13 +301,14 @@ describe('a task', () => {
     }
   });
 
-  it('says its executor puts the work together with the rest of the turn once every gate passed it', async () => {
+  it('shows the verified candidate as ready for authorized integration', async () => {
     const user = userEvent.setup();
-    const gates = TASK_DETAIL.gates.map(g => ({ ...g, state: 'passed' as const }));
-    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, status: 'open', stage: 0, merging: true, gates } }] });
+    const echelons = { ...TASK_DETAIL.echelons, phase: 'ready' as const, ownerAgentId: null,
+      stages: TASK_DETAIL.echelons.stages.map(step => ({ ...step, status: step.status === 'skipped' ? 'skipped' as const : 'complete' as const })) };
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, assignee: null, echelons } }] });
     const panel = await openTask(user);
-    const list = within(panel).getByRole('list', { name: 'Gates' });
-    expect(within(list).getAllByRole('listitem')[0]!.textContent).toBe('Bruno, Backend engineer, puts the work together with the rest of the turn');
+    expect(within(panel).getByRole('status')).toHaveTextContent('Ready to merge');
+    expect(within(panel).getByRole('list', { name: 'Task workflow' })).not.toHaveTextContent('Owner:');
   });
 
   it('posts a comment', async () => {
