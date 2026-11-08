@@ -38,7 +38,7 @@ function once(work) {
 
 async function adapterSelection(environment, changes, suites, ports) {
   const known = suites.filter(suite => adapterOf(suite.run));
-  const changed = changes.filter(change => change.kind !== 'deleted' && isLintable(change.path)).map(change => change.path);
+  const changed = changes.filter(change => change.kind !== 'deleted' && isLintable(change.path) && !opaqueOwner(suites, change.path)).map(change => change.path);
   const inventory = environment.inventory.filter(unit => known.some(suite => suite.id === unit.suiteId));
   const collection = once(() => ports.collect(changed));
   const requiredSuiteIds = known.filter(suite => adapterOf(suite.run) === 'vitest').map(suite => suite.id);
@@ -51,6 +51,11 @@ const opaqueOwner = (suites, path) => {
   const owner = ownerOf(suites, path);
   return owner && adapterOf(owner.run) !== 'vitest' ? owner : null;
 };
+
+function graphOrPolicy(suites, change) {
+  const owner = opaqueOwner(suites, change.path);
+  return !owner || adapterOf(owner.run) === 'node-test';
+}
 
 function wholeOf(environment, suites, changes) {
   const owners = new Map(changes.map(change => [opaqueOwner(suites, change.path)?.id, change]));
@@ -116,7 +121,7 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const documents = changes.filter(document);
   const kept = changes.filter(change => !document(change) && !outsideFast(change, later));
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
-  const rest = kept.filter(change => !opaqueOwner(suites, change.path));
+  const rest = kept.filter(change => graphOrPolicy(suites, change));
   const selection = await adapterSelection(environment, rest, suites, ports);
   const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
