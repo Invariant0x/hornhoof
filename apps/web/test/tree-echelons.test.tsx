@@ -50,7 +50,7 @@ describe('the current echelon on a tree card', () => {
 
   it('names a checker absent from the current roster only from observed activity', () => {
     card('en', { ...ECHELON_WORKFLOW, ownerAgentId: 'observed-checker' }, [
-      { jobId: 'observed-job', agent: { id: 'observed-checker', name: 'Observed checker' }, task: null, segments: [] },
+      { jobId: 'observed-job', agent: { id: 'observed-checker', name: 'Observed checker' }, task: null, segments: [{ kind: 'work', from: DEV_TREE.now, to: null }] },
     ]);
     const current = screen.getByRole('list', { name: 'Task workflow' }).querySelector('[aria-current="step"]');
     expect(current).toHaveTextContent('Owner: Observed checker');

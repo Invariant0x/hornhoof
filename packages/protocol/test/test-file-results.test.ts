@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FileOutcome, KeptFiles, TestEnvironmentV1, TestsDescribed, UnitFingerprint, UnitFingerprints, hashTestEnvironment, parseNodeMessage, parseServerMessage } from '../src/index.js';
+import { EnvironmentDescription, FileOutcome, KeptFiles, TestEnvironmentV1, TestsDescribed, UnitFingerprint, UnitFingerprints, hashTestEnvironment, parseNodeMessage, parseServerMessage } from '../src/index.js';
 
 const command = { program: 'node', args: ['run.js'], cwd: '.' };
 const manifest = (execution?: object, suite: object = {}) => ({
@@ -79,6 +79,18 @@ describe('fingerprints on the wire', () => {
     expect(JSON.stringify(message).length).toBeGreaterThan(3 * 1024 * 1024);
     expect(JSON.stringify(message).length).toBeLessThan(4 * 1024 * 1024);
     expect(TestsDescribed.safeParse(message).error?.issues).toBeUndefined();
+  });
+
+  it('refuses a response beyond the transport frame even when its separate evidence lists fit', async () => {
+    const fingerprints = Array.from({ length: 8000 }, (_, index) => ({ suiteId: 'unit', file: `test/${index}.ts`, fingerprint: digest }));
+    const message = await reply(fingerprints), described = message.result.description;
+    const long = (index: number) => `test/${'x'.repeat(280)}${index}.ts`;
+    described.inventory = Array.from({ length: 4400 }, (_, index) => ({ suiteId: 'unit', file: long(index), selectionUnit: long(index) }));
+    const full = { ...message, result: { ...message.result, baseFingerprints: { commitSha: 'a'.repeat(40), fingerprints } } };
+    expect(EnvironmentDescription.safeParse(described).success).toBe(true);
+    expect(UnitFingerprints.safeParse(fingerprints).success).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(full))).toBeGreaterThan(4 * 1024 * 1024);
+    expect(TestsDescribed.safeParse(full).error?.issues).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('4MiB') })]));
   });
 });
 
