@@ -78,7 +78,7 @@ function testCommand(context, suite, units) {
   const sources = context.paths.filter(path => isSource(path) && ownerOf(context.suites, path) === suite).map(path => posix.relative(cwd, path));
   const { shard = [], files = [], env } = chosenFiles(context, suite, units.map(unit => `./${posix.relative(cwd, unit.file)}`));
   const report = join(context.tmp, `tests-${suite.id}.${REPORT_READER[adapter].extension}`);
-  return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](sources, report), ...files], env }, report, reader: REPORT_READER[adapter].read };
+  return { command: { ...suite.run, args: [...suite.run.args, ...shard, ...FLAGS[adapter](sources, report), ...files], env }, report, reader: REPORT_READER[adapter].read, coverageFile: sources.length ? join(cwd, 'coverage/lcov.info') : null };
 }
 
 function sumCounts(counts) {
@@ -98,17 +98,28 @@ async function testsStage(context) {
   if (selection.unavailable) return unavailable('tests', selection.unavailable);
   if (!selection.packages.length) return unavailable('tests', 'nothing_selected');
   if (selection.packages.some(item => !item.units.length && adapterOf(context.suites.find(suite => suite.id === item.packageId).run))) return ended('tests', 'failed', 1, 'empty_test_selection');
-  const codes = [], counts = [];
-  for (const item of selection.packages) {
-    const suite = context.suites.find(candidate => candidate.id === item.packageId);
-    const { command, report, reader } = testCommand(context, suite, item.units);
-    ports.mkdir(join(command.cwd, 'coverage'));
-    codes.push(...await runAll(context, [command]));
-    if (report) counts.push(reader(ports.read(report)));
-  }
-  context.numbers.tests = sumCounts(counts);
-  const execution = fromCodes('tests', codes);
-  return execution.status === 'passed' ? testReportStatus(counts) ?? execution : execution;
+  const results = [], coverage = new Map();
+  for (const item of selection.packages) results.push(await runTestSuite(context, item, coverage));
+  for (const [path, parts] of coverage) ports.write(path, parts.join('\n'));
+  context.numbers.tests = sumCounts(results.map(result => result.counts));
+  const execution = fromCodes('tests', results.flatMap(result => result.codes));
+  const reported = results.filter(result => result.reported).map(result => result.counts);
+  return execution.status === 'passed' ? testReportStatus(reported) ?? execution : execution;
+}
+
+function keepCoverage(ports, path, coverage) {
+  if (!path) return;
+  const text = ports.read(path);
+  if (text !== null) coverage.set(path, [...(coverage.get(path) ?? []), text]);
+}
+
+async function runTestSuite(context, item, coverage) {
+  const suite = context.suites.find(candidate => candidate.id === item.packageId);
+  const { command, report, reader, coverageFile } = testCommand(context, suite, item.units);
+  context.ports.mkdir(join(command.cwd, 'coverage'));
+  const codes = await runAll(context, [command]);
+  keepCoverage(context.ports, coverageFile, coverage);
+  return { codes, reported: Boolean(report), counts: report ? reader(context.ports.read(report)) : null };
 }
 
 function sourceGroups({ paths, suites }) {
