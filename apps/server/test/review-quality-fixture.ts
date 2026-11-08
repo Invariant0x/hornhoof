@@ -15,8 +15,9 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
-  const [author] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Author', roleKey: 'DEV-BE', departmentId: dev!.id, subscriptionId: sub!.id, model: '' }).returning();
-  const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Author check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author!.id, executor: true })).task;
+  const [author] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Author', roleKey: 'DEV-BE', departmentId: dev!.id, subscriptionId: sub!.id, model: 'claude-opus-5-5', skills: app.ctx.templates.roles.get('DEV-BE')?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [] }).returning();
+  const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Author check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author!.id, executor: true, small: true, paths: ['**'] })).task;
+  app.ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const [job] = await db.insert(jobs).values({ companyId, agentId: author!.id, taskId: task.id, subscriptionId: sub!.id, kind: 'conversation', prompt: 'Check', timeoutMs: 1000 }).returning();
   const [run] = await db.insert(testRuns).values({ companyId, taskId: task.id, agentId: author!.id, jobId: job!.id, departmentId: dev!.id, number: 1, branch: `task-${task.number}`, commitSha: SHA, command: 'author-check', timeoutMs: 1000, status: 'passed', finishedAt: new Date() }).returning();
   const [part] = await db.insert(testParts).values({ companyId, runId: run!.id, part: 1, status: 'passed', commit: SHA, exitCode: 0 }).returning();
@@ -34,7 +35,7 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
     return db.insert(taskEvents).values({ companyId, taskId: task.id, kind: 'comment', agentId: actor, text: 'Structured author check', data: { authorCheck: { ...value, receipt } } });
   };
   const read = async () => {
-    await submit(app.ctx, author!.id, task.id, { summary: 'Done', evidence: 'Author check' });
+    await submit(app.ctx, author!.id, task.id, { summary: 'Done', evidence: 'Author check', review: { baseCommit: OTHER } });
     const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted')));
     return (event!.data.review as { quality: Quality; gateCounts: { source: string } });
   };
