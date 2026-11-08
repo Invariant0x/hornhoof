@@ -7,6 +7,7 @@ import { verifiedReuse } from '../src/modules/tasks/review-reuse.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription, newEnvironmentRequest, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
 import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
+import { reusableUnits } from '../src/modules/testruns/reuse-evidence.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 
@@ -101,6 +102,19 @@ function marked(f: Awaited<ReturnType<typeof fixture>>): { commit: string; state
 }
 
 describe('reusing green test results', () => {
+  it('revalidates files executed in shared preparation and refuses a source that lost its assigned selection', async () => {
+    const f = await fixture(3, 5, true);
+    const id = await f.start({ profile: 'final' });
+    await f.finish(id);
+    const source = await f.runOf(id), scope = source.environmentSnapshot!.description.repositoryScope;
+    const units = fingerprints().map(unit => ({ ...unit, runId: id, commitSha: TEST_COMMIT }));
+    const preparation = (await f.partsOf(id)).find(part => part.environmentSelection?.selection.kind === 'prepare');
+    expect(preparation).toBeDefined();
+    expect(await reusableUnits(f.db, scope, units)).toEqual(units);
+    await f.db.update(testParts).set({ environmentSelection: null }).where(eq(testParts.id, preparation!.id));
+    expect(await reusableUnits(f.db, scope, units)).toEqual([]);
+  });
+
   it('does not run a file again at the same fingerprint, and the run still ends and tells its agent', async () => {
     const f = await fixture();
     const first = await f.start({ profile: 'final' });
