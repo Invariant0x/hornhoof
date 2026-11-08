@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { EnvironmentDescription, TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { codeFilesOf, fastTestsOf, fingerprintUnits, testGraph, type FingerprintInput } from '../src/test-fingerprint.js';
+import * as fingerprint from '../src/test-fingerprint.js';
 
 type Suite = TestEnvironmentV1['suites'][number];
 const run = { program: 'npx', args: ['vitest', 'run'], cwd: '.' };
@@ -94,11 +95,11 @@ describe('the fingerprint of a test file', () => {
     expect(await changed(base(), input({ ...app, 'docs/new.md': 'New' }, manifest(suites)))).toEqual([]);
   });
 
-  it('changes everywhere with the dependency inputs or a runtime version, but not with the machine', async () => {
+  it('changes everywhere with dependency inputs, runtime version or runtime build conditions', async () => {
     const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
     expect(await changed(base(), edit('package-lock.json', '{"new":1}'))).toEqual(everyone);
     expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.2.0', fingerprint: 'a'.repeat(64) }] }))).toEqual(everyone);
-    expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.1.0', fingerprint: 'b'.repeat(64) }] }))).toEqual([]);
+    expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.1.0', fingerprint: 'b'.repeat(64) }] }))).toEqual(everyone);
   });
 
   it('changes everywhere with what a harness names for tests to find', async () => {
@@ -123,6 +124,54 @@ describe('the fingerprint of a test file', () => {
 
   it('changes everywhere with the suite command of its own, not of another suite', async () => {
     expect(await changed(base(), input(app, manifest([suite('a', 'apps/a', { run: { ...run, args: ['vitest', 'run', '--bail'] } }), suite('b', 'apps/b')])))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
+  });
+});
+
+describe('changed pure function mutation selection', () => {
+  const source = 'apps/a/src/pure.ts', test = 'apps/a/test/pure.test.ts';
+  const code = 'export function changed(value: number): number {\n  return value > 0 ? value : 0;\n}\nexport function untouched(value: number): number {\n  return value + 1;\n}\n';
+  const mutation = { status: 'supported' as const, language: 'typescript', tool: 'mutator', command: run, sourcePaths: [source], fastTestPaths: [test], coverageCommands: [run], coverageFiles: ['coverage/lcov.info'] };
+  const delta = { baseCommit: '1'.repeat(40), commit: '2'.repeat(40), changes: [{ path: source, ranges: [[2, 1] as [number, number]] }] };
+  const select = (files: Files, change = delta) => fingerprint.selectPureMutations(input(files, manifest(suites, { mutation })), mutation, change);
+  const files = () => ({ [source]: code, [test]: `import { changed } from '../src/pure.js';\nimport { it, expect } from 'vitest';\nit('clamps', () => expect(changed(-1)).toBe(0));` });
+
+  it('selects only the changed pure function and its fast tests with visible line bounds', async () => {
+    const result = await select(files());
+    expect(result).toMatchObject({ status: 'ready', baseCommit: delta.baseCommit, commit: delta.commit, problems: [], selected: [{ file: source, name: 'changed', startLine: 1, endLine: 3, lines: [1, 2, 3], tests: [test], reason: 'changed_pure_function' }] });
+    expect(result.selected).toHaveLength(1);
+    expect(await select(files(), { ...delta, changes: [] })).toMatchObject({ status: 'ready', selected: [] });
+  });
+
+  it.each(['node:child_process', 'node:fs', 'node:http', 'pg'])('excludes a source module importing %s', async dependency => {
+    const result = await select({ ...files(), [source]: `import * as effect from '${dependency}';\n${code}` });
+    expect(result.selected).toEqual([]);
+    expect(result.excluded).toContainEqual(expect.objectContaining({ file: source, reason: 'unsafe_module' }));
+  });
+
+  it.each(['process.env.KEY', 'fetch("https://example.test")', 'Date.now()', 'Math.random()', '(globalThis.value = value)', 'unknown(value)'])('excludes an effectful or unknown function using %s', async expression => {
+    const result = await select({ ...files(), [source]: `export function changed(value: number) {\n return ${expression};\n}` });
+    expect(result.selected).toEqual([]);
+    expect(result.excluded).toContainEqual(expect.objectContaining({ file: source, name: 'changed', reason: 'purity_unproven' }));
+  });
+
+  it('excludes a fast test with a transitive process or database helper', async () => {
+    const result = await select({ ...files(), [test]: `${files()[test]}\nimport './helper.js';`, 'apps/a/test/helper.ts': "import { spawn } from 'node:child_process';" });
+    expect(result.status).toBe('blocked'); expect(result.selected).toEqual([]);
+    expect(result.problems).toContainEqual({ file: source, code: 'no_safe_fast_tests' });
+  });
+
+  it('blocks a selected function without tests and an unpinned or invalid delta', async () => {
+    expect(await select({ [source]: code })).toMatchObject({ status: 'blocked', selected: [], problems: [{ file: source, code: 'no_safe_fast_tests' }] });
+    expect(await select(files(), { ...delta, commit: '' })).toMatchObject({ status: 'blocked', selected: [], problems: [{ code: 'invalid_mutation_delta' }] });
+    expect(await select(files(), { ...delta, changes: [{ path: source, ranges: [[0, 1]] }] })).toMatchObject({ status: 'blocked', selected: [], problems: [{ code: 'invalid_mutation_delta' }] });
+  });
+
+  it('excludes fixtures even when a manifest lists them and deduplicates replayed changes', async () => {
+    const fixture = 'apps/a/test/fixtures/pure.ts';
+    const result = await fingerprint.selectPureMutations(input({ [fixture]: code }, manifest(suites)), { ...mutation, sourcePaths: [fixture] }, { ...delta, changes: [{ path: fixture, ranges: [[2, 1]] }] });
+    expect(result.selected).toEqual([]); expect(result.excluded).toContainEqual({ file: fixture, reason: 'fixture_or_test' });
+    const once = await select(files()), twice = await select(files(), { ...delta, changes: [...delta.changes, ...delta.changes] });
+    expect(twice).toEqual(once);
   });
 });
 
