@@ -841,11 +841,15 @@ async function relabelWorkKind(ctx: Live, agentId: string, task: Task, workKind:
 }
 
 /* Head revisions preserve the current stage and its immutable candidate. */
+function requireTurnCleanupDecision(task: Task, change: TaskChange): void {
+  if (change.cleanupForTurn && (change.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+}
+
 export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   await requireTaskHead(ctx, task, agentId);
-  if (c.cleanupForTurn && (c.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+  requireTurnCleanupDecision(task, c);
   const route = await routeOf(ctx.db, task);
   if (c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
