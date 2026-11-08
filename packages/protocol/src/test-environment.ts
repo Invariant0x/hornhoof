@@ -286,7 +286,11 @@ export function candidateTestUnits(snapshot: EnvironmentSnapshot): TestUnit[] {
   if (extra || inventory.some(unit => !head.has(fingerprintKey(unit)))) throw new Error('The final fingerprints must cover the canonical test inventory exactly.');
   const required = snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)?.requiredSuiteIds;
   if (!required) throw new Error('Candidate test selection needs a known profile.');
-  const eligible = inventory.filter(unit => required.includes(unit.suiteId));
+  const { mutation } = snapshot.description.manifest;
+  if (mutation.status === 'supported' && (!scope.mutation || scope.mutation.selection.status !== 'ready')) throw new Error('Candidate mutation applicability is missing or blocked.');
+  const mutationSources = new Set(mutation.status === 'supported' ? mutation.sourcePaths : []);
+  const selectedSources = new Set(scope.mutation?.selection.selected.map(fn => fn.file) ?? []);
+  const eligible = inventory.filter(unit => required.includes(unit.suiteId) && (!mutationSources.has(unit.file) || selectedSources.has(unit.file)));
   const changed = new Set(eligible.filter(unit => head.get(fingerprintKey(unit)) !== base.get(fingerprintKey(unit))).map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
   return eligible.filter(unit => changed.has(`${unit.suiteId}\0${unit.selectionUnit}`));
 }

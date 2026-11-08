@@ -56,13 +56,14 @@ export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | nu
 export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
   return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
 }
-type DescribedBase = Extract<TestsDescribed['result'], { status: 'ready' }>['baseFingerprints'];
-function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase): EnvironmentSnapshot {
+type DescribedReady = Extract<TestsDescribed['result'], { status: 'ready' }>;
+type DescribedBase = DescribedReady['baseFingerprints'];
+function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation?: DescribedReady['mutation']): EnvironmentSnapshot {
   const completeProfile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
   if (request.baseCommit && request.profile !== undefined && request.profile !== completeProfile) throw new Error('Candidate verification cannot omit checks with a narrower profile.');
   const profile = request.baseCommit ? completeProfile : request.profile ?? description.manifest.defaultProfile;
   if (request.baseCommit && (request.suite || !base || base.commitSha !== request.baseCommit)) throw new Error('Candidate verification needs its bound base and every applicable suite.');
-  const candidate = request.baseCommit ? { baseCommit: request.baseCommit, baseFingerprints: base!.fingerprints, fingerprints } : undefined;
+  const candidate = request.baseCommit ? { baseCommit: request.baseCommit, baseFingerprints: base!.fingerprints, fingerprints, ...(mutation ? { mutation } : {}) } : undefined;
   const snapshot = EnvironmentSnapshot.parse({ description, profile, ...(candidate ? { candidate } : {}) });
   if (candidate) candidateTestUnits(snapshot);
   return snapshot;
@@ -140,12 +141,12 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
     return true;
   });
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase): Promise<void> {
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const supplied = snapshotFor(description, request, prints, base);
+  const supplied = snapshotFor(description, request, prints, base, mutation);
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
-  const snapshot = supplied.candidate || !mode ? supplied : snapshotFor(description, { ...request, profile: mode.profile }, prints, base);
+  const snapshot = supplied.candidate || !mode ? supplied : snapshotFor(description, { ...request, profile: mode.profile }, prints, base, mutation);
   const reuseMode = mode && snapshot.candidate ? { ...mode, mode: 'cached' as const, profile: snapshot.profile } : mode;
   const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
   const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
@@ -159,7 +160,7 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     if (await retryDescription(ctx, run, message, message.result.problem)) return;
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
-  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints); }
+  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints, message.result.mutation); }
   catch { await descriptionProblem(ctx, run, message, { code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }); }
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {

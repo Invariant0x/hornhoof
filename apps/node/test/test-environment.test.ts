@@ -273,3 +273,27 @@ it('keeps missing fast mutation judges blocked instead of treating the file fing
   const result = await environment.describeTestEnvironment(f.source, f.scope, f.head, f.context, undefined, f.base);
   expect(result).toMatchObject({ mutation: { selection: { status: 'blocked', selected: [], problems: [{ file: 'app/logic.ts', code: 'no_safe_fast_tests' }] } } });
 });
+
+it('passes the exact candidate pair and a bound delta file to the declared narrow mutation command', async () => {
+  const f = await mutationCandidate();
+  const result = await environment.describeTestEnvironment(f.source, f.scope, f.head, f.context, undefined, f.base);
+  Reflect.set(result.description.manifest.mutation, 'candidateRun', {
+    program: 'node', args: ['mutate.mjs', '--base', '{baseCommit}', '--head', '{commit}', '--plan-file', '{planFile}'], cwd: '.',
+  });
+  const snapshot = { description: result.description, profile: 'fast', candidate: { baseCommit: f.base, fingerprints: result.fingerprints!, baseFingerprints: result.baseFingerprints!.fingerprints, mutation: result.mutation! } };
+  const suite = result.description.manifest.suites.find(suite => suite.id === 'mutation')!;
+  const filesPath = join(f.root, 'selected.json');
+  const invocation = await environment.buildTestInvocation(suite, ['app/logic.ts'], Object.assign({ checkout: f.root, filesPath }, { snapshot }));
+  const planFile = `${filesPath}.mutation-plan.json`;
+  expect(invocation.command).toEqual({ program: 'node', args: ['mutate.mjs', '--base', f.base, '--head', f.head, '--plan-file', planFile], cwd: '.' });
+  expect(JSON.parse(await readFile(planFile, 'utf8'))).toMatchObject({ sha: f.head, base: f.base, hunks: { 'app/logic.ts': [[1, 1]] } });
+  expect(JSON.parse(await readFile(filesPath, 'utf8'))).toEqual(['./app/logic.ts']);
+});
+
+it('refuses a broad mutation command when the candidate has no declared narrow invocation', async () => {
+  const f = await mutationCandidate();
+  const result = await environment.describeTestEnvironment(f.source, f.scope, f.head, f.context, undefined, f.base);
+  const snapshot = { description: result.description, profile: 'fast', candidate: { baseCommit: f.base, fingerprints: result.fingerprints!, baseFingerprints: result.baseFingerprints!.fingerprints, mutation: result.mutation! } };
+  const suite = result.description.manifest.suites.find(suite => suite.id === 'mutation')!;
+  await expect(environment.buildTestInvocation(suite, ['app/logic.ts'], Object.assign({ checkout: f.root, filesPath: join(f.root, 'selected.json') }, { snapshot }))).rejects.toThrow(/mutation/i);
+});
