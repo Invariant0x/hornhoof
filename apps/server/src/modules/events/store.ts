@@ -136,8 +136,8 @@ export async function workingCount(db: Db, companyId: string, among?: string[]):
 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
 export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
-  /* Stale wakes stay in the log, but were never spoken: a new session must not receive them as catch-up instructions. */
-  const unspoken = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), eq(jobs.error, 'stale'))));
+  /* Unsent task wakes stay in the log: a new session must not receive them as catch-up instructions. */
+  const unspoken = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), inArray(jobs.error, ['stale', 'waiting']))));
   const rows = await db
     .select(columns)
     .from(agentEvents)
