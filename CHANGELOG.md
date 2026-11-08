@@ -7,31 +7,9 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.8.3] - 2026-11-08
 
-Keep the checks of one change small and in the workspace of whoever builds or reviews it.
-
-### Changed
-
-- A change of the templates or the skills checks only the tests that read them, not the whole server and node suites.
-  A rule of a test environment can now name test files with `tests` beside its suites.
-- Submitting a task starts no test run. The author runs the author check in their own workspace before submitting, and
-  the `AUTHOR_CHECK` setting and the `review.authorCheckPlan` field of a submit are gone.
-- `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests,
-  and builds the protocol and the node again when their files changed since their last build; its `--plan` option is gone.
-- An agent's worktree gets its commit's dependencies from the company's shared harness before its program starts: one
-  machine builds them for a commit and every other takes them, as for the full test runs. A worktree that already holds
-  dependencies stays as it is, a repository without a test environment costs nothing, and a program never waits longer
-  than ten minutes for them.
-
-### Fixed
-
-- An agent may run the project's whole types and lint when their scripts build a workspace by its package name or lint
-  every workspace: the node finds a workspace by name and judges the script in each workspace it runs in.
-
-## [0.8.2] - 2026-11-08
-
 Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,
-let whoever builds or reviews a change check it in their own workspace, and stop nodes from spending a whole processor
-core on their program observer.
+let whoever builds or reviews a change check it in their own workspace with its dependencies already in place, and stop
+nodes from spending a whole processor core on their program observer.
 
 ### Added
 
@@ -53,6 +31,16 @@ core on their program observer.
   end. Below version 1.0 nothing old is kept for compatibility, and existing records are corrected at release.
 - Removing what a change made unneeded is a skill a head can turn on for reviewers and developers; it is off by default.
 - install.sh back-node returns a node to 0.8.1.
+- A change of the templates or the skills checks only the tests that read them, not the whole server and node suites.
+  A rule of a test environment can now name test files with `tests` beside its suites.
+- Submitting a task starts no test run. The author runs the author check in their own workspace before submitting, and
+  the `AUTHOR_CHECK` setting and the `review.authorCheckPlan` field of a submit are gone.
+- `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests,
+  and builds the protocol and the node again when their files changed since their last build; its `--plan` option is gone.
+- An agent's worktree gets its commit's dependencies from the company's shared harness before its program starts: one
+  machine builds them for a commit and every other takes them, as for the full test runs. A worktree that already holds
+  dependencies stays as it is, a repository without a test environment costs nothing, and a program never waits longer
+  than ten minutes for them.
 
 ### Fixed
 
@@ -61,6 +49,8 @@ core on their program observer.
 - A node checks all its programs in one step a second. Before, it copied its whole observer state once for each program
   and delivery it remembered, and with a few hundred of them it sat at 100% CPU with nothing running, so tool and hook
   calls through it timed out.
+- An agent may run the project's whole types and lint when their scripts build a workspace by its package name or lint
+  every workspace: the node finds a workspace by name and judges the script in each workspace it runs in.
 
 ### Before you update
 
