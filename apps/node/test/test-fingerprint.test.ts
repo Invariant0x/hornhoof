@@ -184,6 +184,21 @@ describe('changed pure function mutation selection', () => {
     expect(await select({ ...files(), [source]: `const state = initializeExternal();\n${code}` })).toMatchObject({ selected: [], excluded: [{ file: source, reason: 'unsafe_module' }] });
     expect(await select({ ...files(), [source]: 'export function changed(Math: { abs(): number }) {\n return Math.abs();\n}' })).toMatchObject({ selected: [], excluded: [{ file: source, name: 'changed', reason: 'purity_unproven' }] });
   });
+
+  it('blocks a computed import in the tests whose effects cannot be followed', async () => {
+    const result = await select({ ...files(), [test]: `${files()[test]}\nconst helper = './runtime.js'; await import(helper);` });
+    expect(result).toMatchObject({ status: 'blocked', selected: [], problems: [{ file: source, code: 'no_safe_fast_tests' }] });
+  });
+
+  it('does not confuse a module variable called Math with the builtin', async () => {
+    const result = await select({ ...files(), [source]: `const Math = { abs: customEffect };\nexport function changed(value: number) {\n return Math.abs(value);\n}` });
+    expect(result.selected).toEqual([]);
+  });
+
+  it('blocks unsupported mutation languages instead of treating an empty TypeScript parse as a proof', async () => {
+    const result = await fingerprint.selectPureMutations(input(files(), manifest(suites)), { ...mutation, language: 'python' }, delta);
+    expect(result).toMatchObject({ status: 'blocked', selected: [], problems: [{ code: 'unsupported_mutation_language' }] });
+  });
 });
 
 describe('what the graph does not see', () => {
