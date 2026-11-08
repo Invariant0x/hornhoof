@@ -103,10 +103,11 @@ function deltaRepository(t) {
   mkdirSync(root); mkdirSync(bin);
   const write = (path, text) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); };
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } }).trim();
-  const source = 'apps/a/src/pure.ts', unsafe = 'apps/a/src/process.ts', fast = 'apps/a/test/pure.test.ts', unsafeFast = 'apps/a/test/process.test.ts';
+  const source = 'apps/a/src/pure.ts', unsafe = 'apps/a/src/process.ts', untouched = 'apps/a/src/untouched.ts', fast = 'apps/a/test/pure.test.ts', unsafeFast = 'apps/a/test/process.test.ts';
   const code = 'export function changed(value: number) {\n return value + 1;\n}\nexport function untouched(value: number) {\n return value + 2;\n}\n';
-  const mutation = { status: 'supported', language: 'typescript', tool: join(bin, 'mutator'), sourcePaths: [source, unsafe], fastTestPaths: [fast, unsafeFast] };
+  const mutation = { status: 'supported', language: 'typescript', tool: join(bin, 'mutator'), sourcePaths: [source, unsafe, untouched], fastTestPaths: [fast, unsafeFast] };
   write('.hornhoof/test-environment.json', JSON.stringify({ mutation, dependencies: { inputs: [], install: [] }, prepare: [], suites: [{ id: 'a', root: 'apps/a' }, { id: 'mutation', root: 'scripts/mutation' }] }));
+  write(untouched, 'export function unchanged(value: number) { return value + 5; }\n');
   write('package.json', '{}'); write(source, code); write(unsafe, "import { spawn } from 'node:child_process';\nexport function processWork() { return spawn('true'); }\n");
   write(fast, "import { changed } from '../src/pure.js';\nimport { it, expect } from 'vitest';\nit('changes', () => expect(changed(1)).toBe(2));\n");
   write(unsafeFast, "import { processWork } from '../src/process.js';\nimport { it, expect } from 'vitest';\nit('runs', () => expect(processWork()).toBeDefined());\n");
@@ -120,7 +121,7 @@ function deltaRepository(t) {
   const run = (args = ['--base', base, '--head', head], files = [source, source], extra = {}, cwd = root) => {
     writeFileSync(selected, JSON.stringify(files));
     try {
-      const output = execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url)), ...args], { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: selected, HH_TEST_REPORT: report, ...extra }, encoding: 'utf8', stdio: 'pipe' });
+      const output = execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url)), ...args], { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: files === null ? '' : selected, HH_TEST_REPORT: report, ...extra }, encoding: 'utf8', stdio: 'pipe' });
       return { code: 0, output, report: JSON.parse(readFileSync(report, 'utf8')) };
     } catch (error) { return { code: error.status, output: String(error.stdout), report: existsSync(report) ? JSON.parse(readFileSync(report, 'utf8')) : null }; }
   };
@@ -137,6 +138,14 @@ test('the narrow CLI mutates changed pure lines, reports its scope and keeps who
   assert.equal(result.report.selection.baseCommit, fixture.base); assert.equal(result.report.selection.commit, fixture.head);
   assert.equal(result.report.selection.fullSuiteComparator, 'unavailable');
   assert.equal(existsSync(join(fixture.root, '.metrics/mutate/judges', fixture.source.replaceAll('/', '__'))), false);
+});
+
+test('the narrow CLI with a whole inventory runs only changed pure sources', t => {
+  const fixture = deltaRepository(t), result = fixture.run(['--base', fixture.base, '--head', fixture.head], null);
+  assert.equal(result.code, 0, result.output);
+  assert.deepEqual(result.report.files.map(file => [file.file, file.status]), [[fixture.source, 'passed']]);
+  assert.equal(fixture.calls().length, 1);
+  assert.equal(result.report.selection.excluded.some(item => item.file === fixture.unsafe), true);
 });
 
 for (const failure of ['unsafe', 'stale-head', 'zero-tests']) {
