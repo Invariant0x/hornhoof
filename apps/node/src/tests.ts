@@ -573,28 +573,44 @@ export async function worktreeHarness(tree: Worktree, options: WorktreeOptions):
   const description = await readTestEnvironment(tree.repo, tree.repositoryScope, tree.commitSha, { cacheRoot: join(options.dir, 'cache'), deadline, signal, log: () => {}, ...(options.runtimes ? { runtimes: options.runtimes } : {}) });
   const { dependencies } = description.manifest;
   if (dependencies.cache === 'none' || await holdsAny(tree, dependencies.paths)) return null;
-  const slot = options.slot ?? ((granted, run) => run(granted));
-  await slot(signal, granted => worktreeBuilds.withSlot(() => placeInWorktree(description, tree, options, deadline, granted), { signal: granted }));
+  await placeInWorktree(description, tree, options, deadline, signal);
   return `Dependencies in place from the shared harness after ${within(performance.now() - started)}.`;
 }
+
+/* Taking a ready build never waits for the machine's turn for heavy work; only a build here does. */
+const BUILD_HERE = new Error('A build of the dependencies waits for the machine.');
 
 /* They are built or taken in a folder of the node's own, which goes to the worktree's owner only once they are all there, and
    the owner moves each into the worktree: the node writes nothing where an agent's program could change what it writes into. */
 async function placeInWorktree(description: EnvironmentDescription, tree: Worktree, options: WorktreeOptions, deadline: number, signal: AbortSignal): Promise<void> {
   const root = join(partsFolder(options.dir), `worktree-${tree.id}`), staging = join(root, 'tree'), hidden = productSecrets({ repo: tree.repo }, options.hidden);
   const state: PreparationState = { ...productUser(tree.owner), root, repo: join(root, 'repo'), out: new Output(), deadline, signal, options: { ...options, user: tree.owner }, builder: WORKTREE_BUILDER, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+  /* Its owner's programs keep running meanwhile, so nothing here runs or stops anything as that user. A build takes the
+     commit's own files, never the worktree's. taking: the first pass, which stops where a build here would start. */
+  const contextFor = (phase: AbortSignal, taking?: AbortController): PreparationContext => {
+    const base = preparationContext({ ...state, signal: taking ? AbortSignal.any([phase, taking.signal]) : phase }, '', hidden);
+    return {
+      ...base, checkout: staging, run: async () => { throw new Error('Nothing runs in a worktree for its dependencies.'); }, quiesce: async () => {},
+      builder: async (...args) => {
+        /* Stopped before it fails, so the registry takes the claim back unjudged, for the build that follows. */
+        if (taking) { taking.abort(BUILD_HERE); throw BUILD_HERE; }
+        await checkoutCommit(tree.repo, tree.repositoryScope, tree.commitSha, state.repo, base); return base.builder(...args);
+      },
+    };
+  };
   let handed: string[] | null = null;
   try {
     await privateCacheRoot(join(options.dir, 'cache')); remove(root); prepareFolder(root, null); chmodSync(root, 0o755);
-    const base = preparationContext(state, '', hidden);
-    /* Its owner's programs keep running meanwhile, so nothing here runs or stops anything as that user. A build takes the
-       commit's own files, never the worktree's. */
-    const context: PreparationContext = {
-      ...base, checkout: staging, run: async () => { throw new Error('Nothing runs in a worktree for its dependencies.'); }, quiesce: async () => {},
-      builder: async (...args) => { await checkoutCommit(tree.repo, tree.repositoryScope, tree.commitSha, state.repo, base); return base.builder(...args); },
-    };
-    const { entry } = await prepareDependencies(description, context, { own: true });
-    const roots = entry ? (entry.ready ?? await readReady(entry, context)).roots : [];
+    /* First without the machine's turn: what this machine keeps, what another machine built, or the wait for the one building
+       it. A build here gives the cache lock back and then takes the machine's turn, its own lane and the lock again, in the
+       order a test part takes them. */
+    const taking = new AbortController();
+    const { entry } = await prepareDependencies(description, contextFor(signal, taking), { own: true }).catch(async (error: unknown) => {
+      if (!taking.signal.aborted || signal.aborted) throw error;
+      const slot = options.slot ?? ((granted, run) => run(granted));
+      return slot(signal, granted => worktreeBuilds.withSlot(() => prepareDependencies(description, contextFor(granted), { own: true }), { signal: granted }));
+    });
+    const roots = entry ? (entry.ready ?? await readReady(entry, { cacheRoot: join(options.dir, 'cache'), deadline, signal, log: () => {} })).roots : [];
     await fsChown(staging, tree.owner.uid, tree.owner.gid); handed = roots;
     for (const path of roots) {
       await tree.fs.mkdir(dirname(join(tree.checkout, path)));

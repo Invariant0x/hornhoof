@@ -382,6 +382,15 @@ async function worktree(f: Fixture, options: ReturnType<typeof machine>, commitS
 }
 const PLACED = /^Dependencies in place from the shared harness after \d+ s\.$/;
 const leftOver = async (options: ReturnType<typeof machine>) => (await readdir(join(options.dir, 'runs')).catch(() => [] as string[])).filter(name => name.startsWith('worktree-'));
+/* The machine's turn for heavy work, held by a test part until it lets go. */
+function heldTurn() {
+  let release!: () => void;
+  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 };
+  const slot = async <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> => { asked.count++; await free; return run(signal); };
+  return { slot, release, asked };
+}
+const STILL_WAITING = 'still waiting';
+const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
 
 describe("an agent's worktree", () => {
   it('gets the dependencies of its commit before its program starts, built once and taken by every other machine and by test runs', async () => {
@@ -446,6 +455,32 @@ describe("an agent's worktree", () => {
     const broken = await worktree(f, one, 'f'.repeat(40));
     await writeFile(join(broken.checkout, '.hornhoof/test-environment.json'), 'not a manifest');
     await expect(worktreeHarness(broken, one)).rejects.toThrow();
+  });
+
+  it("takes a ready build while a test part holds the machine's turn for heavy work", async () => {
+    const f = await fixture(), shared = registry();
+    const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
+    expect(await worktreeHarness(await worktree(f, one), one)).toMatch(PLACED);
+    const turn = heldTurn();
+    try {
+      /* Another machine downloads it, and this one has it already. */
+      expect(await settled(worktreeHarness(await worktree(f, two), { ...two, slot: turn.slot }), 5_000)).toMatch(PLACED);
+      expect(await settled(worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot }), 5_000)).toMatch(PLACED);
+    } finally { turn.release(); }
+    expect(turn.asked.count).toBe(0);
+    expect(await installed(f)).toBe(1);
+  });
+
+  it("builds them only in the machine's turn for heavy work, and shares them then", async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one')), turn = heldTurn();
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
+    expect(await settled(placing, 500)).toBe(STILL_WAITING);
+    expect(turn.asked.count).toBe(1);
+    expect(await installed(f)).toBe(0);
+    turn.release();
+    expect(await placing).toMatch(PLACED);
+    expect(await installed(f)).toBe(1);
+    expect([...shared.builds.values()]).toEqual([expect.objectContaining({ bundle: expect.any(Buffer) })]);
   });
 
   it('says why when they cannot be built, and leaves nothing behind', async () => {
