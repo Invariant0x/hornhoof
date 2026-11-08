@@ -23,7 +23,7 @@ When an independent review is assigned, the author cannot pass it. Read the exac
 
 ## Testing
 
-When broader validation is assigned, one owner freezes the exact candidate and coordinates required suites, types/build/language checks, user-facing surfaces and quality measurements. Use run_tests on compatible free machines and read every part's actual SHA and full log. Reuse a proved result only for the same candidate/fingerprint; after fixes rerun what failed and what changed, rather than starting duplicate full runs. A missing or refused stage is NOT_RUN, never PASS.
+When broader validation is assigned, one owner freezes the exact candidate and coordinates required suites, types/build/language checks, user-facing surfaces and quality measurements. Run types/build/language and quality checks in the checker's own workspace. Only whole suites use run_tests, split into groups over compatible free machines; read every part's actual SHA and full log. Reuse a proved result only for the same candidate/fingerprint; after fixes rerun what failed and what changed, rather than starting duplicate full runs. A missing or refused stage is NOT_RUN, never PASS.
 
 ## Release
 

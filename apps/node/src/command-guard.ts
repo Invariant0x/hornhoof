@@ -1,6 +1,6 @@
-/* What a command asks of this machine, told from its text before any of it runs. Installs and heavy checks go through run_tests,
-   one test file may run here, and ordinary work goes on. One policy for the node's own hook path and the standalone hook, so it
-   stands alone: no package of the project, nothing spawned, no network, and a script file or manifest is only ever read.
+/* What a command asks of this machine, told from its text before any of it runs. Whole test suites go through run_tests;
+   installs, named test files and quality stages run in the workspace. One policy for the node's own hook path and the standalone
+   hook, so it stands alone: no package of the project, nothing spawned, no network, and a script file or manifest is only ever read.
 
    This is a finite guard of recognized shapes that keeps machines free, not a sandbox. A program it cannot see into runs with
    coverage 'opaque', which is no claim that it is light. At a recognized check or package boundary, what it cannot tell is
@@ -17,8 +17,8 @@ export type CommandFiles = {
   read(path: string, maxBytes: number): Promise<string | null>;
 };
 export type CommandCoverage = 'recognized' | 'opaque';
-export type CommandDenial = { allow: false; code: 'heavy_check_local' | 'dependency_install_local' | 'command_guard_unavailable'; category: string };
-export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'single_test_file' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
+export type CommandDenial = { allow: false; code: 'whole_suite_local' | 'command_guard_unavailable'; category: string };
+export type AgentCommandVerdict = { allow: true; kind: 'ordinary' | 'test_files' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 export type WorkCommandVerdict = { allow: true; kind: 'ordinary' | 'dependency_preparation' | 'lightweight_screenshot'; coverage: CommandCoverage } | CommandDenial;
 
 export type NativeProgram = 'claude' | 'codex' | 'kimi' | 'antigravity';
@@ -726,8 +726,8 @@ function flagAt(args: Word[], at: number): Flag {
   return { name, value: args[at + 1] ?? null, after: at + 2 };
 }
 
-const COVERAGE_ENV = /^(?:NODE_V8_COVERAGE|NODE_OPTIONS|PYTEST_ADDOPTS|VITEST_[A-Z_]*|JEST_[A-Z_]*|npm_config_[a-z_]*)\+?=/;
-const taints = (word: Word): boolean => COVERAGE_ENV.test(word.text);
+const TEST_OPTIONS_ENV = /^(?:NODE_OPTIONS|PYTEST_ADDOPTS|VITEST_[A-Z_]*|JEST_[A-Z_]*|npm_config_[a-z_]*)\+?=/;
+const taints = (word: Word): boolean => TEST_OPTIONS_ENV.test(word.text);
 
 class Guard {
   readonly found: Finding[] = [];
@@ -777,6 +777,7 @@ class Guard {
     const name = commandName(first.text);
     const args = words.slice(1);
     const known = HANDLERS.get(name) ?? toolHandler(name);
+    if (known && args.some(word => word.literal && (/^--watch(?:-|=|$)/.test(word.text) || (word.text === '-w' && ['tsc', 'vue-tsc', 'webpack', 'rollup'].includes(name))))) return this.note(check('watch'));
     if (known) return onlyAsks(args) ? this.note(RECOGNIZED) : known(this, args, place);
     if (first.text.includes('/')) return this.file(first, place, false);
     this.note(ORDINARY.has(name) ? RECOGNIZED : OPAQUE);
@@ -941,12 +942,12 @@ const ORDINARY = new Set([
 ]);
 
 /* Programs that are a check of one kind, whatever they are given. */
-const HEAVY = new Map(Object.entries<Category>({
+const CHECK_TOOLS = new Map(Object.entries<Category>({
   tsc: 'types', 'vue-tsc': 'types', mypy: 'types', pyright: 'types', pyre: 'types', flow: 'types',
   eslint: 'lint', biome: 'lint', stylelint: 'lint', oxlint: 'lint', tslint: 'lint', ruff: 'lint', flake8: 'lint', pylint: 'lint', rubocop: 'lint', 'golangci-lint': 'lint',
   prettier: 'format', black: 'format', isort: 'format', gofmt: 'format', rustfmt: 'format', yapf: 'format', autopep8: 'format', dprint: 'format',
-  webpack: 'build', rollup: 'build', esbuild: 'build', parcel: 'build', tsup: 'build', swc: 'build', babel: 'build', make: 'build', gmake: 'build', cmake: 'build', ninja: 'build', bazel: 'build', buck: 'build', buck2: 'build',
-  mvn: 'build', mvnw: 'build', gradle: 'build', gradlew: 'build', ant: 'build', sbt: 'build', msbuild: 'build', rake: 'build',
+  webpack: 'build', rollup: 'build', esbuild: 'build', parcel: 'build', tsup: 'build', swc: 'build', babel: 'build', make: 'task_runner', gmake: 'task_runner', cmake: 'build', ninja: 'task_runner', bazel: 'task_runner', buck: 'task_runner', buck2: 'task_runner',
+  mvn: 'task_runner', mvnw: 'task_runner', gradle: 'task_runner', gradlew: 'task_runner', ant: 'task_runner', sbt: 'task_runner', msbuild: 'build', rake: 'task_runner',
   turbo: 'task_runner', nx: 'task_runner', lerna: 'task_runner', just: 'task_runner', task: 'task_runner', 'npm-run-all': 'task_runner', 'run-s': 'task_runner', 'run-p': 'task_runner', concurrently: 'task_runner', wireit: 'task_runner',
   mocha: 'test_scope', unittest: 'test_scope', ava: 'test_scope', tap: 'test_scope', karma: 'test_scope', rspec: 'test_scope', phpunit: 'test_scope', ctest: 'test_scope', tox: 'test_scope', nox: 'test_scope', behave: 'test_scope', nosetests: 'test_scope', jasmine: 'test_scope', tape: 'test_scope', cucumber: 'test_scope',
   c8: 'coverage', nyc: 'coverage', coverage: 'coverage', kcov: 'coverage', gcovr: 'coverage',
@@ -1019,7 +1020,7 @@ const TOOLS = new Map(Object.entries<ToolSpec>({
 }));
 
 function toolHandler(name: string): Handler | null {
-  const heavy = HEAVY.get(name);
+  const heavy = CHECK_TOOLS.get(name);
   if (heavy) return guard => Promise.resolve(guard.note(check(heavy)));
   const tool = TOOLS.get(name);
   return tool ? (guard, args, place) => useTool(tool, guard, args, place) : null;
@@ -1201,28 +1202,20 @@ const FIND: Handler = async (guard, args, place) => {
   }
 };
 
-/* Flags a test run may carry. Any other can widen it, so it stops being one file. The value says whether one follows. */
+/* Flags a test run may carry. Any other can widen its file selection, so it is refused. The value says whether one follows. */
 type Flags = Readonly<Record<string, boolean>>;
-const VITEST_FLAGS: Flags = { '--run': false, '--reporter': true, '-t': true, '--testNamePattern': true, '--bail': true, '--silent': false, '--no-color': false, '--color': false, '--testTimeout': true, '--no-coverage': false };
-const JEST_FLAGS: Flags = { '--runTestsByPath': false, '-t': true, '--testNamePattern': true, '--silent': false, '--verbose': false, '--ci': false, '--no-cache': false, '-b': false, '--bail': false, '--colors': false, '--reporters': true, '--no-coverage': false };
+const VITEST_FLAGS: Flags = { '--config': true, '-c': true, '--project': true, '--root': true, '-r': true, '--dir': true, '--run': false, '--reporter': true, '-t': true, '--testNamePattern': true, '--bail': true, '--silent': false, '--no-color': false, '--color': false, '--testTimeout': true, '--no-coverage': false, '--coverage': false, '--browser': false, '--typecheck': false };
+const JEST_FLAGS: Flags = { '--runTestsByPath': false, '-t': true, '--testNamePattern': true, '--silent': false, '--verbose': false, '--ci': false, '--no-cache': false, '-b': false, '--bail': false, '--colors': false, '--reporters': true, '--no-coverage': false, '--coverage': false };
 const NODE_FLAGS: Flags = {
-  '--test': false, '--test-name-pattern': true, '--test-skip-pattern': true, '--test-reporter': true, '--test-reporter-destination': true, '--test-only': false, '--test-timeout': true, '--import': true, '--require': true, '-r': true,
+  '--test': false, '--experimental-test-coverage': false, '--test-name-pattern': true, '--test-skip-pattern': true, '--test-reporter': true, '--test-reporter-destination': true, '--test-only': false, '--test-timeout': true, '--import': true, '--require': true, '-r': true,
   '--loader': true, '--experimental-loader': true, '--no-warnings': false, '--experimental-strip-types': false, '--experimental-transform-types': false, '--enable-source-maps': false, '--trace-warnings': false, '--conditions': true, '-C': true,
 };
 const PYTEST_FLAGS: Flags = {
   '-q': false, '-qq': false, '--quiet': false, '-v': false, '-vv': false, '-vvv': false, '--verbose': false, '-x': false, '--exitfirst': false, '-s': false, '--tb': true, '-k': true, '-m': true, '--no-header': false, '--no-summary': false, '--color': true,
-  '--maxfail': true, '--capture': true, '-ra': false, '-rA': false, '-rf': false, '--durations': true, '-p': true, '-l': false, '--showlocals': false, '--disable-warnings': false,
+  '--cov': true, '--maxfail': true, '--capture': true, '-ra': false, '-rA': false, '-rf': false, '--durations': true, '-p': true, '-l': false, '--showlocals': false, '--disable-warnings': false,
 };
 
-function flagCategory(flag: string): Category {
-  if (/cov/i.test(flag)) return 'coverage';
-  if (/watch/i.test(flag)) return 'watch';
-  if (/browser/i.test(flag)) return 'browser';
-  if (/typecheck/i.test(flag)) return 'types';
-  return 'test_scope';
-}
-
-/* The files a test run names, or what makes it no single file. */
+/* The literal files a test run names, or what makes its selection unbounded. */
 function testSelection(args: Word[], flags: Flags): { files: Word[] } | { category: Category } {
   const files: Word[] = [];
   for (let at = 0; at < args.length; at++) {
@@ -1230,7 +1223,8 @@ function testSelection(args: Word[], flags: Flags): { files: Word[] } | { catego
     if (!word.literal) return { category: 'dynamic_check' };
     if (word.text === '--') return { files: [...files, ...args.slice(at + 1)] };
     if (!isFlag(word)) files.push(word);
-    else if (!(flagName(word.text) in flags)) return { category: flagCategory(flagName(word.text)) };
+    else if (!(flagName(word.text) in flags)) return { category: /watch/i.test(word.text) ? 'watch' : 'test_scope' };
+    else if (word.text === '--cov') continue;
     else if (takesValue(word, flags) && !args[++at]?.literal) return { category: 'dynamic_check' };
   }
   return { files };
@@ -1238,33 +1232,48 @@ function testSelection(args: Word[], flags: Flags): { files: Word[] } | { catego
 
 const takesValue = (word: Word, flags: Flags): boolean => Boolean(flags[flagName(word.text)]) && !word.text.includes('=');
 
-async function oneTest(guard: Guard, args: Word[], flags: Flags, place: Place, selector: (word: Word) => Word = word => word): Promise<void> {
+async function namedTests(guard: Guard, args: Word[], flags: Flags, place: Place, selector: (word: Word) => Word = word => word): Promise<void> {
   const selection = testSelection(args, flags);
   if ('category' in selection) return guard.note(check(selection.category));
   const { files } = selection;
-  if (place.tainted) return guard.note(check('coverage'));
-  if (files.length === 1 && !place.loop && (await guard.regularFile(selector(files[0]!), place))) return guard.note({ kind: 'test_file' });
+  if (place.tainted) return guard.note(check('dynamic_check'));
+  if (files.length > 0 && !place.loop) {
+    const regular = await Promise.all(files.map(word => guard.regularFile(selector(word), place)));
+    if (regular.every(Boolean)) return guard.note({ kind: 'test_file' });
+  }
   guard.note(check(files.some(word => !word.literal) ? 'dynamic_check' : 'test_scope'));
 }
 
 const VITEST: Handler = async (guard, args, place) => {
   const words = args[0]?.literal && args[0].text === 'run' ? args.slice(1) : args.some(word => word.text === '--run') ? args : null;
   if (!words) return guard.note(check(args.some(word => !word.literal) ? 'dynamic_check' : 'watch'));
-  await oneTest(guard, words, VITEST_FLAGS, place);
+  await namedTests(guard, words, VITEST_FLAGS, place);
 };
 
-const JEST: Handler = (guard, args, place) => oneTest(guard, args, JEST_FLAGS, place);
+const COVERAGE: Handler = async (guard, args, place) => {
+  guard.note(check('coverage'));
+  const values = new Set(['--reporter', '-r', '--reports-dir', '--temp-directory', '--include', '--exclude', '--src', '--omit', '--source', '--data-file']);
+  let at = 0;
+  while (isFlag(args[at])) {
+    if (values.has(flagName(args[at]!.text)) && !args[at]!.text.includes('=')) at++;
+    at++;
+  }
+  if (at < args.length) await guard.run(args.slice(args[at]!.text === 'run' ? at + 1 : at), place);
+};
+
+const JEST: Handler = (guard, args, place) => namedTests(guard, args, JEST_FLAGS, place);
 
 const withoutTestName = (word: Word): Word => ({ ...word, text: word.text.split('::', 1)[0]! });
-const PYTEST: Handler = (guard, args, place) => oneTest(guard, args, PYTEST_FLAGS, place, withoutTestName);
+const PYTEST: Handler = (guard, args, place) => namedTests(guard, args, PYTEST_FLAGS, place, withoutTestName);
 
 const PLAYWRIGHT_ACTIONS: Readonly<Record<string, Finding>> = {
-  test: check('browser'), install: dependency(), 'install-deps': dependency(), screenshot: { kind: 'screenshot' }, pdf: { kind: 'screenshot' },
+  install: dependency(), 'install-deps': dependency(), screenshot: { kind: 'screenshot' }, pdf: { kind: 'screenshot' },
   codegen: OPAQUE, 'show-report': OPAQUE, 'show-trace': OPAQUE, open: OPAQUE,
 };
-const PLAYWRIGHT: Handler = (guard, args) => {
+const PLAYWRIGHT: Handler = (guard, args, place) => {
   const action = args.find(word => !isFlag(word));
   if (!action?.literal) return Promise.resolve(guard.note(action ? check('dynamic_check') : RECOGNIZED));
+  if (action.text === 'test') return namedTests(guard, args.slice(args.indexOf(action) + 1), { '--project': true, '--headed': false, '--reporter': true, '--workers': true, '-g': true, '--grep': true }, place);
   guard.note(own(PLAYWRIGHT_ACTIONS, action.text) ?? unavailable('package_boundary'));
   return Promise.resolve();
 };
@@ -1287,7 +1296,7 @@ const isTold = (name: string): boolean => HANDLERS.has(name) || toolHandler(name
 
 const NODE: Handler = async (guard, args, place) => {
   if (args.some(word => word.literal && /^--watch(?:-|=|$)/.test(word.text))) return guard.note(check('watch'));
-  if (args.some(word => word.text === '--test')) return oneTest(guard, args, NODE_FLAGS, place);
+  if (args.some(word => word.text === '--test')) return namedTests(guard, args, NODE_FLAGS, place);
   const script = args.find(word => !isFlag(word));
   const tool = script?.literal ? toolInNodeModules(script.text) : null;
   if (tool && isTold(tool)) return guard.run([literalWord(tool), ...args.slice(args.indexOf(script!) + 1)], place);
@@ -1296,7 +1305,7 @@ const NODE: Handler = async (guard, args, place) => {
 
 const TSX: Handler = async (guard, args, place) => {
   if (args[0]?.text === 'watch') return guard.note(check('watch'));
-  if (args.some(word => word.text === '--test')) return oneTest(guard, args, NODE_FLAGS, place);
+  if (args.some(word => word.text === '--test')) return namedTests(guard, args, NODE_FLAGS, place);
   guard.note(OPAQUE);
 };
 
@@ -1327,7 +1336,7 @@ const PACMAN: Handler = (guard, args) => {
   return Promise.resolve();
 };
 
-/* npx and its like run what the workspace has, or fetch it: only the first is a local run. */
+/* npx and its like may run an installed tool or fetch one first. */
 type ExecCall = { tool: Word | null; rest: Word[]; noInstall: boolean; fetches: boolean; call: Word | null };
 const EXEC_NO_INSTALL = new Set(['--no-install', '--no']);
 const EXEC_PACKAGE = new Set(['-p', '--package']);
@@ -1357,11 +1366,11 @@ function afterExecFlag(exec: ExecCall, args: Word[], at: number): number {
 async function runExec(guard: Guard, args: Word[], place: Place, mayFetch: boolean): Promise<void> {
   const { tool, rest, noInstall, fetches, call } = readExec(args);
   if (call) return runExecText(guard, call, place);
-  if (fetches) return guard.note(dependency('implicit_install'));
+  if (fetches) guard.note(dependency('implicit_install'));
   if (!tool) return guard.note(RECOGNIZED);
   if (!tool.literal) return guard.note(unavailable('dynamic_check'));
-  if (mayFetch && !noInstall && (await wouldFetch(guard, tool.text, place))) return guard.note(dependency('implicit_install'));
-  await guard.run([literalWord(tool.text), ...rest], place);
+  if (mayFetch && !noInstall && (await wouldFetch(guard, tool.text, place))) guard.note(dependency('implicit_install'));
+  await guard.run([literalWord(tool.text.replace(/(@[^/]+)$/, '')), ...rest], place);
 }
 
 const runExecText = (guard: Guard, call: Word, place: Place): Promise<void> => (call.literal ? guard.shellText(call.text, place) : Promise.resolve(guard.note(unavailable('dynamic_check'))));
@@ -1442,12 +1451,22 @@ const BUN: Manager = {
 };
 
 /* Words after a script's name that reach the script. Past --, always. */
-function forwardedWords(manager: Manager, rest: Word[]): { forwarded: Word[]; many: boolean } {
+/* The words a script gets. npm reads a flag after the script's name as its own, so a workspace or folder named there is where the
+   script runs; the other managers hand every word before -- to the script. */
+function forwardedWords(manager: Manager, rest: Word[], call: ManagerCall): Word[] {
   const dashes = rest.findIndex(word => word.text === '--');
   const before = dashes < 0 ? rest : rest.slice(0, dashes);
   const after = dashes < 0 ? [] : rest.slice(dashes + 1);
-  const flagged = manager.keepsFlags ? before.filter(word => !isFlag(word)) : before;
-  return { forwarded: [...flagged, ...after], many: before.some(word => MANY_FLAGS.has(flagName(word.text))) };
+  if (!manager.keepsFlags) {
+    if (before.some(word => MANY_FLAGS.has(flagName(word.text)))) call.many = true;
+    return [...before, ...after];
+  }
+  const kept: Word[] = [];
+  for (let at = 0; at < before.length; ) {
+    if (isFlag(before[at])) at = afterManagerFlag(call, before, at, manager.workspaces);
+    else kept.push(before[at++]!);
+  }
+  return [...kept, ...after];
 }
 
 /* The folder a flag names is that folder or nothing. With no flag the nearest manifest counts, as npm finds it. */
@@ -1464,9 +1483,10 @@ async function scriptsFolder(guard: Guard, call: ManagerCall, place: Place): Pro
 }
 
 async function runScriptCall(manager: Manager, guard: Guard, call: ManagerCall, name: string, rest: Word[], place: Place): Promise<void> {
-  const { forwarded, many } = forwardedWords(manager, rest);
-  if (many) return guard.note(check('package_scope'));
-  await guard.packageScript(name, forwarded, await scriptsFolder(guard, call, place), place);
+  const scoped: ManagerCall = { ...call };
+  const forwarded = forwardedWords(manager, rest, scoped);
+  if (scoped.many) return guard.note(check('package_scope'));
+  await guard.packageScript(name, forwarded, await scriptsFolder(guard, scoped, place), place);
 }
 
 async function useManager(manager: Manager, guard: Guard, args: Word[], place: Place): Promise<void> {
@@ -1491,11 +1511,23 @@ const scriptAction: ManagerAction = async (manager, guard, call, _sub, rest, pla
 const namedAction: ManagerAction = (manager, guard, call, sub, rest, place) => runScriptCall(manager, guard, call, own(SCRIPT_NAMES, sub) ?? sub, rest, place);
 const execAction: ManagerAction = (manager, guard, _call, _sub, rest, place) => runExec(guard, rest, place, manager.execFetches);
 
+const fetchAction: ManagerAction = async (manager, guard, call, sub, rest, place) => {
+  guard.note(dependency('implicit_install'));
+  await execAction(manager, guard, call, sub, rest, place);
+};
+
+const INSTALL_TEST = new Set(['install-test', 'it', 'install-ci-test', 'cit', 'clean-install-test', 'sit']);
+const installTestAction: ManagerAction = async (manager, guard, call, _sub, rest, place) => {
+  guard.note(dependency());
+  await runScriptCall(manager, guard, call, 'test', rest, place);
+};
+
 const SCRIPT_NAMES: Readonly<Record<string, string>> = { t: 'test', tst: 'test' };
 
 function managerAction(manager: Manager, sub: string): ManagerAction {
+  if (manager.deps.has(sub) && INSTALL_TEST.has(sub)) return installTestAction;
   if (manager.deps.has(sub)) return noteAction(dependency());
-  if (manager.fetchers.has(sub)) return noteAction(dependency('implicit_install'));
+  if (manager.fetchers.has(sub)) return fetchAction;
   if (manager.many.has(sub)) return noteAction(check('package_scope'));
   if (manager.scripts.has(sub)) return scriptAction;
   if (manager.named.has(sub)) return namedAction;
@@ -1510,9 +1542,14 @@ const managerHandler = (manager: Manager): Handler => (guard, args, place) => us
 const BUN_HANDLER: Handler = async (guard, args, place) => {
   const first = args.find(word => !isFlag(word))?.text;
   if (first && /\.[cm]?[jt]sx?$/.test(first)) return guard.note(OPAQUE);
-  if (first === 'test') return guard.note(check('test_scope'));
+  if (first === 'test') return namedTests(guard, args.slice(args.findIndex(word => word.text === 'test') + 1), { '--coverage': false, '-t': true, '--test-name-pattern': true, '--timeout': true, '--bail': false }, place);
   if (first === 'build') return guard.note(check('build'));
   await useManager(BUN, guard, args, place);
+};
+
+const DENO: Handler = (guard, args, place) => {
+  if (args[0]?.text === 'test') return namedTests(guard, args.slice(1), { '--allow-all': false, '-A': false, '--no-check': false, '--coverage': true }, place);
+  return toolHandler('deno')!(guard, args, place);
 };
 
 const BUSYBOX: Handler = (guard, args, place) => guard.run(args, place);
@@ -1522,15 +1559,18 @@ const HANDLERS = new Map<string, Handler>([
   ...['sh', 'bash', 'dash', 'zsh', 'ksh', 'ash'].map((name): [string, Handler] => [name, SHELL]),
   ...['chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable', 'chrome-headless-shell', 'headless_shell'].map((name): [string, Handler] => [name, BROWSER]),
   ['eval', EVAL], ['source', SOURCE], ['.', SOURCE], ['cd', CD], ['pushd', CD], ['popd', CD], ['export', EXPORT], ['xargs', XARGS], ['parallel', XARGS], ['find', FIND], ['busybox', BUSYBOX],
+  ...['mocha', 'ava', 'tap', 'rspec', 'phpunit', 'behave', 'nosetests', 'jasmine', 'tape', 'cucumber'].map((name): [string, Handler] => [name, JEST]),
+  ['deno', DENO],
+  ['c8', COVERAGE], ['nyc', COVERAGE], ['coverage', COVERAGE],
   ['vitest', VITEST], ['jest', JEST], ['pytest', PYTEST], ['py.test', PYTEST], ['playwright', PLAYWRIGHT], ['node', NODE], ['nodejs', NODE], ['tsx', TSX], ['python', PYTHON_HANDLER], ['pacman', PACMAN],
   ['npx', NPX], ['bunx', NPX], ['npm', managerHandler(NPM)], ['pnpm', managerHandler(PNPM)], ['yarn', managerHandler(YARN)], ['bun', BUN_HANDLER],
 ]);
 
 /* Why a command is refused, by what it is: never its own text, which can hold a secret, and which the program's call keeps. */
 const CATEGORY_WORDS: Readonly<Partial<Record<Category, string>>> = {
-  dependency_install: 'Installing dependencies is not done here. Preparing dependencies alone goes through run_work.',
-  implicit_install: 'This would fetch a package to run it. Only a tool the workspace already has runs here.',
-  test_scope: 'Only one literal test file runs here, with no flag that widens it.',
+  test_scope: 'This test run does not name only regular test files.',
+  watch: 'Watch modes do not end.',
+  task_runner: 'This task runner can run the whole suite.',
   dynamic_check: 'What this check selects cannot be read before it runs.',
   unresolved_script: 'This package script cannot be read before it runs.',
   script_cycle: 'These scripts call each other.',
@@ -1542,8 +1582,8 @@ const CATEGORY_WORDS: Readonly<Partial<Record<Category, string>>> = {
 };
 
 export function refusalText(denial: CommandDenial): string {
-  const why = CATEGORY_WORDS[denial.category as Category] ?? `This is a heavy check (${denial.category}).`;
-  return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A refusal is not a result: use run_tests, or tell your head when that route is unavailable.`;
+  const why = CATEGORY_WORDS[denial.category as Category] ?? 'This check cannot run here.';
+  return `${REFUSAL}\nHornhoof stopped this command before it started. ${why} A whole test suite runs through run_tests, which splits it into groups over the machines. Name the test files of your change to run them here. A refusal is not a result.`;
 }
 
 /* A hook's answer as each program's own documentation describes it, which says nothing of what an installed version does.
@@ -1561,8 +1601,8 @@ const callLine = (call = ''): string => {
   return shown ? `\nCall: ${shown}` : '';
 };
 
-function refusal(found: readonly Finding[], kinds: readonly ('check' | 'dependency' | 'unavailable')[]): CommandDenial | null {
-  const codes = { check: 'heavy_check_local', dependency: 'dependency_install_local', unavailable: 'command_guard_unavailable' } as const;
+function refusal(found: readonly Finding[], kinds: readonly ('check' | 'unavailable')[]): CommandDenial | null {
+  const codes = { check: 'whole_suite_local', unavailable: 'command_guard_unavailable' } as const;
   for (const kind of kinds) {
     const finding = found.find(item => item.kind === kind) as { category: Category } | undefined;
     if (finding) return { allow: false, code: codes[kind], category: finding.category };
@@ -1572,21 +1612,20 @@ function refusal(found: readonly Finding[], kinds: readonly ('check' | 'dependen
 
 const coverageOf = (found: readonly Finding[]): CommandCoverage => (found.some(item => item.kind === 'ordinary' && item.coverage === 'opaque') ? 'opaque' : 'recognized');
 const has = (found: readonly Finding[], kind: Finding['kind']): boolean => found.some(item => item.kind === kind);
-const countOf = (found: readonly Finding[], kind: Finding['kind']): number => found.filter(item => item.kind === kind).length;
 
 function agentVerdict(found: readonly Finding[]): AgentCommandVerdict {
-  const denial = refusal(found, ['check', 'dependency', 'unavailable']);
+  const local = found.filter(item => item.kind !== 'check' || !['build', 'types', 'lint', 'format', 'coverage', 'quality', 'mutation'].includes(item.category));
+  const denial = refusal(local, ['check', 'unavailable']);
   if (denial) return denial;
-  if (countOf(found, 'test_file') > 1) return { allow: false, code: 'heavy_check_local', category: 'test_scope' };
   const coverage = coverageOf(found);
-  if (has(found, 'test_file')) return { allow: true, kind: 'single_test_file', coverage };
+  if (has(found, 'test_file')) return { allow: true, kind: 'test_files', coverage };
   return { allow: true, kind: has(found, 'screenshot') ? 'lightweight_screenshot' : 'ordinary', coverage };
 }
 
 function workVerdict(found: readonly Finding[]): WorkCommandVerdict {
   const denial = refusal(found, ['check', 'unavailable']);
   if (denial) return denial;
-  if (has(found, 'test_file')) return { allow: false, code: 'heavy_check_local', category: 'test_scope' };
+  if (has(found, 'test_file')) return { allow: false, code: 'whole_suite_local', category: 'test_scope' };
   const coverage = coverageOf(found);
   if (has(found, 'dependency')) return { allow: true, kind: 'dependency_preparation', coverage };
   return { allow: true, kind: has(found, 'screenshot') ? 'lightweight_screenshot' : 'ordinary', coverage };
