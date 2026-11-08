@@ -385,21 +385,21 @@ const leftOver = async (options: ReturnType<typeof machine>) => (await readdir(j
 /* The machine's turn for heavy work, held by a test part until it lets go. */
 function heldTurn() {
   let release!: () => void;
-  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 }, inside = { count: 0 };
+  const free = new Promise<void>(resolve => { release = resolve; }), asked = { count: 0 }, inside = { count: 0 }, grants = { count: 0 };
   const slot = async <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> => {
-    asked.count++; await free; inside.count++;
+    asked.count++; await free; inside.count++; grants.count++;
     try { return await run(signal); } finally { inside.count--; }
   };
-  return { slot, release, asked, inside };
+  return { slot, release, asked, inside, grants };
 }
-/* A machine's registry that notes what it was told and did, and whether it held the machine's turn meanwhile. */
+/* A machine's registry that notes what it was told and did, and which of its turns it held meanwhile (0: none). */
 function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
-  const claims: { state: string; inside: number }[] = [], downloads: number[] = [];
+  const claims: { state: string; inside: number; turn: number }[] = [], downloads: number[] = [];
   return {
     claims, downloads,
     remote: {
       ...remote,
-      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count }); return claim; },
+      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count, turn: turn.inside.count ? turn.grants.count : 0 }); return claim; },
       async download(key, file, claim, signal) { downloads.push(turn.inside.count); return remote.download(key, file, claim, signal); },
     } satisfies HarnessRemote,
   };
@@ -555,7 +555,10 @@ describe("an agent's worktree", () => {
     expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
     expect(await placing).toMatch(PLACED);
     expect(await installed(f)).toBe(1);
-    expect(mine.claims.filter(claim => claim.inside > 0 && claim.state === 'wait').length).toBeLessThanOrEqual(1);
+    /* A busy machine may go round more than once, as the other machine's claim comes and goes; each time it holds the
+       machine's turn, the first wait gives the turn back. */
+    const waitsInTurns = mine.claims.filter(claim => claim.inside > 0 && claim.state === 'wait').map(claim => claim.turn);
+    expect(new Set(waitsInTurns).size).toBe(waitsInTurns.length);
     expect(mine.downloads).toEqual([0]);
   });
 
