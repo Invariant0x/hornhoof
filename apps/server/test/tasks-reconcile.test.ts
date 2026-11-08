@@ -4,7 +4,9 @@ import { agentEvents, agents, companies, departments, jobs, machines, nodes, pen
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { updateTask } from '../src/modules/tasks/engine.js';
+import { submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 const MIN = 60_000;
@@ -17,21 +19,39 @@ async function company() {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, name, kind, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, name, kind, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
+  const tess = await hire('Tess', 'worker', 'DEV-TEST');
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const ready = vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
   const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
   let number = 0;
   const at = new Date(Date.now() - 10 * MIN);
   const task = async (set: Partial<typeof tasks.$inferInsert> = {}) => {
-    const [row] = await db.insert(tasks).values({ companyId, number: ++number, title: 'Checkout API', departmentId: dev!.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id, createdByAgentId: head.id, createdAt: at, updatedAt: at, ...set }).returning();
+    const [row] = await db.insert(tasks).values({ companyId, number: ++number, title: 'Checkout API', small: true, departmentId: dev!.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id, createdByAgentId: head.id, createdAt: at, updatedAt: at, ...set }).returning();
+    await db.transaction(tx => createRoute(tx, row!, { paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: tess.id }));
     await db.insert(taskEvents).values({ companyId, taskId: row!.id, kind: 'created', agentId: head.id, createdAt: at });
     return row!;
+  };
+  const ageMoves = async (id: string) => {
+    await db.update(taskEvents).set({ createdAt: at }).where(eq(taskEvents.taskId, id));
+    await db.update(tasks).set({ updatedAt: at }).where(eq(tasks.id, id));
+  };
+  const reviewTask = async (set: Partial<typeof tasks.$inferInsert> = {}) => {
+    const row = await task(set);
+    const result = await submit(ctx, bruno.id, row.id, { summary: 'Candidate', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    await ageMoves(row.id);
+    return result.task;
+  };
+  const snapshot = async (id: string) => {
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return routeSnapshot(await routeOf(db, row!), row!.assigneeAgentId);
   };
   const job = async (set: Partial<typeof jobs.$inferInsert> = {}) =>
     (await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, kind: 'conversation', prompt: 'Work on it.', timeoutMs: 2 * 3_600_000, createdAt: at, ...set }).returning())[0]!;
@@ -41,7 +61,7 @@ async function company() {
     await minuteRound(ctx, now, () => err => errors.push(err));
     expect(errors).toEqual([]);
   };
-  return { ctx, db, companyId, ceo: ceo!, sub: sub!, head, bruno, rita, ready, send, at, task, job, turnsOf, round };
+  return { ctx, db, companyId, ceo: ceo!, sub: sub!, head, bruno, rita, tess, ready, send, at, task, reviewTask, ageMoves, snapshot, job, turnsOf, round };
 }
 
 type Company = Awaited<ReturnType<typeof company>>;
@@ -165,7 +185,7 @@ describe('turns on a machine that went away', () => {
     const c = await company();
     const { plan, laptop, desktop } = await personalMachines(c);
     await c.db.update(agents).set({ subscriptionId: plan.id, nodeId: laptop.id }).where(eq(agents.id, c.rita.id));
-    const task = await c.task({ status: 'review', stage: 1, assigneeAgentId: c.rita.id, panel: [c.rita.id] });
+    const task = await c.reviewTask();
     const job = await c.job({ subscriptionId: plan.id, nodeId: laptop.id, agentId: c.rita.id, taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + MIN) });
     c.ready.mockImplementation(id => id.kind === 'builtin' || id.nodeId === desktop.id);
     vi.spyOn(c.ctx.hub, 'awaySince').mockImplementation(id => id.kind === 'node' && id.nodeId === laptop.id ? c.at.getTime() : null);
@@ -226,21 +246,22 @@ describe('work whose move lost its wake', () => {
 
   it.each(['open', 'working', 'review'] as const)('recovers the assignee of an old %s task once per move', async status => {
     const c = await company();
-    const task = await c.task({ status, stage: status === 'review' ? 1 : 0, panel: status === 'review' ? [c.bruno.id] : [] });
+    const task = status === 'review' ? await c.reviewTask() : await c.task({ status });
+    const owner = status === 'review' ? c.rita : c.bruno;
     await c.round();
-    const [job] = await c.turnsOf(c.bruno.id);
+    const [job] = await c.turnsOf(owner.id);
     expect(job).toMatchObject({ kind: 'conversation', taskId: task.id, status: 'running' });
     expect(await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job!.id))).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'message' })]));
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(Date.now() - 3 * MIN) }).where(eq(jobs.id, job!.id));
     await c.round();
-    expect(await c.turnsOf(c.bruno.id)).toHaveLength(1);
+    expect(await c.turnsOf(owner.id)).toHaveLength(1);
     /* A later move can need a new turn even though the earlier one already ran. */
     const movedAt = new Date(Date.now() - 3 * MIN);
     await c.db.update(jobs).set({ createdAt: c.at }).where(eq(jobs.id, job!.id));
     await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'updated', createdAt: movedAt });
     await c.db.update(tasks).set({ updatedAt: movedAt }).where(eq(tasks.id, task.id));
     await c.round();
-    expect(await c.turnsOf(c.bruno.id)).toHaveLength(2);
+    expect(await c.turnsOf(owner.id)).toHaveLength(2);
   });
 
   it('waits more than two minutes after the move and after the agent was last busy', async () => {
@@ -258,28 +279,28 @@ describe('work whose move lost its wake', () => {
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.id !== other.id)).toEqual([expect.objectContaining({ taskId: task.id, status: 'running' })]);
   });
 
-  it('recovers every reviewer still due, with the prompt for a review of the turn', async () => {
+  it('recovers only the current Review owner and its exact candidate in an open turn', async () => {
     const c = await company();
     const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 4, title: 'Payments', goal: 'Card payments.' }).returning();
-    const task = await c.task({ status: 'review', stage: 1, bounces: 1, assigneeAgentId: c.rita.id, panel: [c.rita.id, c.head.id], turnId: turn!.id });
-    await c.db.update(taskEvents).set({ data: { turnReview: true } }).where(eq(taskEvents.taskId, task.id));
-    /* A verdict in an earlier round does not answer this round. */
-    await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'verdict', agentId: c.head.id, createdAt: c.at, data: { stage: 1, round: 0, pass: true } });
-    await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'submitted', agentId: c.bruno.id, createdAt: new Date(c.at.getTime() + MIN) });
+    const task = await c.reviewTask({ turnId: turn!.id });
+    const snapshot = await c.snapshot(task.id);
     await c.round();
-    for (const agent of [c.rita, c.head]) {
-      expect(await c.turnsOf(agent.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining('everything turn 4 changed') })]);
-    }
+    expect(await c.turnsOf(c.rita.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining(HEAD) })]);
+    expect(await c.turnsOf(c.head.id)).toHaveLength(0);
     expect(await c.turnsOf(c.bruno.id)).toHaveLength(0);
+    expect(await c.snapshot(task.id)).toMatchObject({ stage: 'review', ownerAgentId: c.rita.id, candidateId: snapshot.candidateId });
   });
 
-  it('does not wake a reviewer that already gave a verdict in this stage and round', async () => {
+  it('recovers Tests after a passed Review without waking the former checker', async () => {
     const c = await company();
-    const task = await c.task({ status: 'review', stage: 2, bounces: 1, assigneeAgentId: c.rita.id, panel: [c.rita.id, c.head.id] });
-    await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'verdict', agentId: c.rita.id, createdAt: c.at, data: { stage: 2, round: 1, pass: true } });
+    const task = await c.reviewTask();
+    await verdict(c.ctx, c.rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the candidate.' });
+    await c.ageMoves(task.id);
     await c.round();
     expect(await c.turnsOf(c.rita.id)).toHaveLength(0);
-    expect(await c.turnsOf(c.head.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.head.id)).toHaveLength(0);
+    expect(await c.turnsOf(c.tess.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining(HEAD) })]);
+    expect((await c.snapshot(task.id)).stage).toBe('tests');
   });
 
   it('recovers the giver of blocked work instead of its executor', async () => {
@@ -291,26 +312,27 @@ describe('work whose move lost its wake', () => {
     expect(await c.turnsOf(c.bruno.id)).toHaveLength(0);
   });
 
-  it('recovers the head called in by three returns at the same gate', async () => {
+  it('recovers the head for a wrong-goal escalation without returning work to its author', async () => {
     const c = await company();
-    const task = await c.task({ bounces: 3 });
-    for (let round = 0; round < 3; round++) {
-      await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'verdict', agentId: c.rita.id, text: 'Fix the total.', createdAt: c.at, data: { stage: 1, round, pass: false } });
-    }
+    const task = await c.reviewTask();
+    await verdict(c.ctx, c.rita.id, task.id, { pass: false, reviewedCommit: HEAD, escalate: true, comment: 'The requested currency behavior is different.' });
+    await c.ageMoves(task.id);
     await c.round();
-    expect(await c.turnsOf(c.head.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining('went back from the same gate 3 times') })]);
-    expect(await c.turnsOf(c.bruno.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.head.id)).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining('The requested currency behavior is different.') })]);
+    expect(await c.turnsOf(c.bruno.id)).toHaveLength(0);
+    expect(await c.snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'escalated', ownerAgentId: null });
   });
 
-  it('does not call in the head for three returns spread across different gates', async () => {
+  it('keeps repeated ordinary findings with the checker without calling in the head or author', async () => {
     const c = await company();
-    const task = await c.task({ bounces: 3 });
-    for (let round = 0; round < 3; round++) {
-      await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: task.id, kind: 'verdict', agentId: c.rita.id, createdAt: c.at, data: { stage: round + 1, round, pass: false } });
-    }
+    const task = await c.reviewTask();
+    const candidateId = (await c.snapshot(task.id)).candidateId;
+    for (let finding = 0; finding < 3; finding++) await verdict(c.ctx, c.rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: `Repair finding ${finding + 1} in the same branch.` });
+    await c.ageMoves(task.id);
     await c.round();
     expect(await c.turnsOf(c.head.id)).toHaveLength(0);
-    expect(await c.turnsOf(c.bruno.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.bruno.id)).toHaveLength(0);
+    expect(await c.snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: c.rita.id, candidateId });
   });
 
   it.each(waitingCases)('leaves work waiting when it is $why', async ({ hold }) => {
