@@ -970,6 +970,7 @@ export const en = {
   tasks: {
     echelons: {
       coordination: 'Checked coordination report',
+      findings: { heading: 'Findings by stage', unique: (n: number) => `Unique findings: ${n}`, reported: (n: number) => `Reported: ${n}`, confirmed: (n: number) => `Confirmed: ${n}` },
       heading: 'Task workflow',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
       phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed' },

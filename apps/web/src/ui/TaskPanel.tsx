@@ -1,4 +1,4 @@
-import { TaskWorkflow } from './TaskWorkflow';
+import { TaskWorkflow, TaskFindings } from './TaskWorkflow';
 import { taskWaitText } from './task-wait';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
@@ -235,6 +235,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         </p>
       )}
       <TaskWorkflow workflow={task.echelons} task={task} org={org} />
+      <TaskFindings findings={task.echelonFindings} workflow={task.echelons} />
       <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
       <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}

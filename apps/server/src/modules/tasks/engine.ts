@@ -784,6 +784,18 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: Subm
   const operation = submissionOperation(r);
   const replay = await replayedSubmission(ctx.db, before, agentId, operation);
   if (replay) return replay;
+  try {
+    return await submitCandidate(ctx, agentId, taskId, r, operation, checked);
+  } catch (error) {
+    if (operation && error instanceof ApiError && [403, 409].includes(error.status)) {
+      const repeated = await replayedSubmission(ctx.db, await loadTask(ctx.db, taskId), agentId, operation);
+      if (repeated) return repeated;
+    }
+    throw error;
+  }
+}
+
+async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>, checked?: CheckedSubmission): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');

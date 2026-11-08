@@ -1,3 +1,4 @@
+import type { EchelonModel } from '@hornhoof/protocol/echelons';
 /* Product assignment bands, not benchmark scores. Unclassified identities need an explicit catalog policy. */
 const CAPABILITY: Readonly<Record<string, number>> = {
   'claude-haiku-5-5': 0,
@@ -14,7 +15,7 @@ const CAPABILITY: Readonly<Record<string, number>> = {
 export const modelCapability = (model: string): number | null => CAPABILITY[model] ?? null;
 const PROVIDERS: Readonly<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
 export const modelProvider = (provider: string): string => PROVIDERS[provider] ?? provider;
-export type CheckerIdentity = { agentId: string; provider: string; model: string; capability: number };
+export type CheckerIdentity = EchelonModel;
 
 export function reviewEligibility(producer: CheckerIdentity, checker: CheckerIdentity): string | null {
   if (producer.agentId === checker.agentId) return 'self_review';
@@ -23,5 +24,5 @@ export function reviewEligibility(producer: CheckerIdentity, checker: CheckerIde
 }
 
 export function sameChecker(left: CheckerIdentity, right: CheckerIdentity | null): boolean {
-  return right !== null && (['agentId', 'provider', 'model', 'capability'] as const).every(key => left[key] === right[key]);
+  return right !== null && (['agentId', 'subscriptionId', 'provider', 'model', 'capability'] as const).every(key => left[key] === right[key]);
 }

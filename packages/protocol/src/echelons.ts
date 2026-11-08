@@ -26,7 +26,7 @@ export type EchelonsSnapshot = {
   security: { required: boolean; reason: string | null; addedBy: string | null };
 };
 
-export const EchelonModel = z.object({ agentId: z.uuid(), provider: z.string().min(1), model: z.string().min(1), capability: z.number().int().min(0).max(2) }).strict();
+export const EchelonModel = z.object({ agentId: z.uuid(), subscriptionId: z.uuid(), provider: z.string().min(1), model: z.string().min(1), capability: z.number().int().min(0).max(2) }).strict();
 export type EchelonModel = z.infer<typeof EchelonModel>;
 export const EchelonCandidate = z.object({
   id: z.uuid(), parentId: z.uuid().nullable(), revision: z.number().int().positive(),
