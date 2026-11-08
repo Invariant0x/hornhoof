@@ -72,3 +72,20 @@ test('the jobs that may write to the registry build code without keeping the che
     assert.match(job, /actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+persist-credentials: false\n/);
   }
 });
+
+test('images built with our own BuildKit keep their cache in it, and send none to GitHub', () => {
+  assert.match(images.images, /cache-from: \$\{\{ !vars\.BUILDKIT_ENDPOINT && format\('type=gha,scope=\{0\}', matrix\.name\) \|\| '' \}\}\n/);
+  assert.match(images.images, /cache-to: \$\{\{ !vars\.BUILDKIT_ENDPOINT && format\('type=gha,mode=max,scope=\{0\}', matrix\.name\) \|\| '' \}\}\n/);
+});
+
+test('tests GitHub passed in full leave the mark on their commit, so another run of it skips them', () => {
+  const passed = images.passed;
+  assert.ok(passed, 'a job named passed');
+  assert.match(passed, /needs: test\n/);
+  assert.match(passed, /if: \$\{\{ needs\.test\.result == 'success' && github\.event_name != 'pull_request' \}\}\n/);
+  assert.match(passed, /statuses: write\n/);
+  assert.match(passed, /run: node scripts\/tests-mark\.mjs --leave\n/);
+  for (const [name, text] of Object.entries(images)) {
+    if (name !== 'passed') assert.doesNotMatch(text, /statuses: write/, name);
+  }
+});

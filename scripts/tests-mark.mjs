@@ -3,8 +3,9 @@ import { appendFileSync, readFileSync } from 'node:fs';
 
 /* global fetch, AbortSignal */
 
-/* The first job of .github/workflows/images.yml: whether Hornhoof's own full test run already proved the commit this
-   workflow runs for, so GitHub need not run the tests again. Whatever it cannot tell, the tests run. */
+/* The first job of .github/workflows/images.yml: whether a full test run already proved the commit this workflow runs
+   for, so GitHub need not run the tests again. Whatever it cannot tell, the tests run. Hornhoof's own full run leaves
+   the mark, and so does GitHub's, through --leave, once all its parts passed. */
 
 const CONTEXT = 'hornhoof/tests';
 const READ_MS = 20_000;
@@ -43,9 +44,31 @@ async function proved(sha) {
   return { proved: theirs === 'success', why: `${sha} has the tree of its second parent ${parent}, which has ${CONTEXT} = ${theirs ?? 'nothing'}.` };
 }
 
+/* The mark GitHub's own tests leave once every part of them passed, linking the run that passed them. */
+async function leave() {
+  const res = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/statuses/${env.GITHUB_SHA}`, {
+    method: 'POST',
+    headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GITHUB_TOKEN}`, 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      state: 'success',
+      context: CONTEXT,
+      description: 'GitHub ran the full tests and they passed.',
+      target_url: `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
+    }),
+    signal: AbortSignal.timeout(READ_MS),
+  });
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+  process.stdout.write(`${env.GITHUB_SHA} has ${CONTEXT} = success: another run of it skips the tests.\n`);
+}
+
 async function decide() {
   if (fromFork(JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')))) return { proved: false, why: 'A pull request from a fork always runs the tests.' };
   return proved(env.GITHUB_SHA);
+}
+
+if (process.argv.includes('--leave')) {
+  await leave().catch(err => { process.stderr.write(`Could not leave the mark: ${err.message}.\n`); process.exit(1); });
+  process.exit(0);
 }
 
 const outcome = await decide().catch(err => ({ proved: false, why: `Could not read the mark: ${err.message}.` }));
