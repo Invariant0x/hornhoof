@@ -283,12 +283,14 @@ describe("a task's kind and risk class", () => {
     expect((await db.select().from(tasks))[0]).toMatchObject({ workKind: 'unknown_path' });
   });
 
-  it('leaves the wait, queue position and version intact when only the work kind changes', async () => {
+  it('leaves the wait, task version and current route intact when only the work kind changes', async () => {
     const { db, ctx, head, bruno, tools } = await company();
     await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
     const until = new Date(Date.now() + 3_600_000).toISOString();
     const [row] = await db.update(tasks).set({ externalWait: { reason: 'A build', since: new Date().toISOString(), until } }).returning();
+    const route = await routeOf(db, row!);
     const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'known_behavior' });
+    expect(await routeOf(db, moved.task)).toEqual(route);
     expect(moved.task.externalWait).toMatchObject({ reason: 'A build', until });
     expect(moved.task.version).toBe(row!.version);
     expect((await updateTask(ctx, head.id, row!.id, { workKind: 'known_behavior' })).task.updatedAt).toEqual(moved.task.updatedAt);

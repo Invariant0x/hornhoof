@@ -791,6 +791,20 @@ export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver
   return { wakes, closed: [] };
 }
 
+/* The work kind is metadata. Changing it leaves active waits and queued task versions intact. */
+async function relabelWorkKind(ctx: Live, agentId: string, task: Task, workKind: NonNullable<Task['workKind']>): Promise<Moved> {
+  const row = await ctx.db.transaction(async tx => {
+    const [fresh] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for('update');
+    stillOpen(fresh!);
+    if (fresh!.workKind === workKind) return fresh!;
+    const [changed] = await tx.update(tasks).set({ workKind, updatedAt: new Date() }).where(eq(tasks.id, task.id)).returning();
+    await note(tx, changed!, { kind: 'updated', actor: { agentId }, data: { fields: ['workKind'] } });
+    return changed!;
+  });
+  published(ctx, row);
+  return { task: row, wakes: [] };
+}
+
 /* Head revisions preserve the current stage and its immutable candidate. */
 export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
@@ -798,6 +812,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   await requireTaskHead(ctx, task, agentId);
   if (c.cleanupForTurn && (c.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
   const route = await routeOf(ctx.db, task);
+  if (c.workKind !== undefined && Object.keys(c).every(key => key === 'workKind')) return relabelWorkKind(ctx, agentId, task, c.workKind);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
   const set = revised.set;
   for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (c[key] !== undefined) Object.assign(set, { [key]: c[key] });
