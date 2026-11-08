@@ -87,20 +87,28 @@ function sumCounts(counts) {
   return { passed: add('passed'), failed: add('failed'), skipped: add('skipped'), total: add('total') };
 }
 
+function testReportStatus(counts) {
+  if (counts.some(count => count !== null && (count.failed > 0 || count.passed === 0))) return ended('tests', 'failed', 1, 'tests_not_passed');
+  if (counts.includes(null)) return unavailable('tests', 'test_report_unavailable');
+  return null;
+}
+
 async function testsStage(context) {
   const { selection, ports } = context;
   if (selection.unavailable) return unavailable('tests', selection.unavailable);
   if (!selection.packages.length) return unavailable('tests', 'nothing_selected');
+  if (selection.packages.some(item => !item.units.length)) return ended('tests', 'failed', 1, 'empty_test_selection');
   const codes = [], counts = [];
   for (const item of selection.packages) {
     const suite = context.suites.find(candidate => candidate.id === item.packageId);
     const { command, report, reader } = testCommand(context, suite, item.units);
     ports.mkdir(join(command.cwd, 'coverage'));
     codes.push(...await runAll(context, [command]));
-    counts.push(report ? reader(ports.read(report)) : null);
+    if (report) counts.push(reader(ports.read(report)));
   }
   context.numbers.tests = sumCounts(counts);
-  return fromCodes('tests', codes);
+  const execution = fromCodes('tests', codes);
+  return execution.status === 'passed' ? testReportStatus(counts) ?? execution : execution;
 }
 
 function sourceGroups({ paths, suites }) {
