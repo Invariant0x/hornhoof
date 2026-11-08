@@ -7,11 +7,14 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.8.4] - 2026-11-08
 
-Let the nodes on every computer follow the server to a new build by themselves, let GitHub test each commit once and only
-where its change reaches, and tell an employee once that someone waits for them.
+Let the nodes on every computer follow the server to a new build by themselves, release a version without turns of the
+programs on real nodes, let GitHub test each commit once and only where its change reaches, and tell an employee once that
+someone waits for them.
 
 ### Before you update
 
+- A server on 0.8.0 to 0.8.3 does not offer this version, as it waits for a check on real programs that no longer comes.
+  Run the install line once on the server's computer to update it.
 - On every computer other than the server's own, run the install line once more after the update. It starts the updater
   of that computer's nodes; from then on they follow the server by themselves.
 
@@ -23,6 +26,9 @@ where its change reaches, and tell an employee once that someone waits for them.
 
 ### Changed
 
+- A release no longer needs turns of Claude, Codex, Kimi and Antigravity on real nodes. Once the tests passed on main, the
+  images built for that commit go out, every published build is offered and installed, and the nodes follow it. The live
+  check, its proof, the live check stand, `install.sh check-node` and `install.sh back-node` are gone.
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
   change that reaches everything, such as one of the lockfile, still runs every test.
 
