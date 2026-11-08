@@ -120,6 +120,18 @@ describe('templates', () => {
     expect(body('dev-plan-review')).toMatch(/Small or local work needs no note/);
   });
 
+  it('checks data compatibility by release version in the review checklist', () => {
+    const data = body('dev-review-diff').split('\n').find(line => line.startsWith('4. **Data.**'))!;
+    expect(data).toMatch(/Below version 1\.0, before the first release, no compatibility paths or data-conversion code/);
+    expect(data).toMatch(/Correct existing records directly at release/);
+    expect(data).toMatch(/From 1\.0 on, migrations safe for existing rows/);
+    expect(data).toMatch(/transactions where two writes must agree, nothing trusted from outside without a check at the boundary/i);
+  });
+
+  it('offers removing what is not needed to reviewers and developers, off until someone turns it on', () => {
+    for (const id of ['DEV-REV', 'DEV-ENG']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-cleanup')?.on, id).toBe(false);
+  });
+
   it('preserves ub-mode verbatim after its applicability preface', () => {
     const rules = templates.skills.get('dev-engineering-rules')!;
     const upstream = readFileSync(fileURLToPath(new URL('./fixtures/ub-mode-SKILL.md', import.meta.url)), 'utf8').replace(/^---[\s\S]*?\n---\n/, '').replace(/^\s*# ub-mode\s*\n/, '').trim();
