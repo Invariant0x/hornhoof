@@ -331,6 +331,21 @@ test('test reports give counts or nothing', () => {
   assert.equal(parseTap(null), null);
 });
 
+test('malformed test counts cannot become passing execution evidence', async () => {
+  for (const report of [
+    { numTotalTests: 2 },
+    { numTotalTests: 2, numPassedTests: 3, numFailedTests: 0 },
+    { numTotalTests: 2, numPassedTests: -1, numFailedTests: 0 },
+    { numTotalTests: 2, numPassedTests: '2', numFailedTests: 0 },
+  ]) {
+    assert.equal(parseVitestJson(JSON.stringify(report)), null);
+    const result = await runStages(given(), fake(undefined, { ...FILES, [REPORT]: JSON.stringify(report) }));
+    assert.equal(stage(result, 'tests').status, 'unavailable');
+    assert.equal(exitCodeOf(result.stages), 2);
+  }
+  for (const report of ['# tests 2\n# pass 2\n', '# tests 2\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n']) assert.equal(parseTap(report), null);
+});
+
 test('dryer output counts its findings', () => {
   assert.equal(countDuplicates('No duplicate candidates found.\n'), 0);
   assert.equal(countDuplicates('Wrote x\nDUPLICATE score=1.00\n  a\n  b\n'), 1);
