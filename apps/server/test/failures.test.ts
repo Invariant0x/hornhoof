@@ -6,11 +6,12 @@ import { decisionPrincipal } from '../src/modules/conversation/decision-context.
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { appendEvent, messageForJob } from '../src/modules/events/store.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { createTask, report } from '../src/modules/tasks/engine.js';
 import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { routeOf } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { shortReason } from '../src/modules/tasks/failures.js';
 import { originalPromptOf } from '../src/modules/conversation/requested-prompt.js';
@@ -38,11 +39,11 @@ describe('named turn failures', () => {
     expect((await c.log(c.task.id)).filter(e => e.kind === 'wake_skipped')).toHaveLength(1);
   });
 
-  it('keeps a person and their one message when a legacy task continuation uses the shared repeat path', async () => {
+  it('keeps a person and their one message when a task continuation uses the shared repeat path', async () => {
     const c = await failureCompany();
     const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
     const text = 'Keep my task message and its author.';
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task.id, prompt: text, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text, taskWake: taskWakeOf(task, { why: 'message' as Parameters<typeof taskWakeOf>[1]['why'] }) } });
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task.id, prompt: text, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text, taskWake: taskWakeOf(task, { why: 'message' as Parameters<typeof taskWakeOf>[1]['why'] }, (await routeOf(c.db, task)).state) } });
     await c.fail(id);
     const retry = (await c.turnsOf()).find(j => j.continueOf === id)!;
     expect(retry).toMatchObject({ createdBy: c.sub.ownerPersonId, answersCeo: true });
@@ -58,8 +59,8 @@ describe('named turn failures', () => {
     const retry = (await c.turnsOf()).find(j => j.continueOf === c.first.id)!;
     const words = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, retry.id));
     expect(words.filter(e => e.kind === 'message')).toEqual([]);
-    expect(words.filter(e => e.kind === 'typed')).toEqual([expect.objectContaining({ data: expect.objectContaining({ taskWake: expect.objectContaining({ why: 'assigned', status: 'working', stage: 0 }) }) })]);
-    await c.db.update(tasks).set({ status: 'review', stage: 1, panel: [c.agent.id] }).where(eq(tasks.id, c.task.id));
+    expect(words.filter(e => e.kind === 'typed')).toEqual([expect.objectContaining({ data: expect.objectContaining({ taskWake: expect.objectContaining({ why: 'assigned', status: 'working', stage: 'architecture' }) }) })]);
+    await report(c.ctx, c.agent.id, c.task.id, { done: true, summary: 'Plan the checkout change and its affected checks.' });
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, retry.id));
     await pump(c.ctx, c.agent.id);
     expect(await c.jobOf(retry.id)).toMatchObject({ status: 'obsolete', error: 'stale' });

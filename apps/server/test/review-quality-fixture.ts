@@ -15,6 +15,7 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
+  const [head] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id, subscriptionId: sub!.id, model: 'claude-opus-5-5' }).returning();
   const [author] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Author', roleKey: 'DEV-BE', departmentId: dev!.id, subscriptionId: sub!.id, model: 'claude-opus-5-5', skills: app.ctx.templates.roles.get('DEV-BE')?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [] }).returning();
   const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Author check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author!.id, executor: true, small: true, paths: ['**'] })).task;
   app.ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
@@ -39,6 +40,6 @@ export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
     const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted')));
     return (event!.data.review as { quality: Quality; gateCounts: { source: string } });
   };
-  return { db, app, task, author: author!, job: job!, run: run!, part: part!, record, seed, read };
+  return { db, app, task, head: head!, author: author!, job: job!, run: run!, part: part!, record, seed, read };
 }
 

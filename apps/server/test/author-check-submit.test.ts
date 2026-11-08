@@ -2,7 +2,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { agents, jobs, pendingWakes, taskEvents, tasks, testRuns } from '../src/db/schema.js';
+import { jobs, pendingWakes, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { submitWithAuthorCheck } from '../src/modules/tasks/author-check-submit.js';
 import { connectNode, listen, TEST_SECRET as SECRET, until, type FakeNode } from './helpers.js';
 import { OTHER, qualityFixture, SHA } from './review-quality-fixture.js';
@@ -108,7 +108,7 @@ describe('author check on submit', () => {
   it('keeps the first two failures with their producer and escalates the third to the head', async () => {
     const f = await qualityFixture({ NODE_KEY });
     f.app.ctx.config.authorCheck = true;
-    const [head] = await f.db.insert(agents).values({ companyId: f.author.companyId, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: f.author.departmentId, subscriptionId: f.author.subscriptionId, model: '' }).returning();
+    const head = f.head;
     await f.db.update(tasks).set({ createdByAgentId: head!.id }).where(eq(tasks.id, f.task.id));
     const node = await nodeOf(f);
     let commit = SHA;

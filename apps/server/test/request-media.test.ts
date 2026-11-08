@@ -35,7 +35,7 @@ async function company() {
   const fran = await hire('Fran', 'worker', 'DEV-FE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const parent = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Icons', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Provider icons', brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: fran.id, executor: true, gates: [rita.id] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Provider icons', brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: fran.id, executor: true, reviewerAgentId: rita.id })).task;
   let n = 0;
   /* A running turn of the agent: its token, for uploads and for Hornhoof's tools. */
   const turn = async (agent: { id: string }) => {
