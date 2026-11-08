@@ -1,6 +1,7 @@
 # Development echelons
 
-Status: proposed to the Head of Development for task #718, implementing #717.
+Status: approved by the Head of Development for task #718, implementing #717.
+Decision: the head's recorded answer on #718, 2026-11-08 10:48:14 UTC.
 Base: `e0d362be11294e0df9a7ef5036389283bffa030b`.
 This note changes no running department, task, employee, model or subscription.
 
@@ -19,8 +20,8 @@ the selected route on task creation; changing a department default does not
 reinterpret open tasks. The current department, #717 and its subtasks stay legacy.
 Other departments, Matrix and Performance are outside this route.
 
-Proposed scope for the head's choice: apply the code route to executor-bearing
-repository implementation tasks. Head coordination tasks and architecture-only
+Apply the code route to executor-bearing repository implementation tasks.
+Head coordination tasks and architecture-only
 or other non-code deliverables keep their existing completion rules. They must
 not need a fictional code SHA to finish. A route's Architecture stage still
 records the plan for its implementation task.
@@ -54,7 +55,9 @@ precedence over CONTRIBUTING's sign-off and local-check instructions.
 ## Shared route contract
 
 The server owner (#719) owns the protocol schema, validation, persistence,
-transport and errors. This is a proposed contract until the head chooses it.
+transport and errors. The head approved this contract and its ownership split.
+The agreed shared module is `@hornhoof/protocol/echelons`, exporting
+`EchelonsSnapshot` and `EchelonFindingsView` for server and web consumers.
 
 `echelons` is null or the following versioned pointer:
 
@@ -146,7 +149,7 @@ neither submit nor replace the candidate. Existing repository credentials are
 not widened by route ownership. Git alone cannot prevent an old credential
 holder pushing; every consumer must reject an unpinned or unexpected branch head.
 
-## Model policy and unresolved arbitration
+## Approved model policy
 
 Normalize API/CLI vendors with the existing `reviewVendor` mapping. Pin actual
 canonical model identity and policy revision at assignment and candidate
@@ -154,18 +157,26 @@ production; null/default/unresolved aliases are unknown, not a proof. Revalidate
 when assigning, replacing an owner, adding Security, recording a verdict or
 accepting a completion. Runtime fallback may not silently change the model.
 
-Use a versioned department policy stored alongside the department default:
+Ship a builtin versioned policy; a department may store an authorized override
+alongside its route default. The policy shape is
 `{id, revision, edges:[{from:{vendor,model},to:{vendor,model}}],
-source:{taskId,eventId}, setByAgentId}`. Only the department head or a person
+source, setByAgentId}`. The generic shipped source is `{kind:'builtin',version:1}`
+with no company, employee or task IDs and no setting actor. A runtime override
+uses `{kind:'department',taskId,eventId}` and the authorized actor of that
+department's own event. Only the department head or a person
 already authorized to change that department's rules can change it; use existing
 company/access checks. Each explicit edge means an approved stronger reviewer
 for that producing model, not a benchmark claim or an inferred numeric rank.
 Source model IDs from the repository catalogue/reported subscription models;
-source edge decisions from the head's recorded decision. No client or node
+the builtin edges below implement the head's product decision. Runtime changes
+use the authorized department event as their source. No client or node
 report may grant itself stronger status. A policy change affects future route
 snapshots; changing an active one needs a recorded head decision and revalidation.
 
-Always require a different model and an explicit stronger edge. Codex-produced
+Require different canonical models and an explicit stronger edge, without a
+universal requirement for different vendors. Claude-to-Claude is allowed only
+by a listed stronger edge. Effort, tier and role names do not establish strength.
+The following vendor constraints override every policy edge: Codex-produced
 code requires a Claude reviewer; Claude-produced code cannot receive a Codex
 reviewer. Compare a stage's assignment with its immutable input candidate's
 actual producer and the previous checking stage, not only the original executor.
@@ -177,25 +188,48 @@ does not invent a new producer, and a Claude contribution can never be hidden
 to permit a later Codex reviewer. Unknown/unsupported pairs, unavailable
 subscriptions and insufficient eligible agents stop that task with a stable
 reason and a head notification. They do not stop independent department work.
+An alias is accepted only after confirmed canonical resolution and pinning;
+never infer the current version of `sonnet`, `opus` or a default model.
 
-Two independent proposals remain visible:
+The initial supported builtin policy v1 contains exactly these directed edges,
+with vendors normalized through `reviewVendor`:
+
+| Producing vendor/model | Stronger checking vendor/model |
+| --- | --- |
+| `codex/gpt-6-luna` | `claude/claude-sonnet-5-5` |
+| `codex/gpt-6-luna` | `claude/claude-opus-5-5` |
+| `codex/gpt-6.1-sol` | `claude/claude-opus-5-5` |
+| `claude/claude-sonnet-5-5` | `claude/claude-opus-5-5` |
+
+These exact model IDs were checked in `packages/protocol/src/index.ts` at the
+pinned base. The edges are an explicit product authorization, not a universal
+ranking. Other pairs are unsupported; never infer transitive edges. No ordering
+for Kimi, GLM, Gemini or unknown models is implied.
+
+The supported risky path is Luna Development -> Sonnet Review -> Opus Security,
+including Sonnet fixes and an unchanged Review input. The ordinary Sol -> Opus
+path is supported. After an Opus Review fix, or whenever no next allowed edge
+exists, required Security waits for the head; never remove it to make progress.
+A new department ships the policy and route; missing eligible subscriptions or
+canonical identities produce a visible task-local configuration blocker.
+
+The independent proposals and the head's resolution remain recorded:
 
 * Codex originally proposed a nullable workflow snapshot with embedded candidate
   and counts. It accepts Kimi's event-backed candidate pointer and derived counts
-  to avoid divergent provenance. Codex recommends different models, permitting
+  to avoid divergent provenance. Codex proposed different models, permitting
   Claude-to-Claude only for an explicitly approved stronger edge. The order asks
   for different models, not universally different vendors.
 * Kimi independently proposed the pointer/event split, fail-closed assignments,
   an explicit creation default and Tests-failure escalation. Kimi additionally
-  requires different vendors between producing/checking stages. After a Claude
+  proposed different vendors between producing/checking stages. After a Claude
   Review fix this may leave Security without an eligible third vendor; waiting
-  is preferable to weakening that rule under Kimi's proposal.
+  was preferable to weakening that rule under Kimi's proposal.
 
-The head must select the vendor rule and the initial supported edge policy.
-Neither proposal invents an ordering for Kimi, GLM, Gemini or unknown models.
-Tests exercise explicitly configured edges and prohibited directions, not
-unsubstantiated model strength claims. A new department with no supported pair
-still has the route installed and exposes its configuration blocker to its head.
+The head selected the Codex model rule, the four explicit builtin edges and the
+shared pointer/event design. Kimi's universal different-vendor restriction was
+not selected. No further model or scope decision is pending. Tests exercise the
+explicit edges and prohibited directions, not inferred model strength claims.
 
 ## Read models, metrics and templates
 
@@ -230,6 +264,14 @@ standalone check and fix skills; no new special echelon role or references
 between skill documents. Templates describe behavior generically, not this
 company or live employees. A template refresh must not mutate existing staffing,
 model assignments, permissions or active route snapshots.
+
+The single creation-default helper is
+`defaultDepartmentEchelonsEnabled(templateKey): boolean` in the shared protocol
+module, owned by #719. It returns true only for Development and is called only
+by the two department INSERT paths owned by #719, never when reading existing
+departments. The database default remains false. #722 owns template text,
+loading and tests, and imports this contract without editing those creation
+paths or the schema. No file is co-owned.
 
 ## Tests contract
 
@@ -282,7 +324,7 @@ selection. Planned acceptance is not evidence of implemented behavior.
 | Checkers fix and hand forward | Engine/candidate tests: fix changes final SHA, parentId/producer recorded, same owner until handoff, no author wake. |
 | Wrong goal and failed Tests | Head escalation tests; no stage decrease, author return or candidate edit by Tests. |
 | No duplicate work or foreign access | Concurrent/retried move, stale owner/wake, cross-company/path and idempotency conflict tests. |
-| Stronger/different models | Policy tests: configured edge accepted, same/unknown model rejected, Codex -> Claude required, Claude -> Codex rejected, actual fix producer and subscription changes revalidated. |
+| Stronger/different models | Policy tests: all four builtin edges accepted, same/unknown/default models and unlisted/transitive edges rejected, confirmed canonical alias required, Codex -> Claude required, Claude -> Codex rejected, actual fix producer and subscription changes revalidated; Luna -> Sonnet -> Opus with fixes/unchanged input, Sol -> Opus and required Security after Opus waiting for the head. |
 | Compatibility | Existing gate/merge/turn tests; null route and existing department remain unchanged, #717 never auto-opted-in. |
 | Concurrent A/B | Integration test with A at Review and independent B at Development; shared-file/dependency conflicts still wait. |
 | Exact final candidate and reuse | Selector/receipt tests invalidate changed source, tests, imported input and environment; selection alone and stale author receipts rejected. |
