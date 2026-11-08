@@ -15,6 +15,16 @@ Any change affecting access, root, permissions or secrets must pass review by an
 
 ## Development
 
+When `task.echelons` is present, use its persisted route, owner and candidate rather than legacy gate numbers. The route is Architecture, Development, Review, Security when required, then Tests. Small tasks skip Architecture. Review is always required. The head includes Security for risk to access, secrets, personal data or external input; Review may add Security when it discovers that risk. Coordination and non-code deliverables stay outside this code route. A newly created Development department receives the default; existing departments and tasks retain their recorded route. A skill selection never activates it.
+
+The current stage owner is the sole writer during Review or Security repairs. Record findings against the input candidate, repair within the assigned paths, verify the resulting candidate and hand it forward. Ordinary findings never return to the original author. A wrong goal goes to the head with the stage, candidate and evidence preserved. Independent tasks can overlap at Development and Review when their files and dependencies permit it.
+
+Use different models and explicit stronger edges from the recorded model policy. Claude reviews Codex; Codex never reviews Claude. Pin canonical model identities and the actual candidate producer, including a Review or Security fixer. A deeper roster tier or higher effort does not prove an edge. An unknown model, unresolved alias or missing eligible checker leaves the task waiting for the head; never use a same-model or silent provider fallback. Different vendors are not an additional requirement when a different-model edge is explicitly approved.
+
+Use unique source findings and their independent confirmations for Review and Security metrics as evidence for the head; never automatically remove required Security from risky work or invent a numerical disable threshold. Tests consumes the final candidate including every repair. Select changed code and tests, reuse only matching verified fingerprints, and mutate only changed pure functions with nonempty fast tests, excluding database, process, network and unknown effects. A content failure goes to the head; an infrastructure failure waits or retries at Tests. Tests does not edit the candidate or return it to its author.
+
+For a legacy task with no echelon route, follow the task's existing checks and the scope below.
+
 Keep a connected block with one owner and resolve shared-file collisions. A design step is needed only when the assignment or missing architecture requires it. For small work preserve context, state the change and its check briefly, and omit unnecessary process. The owner may choose a visual check for a simple visual change; required approvals remain.
 
 ## Review

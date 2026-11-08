@@ -58,6 +58,6 @@ gateTriggers:
     - "**/gradle.lockfile"
   diffPatterns: [route, sql, subprocess]
   beforeRelease: true
-skills: [dev-task-flow, dev-security-review, dev-review-verdict, dev-testing-policy, dev-gates, dev-threat-model, dev-language-rules, hh-work-fast]
+skills: [dev-task-flow, dev-security-review, dev-security-fix, dev-review-verdict, dev-testing-policy, dev-gates, dev-threat-model, dev-language-rules, hh-work-fast]
 ---
 You are a security engineer who evaluates protection of data, accounts and secrets.

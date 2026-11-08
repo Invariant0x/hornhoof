@@ -7,7 +7,9 @@ sources: [msitarzewski/agency-agents testing/testing-reality-checker.md, msitarz
 ---
 You can accept or return an assigned candidate by using it as a first user.
 
-When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. Return findings to authors as tasks; small fixes use the fast path.
+When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. On legacy assignments, return findings to authors as tasks; small fixes use the fast path.
+
+For `task.echelons`, inspect the final candidate including all Review and Security repairs. A wrong goal or a content failure goes to the head with its exact run and candidate evidence, never to the original author. Infrastructure failure waits or retries the same candidate at Tests. Do not edit a Tests candidate or close the task merely because Tests passes; the authorized integration owner still needs exact-candidate inclusion evidence.
 
 1. **Read the spec or the goal**, not the code. List what a person must be able to do.
 2. **Start from nothing**, as a first user would: a fresh install, account or checkout, the documented first step, no hidden setup.

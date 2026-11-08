@@ -15,6 +15,8 @@ Click a department to fly into it. Its schema shows:
 
 Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
+For a task on the new Development echelon route, the map shows Architecture, Development, Review, Security and Tests in English in every language. It uses the task's recorded stages and owner, including skipped Architecture on small tasks and Security added for risk. It does not infer the route from legacy role gate numbers. Review and Security owners can repair their findings and hand the candidate forward; a wrong goal needs the head's decision.
+
 "Tree" shows the work of the current turn. It opens at 100% from its start, and each employee's name, role, task and state show in full however many employees there are: a long task title wraps, and the tree may be wider and taller than the screen. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
 
 On the map, a department's card has one square per employee, in the same colors.
@@ -30,6 +32,8 @@ On the map, a department's card has one square per employee, in the same colors.
 "+ Hire" asks the orchestrator to staff the department. He proposes people, each with a role, a subscription and a model, and "Hire (2)", with the number of people ticked, creates them.
 
 When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
+
+New Development departments receive the echelon default both during company setup and when added later. Review and Security keep short role identities with separately selectable checking and repair abilities. Review offers a deeper model tier, while actual assignments still require the configured different-model and stronger-edge policy. A template update does not restaff an existing department, change stored employee models or activate a route on existing tasks.
 
 ## Who is always in Operations?
 

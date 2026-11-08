@@ -9,6 +9,8 @@ You can select the proportionate proof for a software result.
 
 Start from the task, employee assignment and potential harm, rather than a fixed sequence of roles. For small work describe a bounded change and its check; shared turn review or extra metrics exist only when assigned. Protected actions and real dependencies are never removed by a fast path.
 
+If `task.echelons` is present, use its persisted stage, current owner and final candidate including Review and Security repairs. Check affected code and tests with verified matching fingerprints; restrict mutation to changed pure functions with fast tests, excluding database, process, network and unknown effects. A wrong goal or a content failure in Tests goes to the head, never back to the original author. An infrastructure failure waits or retries at Tests. Without this route, the legacy task keeps its assigned completion rules.
+
 Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate.
 
 Use direct fast tests for pure logic, narrow integration checks for boundaries and a few end-to-end flows for user-visible behavior. After a batch, check the affected result on one pinned commit. When a full candidate validation is assigned, give it one explicit owner, coordinate the complete required stages once and read the actual logs rather than asking each author for duplicate final metrics.

@@ -27,7 +27,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
 
-Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings in logic return to authors as tasks, small fixes by the fast path, and the tester fixes a flaky or outdated test or an obvious trifle itself in a separate commit. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and preserve author-check and run evidence without duplicate runs. This verification ownership adapts the development roles and skills below.
+Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The assigned test engineer or QA coordinates the full checks on the exact final candidate. In an echelon route, Review and Security own their repairs and hand the verified candidate forward; a wrong goal or content failure in Tests goes to the head. Legacy tasks keep their assigned author-return and shared-turn checks. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and preserve author-check and run evidence without duplicate runs. These are project-owned procedures for any company; they do not change live assignments or permissions.
 
 ## Every template
 
@@ -111,8 +111,10 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-qa-acceptance.md` | Written for Hornhoof | msitarzewski/agency-agents testing/testing-reality-checker.md; msitarzewski/agency-agents testing/testing-evidence-collector.md; garrytan/gstack qa/SKILL.md.tmpl | Hornhoof |
 | `skills/dev-release-notes.md` | Written for Hornhoof | garrytan/gstack document-release/SKILL.md.tmpl | Hornhoof |
 | `skills/dev-review-diff.md` | Written for Hornhoof | affaan-m/ECC agents/code-reviewer.md; obra/superpowers skills/requesting-code-review/code-reviewer.md; anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md; garrytan/gstack review/checklist.md | Hornhoof |
+| `skills/dev-review-fix.md` | Written for Hornhoof | No outside source: standalone review repair and forward handoff procedure | Hornhoof |
 | `skills/dev-review-verdict.md` | Written for Hornhoof | obra/superpowers skills/requesting-code-review/code-reviewer.md | Hornhoof |
 | `skills/dev-security-review.md` | Written for Hornhoof | affaan-m/ECC agents/security-reviewer.md; addyosmani/agent-skills skills/security-and-hardening/SKILL.md; garrytan/gstack review/specialists/security.md; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
+| `skills/dev-security-fix.md` | Written for Hornhoof | No outside source: standalone security repair and evidence procedure | Hornhoof |
 | `skills/dev-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-tdd.md` | Written for Hornhoof | obra/superpowers skills/test-driven-development/SKILL.md; obra/superpowers skills/test-driven-development/writing-good-tests.md | Hornhoof |
 | `skills/dev-test-environment.md` | Written for Hornhoof | No outside source: product test-environment discovery and ownership procedure | Hornhoof |

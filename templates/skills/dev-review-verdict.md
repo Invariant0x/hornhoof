@@ -7,6 +7,14 @@ sources: [obra/superpowers skills/requesting-code-review/code-reviewer.md]
 ---
 You can record an independent review decision from verified findings and exact-version evidence.
 
+## Echelon assignment
+
+When `task.echelons` is present, read its current stage owner and input candidate first. A Review or Security owner records a confirmed finding, keeps ownership for its scoped repair and hands the corrected, verified candidate forward with its parent and actual producer. Never use an ordinary finding to return work to the original author. A wrong goal is escalated to the head with the evidence and existing requirement. Use the task's route-aware commands and current version, route revision, candidate identity and retry key; an old owner or stale candidate cannot complete another owner's work. Record source finding IDs once and keep independent confirmation separate from the fix. A repaired sensitive change still needs a different independent Security approver on its exact SHA before shared integration; recording stage completion is not self-approval of that protected change.
+
+## Legacy immutable gate
+
+The remaining protocol applies to a legacy task without an echelon route, where the assignment is to judge an immutable change.
+
 Read the assigned scope, brief, diff and affected evidence. Inspect correctness, data/access boundaries, error paths, required tests and material simplicity. Never approve your own independent gate or edit the change you are assigned to judge. A self-review may find improvements but does not satisfy an independent Security gate for access/root/permissions/secrets before a shared merge, including urgent/small/named changes.
 
 The task's actual gates and employee assignment determine whether this review is needed. A small task is not automatically exempt from a required independent approval. Use a short result for a small scope; do not demand unassigned shared-turn metrics or duplicate passed checks. Findings belong in the structured verdict, with communication only when needed to resolve a real ambiguity or deliver that result.

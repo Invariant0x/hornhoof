@@ -46,7 +46,21 @@ In Development, each piece is a whole feature for one developer of the pool. Whe
 
 ## Which checks does a piece go through?
 
-Each piece gets only the gates its size and risk need:
+New Development departments use an echelon route for code implementation tasks. Coordination, architecture-only documents and other non-code tasks keep their assigned completion rules. Existing departments and tasks keep their recorded route; an update does not move their employees, models or work into the new route.
+
+| Stage | What happens |
+| --- | --- |
+| Architecture | Records the implementation plan and paths. Small tasks skip this stage. |
+| Development | The author writes code and tests, then hands over a pinned candidate. |
+| Review | Always checks the candidate. Its owner fixes ordinary findings and hands the corrected candidate forward. |
+| Security | The head includes it for risky work, or Review adds it after discovering risk. Its owner fixes confirmed security findings. |
+| Tests | Checks the final candidate, including all repairs, using affected tests and applicable matching fingerprints. |
+
+The current stage has one owner and one writer on the task branch. Review and Security do not return ordinary findings to the author. A wrong goal goes to the head with its evidence. A content failure in Tests also needs the head's decision; an infrastructure failure waits or retries at Tests. Tests passing makes a candidate ready for the authorized integration owner, who still proves inclusion of that exact commit. It does not authorize main or publication.
+
+Reviewers use different canonical models and explicit stronger edges from the department's policy. Codex-produced code requires Claude review; Claude-produced code cannot be reviewed by Codex. An unknown model or missing eligible checker leaves that task waiting for its head, with no silent fallback. Source findings and independent confirmations show what each stage found; the head uses that evidence, without automatically removing Security from risky work. Independent tasks may overlap at Review and Development when their files and dependencies allow it.
+
+For a legacy task without an echelon route, each piece gets only the gates its size and risk need:
 
 - none for research, reports, plans and docs;
 - one review stage for code, where a reviewer of each provider checks the same change in parallel;
@@ -55,6 +69,8 @@ Each piece gets only the gates its size and risk need:
 Acceptance runs once per turn, on the turn's branch.
 
 ## How does a member work its piece?
+
+The steps below describe a legacy task. A task with an echelon route follows its current owner and candidate as described above.
 
 1. It works the task in a branch.
 2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again.
