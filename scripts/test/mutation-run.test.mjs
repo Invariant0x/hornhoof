@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { judgedAgain, keepJudges, mutateSources, mutatorArgs, outcomeOf, selectedSources, testCommand } from '../mutation/run.mjs';
+import { encodePlan } from '../author-check/plan.mjs';
 
 const table = (killed, survived, uncovered, sites) => `name   ns  killed survived uncovered sites score\n-----\nfoo    a        ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n-----\nTotal         ${killed}        ${survived}          ${uncovered}     ${sites}  50.0%\n\n`;
 
@@ -70,6 +71,89 @@ test('what the tool runs says to mutate everything only when asked', () => {
   assert.ok(!mutatorArgs('a/one.ts', ['a/test/one.test.ts'], false).includes('--mutate-all'));
   assert.ok(mutatorArgs('a/one.ts', ['a/test/one.test.ts'], true).includes('--mutate-all'));
   assert.deepEqual(mutatorArgs('a/one.ts', ['a/test/one.test.ts'], false).slice(0, 4), ['--root', '.', '--source-root', 'a/one.ts']);
+});
+
+test('a narrow mutator command carries only the selected function lines', () => {
+  const args = mutatorArgs('a/one.ts', ['a/test/one.test.ts'], true, [3, 1, 2, 2]);
+  assert.equal(args[args.indexOf('--lines') + 1], '1,2,3');
+  assert.throws(() => mutatorArgs('a/one.ts', ['a/test/one.test.ts'], true, []), /lines/i);
+});
+
+test('duplicate source selections produce one outcome and one mutation', async () => {
+  const calls = [];
+  const files = await mutateSources(['a/one.ts', 'a/one.ts'], new Map([['a/one.ts', ['a/test/one.test.ts']]]), {
+    testsPass: async () => true, mutate: async source => { calls.push(source); return { code: 0, output: table(1, 0, 0, 1) }; },
+  });
+  assert.equal(files.length, 1); assert.deepEqual(calls, ['a/one.ts']);
+});
+
+test('current mutator totals keep compile errors and timeouts separate from kills', () => {
+  assert.deepEqual(outcomeOf(0, 'Total 3 0 0 0 0 3 100.0%\n'), { status: 'passed', note: '3 killed, 0 survived, 0 uncovered, 0 compile_error, 0 timeout of 3 sites' });
+  for (const totals of ['Total 0 0 0 1 0 1 n/a\n', 'Total 0 0 0 0 1 1 n/a\n']) {
+    const outcome = outcomeOf(0, totals);
+    assert.equal(outcome.status, 'failed');
+    assert.match(outcome.note, /compile_error.*timeout/);
+  }
+});
+
+function deltaRepository(t) {
+  const folder = mkdtempSync(join(tmpdir(), 'hh-mutation-delta-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const root = join(folder, 'repo'), bin = join(folder, 'bin'), calls = join(folder, 'calls'), report = join(folder, 'report.json'), selected = join(folder, 'selected.json');
+  mkdirSync(root); mkdirSync(bin);
+  const write = (path, text) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), text); };
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } }).trim();
+  const source = 'apps/a/src/pure.ts', unsafe = 'apps/a/src/process.ts', fast = 'apps/a/test/pure.test.ts';
+  const code = 'export function changed(value: number) {\n return value + 1;\n}\nexport function untouched(value: number) {\n return value + 2;\n}\n';
+  const mutation = { status: 'supported', language: 'typescript', tool: join(bin, 'mutator'), sourcePaths: [source, unsafe], fastTestPaths: [fast] };
+  write('.hornhoof/test-environment.json', JSON.stringify({ mutation, dependencies: { inputs: [], install: [] }, prepare: [], suites: [{ id: 'a', root: 'apps/a' }, { id: 'mutation', root: 'scripts/mutation' }] }));
+  write('package.json', '{}'); write(source, code); write(unsafe, "import { spawn } from 'node:child_process';\nexport function processWork() { return spawn('true'); }\n");
+  write(fast, "import { changed } from '../src/pure.js';\nimport { it, expect } from 'vitest';\nit('changes', () => expect(changed(1)).toBe(2));\n");
+  write('scripts/mutation/vitest.config.mjs', 'export default {};');
+  writeFileSync(join(bin, 'npx'), `#!/usr/bin/env node\nconst fs=require('node:fs'); const arg=process.argv.find(a=>a.startsWith('--outputFile.json=')); if(arg) fs.writeFileSync(arg.slice('--outputFile.json='.length),JSON.stringify({numTotalTests:process.env.HH_FIXTURE_ZERO==='1'?0:1,numPassedTests:process.env.HH_FIXTURE_ZERO==='1'?0:1,numFailedTests:0}));\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'mutator'), `#!/usr/bin/env node\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n'); process.stdout.write('Total 1 0 0 1 100.0%\\n');\n`, { mode: 0o755 });
+  git('init', '--quiet'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test'); git('add', '.'); git('commit', '--quiet', '-m', 'Base');
+  const base = git('rev-parse', 'HEAD'); write(source, code.replace('return value + 1;', 'return value > 0 ? value : 0;')); write(unsafe, "import { spawn } from 'node:child_process';\nexport function processWork() { return spawn('false'); }\n");
+  git('add', '.'); git('commit', '--quiet', '-m', 'Candidate');
+  const head = git('rev-parse', 'HEAD');
+  const run = (args = ['--base', base, '--head', head], files = [source, source], extra = {}, cwd = root) => {
+    writeFileSync(selected, JSON.stringify(files));
+    try {
+      const output = execFileSync(process.execPath, [fileURLToPath(new URL('../mutation/run.mjs', import.meta.url)), ...args], { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HH_TEST_FILES: selected, HH_TEST_REPORT: report, ...extra }, encoding: 'utf8', stdio: 'pipe' });
+      return { code: 0, output, report: JSON.parse(readFileSync(report, 'utf8')) };
+    } catch (error) { return { code: error.status, output: String(error.stdout), report: existsSync(report) ? JSON.parse(readFileSync(report, 'utf8')) : null }; }
+  };
+  return { root, folder, source, unsafe, base, head, run, calls: () => existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [] };
+}
+
+test('the narrow CLI mutates changed pure lines, reports its scope and keeps whole judges separate', t => {
+  const fixture = deltaRepository(t), result = fixture.run();
+  assert.equal(result.code, 0, result.output);
+  assert.equal(result.report.files.length, 1);
+  const args = fixture.calls()[0];
+  assert.equal(args[args.indexOf('--lines') + 1], '1,2,3');
+  assert.equal(fixture.calls().length, 1);
+  assert.equal(result.report.selection.baseCommit, fixture.base); assert.equal(result.report.selection.commit, fixture.head);
+  assert.equal(result.report.selection.fullSuiteComparator, 'unavailable');
+  assert.equal(existsSync(join(fixture.root, '.metrics/mutate/judges', fixture.source.replaceAll('/', '__'))), false);
+});
+
+for (const failure of ['unsafe', 'stale-head', 'zero-tests']) {
+  test(`the narrow CLI rejects ${failure} before any mutation`, t => {
+    const fixture = deltaRepository(t);
+    const args = ['--base', fixture.base, '--head', failure === 'stale-head' ? fixture.base : fixture.head];
+    const result = fixture.run(args, [failure === 'unsafe' ? fixture.unsafe : fixture.source], failure === 'zero-tests' ? { HH_FIXTURE_ZERO: '1' } : {});
+    assert.equal(result.code, 1, result.output); assert.deepEqual(fixture.calls(), []);
+  });
+}
+
+test('a bound delta plan works on a shallow worker without its base object', t => {
+  const fixture = deltaRepository(t), shallow = join(fixture.folder, 'shallow');
+  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${fixture.root}`, shallow], { stdio: 'pipe' });
+  const plan = encodePlan({ sha: fixture.head, base: fixture.base, changes: [{ path: fixture.source, kind: 'modified' }], hunks: { [fixture.source]: [[2, 1]] }, grown: {} });
+  const result = fixture.run(['--base', fixture.base, '--head', fixture.head, '--plan', plan], [fixture.source], {}, shallow);
+  assert.equal(result.code, 0, result.output); assert.equal(fixture.calls()[0].includes('--lines'), true);
+  assert.equal(result.report.selection.deltaSource, 'plan');
 });
 
 test('a source is judged again by tests that changed, and keeps what it was judged by only once it went well', async t => {
