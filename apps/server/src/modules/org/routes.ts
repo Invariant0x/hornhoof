@@ -17,7 +17,8 @@ import { CHANNEL_MS, type Channel, type Endpoint } from '../events/bus.js';
 import { workingSeen } from '../events/stream-view.js';
 import { machineOf } from '../nodes/nodes.js';
 import { departmentOwners, pendingFor, visibleDecisions } from '../tasks/decisions.js';
-import { seesTask } from '../tasks/sight.js';
+import { seesTask, shownEchelons } from '../tasks/sight.js';
+import { routeSnapshots } from '../tasks/echelons-store.js';
 import { agentFailureStates } from '../tasks/failures.js';
 import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
@@ -102,6 +103,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
        Only of the tasks this person sees; the rest see that it exists, not what it does. */
     const reach = viewer.access;
     const { openTasks, running, busy, doing } = await agentWork(db, me.companyId);
+    const snapshots = await routeSnapshots(db, openTasks.filter(t => seesTask(viewer, t)));
     const currentOf = (id: string) => {
       const mine = openTasks.filter(t => t.departmentId === id && seesTask(viewer, t));
       const t = mine.find(x => !x.executorAgentId) ?? mine[0];
@@ -176,7 +178,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             /* How often it wakes on its timer, in minutes. */
             timer: a.timerMinutes,
             /* Like the department's current task, only for people who reach it. */
-            task: now.task && canReach(reach, { departmentId: dept.id }) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces } : null,
+            task: now.task && seesTask(viewer, now.task) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces, echelons: shownEchelons(viewer, snapshots.get(now.task.id)!) } : null,
           };
         });
     /* The roles a department's employees hold, with the gate each one keeps, for the department's schema. */

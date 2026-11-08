@@ -13,17 +13,15 @@ type Status = 'off' | 'working' | 'waiting' | 'queued' | 'handed' | 'idle';
 type Work = { status: Status; task: Task | null };
 type Facts = { openTasks: Task[]; running: Run[]; asked: Asked[]; notDone: ReadonlySet<string> };
 
-/* At a gate, only its current reviewers hold it. Before the gate, its executor or holder does. */
+/* Only the current assignee owns a task, including a checker who received it from its author. */
 function holds(task: Task, agentId: string): boolean {
-  if (task.stage === 0) return (task.executorAgentId ?? task.assigneeAgentId) === agentId;
-  if (task.status !== 'review' && task.status !== 'waiting') return false;
-  return task.panel.length ? task.panel.includes(agentId) : task.assigneeAgentId === agentId;
+  return task.assigneeAgentId === agentId;
 }
 
 function waiting(agentId: string, facts: Facts, held: Task[]): Task[] {
   const byId = new Map(facts.openTasks.map(t => [t.id, t]));
   const asked = facts.asked.filter(r => r.agentId === agentId).map(r => byId.get(r.taskId)).filter(t => t !== undefined);
-  return [...asked, ...held.filter(t => t.status === 'blocked' || (t.status === 'waiting' && t.stage === 0))];
+  return [...asked, ...held.filter(t => t.status === 'blocked' || t.status === 'waiting')];
 }
 
 function choices(agentId: string, facts: Facts) {
@@ -31,7 +29,7 @@ function choices(agentId: string, facts: Facts) {
   const parents = new Set(facts.openTasks.map(t => t.parentId));
   const waits = waiting(agentId, facts, held);
   const next = held.filter(t => !parents.has(t.id) && !waits.includes(t));
-  const gave = [...facts.openTasks.filter(t => t.stage > 0 && t.executorAgentId === agentId), ...held.filter(t => parents.has(t.id))];
+  const gave = [...facts.openTasks.filter(t => t.assigneeAgentId !== agentId && t.executorAgentId === agentId), ...held.filter(t => parents.has(t.id))];
   return { held, waits, next, gave };
 }
 

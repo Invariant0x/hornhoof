@@ -1,3 +1,4 @@
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canReach } from '../../auth/access.js';
@@ -36,8 +37,18 @@ function shownIndependent(viewer: AgentViewer, part: TaskLine['independentPart']
   return shownRef(viewer, part.executor) ? part : null;
 }
 
+/* Route history is shared, but hidden employees and repository candidates remain private. */
+export function shownEchelons(viewer: AgentViewer, route: EchelonsSnapshot): EchelonsSnapshot {
+  if (viewer.full) return route;
+  const owner = (id: string | null) => seesAgentId(viewer, id) ? id : null;
+  return { ...route, ownerAgentId: owner(route.ownerAgentId), candidateId: null, assignment: null,
+    security: { ...route.security, addedBy: owner(route.security.addedBy) },
+    stages: route.stages.map(step => ({ ...step, ownerAgentId: owner(step.ownerAgentId), inputCandidateId: null, candidateId: null })),
+  };
+}
+
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
-  return { ...line, waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
+  return { ...line, echelons: shownEchelons(viewer, line.echelons), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
 }
 
 /* Task lines as this person reads them. */

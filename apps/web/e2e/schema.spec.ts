@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Department, DeptRole, Employee, Org } from '../src/types';
-import { schemaLayout, stepPaths } from '../src/screens/schema';
-import { toD } from '../src/ui/wires';
+import { taskRoute } from '../test/task-route';
+import type { EchelonStage } from '@hornhoof/protocol/echelons';
 import { ME, serveApi } from './api';
 
 const role = (id: string, en: string, ru: string, gate: number | null = null, schema?: 'before_work' | 'final_check' | 'observer'): DeptRole => ({
@@ -45,7 +45,13 @@ const ROLES = [
 ];
 
 const NOW = '2026-11-05T12:00:00.000Z';
-const RETURNED = '2026-11-05T11:59:00.000Z';
+const STAGES: EchelonStage[] = ['architecture', 'development', 'review', 'security', 'tests'];
+
+function owner(id: string, name: string, roleId: string, stage: EchelonStage, index: number): Employee {
+  const echelons = taskRoute(stage, id);
+  echelons.stages = echelons.stages.map(step => step.stage === stage ? { ...step, status: 'active' } : step);
+  return { ...employee(id, name, roleId), status: 'working', task: { id: `task-${index}`, number: index + 1, title: `Work ${index + 1}`, stage: 0, gateCount: 0, bounces: 0, echelons } };
+}
 
 const DEPARTMENT: Department = {
   id: 'd2',
@@ -57,10 +63,10 @@ const DEPARTMENT: Department = {
   products: [],
   teams: [],
   people: [],
-  employees: [employee('head', 'Hana', 'DEV-HEAD', 'head'), ...ROLES.map(r => employee(r.id.toLowerCase(), r.title.en, r.id))],
+  employees: [employee('head', 'Hana', 'DEV-HEAD', 'head'), ...ROLES.map((r, i) => i < STAGES.length ? owner(r.id.toLowerCase(), r.title.en, r.id, STAGES[i]!, i) : employee(r.id.toLowerCase(), r.title.en, r.id))],
   roles: ROLES,
-  workLines: [{ upstreamAgentId: 'head', downstreamAgentId: 'dev-eng', working: false, workEpoch: 1, returnedEpoch: 1, returnedAt: RETURNED }],
-  reworkAt: RETURNED,
+  workLines: [],
+  reworkAt: null,
 };
 
 const ORG: Org = {
@@ -86,8 +92,8 @@ async function serveSchema(page: Page) {
 }
 
 for (const look of [
-  { lang: 'en', theme: 'light', final: 'final turn check, once per turn', observer: 'turn observer', gate: (n: number) => `gate ${n}` },
-  { lang: 'ru', theme: 'dark', final: 'финальная проверка хода, один раз за ход', observer: 'наблюдатель хода', gate: (n: number) => `рубеж ${n}` },
+  { lang: 'en', theme: 'light', observer: 'turn observer' },
+  { lang: 'ru', theme: 'dark', observer: 'наблюдатель хода' },
 ] as const) {
   test(`orders the development pipeline and places the observer outside it: ${look.lang}`, async ({ page }, info) => {
     const errors: string[] = [];
@@ -108,57 +114,15 @@ for (const look of [
     await page.screenshot({ path: evidence, fullPage: true });
     await info.attach(`development-${look.lang}.png`, { path: evidence, contentType: 'image/png' });
 
-    const frame = (title: string) => page.locator('.frame').filter({ has: page.locator('.fn', { hasText: title }) });
-    const architect = frame(ROLES[0]!.title[look.lang]);
-    const developer = frame(ROLES[1]!.title[look.lang]);
-    const reviewer = frame(ROLES[2]!.title[look.lang]);
-    const security = frame(ROLES[3]!.title[look.lang]);
-    const final = frame(ROLES[4]!.title[look.lang]);
-    const observer = frame(ROLES[5]!.title[look.lang]);
-    await expect(final).toContainText(look.final);
-    await expect(final).not.toHaveClass(/gt/);
+    const frames = ['Architecture', 'Development', 'Review', 'Security', 'Tests'].map(name => page.getByRole('group', { name, exact: true }));
+    for (const frame of frames) await expect(frame).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Cleanup', exact: true })).toHaveCount(0);
+    const observer = page.locator('.frame').filter({ has: page.locator('.fn', { hasText: ROLES[5]!.title[look.lang] }) });
     await expect(observer).toContainText(look.observer);
-    expect(await page.locator('.dcanvas .gl').allTextContents()).toEqual([look.gate(1), look.gate(2)]);
-
-    const schema = schemaLayout(DEPARTMENT, 0);
-    const paths = stepPaths(schema);
-    const backs = ['dev-rev', 'dev-sec'].map(from => paths.back(from, 'dev-eng')!);
-    const amber = page.locator('.wires path.live.a[data-work="dev-eng"]');
-    await expect(amber).toHaveCount(2);
-    const dots = page.locator('.dview circle.pt.a animateMotion');
-    await expect(dots).toHaveCount(4);
-    const drawn = await page.locator('.dview .wires .rl').evaluateAll(paths => paths.map(path => path.getAttribute('d')));
-    for (const line of schema.lines.filter(l => l.cls === 'rl')) expect(drawn).toContain(toD(line.pts));
-    for (const [index, back] of backs.entries()) {
-      await expect(amber.nth(index)).toHaveAttribute('d', toD(back));
-      for (let j = 0; j < 2; j++) expect(await dots.nth(index * 2 + j).getAttribute('path')).toBe(toD(back));
-      for (let i = 1; i < back.length; i++) {
-        const segment = [back[i - 1]!, back[i]!];
-        if (segment[0][0] === segment[1][0]) {
-          expect(drawn).toContain(toD(segment));
-        } else {
-          const y = segment[0][1], xs = segment.map(p => p[0]);
-          expect(schema.lines.some(l => l.cls === 'rl' && l.pts[0]![1] === y && l.pts[1]![1] === y && xs.every(x => x >= Math.min(l.pts[0]![0], l.pts[1]![0]) && x <= Math.max(l.pts[0]![0], l.pts[1]![0])))).toBe(true);
-        }
-      }
-    }
-
-    const boxes = await Promise.all([architect, developer, reviewer, security, final, observer].map(async f => (await f.boundingBox())!));
-    for (let i = 0; i < 4; i++) expect(boxes[i]!.x).toBeLessThan(boxes[i + 1]!.x);
+    const boxes = await Promise.all([...frames, observer].map(async frame => (await frame.boundingBox())!));
+    for (let i = 0; i < frames.length - 1; i++) expect(boxes[i]!.x).toBeLessThan(boxes[i + 1]!.x);
     expect(boxes[5]!.x).toBeLessThan(boxes[0]!.x);
-
-    if (look.lang === 'en') {
-      for (let i = 0; i < 3; i++) await page.locator('.dview .zoom button').nth(1).click();
-      await expect.poll(() => page.locator('.dview circle.pt.a').evaluateAll(circles => {
-        const horizontal = [...document.querySelectorAll<SVGPathElement>('.dview .wires .rl')].find(path => path.getBBox().height === 0);
-        if (!horizontal) return false;
-        const y = horizontal.getBoundingClientRect().y;
-        return circles.some(circle => Math.abs(circle.getBoundingClientRect().y - y) < 4);
-      })).toBe(true);
-      const returnEvidence = info.outputPath('development-return-line.png');
-      await page.screenshot({ path: returnEvidence, fullPage: true });
-      await info.attach('development-return-line.png', { path: returnEvidence, contentType: 'image/png' });
-    }
+    await expect(page.locator('.dview .wires .rl')).toHaveCount(0);
 
     await page.setViewportSize({ width: 375, height: 812 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
