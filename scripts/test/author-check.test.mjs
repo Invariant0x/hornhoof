@@ -163,6 +163,27 @@ test('a test report that cannot be read leaves the count unknown, never zero', a
   const files = { ...FILES }; delete files[REPORT];
   const result = await runStages(given(), fake(undefined, files));
   assert.equal(result.numbers.tests, null);
+  assert.equal(stage(result, 'tests').status, 'unavailable');
+});
+
+for (const [why, report] of [
+  ['zero tests', { numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }],
+  ['only skipped tests', { numTotalTests: 2, numPassedTests: 0, numFailedTests: 0, numPendingTests: 2, numTodoTests: 0 }],
+  ['a reported failure with exit zero', { numTotalTests: 2, numPassedTests: 1, numFailedTests: 1, numPendingTests: 0, numTodoTests: 0 }],
+]) {
+  test(`the author check fails for ${why}`, async () => {
+    const result = await runStages(given(), fake(undefined, { ...FILES, [REPORT]: JSON.stringify(report) }));
+    assert.equal(stage(result, 'tests').status, 'failed');
+    assert.equal(exitCodeOf(result.stages), 1);
+  });
+}
+
+test('an empty package selection cannot fall through to the runner default suite', async () => {
+  const input = given(); input.selection.packages[0].units = [];
+  const ports = fake();
+  const result = await runStages(input, ports);
+  assert.equal(stage(result, 'tests').status, 'failed');
+  assert.equal(ports.calls.filter(call => call.args.includes('vitest')).length, 0);
 });
 
 test('a changed source without any selected test scores on zero coverage of that fact', async () => {
