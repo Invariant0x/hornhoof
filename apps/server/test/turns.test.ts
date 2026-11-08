@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, improvements, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
+import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { settle } from '../src/modules/tasks/turns.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -186,8 +189,10 @@ describe('turns', () => {
     const [root] = await db.select().from(tasks).where(eq(tasks.number, 2));
     const [child] = await db
       .insert(tasks)
-      .values({ companyId, number: 3, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Open child', brief: 'Keep assignee.', body: 'Continue the same work.', status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [hana.id], createdByAgentId: orchestrator.id })
+      .values({ companyId, number: 3, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Open child', brief: 'Keep assignee.', body: 'Continue the same work.', status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, createdByAgentId: orchestrator.id })
       .returning();
+    await db.transaction(tx => createRoute(tx, child!, { reviewerAgentId: hana.id, paths: ['logic/totals.ts'] }));
+    const childRoute = await routeOf(db, child!);
     const [finished] = await db
       .insert(tasks)
       .values({ companyId, number: 4, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Finished child', brief: 'Keep result.', body: 'Finished work.', status: 'done', closedAt: new Date(), executorAgentId: bruno.id, createdByAgentId: orchestrator.id })
@@ -198,8 +203,9 @@ describe('turns', () => {
 
     expect((await call(boss, 'merge_turn', { source: 2, target: 1 })).isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, root!.id)))[0]).toMatchObject({ turnId: target!.id, status: 'open', assigneeAgentId: hana.id });
-    expect((await db.select().from(tasks).where(eq(tasks.id, child!.id)))[0]).toMatchObject({ turnId: target!.id, parentId: root!.id, status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [hana.id], body: 'Continue the same work.' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, child!.id)))[0]).toMatchObject({ turnId: target!.id, parentId: root!.id, status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, body: 'Continue the same work.' });
     expect((await db.select().from(tasks).where(eq(tasks.id, finished!.id)))[0]).toMatchObject({ turnId: target!.id, parentId: root!.id, status: 'done', closedAt: finished!.closedAt });
+    expect(await routeOf(db, child!)).toEqual(childRoute);
     expect((await db.select().from(jobs).where(eq(jobs.id, running!.id)))[0]).toEqual(running);
     expect((await db.select().from(taskEvents).where(eq(taskEvents.taskId, finished!.id)))[0]).toMatchObject({ kind: 'submitted', text: 'Child result.', data: { evidence: 'kept evidence' } });
     const listed = (await get(ceoToken, '/api/improvements')).json().improvements.find((i: { id: string }) => i.id === idea!.id);
@@ -239,19 +245,30 @@ describe('turns', () => {
     const { db, ctx, orchestrator, dev, hana, bruno, tools, queued } = await company();
     const boss = await tools(orchestrator);
     await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
-    await call(boss, 'plan_turn', { title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked'), work(dev.id, 'Review')] });
+    await call(boss, 'plan_turn', { title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked')] });
     const [target] = await db.select().from(turns).where(eq(turns.number, 1));
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.number, 2));
     await db.update(tasks).set({ status: 'blocked', assigneeAgentId: hana.id }).where(eq(tasks.number, 3));
-    await db.update(tasks).set({ status: 'review', stage: 1, gates: [hana.id], panel: [hana.id], executorAgentId: bruno.id, assigneeAgentId: hana.id }).where(eq(tasks.number, 4));
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+    await db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, bruno.id));
+    const [reviewer] = await db.insert(agents).values({ companyId: dev.companyId, departmentId: dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rita', model: 'claude-opus-5-5', subscriptionId: bruno.subscriptionId, skills: ctx.templates.roles.get('DEV-REV')!.skills.filter(s => s.on).map(s => s.id) }).returning();
+    ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+    const made = await createTask(ctx, { agentId: hana.id }, { title: 'Review', brief: '', body: 'Keep totals correct.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: reviewer!.id });
+    const checked = await submit(ctx, bruno.id, made.task.id, { summary: 'Ready.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    /* The merge input contains unfinished executable work parked in the planned source. */
+    await db.update(tasks).set({ turnId: source!.id }).where(eq(tasks.id, checked.task.id));
+    const checkingRoute = await routeOf(db, checked.task);
+    expect(routeSnapshot(checkingRoute, reviewer!.id)).toMatchObject({ stage: 'review', phase: 'active', candidateId: expect.any(String) });
     const [finished] = await db.select().from(tasks).where(eq(tasks.number, 2));
 
     expect(await settle(ctx, finished!)).toBeNull();
     expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'planned' });
     expect((await call(boss, 'merge_turn', { source: 2, target: 1 })).isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.number, 3)))[0]).toMatchObject({ turnId: target!.id, status: 'blocked', assigneeAgentId: hana.id });
-    expect((await db.select().from(tasks).where(eq(tasks.number, 4)))[0]).toMatchObject({ turnId: target!.id, status: 'review', stage: 1, panel: [hana.id], assigneeAgentId: hana.id });
+    expect((await db.select().from(tasks).where(eq(tasks.id, checked.task.id)))[0]).toMatchObject({ turnId: target!.id, status: 'review', assigneeAgentId: reviewer!.id, executorAgentId: bruno.id });
+    expect(await routeOf(db, checked.task)).toEqual(checkingRoute);
     expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'closed' });
     expect(await queued(hana.id)).toHaveLength(1);
   });
