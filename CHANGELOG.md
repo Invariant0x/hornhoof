@@ -8,7 +8,8 @@ The middle number is the turn; the last counts releases between turns.
 ## [0.8.2] - 2026-11-08
 
 Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,
-and stop nodes from spending a whole processor core on their program observer.
+let whoever builds or reviews a change check it in their own workspace, and stop nodes from spending a whole processor
+core on their program observer.
 
 ### Added
 
@@ -22,6 +23,13 @@ and stop nodes from spending a whole processor core on their program observer.
 - Skills of all departments stand alone: none names or relies on another, and any set of ticked skills works together.
 - Roles are one line about who the employee is; how it works lives in its skills.
 - The generalist developer role is gone: an employee with the skills that cover the whole chain does that work.
+- Whoever builds or reviews a change checks it in their own workspace right away: dependency installs, the named test
+  files of the change, types, lint, builds and quality checks. Only a whole test suite goes through run_tests, which
+  splits it into groups over the free machines. A node refuses a whole suite, a task runner that runs everything and a
+  watch mode in an agent's terminal.
+- The architect designs new features and changes that reshape the architecture; one feature goes to one developer end to
+  end. Below version 1.0 nothing old is kept for compatibility, and existing records are corrected at release.
+- Removing what a change made unneeded is a skill a head can turn on for reviewers and developers; it is off by default.
 - install.sh back-node returns a node to 0.8.1.
 
 ### Fixed
