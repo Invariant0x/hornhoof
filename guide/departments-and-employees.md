@@ -113,6 +113,8 @@ The head spreads tasks over the implementers that are on, a different task for e
 
 ## How do reviews at a gate work?
 
+The gate protocol below is for legacy tasks. An echelon task instead follows its recorded single owner and different-model policy, with Review and Security owning their repairs. Missing eligible reviewers leave that task waiting for the head.
+
 Reviewers of different models find different things. So at each gate, one employee of the gate's role for each maker of models checks the same work at once, such as one on Claude and one on Codex. For each maker, it is the employee that is on with the fewest tasks at a gate.
 
 - The gate passes when all of them pass.
@@ -170,9 +172,11 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Sales | - | Account executive | Head of sales, Sales development representative, Sales operations analyst |
 | Support | - | Second-line support | First-line support, Head of support, Knowledge base editor |
 
-Deep roles: Architect, Controller, Head of business development, Head of development, Security engineer.
+Deep roles: Architect, Code reviewer, Controller, Head of business development, Head of development, Security engineer.
 
 ## What if a role has nobody switched on?
+
+For an echelon task, mandatory Review and risk-required Security remain required even when no eligible employee is available. The task waits for its head rather than skipping that protection. Legacy gates behave as follows:
 
 - A role with nobody on takes no part. It gets no tasks, and work passes its gate by, on to the next one, or is done after the last.
 - A gate whose role has people on, but none who can check it, waits with the head and says who they are. That happens, for example, when they have no subscription. It starts again once one of the role who is on can check it, or when the head gives it other gates.
