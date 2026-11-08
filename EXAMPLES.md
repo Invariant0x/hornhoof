@@ -14,7 +14,7 @@ Work written on one maker's model is checked by reviewers on the others, one of 
 
 A plan that reaches its limit does not stop the job. Its task goes to an employee of the same role on another maker's plan that still has room, or waits until the limit resets and then goes on by itself. Next to each plan's limits, "Tasks may use" sets how much of every limit window the tasks may spend, from 50 to 90 percent, so some is always left for you.
 
-![Connecting AI plans](.github/assets/subscriptions.png)
+![Connecting AI plans](.github/assets/subscriptions.gif)
 
 ### Too many windows
 
@@ -36,7 +36,7 @@ Connect your work laptop, an old one and a server, each with one command from th
 
 When an agent runs the tests, Hornhoof sends them to whichever machine is free and splits a big test suite across several machines at once. Other heavy work, like a build or a report, goes out the same way, and the results come back to the task. A busy machine gets no new work. Untick "Lend to test runs" on a machine to keep it for yourself.
 
-![The pool of machines](.github/assets/machines.png)
+![The pool of machines](.github/assets/machines.gif)
 
 ### Building something with friends
 

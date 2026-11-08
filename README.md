@@ -2,227 +2,209 @@
 
 # Hornhoof
 
-**Your own company of AI agents, on your own computers.**
+**Your own company of AI agents: any models, your own computers.**
 
-Hornhoof turns the AI plans you already pay for, like Claude, ChatGPT, Kimi, GLM or Google AI, into a company that works for you.
+Hornhoof is a system for running AI agents as one company. It works with any models: through subscriptions like Claude, ChatGPT, Kimi, GLM or Google, through API keys, and with new models as they come out. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents on different models check each other's work. You see everything on one map and get the finished result.
 
-You write what you want in plain words. The orchestrator, the main agent, splits it into tasks and gives them to departments. Every department has a head and employees, and every employee is an AI agent. You watch all of them on one map, see what each one is doing right now, and step in only when someone asks you.
-
-It all runs on your own computers. There is no account to make, nothing to sign up for, and no Hornhoof server that holds your company.
-
-Hornhoof is young. It works, and it changes fast. Expect rough edges, and tell us about them.
+It is your own virtual cloud. It runs on the computers you connect, one or many, yours or your team's. No cloud provider, no third-party servers, no account to make. Free and open source.
 
 ## Hornhoof is for you if
 
+- ✅ You have many Claude Code or Codex windows open and no longer remember which one does what.
+- ✅ You and a few friends want to build something together, and each of you has your own AI plans.
 - ✅ You pay for more than one AI plan and want all of them working, not waiting.
-- ✅ You have ten Claude Code or Codex windows open and no longer remember which one does what.
-- ✅ You want to give a goal and get the result, not watch every step.
-- ✅ You and a few friends each have a plan and want to build something together.
-- ✅ You have an old laptop, a home server or a spare Mac that sits idle most of the day.
-- ✅ You want the company to keep going when one of your computers turns off.
-- ✅ You want to look in from your phone, wherever you are.
+- ✅ You have a spare laptop, a home server or an old Mac that sits idle most of the day.
+- ✅ You want to give a goal and get a checked result, not watch every step.
+- ✅ You want your home looked after too: devices, network, shopping, bills.
 - ✅ You want it all on your own machines, under your own control.
 
 ## What changes
 
 | | AI programs on their own | With Hornhoof |
 | --- | :---: | :---: |
-| All your AI plans work at the same time, on one job | ❌ | ✅ |
+| Your plans and your friends' plans work on one job at the same time | ❌ | ✅ |
 | Work goes on when a plan hits its limit | ❌ | ✅ |
-| Agents hand work to each other, without you copying it over | ❌ | ✅ |
-| Every change is reviewed by an AI of another maker | ❌ | ✅ |
-| Nothing reaches the main branch before its exact commit is approved | ❌ | ✅ |
-| One map shows what every agent is doing right now | ❌ | ✅ |
-| Spare computers take tests and heavy jobs | ❌ | ✅ |
+| Every change is reviewed by AI of other makers, then security, then tests | ❌ | ✅ |
+| One map shows every agent, what it does now and who stands idle | ❌ | ✅ |
+| Spare computers take the tests and heavy jobs | ❌ | ✅ |
 | The company keeps running when one of your computers stops | ❌ | ✅ |
-| Friends join with their own plans | ❌ | ✅ |
+| Nothing reaches your main branch without your approval | ❌ | ✅ |
+| Departments beyond code: design, marketing, sales, the home | ❌ | ✅ |
 | Runs on your own machines, with no sign-up | ✅ | ✅ |
 
 "AI programs on their own" means Claude Code, Codex, Kimi Code and the like, each in its own window. Hornhoof runs them for you as one team.
 
-## How it works
+## How it starts
 
-The pictures show Moonfern, a made-up company. Its people, plans and work are invented for the demo.
-
-1. Install Hornhoof with one line in the terminal.
-
-2. Open the link it shows. Name your company and pick a template, or start with Operations alone.
-
-   ![Setting up a company](.github/assets/setup.gif)
-
-3. Connect your AI plans. Each runs on your own computer, in a small locked box of its own, and you sign it in once in Hornhoof for all your machines.
-
-   ![Connecting AI plans](.github/assets/subscriptions.png)
-
-4. Tell the orchestrator about your company. He proposes departments and people for them. You tick what you want and click once.
-
-   ![Building the departments](.github/assets/build.gif)
-
-5. Write what you need. The orchestrator packs it into a turn of tasks, the heads hand out the work, and you watch it move on the map.
-
-   ![The company map](.github/assets/map.gif)
-
-## What people do with it
-
-### Many AI plans working as one team
-
-Say you have Claude, ChatGPT and Kimi. Usually you work in one of them while the others wait. In Hornhoof each plan carries its own employees, so developers on Claude, on Codex and on Kimi take different tasks of the same job at the same time.
-
-A change written on one maker's model is checked by reviewers on the others, because each of them catches mistakes the others miss. When one plan reaches its limit, its task goes to an employee of the same role on another plan, or waits until the limit resets and then goes on by itself. You set how much of each plan's limit the tasks may use, so some is always left for you.
-
-![The Development department at work](.github/assets/development.gif)
-
-### Too many windows
-
-Instead of a dozen chats you have one company. You write to the orchestrator once, he turns it into tasks, and each department's head gives them out. Every employee works in its own terminal, which you can open and watch live, and type into when the plan is yours. When an agent needs you, its question waits for you at the top of Tasks, so you answer everything in one place.
-
-![An employee's terminal](.github/assets/terminal.gif)
-
-![Tasks and turns](.github/assets/tasks.gif)
-
-### A company that keeps itself moving
-
-Operations, a department every company always has, keeps the work going so you do not have to. Its task watchdog wakes every 10 minutes while there is work, nudges any agent that is stuck on a task, and tells the head when a nudge did not help. Every three hours another agent reads what failed and where agents stumbled, and proposes fixes. They wait for you under Improvements. When an agent's program stops on a screen nobody planned for, the program operator looks at it: it passes what is harmless, refuses what a program may not do, and brings you terms, sign-ins and payment with a picture of the screen. Hornhoof keeps these people and the department's head in place by itself, in new companies and in ones that already run.
-
-### All your computers in one pool
-
-Connect your work laptop, an old one and a home server, each with one command. A computer needs no AI plan to join: it can simply lend its power.
-
-The Machines tab shows every machine of the company as one pool: how many are online, their processor cores and free memory together, and how busy they are right now. Each machine's card shows its owner, system, processor, memory, free disk and load, and the employees and test runs on it at the moment.
-
-The pool does the heavy lifting. When an agent runs the tests, Hornhoof sends them to the freest machine, and splits a big test suite over several machines at once when the test runner can split it. Builds, reports and other heavy commands go out the same way, and their results come back to the task. The agents keep working where they are meanwhile. A machine whose processors are busy 90% of the time or more gets no new work. If a machine goes away in the middle of a test run, its part starts again on another one. A new employee starts on the freest machine of its plan.
-
-Every machine is lent to the pool at first. Its owner keeps it out with one tick on its card, "Lend to test runs".
-
-![The pool of machines](.github/assets/machines.png)
-
-### One company on all your machines
-
-Your company does not live on one computer. One of your machines leads, and up to two more keep a full copy of the company's data. If the leading machine stops, an up-to-date copy takes over within about a minute, by itself, under the same link. Every machine of the company opens it at `localhost`, and the public link always reaches it.
-
-Hornhoof picks each machine's role by itself and shows it on the Machines tab: Leader, Copy, Voter, or Worker, which only does work. Copies go only to machines of the CEO and of people who see the whole company. Every 6 hours and before each update, the leading machine makes an encrypted backup, and up to three other company machines keep the latest two. They cannot open them: only the machines that may hold the data, and the recovery file you save in Settings, can.
-
-If your machines lose sight of each other, each side with internet keeps working, and Hornhoof merges the two sides when they meet again. A real conflict goes to the orchestrator, who tells you.
-
-You sign in to a plan once, and it runs on any of your machines. A ChatGPT plan runs on one machine at a time and moves by itself when that machine goes offline. Antigravity still signs in on each machine.
-
-### Building something with friends
-
-Invite each friend with a link. Everyone connects their own plan on their own computer, so their agents work for the shared company. Their sign-in is sealed to their own machines: Hornhoof keeps it locked with each machine's key and cannot read it. Give each person the departments they work in, and they see only those. Someone who works across several departments shows up next to the CEO on the map as a deputy.
-
-### Several products
-
-Put a product under a department for each thing you build, each with its own git repository. The "Studio with products" template sets this up: one development department with several products under it.
-
-### A home full of devices
-
-The Home template gives you a department that looks after the Wi-Fi, the router and the smart home, and a household department for shopping lists, bills and the family calendar. Anything that touches a real device or spends money waits for a person to say yes.
-
-More examples, from a cybersecurity company to several companies on one computer, are in [EXAMPLES.md](EXAMPLES.md).
-
-## Your company stays yours
-
-- It runs on your machines. There is no Hornhoof cloud, no account with us, and no Hornhoof server that holds your company.
-- Its database sits only on machines of the CEO and of people who see the whole company. Backups are encrypted, so only those machines and your recovery file open them.
-- Every agent works in a locked box: a Docker container with no folder of your computer in it, where the agent runs as a user of its own and cannot read the machine's keys.
-- Root on a machine opens only when that machine's owner allows it, for a day at most. Nobody else can allow it, the CEO included.
-- A plan's sign-in opens only on its owner's machines. Keys and tokens show as `[hidden]` in every terminal and every output.
-- Stored keys are encrypted, passwords are hashed, and each person sees only the departments they are given.
-- The hornhoof.org link is optional. It passes traffic to your company through a tunnel your own server opens, and keeps no copy of it.
-
-[SECURITY.md](SECURITY.md) explains each point, and how to report a problem.
-
-## Install
-
-You need a computer with macOS or Linux. Windows is not supported yet. Docker is installed for you if it is missing.
-
-1. Open a terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, like Ubuntu, press `Ctrl`, `Alt` and `T`.
-
-2. Copy this line, paste it into the terminal and press `Enter`:
+1. Install Hornhoof with one line in the terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL. Docker installs itself if it is missing.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
    ```
 
-3. It may ask for your computer's password, to install Docker. If Docker Desktop is installed but not running, it starts it.
+2. Open the link it shows, name your company and pick one of nine templates. You are the CEO.
 
-4. Wait a few minutes. The first time, it downloads Hornhoof. At the end it shows a link like `http://localhost:8080/setup?code=...`.
+   ![Setting up a company](.github/assets/setup.gif)
 
-5. Open that link in your browser and follow the steps. Name your company, pick a template, and create your account: you become the CEO. Then choose how the orchestrator runs. "My subscription" gives you one more command to run in the terminal. It opens your plan's sign-in page, and the orchestrator starts as soon as you sign in.
+3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs.
 
-Now you are on the map, with the orchestrator in the middle. Click him and tell him about your company.
+   ![Connecting AI plans](.github/assets/subscriptions.gif)
 
-### Add more later
+4. Tell the orchestrator what you are building. He proposes departments, and you create them with one click.
 
-- To add another computer, open Machines, click "Connect a machine", then "Copy", and run the command in a terminal on that computer.
-- To add your AI plans, open Subscriptions, click "Connect a subscription", tick your plans, click "Get the command" and run it on the computer that will carry them. Each plan opens its own sign-in there, or you sign it in once on the Subscriptions tab, and it reaches every machine of yours.
-- To invite a friend, open People, click "Invite person", fill in their name and email and tick what they may see, click "Send invite", then "Copy link", and send them the link yourself.
-- When a new version is out, Hornhoof shows a banner with an "Update" button. Running the install line again updates too.
+   ![Building the departments](.github/assets/build.gif)
 
-### Remove it
+5. Give a goal, like "Launch the iOS beta by Friday", and watch the company work on the map.
 
-- To remove what Hornhoof put on a connected computer, run `curl -fsSL <your Hornhoof address>/install.sh | bash -s -- --uninstall` on it.
-- To remove the server, run `docker compose down -v` in the `~/hornhoof` folder and delete the folder. This deletes all of the company's data.
+   ![The company map](.github/assets/map.gif)
 
-## Questions
+Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. New programs and models are added as they come out. When a new version is out, one "Update" button moves every machine to it.
 
-**Does Hornhoof cost anything?**
-No. You use the AI plans you already have. Hornhoof itself is free.
+## For a startup or a team of friends
 
-**Which AI plans work?**
-Claude plans through Claude Code, ChatGPT plans through Codex, Kimi Code, the GLM Coding Plan from z.ai, and Google AI Pro or Ultra through Antigravity. A company can also use Anthropic or OpenAI API keys.
+*Everyone brings what they have. The company uses all of it.*
 
-**Does my data go to you?**
-No. There is no Hornhoof server that holds your company: it lives on your own machines. The AI programs send your prompts and code to their makers, as they always do. The optional hornhoof.org link passes the traffic on to your company and keeps no copy of it. It has no accounts. [SECURITY.md](SECURITY.md) says exactly what it sees and what it keeps.
+- **Plans add up.** Each person connects their own plans on their own computer. All of them work on the same goal at once, and when one runs out, its task goes to the same role on another plan.
+- **Computers add up.** Laptops, a Mac mini and an old server become one pool. Tests go to the freest machine and split across several. If the computer with the server turns off, the next one takes over within a minute, at the same link.
+- **Everyone sees their part.** Each person gets the departments they work in, and inside them the agents on their own plans. Someone who runs several departments sits next to the CEO as a deputy.
+- **Sign-ins stay with their owners.** Your plan's sign-in is sealed to your own machines. Nobody else can read it, the CEO included.
+- **Real departments from day one.** Development, design, marketing, sales, support, finance. Nine company templates, each department with a head and employees who know their job.
 
-**Is it safe to let agents work on their own?**
-Every agent works in a locked box on the machine: a Docker container of its plan, as a user of its own, and it cannot read the keys of the machine or of other plans. Code passes reviews, nothing reaches the main branch before its exact commit is approved, and in the Home template anything that acts on a real device or spends money waits for a person. Agents still make mistakes, so give them access only to what they need, like a token for one repository.
+![The Development department at work](.github/assets/development.gif)
 
-**What happens when a computer turns off?**
-If it led the company, an up-to-date copy takes over within about a minute, under the same link. Its employees move to another machine with the same plan, or wait until it comes back. A test run it was doing starts again on another machine.
+![The pool of machines](.github/assets/machines.gif)
 
-**How is this different from Claude Code or Codex?**
-Hornhoof uses them. They are the employees, and Hornhoof is the company around them: departments, tasks, reviews and one view of it all.
+## Any work, not only code
 
-**Can I use my phone?**
-You can open and run your company from the phone's browser. Phones that do work themselves, like an old Android on a charger, are coming next.
+*Marketing, content, sales and support run the same way as development.*
 
-## What Hornhoof is not
+- **A department for every kind of work.** Each has a head and employees who each know one part of the job. In marketing a search specialist, a social media manager and a copywriter work on one campaign; in support the first line answers, the second line takes the hard cases and an editor keeps the knowledge base. The head splits the goal, hands out the parts and checks the result.
+- **A library to start from.** 10 departments, 50 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
+- **Your own way of working.** Change any employee's role and skills on its card, or write your own roles, skills and departments. The company puts them to work on the next task.
 
-- It is not a cloud service. There is no sign-up and no account with us. It is yours, on your machines.
-- It is not a new AI. It runs the AI programs you already use.
-- It is not a chat. Work is tasks, each with someone who owns it, a review and a result.
-- It is not only for code. There are templates for marketing, sales, support, research, finance and the home.
+## For your home
 
-## Help build Hornhoof
+*Your home is a company too.*
 
-Hornhoof is built by a few people and a lot of agents, and we are looking for more of both. If you want a company of agents of your own and want to shape how it works, join us. You can:
+- **Every device, watched.** One agent looks after the Wi-Fi and the router, another keeps the smart devices updated and tuned, and the department always knows the state of every device.
+- **No junk on your devices.** Apps, extensions and settings that should not be there get found, and you get a list of what to remove.
+- **The household runs itself.** One agent keeps the shopping list and supplies and drafts the orders, one tracks bills and subscriptions, one keeps the family calendar and chores.
+- **Nothing happens behind your back.** Anything that changes a real device, buys something or pays for it waits for a person to say yes.
+- **Runs on what you have.** An old laptop or a home server carries the work.
 
-- try it and tell us what broke or what confused you;
-- bring ideas for what would make your own company of agents work better;
-- translate the screens, which are in English and Russian now;
-- write templates for departments, roles and skills that fit any company;
-- fix and build things, starting with an issue marked "good first issue".
+![A home run by Hornhoof](.github/assets/home.gif)
+
+## See the work live
+
+*Who works, who waits and who stands idle, right now.*
+
+- **A work tree for every department.** Each agent is a line with its task, and each state has its own color: working, waiting for another task, waiting for a person, standing idle. Work that is handed in merges into the turn's branch before your eyes.
+- **The speed of every turn.** How long each agent worked, waited and stood idle, and every wait with since when, so you see where the time goes.
+- **A live terminal for every agent.** The real Claude Code, Codex, Kimi or Antigravity screen in your browser, whichever machine it runs on. Any line of the tree opens it.
+
+![The work tree of a department](.github/assets/tree.gif)
+
+![Where the time of a turn goes](.github/assets/speed.gif)
+
+![An employee's terminal](.github/assets/terminal.gif)
+
+## You decide, they do
+
+- **One list for everything that needs you.** Questions, design choices and approvals wait in one place, and you answer from any device, your phone too.
+- **Work in turns.** A goal becomes a turn of tasks, and each turn ends in a numbered release.
+- **Nothing ships without you.** Work reaches your main branch only after the review of the turn, the final test run and your approval.
+
+![Tasks and turns](.github/assets/tasks.gif)
+
+## It gets better by itself
+
+Hornhoof does not stay the way you installed it. Every company has an Operations department whose job is to make the company work better in your own setup:
+
+- **A task watchdog** wakes every 10 minutes while there is work, nudges an agent that is stuck, and tells its head when that did not help.
+- **A weak point collector** reads every three hours what failed and where agents stumbled, and writes each finding up with its facts and a fix.
+- **Improvements** collect those fixes. You take one with a click, and the orchestrator does it or turns it into a task.
+- **A program operator** looks after the AI programs themselves: it passes harmless screens, refuses what a program may not do, and brings you sign-ins and payments.
+- **A reliability engineer** restores broken machines, tools and integrations, finds the cause, and writes down how to handle it next time.
+
+## Next to the alternatives
+
+"Parallel agent apps" run several coding agents side by side, each on its own copy of the code.
+
+| | One AI program | Parallel agent apps | Hornhoof |
+| --- | :---: | :---: | :---: |
+| Agents of different makers work on one job at the same time | ❌ | ⚠️ side by side, you coordinate | ✅ |
+| A main agent splits the work and hands it out | ❌ | ⚠️ some | ✅ |
+| Each change reviewed by the other makers at once, then security, then tests | ❌ | ❌ | ✅ |
+| Work goes on when a plan hits its limit | ❌ | ❌ | ✅ |
+| Tests go to the freest of your computers | ❌ | ❌ | ✅ |
+| Keeps running when the server's computer turns off | ❌ | ❌ | ✅ |
+| Live terminal of every agent in the browser, on any machine | ❌ | ⚠️ this computer only | ✅ |
+| Several people, each with their own plans and departments | ❌ | ❌ | ✅ |
+| Departments beyond code, and the home | ❌ | ❌ | ✅ |
+
+## Hornhoof builds itself
+
+Hornhoof is developed inside Hornhoof. Its own company of agents on Claude, ChatGPT, Kimi and Google plans takes the tasks, writes the code, reviews it across makers, tests it and ships every turn as a release, the way large companies run on their own products.
+
+## Let's build it together
+
+I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 50 roles and over 150 skills that every company starts with.
+
+Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an issue marked "good first issue".
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct](CODE_OF_CONDUCT.md), and report security problems privately, as [SECURITY.md](SECURITY.md) says.
 
+## Good to know
+
+- **Each agent is a real program on your machine.** More agents need more memory. Spare computers help.
+- **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell me about them.
+
+## Your company stays yours
+
+- It runs on your machines. No Hornhoof cloud, no account with us.
+- Its data sits only on machines of the CEO and of people who see the whole company, and backups are encrypted.
+- Every agent works in a locked box: a container with no folder of your computer in it, as a user of its own, unable to read the machine's keys or other plans.
+- Root on a machine opens only when that machine's owner allows it, for a day at most.
+- Keys and tokens show as `[hidden]` in every terminal and output.
+- The hornhoof.org link is optional, and it passes your traffic on encrypted, unable to read it.
+
+[SECURITY.md](SECURITY.md) explains each point.
+
+## What comes next
+
+| What is coming | What it gives you |
+| --- | --- |
+| Direct links between machines in different homes | Machines connect to each other directly, without going through the public link |
+| More machines holding the company's data | The company's data lives on five machines out of ten instead of three |
+| Phones and tablets as workers | One Android app turns a phone or tablet on a charger into a full machine of the company: agents, tests and checks on a real device |
+| Checkpoints for every department | Marketing, content and sales get stages and checks between them, the way development has them |
+| Schemes to share | Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working |
+| Styles for the interface | Pick the look you like in Settings |
+
+Want to add something? [Write to us](https://github.com/Invariant0x/hornhoof/issues) and let's build it.
+
+## Questions
+
+**Does it cost anything?** No. You use the AI plans you already have. Hornhoof is free and open source.
+
+**How is it different from Claude Code or Codex?** Hornhoof uses them. They are the employees, Hornhoof is the company around them.
+
+**Is it only for code?** No. There are templates for marketing, sales, support, research, finance and the home.
+
+**Does my data go to you?** No. The AI programs talk to their makers as always, and nothing goes to us.
+
+**Can I use my phone?** Yes, to watch, answer and approve from the browser.
+
+## What Hornhoof is not
+
+- Not a cloud service. There is no sign-up and no account with us.
+- Not a new AI. It runs the AI programs you already use.
+- Not a chat. Work is tasks, each with an owner, a review and a result.
+
 ## Learn more
 
-The [guide](guide/README.md) explains how Hornhoof works, in detail, one topic per page:
-
-- [Install and run the server](guide/install.md): what the install line does, several companies on one computer, running from source, your own domain, and a forgotten password.
-- [The link on the internet](guide/public-link.md): how people open your company from anywhere, and who can reach it.
-- [Machines and plans](guide/machines-and-plans.md): how to connect your AI plans and computers, how agents are kept apart, and what happens when a plan hits its limit.
-- [The orchestrator](guide/orchestrator.md): what the main agent can do for you, and what stays with people.
-- [Departments and employees](guide/departments-and-employees.md): the department schema, hiring, an employee's window and terminal, switching agents off, and reviews at a gate.
-- [Tasks and turns](guide/tasks-and-turns.md): how your words become tasks, which checks they pass, and what happens when an agent gets stuck.
-- [Repositories](guide/repositories.md): how a department gets a git repository, and where its token goes.
-- [Tests and heavy work on free machines](guide/free-machines.md): where tests run, which machines take them, and what happens when a machine goes away.
-- [Updates](guide/updates.md): how a new version arrives, how to go back, and how to take back a public link after an update went back.
-- [Security](SECURITY.md): how Hornhoof keeps your company safe, and how to report a problem.
+The [guide](guide/README.md) explains every part, one topic per page: [install](guide/install.md), [the public link](guide/public-link.md), [machines and plans](guide/machines-and-plans.md), [the orchestrator](guide/orchestrator.md), [departments and employees](guide/departments-and-employees.md), [tasks and turns](guide/tasks-and-turns.md), [repositories](guide/repositories.md), [tests on free machines](guide/free-machines.md), [updates](guide/updates.md) and [security](SECURITY.md). More examples are in [EXAMPLES.md](EXAMPLES.md).
 
 ## License
 
-Hornhoof is free and open source under the [MIT License](LICENSE). Copyright (c) 2026 Ivan Korol.
-
-The templates in `templates/` and the programs every node carries come from projects with their own licences, which `templates/SOURCES.md` lists.
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Ivan Korol. The templates in `templates/` and the programs every node carries come from projects with their own licences, listed in `templates/SOURCES.md`.
