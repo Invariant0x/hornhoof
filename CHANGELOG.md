@@ -34,6 +34,7 @@ core on their program observer.
 
 ### Fixed
 
+- Firefox and WebKit start on every node: the node image carries the system packages they need, not only Chromium's.
 - A node checks all its programs in one step a second. Before, it copied its whole observer state once for each program
   and delivery it remembered, and with a few hundred of them it sat at 100% CPU with nothing running, so tool and hook
   calls through it timed out.
