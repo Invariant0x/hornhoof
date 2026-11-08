@@ -36,13 +36,13 @@ export async function testsFixture(fix = false) {
     else await f.db.delete(testParts).where(eq(testParts.runId, value!.id));
     return finished!;
   };
-  const run = async (commit = finalCommit, parts = 1) => {
+  const run = async (commit = finalCommit, parts = 1, options: { finalChecks?: boolean } = {}) => {
     const value = await start(), request = { ...value.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
     await f.db.update(testRuns).set({ environmentRequest: request }).where(eq(testRuns.id, value.id));
     const { snapshot: environment } = await planningEnvironment(), description = environment.description, manifest = description.manifest;
     manifest.runtimes = [{ id: 'node', version: '22' }];
     manifest.profiles = [{ id: 'fast', requiredSuiteIds: ['vitest'] }];
-    manifest.suites = [{ ...manifest.suites[0]!, profiles: ['fast'], finalChecks: [] }];
+    manifest.suites = [{ ...manifest.suites[0]!, profiles: ['fast'], finalChecks: options.finalChecks ? manifest.suites[0]!.finalChecks : [] }];
     manifest.execution = { version: 2 };
     description.repositoryScope = request.repositoryScope;
     description.commitSha = finalCommit;
@@ -56,16 +56,19 @@ export async function testsFixture(fix = false) {
     await acceptDescription(f.ctx, BUILTIN, { type: 'tests.described', requestId: request.requestId, commitSha: finalCommit,
       result: { status: 'ready', description, fingerprints, baseFingerprints: { commitSha: BASE, fingerprints: fingerprints.map(print => ({ ...print, fingerprint: '2'.repeat(64) })) } } });
     const planned = await f.db.select().from(testParts).where(eq(testParts.runId, value.id));
-    if (planned.length !== 1 || planned[0]!.environmentSelection?.selection.kind !== 'batch') throw new Error('The fixture needs one authenticated candidate batch.');
-    const part = planned[0]!, selection = part.environmentSelection!.selection;
-    if (selection.kind !== 'batch') throw new Error('The fixture needs a batch selection.');
-    await f.db.update(testParts).set({ status: 'running', builtin: true, startedAt: new Date() }).where(eq(testParts.id, part.id));
-    await partDone(f.ctx, BUILTIN, { type: 'tests.done', partId: part.id, ok: true, error: null, exitCode: 0, commit: finalCommit, log: 'Candidate batch passed.',
-      environmentReceipt: { version: 2, profile: 'fast', selection, commitSha: finalCommit, manifestHash: description.manifestHash, runtimes,
-        outcomes: [{ index: 0, status: 'passed', exitCode: 0 }], dependencies: { key: null, hit: false }, environments: [],
-        phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } } });
+    if (planned.length !== (options.finalChecks ? 2 : 1) || planned[0]!.environmentSelection?.selection.kind !== 'batch') throw new Error('The fixture needs an authenticated candidate batch and its applicable checks.');
+    for (const part of planned.sort((a, b) => a.part - b.part)) {
+      const selection = part.environmentSelection!.selection;
+      const identity = { commitSha: finalCommit, manifestHash: description.manifestHash, runtimes, dependencies: { key: null, hit: false }, environments: [],
+        phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } };
+      const receipt = selection.kind === 'batch' ? { ...identity, version: 2 as const, profile: 'fast', selection, outcomes: [{ index: 0, status: 'passed' as const, exitCode: 0 }] }
+        : selection.kind === 'final' ? { ...identity, version: 1 as const, kind: 'final' as const, suiteId: selection.suiteId, files: [] } : null;
+      if (!receipt) throw new Error('The fixture needs a batch or final selection.');
+      await f.db.update(testParts).set({ status: 'running', builtin: true, startedAt: new Date() }).where(eq(testParts.id, part.id));
+      await partDone(f.ctx, BUILTIN, { type: 'tests.done', partId: part.id, ok: true, error: null, exitCode: 0, commit: finalCommit, log: 'Candidate check passed.', environmentReceipt: receipt });
+    }
     if (parts === 0) await f.db.delete(testParts).where(eq(testParts.runId, value.id));
-    const [finished] = await f.db.update(testRuns).set({ commitSha: commit, parts }).where(eq(testRuns.id, value.id)).returning();
+    const [finished] = await f.db.update(testRuns).set({ commitSha: commit, parts: parts === 0 ? 0 : planned.length }).where(eq(testRuns.id, value.id)).returning();
     return finished!;
   };
   const verified = (ids: string[]) => ({ done: true, summary: 'Verified the final changed scope.', ...{ verification: { candidateId: snapshot.candidateId!, revision: snapshot.revision, runIds: ids } } });

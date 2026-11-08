@@ -39,6 +39,34 @@ describe('Tests verifies the final candidate without changing it', () => {
     await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons.phase).toBe('active');
   });
+  it.each([false, true])('refuses an omitted affected unit even when duplicate receipts pad the count=%s', async duplicate => {
+    const f = await testsFixture(), run = await f.run(), snapshot = structuredClone(run.environmentSnapshot!);
+    const unit = { ...snapshot.description.inventory[0]!, file: 'web/test/b.test.ts', selectionUnit: 'web/test/b.test.ts' };
+    snapshot.description.inventory.push(unit);
+    snapshot.candidate!.fingerprints.push({ suiteId: unit.suiteId, file: unit.file, fingerprint: '3'.repeat(64) });
+    snapshot.candidate!.baseFingerprints.push({ suiteId: unit.suiteId, file: unit.file, fingerprint: '4'.repeat(64) });
+    if (duplicate) {
+      const [part] = await f.db.select().from(testParts).where(eq(testParts.runId, run.id));
+      await f.db.insert(testParts).values({ ...part!, id: randomUUID(), part: 2 });
+    }
+    await f.db.update(testRuns).set({ environmentSnapshot: snapshot, parts: duplicate ? 2 : 1 }).where(eq(testRuns.id, run.id));
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.phase).toBe('active');
+  });
+  it('keeps the applicable post-suite check in valid candidate evidence', async () => {
+    const f = await testsFixture(), run = await f.run(f.finalCommit, 1, { finalChecks: true });
+    expect(run.parts).toBe(2);
+    expect((await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]))).task.status).toBe('open');
+  });
+  it('refuses a passed suite whose required post-suite check is missing', async () => {
+    const f = await testsFixture(), run = await f.run(f.finalCommit, 1, { finalChecks: true });
+    const parts = await f.db.select().from(testParts).where(eq(testParts.runId, run.id));
+    const final = parts.find(part => part.environmentSelection?.selection.kind === 'final')!;
+    await f.db.delete(testParts).where(eq(testParts.id, final.id));
+    await f.db.update(testRuns).set({ parts: 1 }).where(eq(testRuns.id, run.id));
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.phase).toBe('active');
+  });
   it('rejects an author receipt made before the checker changed the commit', async () => {
     const f = await testsFixture(true);
     const run = await f.run(HEAD);

@@ -57,7 +57,7 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
     const complete = run.parts > 0 ? parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null) : await verifiedReuse(run);
     if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
     for (const part of parts) {
-      const receipt = productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: part.exitCode, error: part.error, log: '',
+      const receipt = productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: part.exitCode, error: null, log: '',
         ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities);
       if (!part.finishedAt || !receipt) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
     }
