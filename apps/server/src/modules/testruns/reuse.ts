@@ -165,15 +165,13 @@ function sourcesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<stri
 }
 
 type RunReuse = { decision: ReuseDecision; fileCache: TestRunFileCache | null };
-/* A full run decides as well, reuses nothing and remembers what it would have reused. */
-export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
-  if (!mode) return { decision: NO_REUSE, fileCache: null };
-  const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
-  const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile));
-  const valid = snapshot.candidate ? new Set((await reusableUnits(ctx.db, description.repositoryScope, [...known.values()])).map(unit => printKey(unit, unit.fingerprint))) : null;
-  const green = valid ? new Map([...known].filter(([key]) => valid.has(key))) : known;
-  const decision = decideReuse({ units, prints, green, once });
+async function candidateGreen(ctx: Pick<Ctx, 'db'>, snapshot: EnvironmentSnapshot, known: Map<string, GreenSource>): Promise<Map<string, GreenSource>> {
+  if (!snapshot.candidate) return known;
+  const valid = new Set((await reusableUnits(ctx.db, snapshot.description.repositoryScope, [...known.values()])).map(unit => printKey(unit, unit.fingerprint)));
+  return new Map([...known].filter(([key]) => valid.has(key)));
+}
+
+function reuseCache(mode: NonNullable<RunMode>, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[], green: Map<string, GreenSource>, decision: ReuseDecision): RunReuse {
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];
   const taken = mode.mode === 'cached' ? decision : NO_REUSE;
@@ -181,6 +179,17 @@ export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: En
   const reusedUnits = sources.map(source => ({ suiteId: source.suiteId, file: source.file, fingerprint: source.fingerprint, runId: source.runId, commitSha: source.commitSha }));
   return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, mainLine: mode.mainLine, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation,
     ...(snapshot.candidate ? { reusedUnits } : {}), wouldSkip, compared: 0, mismatches: [], notes } };
+}
+
+/* A full run decides as well, reuses nothing and remembers what it would have reused. */
+export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: EnvironmentSnapshot, units: TestUnit[], prints: UnitFingerprint[]): Promise<RunReuse> {
+  if (!mode) return { decision: NO_REUSE, fileCache: null };
+  const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
+  const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
+  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile));
+  const green = await candidateGreen(ctx, snapshot, known);
+  const decision = decideReuse({ units, prints, green, once });
+  return reuseCache(mode, snapshot, units, prints, green, decision);
 }
 
 const printsOf = (cache: TestRunFileCache): Map<string, string> => new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));

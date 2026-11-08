@@ -58,12 +58,19 @@ export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<Test
 }
 type DescribedReady = Extract<TestsDescribed['result'], { status: 'ready' }>;
 type DescribedBase = DescribedReady['baseFingerprints'];
-function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation?: DescribedReady['mutation']): EnvironmentSnapshot {
+function verificationProfile(description: EnvironmentDescription, request: TestEnvironmentRequest): string {
   const completeProfile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
   if (request.baseCommit && request.profile !== undefined && request.profile !== completeProfile) throw new Error('Candidate verification cannot omit checks with a narrower profile.');
-  const profile = request.baseCommit ? completeProfile : request.profile ?? description.manifest.defaultProfile;
-  if (request.baseCommit && (request.suite || !base || base.commitSha !== request.baseCommit)) throw new Error('Candidate verification needs its bound base and every applicable suite.');
-  const candidate = request.baseCommit ? { baseCommit: request.baseCommit, baseFingerprints: base!.fingerprints, fingerprints, ...(mutation ? { mutation } : {}) } : undefined;
+  return request.baseCommit ? completeProfile : request.profile ?? description.manifest.defaultProfile;
+}
+function describedCandidate(request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): EnvironmentSnapshot['candidate'] {
+  if (!request.baseCommit) return undefined;
+  if (request.suite || !base || base.commitSha !== request.baseCommit) throw new Error('Candidate verification needs its bound base and every applicable suite.');
+  return { baseCommit: request.baseCommit, baseFingerprints: base.fingerprints, fingerprints, ...(mutation ? { mutation } : {}) };
+}
+function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest, fingerprints: UnitFingerprint[], base: DescribedBase, mutation?: DescribedReady['mutation']): EnvironmentSnapshot {
+  const profile = verificationProfile(description, request);
+  const candidate = describedCandidate(request, fingerprints, base, mutation);
   const snapshot = EnvironmentSnapshot.parse({ description, profile, ...(candidate ? { candidate } : {}) });
   if (candidate) candidateTestUnits(snapshot);
   return snapshot;
@@ -141,13 +148,20 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
     return true;
   });
 }
+type RunMode = Awaited<ReturnType<typeof runModeOf>>;
+function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequest, mode: RunMode, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): EnvironmentSnapshot {
+  return supplied.candidate || !mode ? supplied : snapshotFor(supplied.description, { ...request, profile: mode.profile }, prints, base, mutation);
+}
+function candidateReuseMode(mode: RunMode, snapshot: EnvironmentSnapshot): RunMode {
+  return mode && snapshot.candidate ? { ...mode, mode: 'cached', profile: snapshot.profile } : mode;
+}
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
   const supplied = snapshotFor(description, request, prints, base, mutation);
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
-  const snapshot = supplied.candidate || !mode ? supplied : snapshotFor(description, { ...request, profile: mode.profile }, prints, base, mutation);
-  const reuseMode = mode && snapshot.candidate ? { ...mode, mode: 'cached' as const, profile: snapshot.profile } : mode;
+  const snapshot = runSnapshot(supplied, request, mode, prints, base, mutation);
+  const reuseMode = candidateReuseMode(mode, snapshot);
   const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
   const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
   const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
