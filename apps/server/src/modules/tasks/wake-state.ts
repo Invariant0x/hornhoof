@@ -50,8 +50,12 @@ function recipient(task: Task, agentId: string, why = ''): boolean {
   return onTask(task, agentId);
 }
 
-/* A cancelled prerequisite is news for the dependent task's creator, not its executor or reviewers. */
+/* Escalations reach the live department head even when a worker created the task. */
 async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): Promise<boolean> {
+  if (why === 'blocked' && !recipient(task, agentId, why)) {
+    const [head] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+    return head !== undefined;
+  }
   if (why !== 'after_cancelled') return recipient(task, agentId, why);
   if (task.createdByAgentId) return task.createdByAgentId === agentId;
   const [orchestrator] = await db.select({ id: agents.id }).from(agents)
