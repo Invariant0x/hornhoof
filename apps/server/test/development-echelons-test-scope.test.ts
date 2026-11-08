@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { hashTestEnvironment } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { jobs, testFileResults, testParts, testRuns } from '../src/db/schema.js';
+import { jobs, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription } from '../src/modules/testruns/describe.js';
 import { startRun } from '../src/modules/testruns/runs.js';
@@ -90,9 +90,10 @@ describe('candidate scope from the authenticated metadata response', () => {
   });
 
   it('reuses an affected unit at its final fingerprint without requiring a whole-profile preparation', async () => {
-    const f = await fixture(undefined, { full: true, profile: 'final' }), run = await f.stored();
-    const print = f.reply.result.fingerprints[1]!;
-    await f.db.insert(testFileResults).values({ ...run.environmentRequest!.repositoryScope, ...print, runId: run.id, commitSha: 'd'.repeat(40), mainLine: true });
+    const f = await fixture(undefined, { full: true, profile: 'final' });
+    await f.run(f.finalCommit, 1, { cache: true });
+    f.reply.result.baseFingerprints.fingerprints[0]!.fingerprint = 'e'.repeat(64);
+    f.reply.result.baseFingerprints.fingerprints[1]!.fingerprint = f.reply.result.fingerprints[1]!.fingerprint;
     await acceptDescription(f.ctx, BUILTIN, f.reply);
     const stored = await f.stored();
     expect(stored.environmentRequest?.problem).toBeNull();

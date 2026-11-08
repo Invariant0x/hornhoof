@@ -1011,9 +1011,11 @@ export type TestEnvironmentSelection = { selection: TestExecution['selection']; 
 export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
+export type ReusedTestUnit = UnitFingerprint & { runId: string; commitSha: string };
 export type TestRunFileCache = {
   mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  reusedUnits?: (UnitFingerprint & { runId: string; commitSha: string })[];
+  reusedUnits?: ReusedTestUnit[];
+  verifiedFingerprints?: UnitFingerprint[];
   wouldSkip: TestFileKey[]; compared: number; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
 };
 

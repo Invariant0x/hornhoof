@@ -1,4 +1,4 @@
-import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -15,6 +15,7 @@ import { pickMachine } from './pick.js';
 import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { runPurpose } from './purpose.js';
+export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
@@ -228,35 +229,6 @@ export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Pr
 
 
 
-function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
-  return receipt.commitSha === snapshot.description.commitSha && receipt.manifestHash === snapshot.description.manifestHash;
-}
-function receiptSelection(snapshot: EnvironmentSnapshot, selection: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
-  if (receipt.version === 1) {
-    const assigned = selection.selection;
-    return 'files' in assigned && receipt.kind === assigned.kind && receipt.suiteId === assigned.suiteId && JSON.stringify(receipt.files) === JSON.stringify(assigned.files);
-  }
-  const assigned = TestExecution.safeParse({ snapshot, selection: selection.selection }), reported = TestExecution.safeParse({ snapshot, selection: receipt.selection });
-  return receipt.profile === snapshot.profile && assigned.success && reported.success && JSON.stringify(assigned.data.selection) === JSON.stringify(reported.data.selection);
-}
-function expectedOutcomes(snapshot: EnvironmentSnapshot, receipt: Extract<TestEnvironmentReceipt, { version: 2 }>): number {
-  const preparation = snapshot.description.manifest.execution?.oncePreparation;
-  return receipt.selection.kind === 'batch' ? receipt.selection.selections.length : (preparation?.suiteIds.length ?? 0) + (preparation?.commands.length ?? 0);
-}
-function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>): boolean {
-  if (receipt.version === 1) return true;
-  if (message.commit !== receipt.commitSha || receipt.outcomes.length !== expectedOutcomes(snapshot, receipt)) return false;
-  return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
-}
-function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
-  return supportsTestProfile(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version));
-}
-export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {
-  const parsed = TestEnvironmentReceipt.safeParse(message.environmentReceipt);
-  if (!snapshot || !selection || !parsed.success) return null;
-  const receipt = parsed.data;
-  return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) ? receipt : null;
-}
 export function resetDescriptionDelivery(ctx: Ctx): void { sent.get(ctx)?.clear(); }
 
 async function retryDescription(ctx: Ctx, run: Run, message: TestsDescribed, problem: EnvironmentProblem): Promise<boolean> {

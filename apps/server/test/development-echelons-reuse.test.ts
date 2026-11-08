@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { testParts, testRuns } from '../src/db/schema.js';
@@ -58,4 +59,3 @@ describe('fingerprint reuse in final candidate evidence', () => {
     await expect(verifiedCandidateEvidence(f.db, task, route, candidate).then(() => null)).rejects.toMatchObject({ status: 409 });
   });
 });
-import { randomUUID } from 'node:crypto';

@@ -10,7 +10,9 @@ import { sameChecker } from './echelons-policy.js';
 import { agentIdentity, departmentHead } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
-import { productReceipt, scopeKey } from '../testruns/describe.js';
+import { scopeKey } from '../testruns/load.js';
+import { passedProductPart } from '../testruns/receipts.js';
+import { reusableUnits } from '../testruns/reuse-evidence.js';
 import { unitKey } from '../testruns/plan-environment.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
@@ -79,11 +81,11 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
     const complete = parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null);
     if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
     for (const part of parts) {
-      const receipt = productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: part.exitCode, error: null, log: '',
-        ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities);
-      if (!part.finishedAt || !receipt) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
+      if (!passedProductPart(snapshot, part)) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
     }
-    completeCandidateSelection(snapshot, parts, reusedCandidateUnits(run, snapshot));
+    const reused = reusedCandidateUnits(run, snapshot);
+    if ((await reusableUnits(db, snapshot.description.repositoryScope, reused)).length !== reused.length) throw refuse(409, 'task_invalid', 'A reused unit has no valid original source receipt.');
+    completeCandidateSelection(snapshot, parts, reused);
   }
   return runs.map(run => ({ runId: run.id, commit: candidate.commit }));
 }

@@ -3,6 +3,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, notExists, sql } from 'drizzle
 import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
+import { reusableUnits } from './reuse-evidence.js';
 
 /* Reusing green test results. A file that passed at a fingerprint need not run again at that fingerprint. Every doubt runs the
    file: no fingerprint, no green result, a group with one file changed, a machine that sent none. Every so many turns a run
@@ -169,7 +170,10 @@ export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: En
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
   const once = !snapshot.candidate && policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const green = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile)), decision = decideReuse({ units, prints, green, once });
+  const known = await greenAt(ctx.db, description.repositoryScope, prints, !snapshot.candidate && ofRelease(description.manifest, snapshot.profile));
+  const valid = snapshot.candidate ? new Set((await reusableUnits(ctx.db, description.repositoryScope, [...known.values()])).map(unit => printKey(unit, unit.fingerprint))) : null;
+  const green = valid ? new Map([...known].filter(([key]) => valid.has(key))) : known;
+  const decision = decideReuse({ units, prints, green, once });
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];
   const taken = mode.mode === 'cached' ? decision : NO_REUSE;
@@ -229,7 +233,7 @@ export async function closeFileCache(tx: Pick<Db, 'select' | 'update'>, run: Run
   const toldAll = parts.every(part => part.status === 'passed' || part.failedFiles);
   const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), eq(testFileResults.runId, run.id), isNotNull(testFileResults.note)));
   const notes = [...cache.notes, ...ran.map(({ file, note }) => ({ file, note: note! }))].sort((a, b) => a.file.localeCompare(b.file));
-  const fileCache: TestRunFileCache = { ...cache, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
+  const fileCache: TestRunFileCache = { ...cache, verifiedFingerprints: cache.verifiedFingerprints ?? cache.fingerprints, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
   await tx.update(testRuns).set({ fileCache }).where(eq(testRuns.id, run.id));
   return { ...run, fileCache };
 }
