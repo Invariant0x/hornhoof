@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription } from '../src/modules/testruns/describe.js';
-import { startRun } from '../src/modules/testruns/runs.js';
+import { pumpTests, startRun } from '../src/modules/testruns/runs.js';
+import { report } from '../src/modules/tasks/engine.js';
 import { BASE } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
 import { planningEnvironment } from './fixtures/run-planning/environment.js';
@@ -35,6 +36,19 @@ async function fixture(suite?: string, options: { full?: boolean; profile?: stri
 }
 
 describe('candidate scope from the authenticated metadata response', () => {
+  it('records an unchanged applicable scope without creating or running a test part', async () => {
+    const f = await fixture();
+    f.reply.result.baseFingerprints.fingerprints = f.reply.result.fingerprints.map(print => ({ ...print }));
+    await acceptDescription(f.ctx, BUILTIN, f.reply);
+    expect((await f.stored()).environmentRequest?.problem).toBeNull();
+    expect((await f.stored()).environmentSnapshot?.candidate).toBeDefined();
+    expect(await f.parts()).toEqual([]);
+    await pumpTests(f.ctx);
+    const run = await f.stored();
+    expect(run).toMatchObject({ parts: 0, status: 'passed' });
+    await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+    expect((await f.detail()).echelons.phase).toBe('ready');
+  });
   it('keeps the bound pair and plans only its affected canonical test units', async () => {
     const f = await fixture();
     await acceptDescription(f.ctx, BUILTIN, f.reply);

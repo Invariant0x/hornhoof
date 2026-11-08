@@ -93,6 +93,14 @@ async function candidateFixture(options: { whole?: boolean; added?: boolean } = 
 }
 
 describe('candidate scope before product part planning', () => {
+  it('plans no command when every influencing fingerprint is unchanged at the bound base', async () => {
+    const { input, candidate } = await candidateFixture();
+    candidate.baseFingerprints = candidate.fingerprints.map(print => ({ ...print }));
+    const plan = await planProductParts(input);
+    expect(plan.leaves).toEqual([]);
+    expect(plan.estimate).toBeNull();
+    expect(plan.reason).toMatch(/no.*changed influencing fingerprint/i);
+  });
   it.each([false, true])('plans only changed influencing fingerprints, including newly added tests=%s', async added => {
     const { input } = await candidateFixture({ added });
     const plan = await planProductParts(input);
