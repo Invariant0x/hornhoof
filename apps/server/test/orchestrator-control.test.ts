@@ -9,8 +9,10 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, ownDatabases } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
@@ -298,15 +300,23 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await db.select().from(tasks).where(eq(tasks.id, payments.id)))[0]).toMatchObject({ body: 'Payments with tax.', status: 'blocked' });
   });
 
-  it('tells the head when it takes the last gate off a member task', async () => {
+  it('lets the orchestrator assign an eligible checker without skipping the required Review', async () => {
     const { app, db, hana, bruno, dev } = await company();
-    const [rita] = await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', name: 'Rita', roleKey: 'DEV-REV', departmentId: dev.id, model: '', subscriptionId: bruno.subscriptionId }).returning();
-    const checked = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita!.id] })).task;
-    await db.update(tasks).set({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id }).where(eq(tasks.id, checked.id));
-    const res = await call(await mcp(app, TOKEN), 'update_task', { task: checked.number, gates: [] });
-    expect(res.isError).toBeFalsy();
-    expect((await db.select().from(tasks).where(eq(tasks.id, checked.id)))[0]!.status).toBe('done');
-    expect(await db.select().from(jobs).where(and(eq(jobs.agentId, hana.id), eq(jobs.taskId, checked.id)))).toHaveLength(1);
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev.id));
+    await db.update(agents).set({ model: 'claude-opus-5-5' }).where(eq(agents.id, bruno.id));
+    const reviewers = await db.insert(agents).values(['Rita', 'Rob'].map(name => ({ companyId: dev.companyId, kind: 'worker' as const, name, roleKey: 'DEV-REV', departmentId: dev.id, model: 'claude-opus-5-5', subscriptionId: bruno.subscriptionId, skills: app.ctx.templates.roles.get('DEV-REV')!.skills.filter(s => s.on).map(s => s.id) }))).returning();
+    const [rita, rob] = reviewers;
+    app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+    const checked = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita!.id })).task;
+    const submitted = await submit(app.ctx, bruno.id, checked.id, { summary: 'Ready.', evidence: 'Changed total tests.', review: { baseCommit: BASE } });
+    const candidateId = (await routeOf(db, submitted.task)).state.candidateId;
+    const res = await call(await mcp(app, TOKEN), 'update_task', { task: checked.number, ownerAgentId: rob!.id });
+    expect(res.isError, text(res)).toBeFalsy();
+    const [current] = await db.select().from(tasks).where(eq(tasks.id, checked.id));
+    expect(current).toMatchObject({ status: 'review', assigneeAgentId: rob!.id, executorAgentId: bruno.id });
+    expect(routeSnapshot(await routeOf(db, current!), current!.assigneeAgentId)).toMatchObject({ stage: 'review', phase: 'active', candidateId, ownerAgentId: rob!.id });
+    expect(await db.select().from(jobs).where(and(eq(jobs.agentId, rob!.id), eq(jobs.taskId, checked.id)))).toHaveLength(1);
   });
 
   it('closes the staff card it hires from', async () => {

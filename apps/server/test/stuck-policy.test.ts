@@ -4,7 +4,9 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { createTask, GOING_ON_TURNS, submit, verdict } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 const TOKEN = 'stuck-policy-tool-token-0123456789ab';
@@ -14,15 +16,17 @@ async function company() {
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-  const hire = async (name: string, kind: 'head' | 'worker') =>
-    (await db.insert(agents).values({ companyId: acme!.id, kind, name, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
-  const head = await hire('Hana', 'head');
-  const worker = await hire('Bruno', 'worker');
-  const reviewer = await hire('Rita', 'worker');
+  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+    (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
+  const head = await hire('Hana', 'head', 'DEV-HEAD');
+  const worker = await hire('Bruno', 'worker', 'DEV-BE');
+  const reviewer = await hire('Rita', 'worker', 'DEV-REV');
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const taskFor = async (agentId: string, createdByAgentId: string, title = 'Checkout', gates: string[] = []) =>
-    (await createTask(app.ctx, { agentId: createdByAgentId }, { title, brief: '', body: 'Finish the work.', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates })).task;
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  const taskFor = async (agentId: string, createdByAgentId: string, title = 'Checkout', reviewerAgentId?: string) =>
+    (await createTask(app.ctx, { agentId: createdByAgentId }, { title, brief: '', body: 'Finish the work.', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
   const realProgram = async (jobId: string, agentId: string) => {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     await db.insert(agentEvents).values({ companyId: job!.companyId, agentId, jobId, kind: 'program', data: { program: { state: 'thinking', since: Date.now() - 60_000, tool: null }, alarm: null } });
@@ -165,18 +169,19 @@ describe('internal stuck routing', () => {
     expect(reminders[0]!.prompt).toContain('without moving it');
   });
 
-  it('does not treat an internal stuck request as a human question that blocks a gate verdict', async () => {
+  it('does not treat an internal stuck request as a human question that blocks the current Review verdict', async () => {
     const c = await company();
-    const task = await c.taskFor(c.worker.id, c.head.id, 'Checkout', [c.reviewer.id]);
-    await submit(c.ctx, c.worker.id, task.id, { summary: 'Ready.', evidence: 'Focused tests passed.' });
+    const task = await c.taskFor(c.worker.id, c.head.id, 'Checkout', c.reviewer.id);
+    await submit(c.ctx, c.worker.id, task.id, { summary: 'Ready.', evidence: 'Focused tests passed.', review: { baseCommit: BASE } });
     await wakeAll(c.ctx, [{ agentId: c.reviewer.id, taskId: task.id, why: 'review' }]);
     for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.reviewer.id, task.id);
     const [request] = await c.db.select().from(requests);
     expect(request).toMatchObject({ kind: 'stuck', audience: 'internal', triageAgentId: c.head.id, status: 'open' });
 
-    const decided = await verdict(c.ctx, c.reviewer.id, task.id, { pass: true, comment: 'Focused evidence covers the change.' });
+    const decided = await verdict(c.ctx, c.reviewer.id, task.id, { pass: true, comment: 'Focused evidence covers the change.', reviewedCommit: HEAD });
 
-    expect(decided.task.status).toBe('done');
+    expect(decided.task.status).not.toBe('done');
+    expect(routeSnapshot(await routeOf(c.db, decided.task), decided.task.assigneeAgentId).stage).toBe('tests');
     expect((await c.db.select().from(requests).where(eq(requests.id, request!.id)))[0]!.status).toBe('open');
   });
 
