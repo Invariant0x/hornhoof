@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, requestInternal, requests, tasks } from '../../db/schema.js';
 import { CLOSED, move, refuse, taskSpot, type Actor, type Answer, type Request, type Task, type Wake } from './engine.js';
 import { stuckRecipient } from './stuck-route.js';
+import { routeOf } from './echelons-store.js';
 import { endRequest } from './wait-producers.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
@@ -47,10 +48,12 @@ function instructionOf(a: Answer): string {
   return instruction;
 }
 
-function continuation(found: Found, instruction: string): { set: Partial<Task>; wakes: Wake[] } {
-  const goesOn = found.task.stage === 0 && found.task.assigneeAgentId ? found.task.assigneeAgentId : found.request.agentId;
-  const wakes: Wake[] = CLOSED.includes(found.task.status) ? [] : [{ agentId: goesOn, taskId: found.task.id, why: 'answered', text: instruction }];
-  const set: Partial<Task> = { silent: 0, ...(found.task.status === 'waiting' ? { status: found.task.stage > 0 ? 'review' : 'working' } : {}) };
+async function continuation(ctx: Ctx, found: Found, instruction: string): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+  const goesOn = found.task.assigneeAgentId;
+  const wakes: Wake[] = CLOSED.includes(found.task.status) || !goesOn ? [] : [{ agentId: goesOn, taskId: found.task.id, why: 'answered', text: instruction }];
+  const route = await routeOf(ctx.db, found.task);
+  const checking = ['review', 'security', 'cleanup'].includes(route.state.stage ?? '');
+  const set: Partial<Task> = { silent: 0, ...(found.task.status === 'waiting' ? { status: checking ? 'review' : 'working' } : {}) };
   return { set, wakes };
 }
 
@@ -61,7 +64,7 @@ export async function resolveStuck(ctx: Ctx, job: ToolJob, requestId: string, a:
   await answeringJob(ctx, job, found);
   const instruction = instructionOf(a);
   const actor: Actor = { agentId: job.agentId };
-  const { set, wakes } = continuation(found, instruction);
+  const { set, wakes } = await continuation(ctx, found, instruction);
   let resolved: Request | undefined;
   const row = await move(ctx, found.task, set, { kind: 'answered', actor, text: instruction, data: { requestId, kind: 'stuck', status: 'resolved_internal' } }, async tx => {
     [resolved] = await tx

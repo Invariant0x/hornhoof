@@ -4,6 +4,7 @@ import type { Db } from '../../db/client.js';
 import { agents, requests, taskWaits } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { candidates, decisionOwner } from './decisions.js';
+import { routeOf } from './echelons-store.js';
 import { CLOSED, refuse, requestSubject, type Actor, type Request, type Task, type Tx } from './engine.js';
 import { departmentHead, planFromPolicy, setsWaitDates } from './wait-policy.js';
 import { afterSourceKey, endOpenSource, endTaskWaits, lastOfSource, moveWaitOwner, recordLegacyWait, requestSourceKey, reviewSourceKey, syncSourceWaits, type TaskWait } from './wait-state.js';
@@ -116,37 +117,19 @@ async function endWithdrawn(tx: Tx, row: Task, step: WaitStep, open: TaskWait[])
   }
 }
 
-const atItsGate = (task: Task): boolean => task.stage > 0 && ['review', 'waiting'].includes(task.status);
-
-/* Who answers for the check now: each reviewer on the panel, and while nobody is on to check it whoever it waits with. */
-async function reviewersOf(tx: Tx, row: Task): Promise<string[]> {
-  if (!atItsGate(row)) return [];
-  if (row.panel.length) return row.panel;
-  const holder = await answeringFor(tx, row, [row.assigneeAgentId]);
-  return holder ? [holder] : [];
-}
-
-/* A verdict ends its reviewer's wait, and proves that much. A reviewer no longer wanted in this round stops being waited for. */
-async function endReviews(tx: Tx, row: Task, step: WaitStep, open: TaskWait[], wanted: Set<string>): Promise<void> {
-  for (const wait of open.filter(w => w.kind === 'review')) {
-    const gave = step.kind === 'verdict' && wait.ownerAgentId === step.actor.agentId;
-    if (!gave && wanted.has(wait.sourceKey)) continue;
-    await endOpenSource(tx, { taskId: row.id, kind: 'review', sourceKey: wait.sourceKey, outcome: gave ? 'resolved' : 'cancelled', proofRef: gave ? `verdict:${step.eventId}` : `moved:${step.eventId}`, actor: step.actor });
-  }
-}
-
-/* The gate waits for each reviewer on its own, for this round: what was bound for another round cannot come back. Only handing
-   work in is refused without dates. A verdict or someone leaving goes on, and that work has no date to keep. */
+/* A check waits on one candidate, stage and owner, including the owner's own repairs. */
 async function keepReviews(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {
-  const reviewers = await reviewersOf(tx, row);
-  await endReviews(tx, row, step, open, new Set(reviewers.map(id => reviewSourceKey(row.id, row.bounces, id))));
-  for (const agentId of reviewers) {
-    await bindSource(tx, row, { kind: 'review', sourceKey: reviewSourceKey(row.id, row.bounces, agentId), owner: { agentId }, strict: step.kind === 'submitted', actor: step.actor });
+  const route = await routeOf(tx, row);
+  const checking = route.state.phase === 'active' && ['review', 'security', 'cleanup'].includes(route.state.stage ?? '') && !CLOSED.includes(row.status);
+  const key = checking && row.assigneeAgentId && route.state.candidateId
+    ? reviewSourceKey(row.id, route.state.stage!, route.state.candidateId, row.assigneeAgentId) : null;
+  for (const wait of open.filter(wait => wait.kind === 'review')) {
+    if (wait.sourceKey === key) continue;
+    const resolved = step.kind === 'verdict' && wait.ownerAgentId === step.actor.agentId;
+    await endOpenSource(tx, { taskId: row.id, kind: 'review', sourceKey: wait.sourceKey, outcome: resolved ? 'resolved' : 'superseded', proofRef: `moved:${step.eventId}`, actor: step.actor });
   }
+  if (key) await bindSource(tx, row, { kind: 'review', sourceKey: key, owner: { agentId: row.assigneeAgentId! }, strict: step.kind === 'submitted', actor: step.actor });
 }
-
-/* The review of a turn is born at its gate, without a move. */
-export const bindTurnReview = (tx: Tx, row: Task, step: WaitStep): Promise<void> => keepReviews(tx, row, step, []);
 
 /* A wait_for lasts until its holder moves the work on. Words that bring it back to look do not end it. */
 async function endWaitFors(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {
@@ -158,12 +141,12 @@ async function endWaitFors(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]):
 /* What a move of a task means for the waits on it, in the same write. */
 export async function keepWaitsWithMove(tx: Tx, before: Task, row: Task, step: WaitStep): Promise<void> {
   const open = await openWaits(tx, row.id);
-  if (atItsGate(before) || atItsGate(row)) await keepReviews(tx, row, step, open);
+  await keepReviews(tx, row, step, open);
   await endWithdrawn(tx, row, step, open);
   if (CLOSED.includes(row.status)) {
     await endTaskWaits(tx, { taskId: row.id, outcome: row.status === 'done' ? 'resolved' : 'cancelled', proofRef: `task:${row.id}:${row.status}`, actor: step.actor });
     return;
   }
   if (row.assigneeAgentId !== before.assigneeAgentId) await followHolder(tx, row, step.actor);
-  if (row.status !== before.status || row.stage !== before.stage) await endWaitFors(tx, row, step, open);
+  if (row.status !== before.status || row.assigneeAgentId !== before.assigneeAgentId || ['submitted', 'verdict', 'report'].includes(step.kind)) await endWaitFors(tx, row, step, open);
 }

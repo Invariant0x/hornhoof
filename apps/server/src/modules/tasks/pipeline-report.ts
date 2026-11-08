@@ -26,8 +26,6 @@ const FACT_TASK = {
   executorAgentId: tasks.executorAgentId,
   status: tasks.status,
   after: tasks.after,
-  gates: tasks.gates,
-  bounces: tasks.bounces,
   workKind: tasks.workKind,
   small: tasks.small,
   firstLine: sql<string>`split_part(left(${tasks.body}, 200), E'\n', 1)`,
@@ -85,7 +83,7 @@ function partOf(raw: RawInput, some: FactsTask[]): RawInput {
 export async function turnFacts(db: Reader, turn: Turn, until: Date): Promise<TurnFacts> {
   const rows = await db.select(FACT_TASK).from(tasks).where(eq(tasks.turnId, turn.id)).orderBy(asc(tasks.number));
   const window = { openedAt: turn.openedAt ?? turn.createdAt, until };
-  const raw = rows.length ? await readRaw(db, turn.companyId, rows.map(r => ({ ...r, gates: r.gates.length }))) : { tasks: [], events: [], requests: [], runs: [], jobs: [], timings: [] };
+  const raw = rows.length ? await readRaw(db, turn.companyId, rows) : { tasks: [], events: [], requests: [], runs: [], jobs: [], timings: [] };
   const departmentIds = [...new Set(rows.flatMap(r => r.departmentId ?? []))];
   const places = departmentIds.length ? await db.select().from(departments).where(inArray(departments.id, departmentIds)).orderBy(asc(departments.position)) : [];
   const departmentsFacts: DepartmentFacts[] = [];

@@ -11,8 +11,6 @@ export type FactsTask = {
   executorAgentId: string | null;
   status: TaskStatus;
   after: string[];
-  gates: number;
-  bounces: number;
   workKind: WorkKind | null;
   small?: boolean;
   /* The first line of its body, where a kind was written before it had a field. */
@@ -83,10 +81,10 @@ const isWork = (line: Line): boolean => !!line.task.executorAgentId && !line.rev
 const isMerge = (e: FactsEvent): boolean => e.kind === 'submitted' && e.data.merged === true;
 const handInsOf = (line: Line): FactsEvent[] => line.events.filter(e => e.kind === 'submitted' && !isMerge(e));
 
-function stageAfterLook(verdict: FactsEvent | undefined, isLast: boolean, gates: number): PipelineStage {
+function stageAfterLook(verdict: FactsEvent | undefined, isLast: boolean): PipelineStage {
   if (!isLast) return 'fixes';
   if (verdict) return verdict.data.pass === true ? 'merge' : 'fixes';
-  return gates ? 'review' : 'merge';
+  return 'review';
 }
 
 /* One hand-in: its look, up to the last verdict on it, and what came after that up to stop. */
@@ -94,7 +92,7 @@ function addHandIn(stages: Record<PipelineStage, number>, line: Line, handIn: Fa
   const verdict = line.events.findLast(e => e.kind === 'verdict' && e.createdAt >= handIn.createdAt && e.createdAt <= stop);
   const lookEnd = verdict?.createdAt ?? handIn.createdAt;
   stages.review += seconds(handIn.createdAt, lookEnd);
-  stages[stageAfterLook(verdict, !next, line.task.gates)] += seconds(lookEnd, stop);
+  stages[stageAfterLook(verdict, !next)] += seconds(lookEnd, stop);
 }
 
 /* Work up to the first hand-in, then each hand-in up to the next one or the merge. */
@@ -235,7 +233,7 @@ function kindFacts(lines: Line[]): KindFacts {
   return {
     tasks: lines.length,
     toAcceptance: median(lines.filter(isDone).map(accepted)),
-    returns: sum(lines.map(l => l.task.bounces)),
+    returns: sum(lines.map(l => l.events.filter(event => event.data.rework === true).length)),
     fixRounds: sum(lines.map(fixRoundsOf)),
   };
 }
@@ -337,7 +335,7 @@ export function pipelineFacts(input: FactsInput): PipelineFacts {
       tasks: taskWaits(lines, input.openedAt),
       queue: waited(input.jobs.map(j => seconds(j.createdAt, j.startedAt ?? j.finishedAt ?? input.until))),
     },
-    returns: sum(work.map(l => l.task.bounces)),
+    returns: sum(work.map(l => l.events.filter(event => event.data.rework === true).length)),
     fixRounds: sum(work.map(fixRoundsOf)),
     submitsPerTask: roundedRatio(sum(handedIn.map(l => handInsOf(l).length)), handedIn.length),
     failures: input.jobs.filter(isFailure).length,

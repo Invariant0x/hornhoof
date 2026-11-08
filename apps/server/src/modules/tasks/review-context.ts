@@ -64,11 +64,6 @@ async function authorRuns(db: Store, task: Task, commit: string | null, branch?:
   return Promise.all(runs.map(run => runRecord(run, parts, commit)));
 }
 
-export async function turnReviewContext(db: Tx, task: Task, head: string, branch: string, comparison: CompareResult): Promise<Review> {
-  const pin: Pin = comparison.complete ? { commit: comparison.headSha, branch, status: 'pinned', reason: null } : { ...UNAVAILABLE, branch, reason: 'comparison-unavailable' };
-  return { ...pin, revision: randomUUID(), authorId: head, authorVendor: await authorVendor(db, head), gateCounts: { source: 'review-lifecycle', passed: 0, returned: 0 }, qualityTaskId: task.id, quality: await authorQuality(db, task.id, pin.commit), runs: await authorRuns(db, task, pin.commit, branch), source: null };
-}
-
 async function readPin(read: Ctx['readCommit'], repo: RepoAddress, task: number): Promise<Pin> {
   try {
     const at = await read(repo, { task }, 5_000);

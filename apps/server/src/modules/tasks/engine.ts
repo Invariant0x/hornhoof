@@ -18,7 +18,6 @@ import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
-import { requireBlockingGate } from './gate-triggers.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { returnAlongLine } from '../org/map-state.js';
@@ -338,9 +337,8 @@ export type NewTask = {
   productId?: string | null;
   parentId?: string | null;
   assigneeAgentId: string;
-  /* A member task: the assignee executes it and its gates review it in order. */
+  /* Executable work starts with this employee; coordination has no code producer. */
   executor?: boolean;
-  gates?: string[];
   reviewerAgentId?: string;
   securityAgentId?: string;
   testsAgentId?: string;
@@ -352,8 +350,6 @@ export type NewTask = {
   afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
-  /* Code given out without gates of its own: the review of its department's turn checks it. */
-  inTurnReview?: boolean;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
@@ -370,9 +366,9 @@ async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
 
 /* A live agent that can take a turn: one without a subscription would never wake for the task, one switched off not
    until it is on again. A gate may be off: its role's employees that are on check the work. */
-async function workingAgent(db: Db | Tx, companyId: string | null, id: string, gate = false) {
+async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
   const agent = await liveAgent(db, companyId, id);
-  if (agent.switchedOffAt && !gate) throw refuse(409, 'switched_off', `${agent.name} is switched off right now. Give the work to someone who is on.`);
+  if (agent.switchedOffAt) throw refuse(409, 'switched_off', `${agent.name} is switched off right now. Give the work to someone who is on.`);
   const [sub] = agent.subscriptionId
     ? await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.id, agent.subscriptionId), isNull(subscriptions.removedAt)))
     : [];
@@ -380,18 +376,12 @@ async function workingAgent(db: Db | Tx, companyId: string | null, id: string, g
   return agent;
 }
 
-async function checkGates(db: Db, companyId: string, executor: string, gates: string[], templates?: Live['templates']): Promise<void> {
-  if (new Set(gates).size !== gates.length) throw refuse(400, 'task_invalid', 'A gate is listed twice.');
-  if (gates.includes(executor)) throw refuse(400, 'task_invalid', 'Whoever does the work never passes its gate. Pick another reviewer.');
-  for (const id of gates) requireBlockingGate(templates, (await workingAgent(db, companyId, id, true)).roleKey);
-}
-
 async function checkIndependentExecutor(db: Db, departmentId: string | null, part: IndependentPartInput): Promise<void> {
   const agent = await workingAgent(db, null, part.executor);
   if (agent.departmentId !== departmentId) throw refuse(403, 'task_not_yours', `${agent.name} does not work in this department.`);
 }
 
-async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, inTurnReview?: boolean): Promise<{ child: Task; wake: Wake }> {
+async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor): Promise<{ child: Task; wake: Wake }> {
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
@@ -405,7 +395,6 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     body: part.body,
     assigneeAgentId: part.executor,
     executorAgentId: part.executor,
-    gates: parent.gates,
     after: [],
     workKind: parent.workKind,
     riskClass: parent.riskClass,
@@ -415,31 +404,28 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     updatedAt: new Date(),
   }).returning();
   await createRoute(tx, child!, {});
-  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, gates: child!.gates, after: [], independentPartOf: parent.id, ...(inTurnReview ? { inTurnReview: true } : {}) } });
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
   return { child: child!, wake };
 }
 
 /* Who a new task gives work to, as urgent as it comes out: a word nobody may say is refused when the task is made. */
-function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, gates: string[], declaration: IndependentDeclaration | null): Promise<void> {
+function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, declaration: IndependentDeclaration | null): Promise<void> {
   const urgent = parent ? parent.urgent : input.urgent === true;
   const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
-  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null }, [input.assigneeAgentId, ...part]);
 }
 
-type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; gates: string[]; parent: Task | null; declaration: IndependentDeclaration | null };
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; parent: Task | null; declaration: IndependentDeclaration | null };
 
-async function checkNewTaskFields(ctx: Ctx, input: NewTask, assignee: NewTaskSetup['assignee'], gates: string[]): Promise<void> {
-  if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
-  if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
+function checkNewTaskFields(input: NewTask): void {
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
 }
 
 async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<NewTaskSetup> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
-  const gates = input.executor ? (input.gates ?? []) : [];
-  await checkNewTaskFields(ctx, input, assignee, gates);
+  checkNewTaskFields(input);
   checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
@@ -455,8 +441,8 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   }
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
-  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
-  return { assignee, gates, parent, declaration };
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, declaration);
+  return { assignee, parent, declaration };
 }
 
 async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
@@ -476,7 +462,7 @@ function independentData(declaration: IndependentDeclaration | null): Record<str
   return {};
 }
 
-function newTaskValues(actor: Actor, input: NewTask, { assignee, gates, parent }: NewTaskSetup, position: { urgent: boolean; turnId: string | null; number: number }): typeof tasks.$inferInsert {
+function newTaskValues(actor: Actor, input: NewTask, { assignee, parent }: NewTaskSetup, position: { urgent: boolean; turnId: string | null; number: number }): typeof tasks.$inferInsert {
   return {
         companyId: assignee.companyId,
         number: position.number,
@@ -489,7 +475,6 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, gates, parent }
         body: input.body,
         assigneeAgentId: assignee.id,
         executorAgentId: input.executor ? assignee.id : null,
-        gates,
         after: input.after ?? [],
         workKind: input.workKind,
         riskClass: input.riskClass,
@@ -516,7 +501,7 @@ async function afterForNewTask(tx: Tx, companyId: string, turnId: string | null,
 }
 
 async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTaskSetup): Promise<CreatedTask> {
-  const { assignee, gates, parent, declaration } = setup;
+  const { assignee, parent, declaration } = setup;
   let independent: Task | null = null;
   const wakes: Wake[] = [];
   /* Numbers go up one by one per company, so creating tasks waits on the company row. */
@@ -538,14 +523,12 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   await createRoute(tx, row!, input);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
     assignee: assignee.id,
-    gates,
     after: row!.after,
     ...independentData(declaration),
-    ...(input.inTurnReview ? { inTurnReview: true } : {}),
   } });
   await bindAfter(tx, row!, after, input.afterPlans, actor);
   if (declaration?.kind === 'part') {
-    const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
+    const made = await insertIndependent(tx, row!, declaration.part, actor);
     independent = made.child;
     wakes.push(made.wake);
   }
@@ -580,7 +563,7 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
 export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
 type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
 
-/* The executor hands its work to the first gate, or finishes a task without gates. */
+/* The current producing owner records an immutable candidate and hands it forward. */
 export async function submit(ctx: Live, agentId: string, taskId: string, r: Submission, checked?: CheckedSubmission): Promise<Moved> {
   const before = await loadTask(ctx.db, taskId);
   await liveAgent(ctx.db, before.companyId, agentId);
@@ -755,7 +738,7 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
   return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
 }
 
-export type TaskChange = { ownerAgentId?: string; cleanup?: boolean; cleanupForTurn?: boolean; paths?: string[]; title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
+export type TaskChange = { ownerAgentId?: string; cleanup?: boolean; cleanupForTurn?: boolean; paths?: string[]; title?: string; brief?: string; body?: string; executor?: string; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Retrying a task CAS never bypasses its current route or owner checks. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -815,7 +798,6 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   await requireTaskHead(ctx, task, agentId);
-  if (c.gates !== undefined) throw refuse(400, 'task_invalid', 'Numeric gates were replaced by the required route.');
   if (c.cleanupForTurn && (c.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
   const route = await routeOf(ctx.db, task);
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);

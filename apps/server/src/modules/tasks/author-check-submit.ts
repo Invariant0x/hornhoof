@@ -22,7 +22,6 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: strin
   const pending = await samePending(ctx, taskId, input);
   if (pending) return { task: pending, wakes: [] };
   const task = await submissionTask(ctx, job.agentId, taskId);
-  if (task.merging) return submit(ctx, job.agentId, taskId, input);
   const review = await captureReview(ctx, task, input.review);
   if (!validReview(review)) throw refuse(409, 'task_invalid', 'The author check needs an exact review commit and base comparison.');
   const run = await startAuthorRun(ctx, job, task, review, input.review.authorCheckPlan);

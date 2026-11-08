@@ -44,7 +44,7 @@ async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { of
 
 /* A head takes what is placed with it as anyone else takes work. */
 const headMayHold = (ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, item: PlanItem, head: Head) =>
-  refuseNotUrgent(ctx, { agentId: by.agentId }, companyId, { urgent: item.urgent === true, productId: item.product ?? null, gates: [] }, [head.id]);
+  refuseNotUrgent(ctx, { agentId: by.agentId }, companyId, { urgent: item.urgent === true, productId: item.product ?? null }, [head.id]);
 
 /* Every item names a department of the company, a product inside it, and the department has a head to take it. */
 async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items: PlanItem[]): Promise<Placed[]> {

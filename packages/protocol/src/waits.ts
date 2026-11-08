@@ -32,7 +32,7 @@ export const WAIT_LEVELS = { normal: 0, owner: 1, head: 2, department: 3 } as co
 /* Each kind of source has its own way of naming one source. It is stable across a restart and never made up by a sweep. */
 const SOURCE_KEYS: Record<WaitSourceKind, RegExp> = {
   after: new RegExp(`^task:${UUID}$`),
-  review: new RegExp(`^review:${UUID}:\\d+:${UUID}$`),
+  review: new RegExp(`^review:${UUID}:(review|security|cleanup):${UUID}:${UUID}$`),
   person: new RegExp(`^(request|question):${UUID}$`),
   run: new RegExp(`^run:${UUID}$`),
   external: new RegExp(`^(wait_for|operation|question):${UUID}$`),

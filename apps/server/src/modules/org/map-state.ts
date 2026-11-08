@@ -13,7 +13,7 @@ type Reader = Db | Tx;
 
 type Agent = Pick<typeof agents.$inferSelect, 'id' | 'companyId' | 'kind' | 'departmentId' | 'productId' | 'teamId' | 'switchedOffAt' | 'removedAt'>;
 type Line = typeof mapReturns.$inferSelect;
-type TaskFacts = Pick<typeof tasks.$inferSelect, 'id' | 'parentId' | 'status' | 'stage' | 'executorAgentId' | 'assigneeAgentId' | 'panel' | 'after'>;
+type TaskFacts = Pick<typeof tasks.$inferSelect, 'id' | 'parentId' | 'status' | 'executorAgentId' | 'assigneeAgentId' | 'after'>;
 
 /* What decides whether an agent acts on a task now: the tasks with those above them, the tasks still to be done first,
    and the questions each agent waits on, as agentId:taskId. */
@@ -33,8 +33,7 @@ const asking = (f: Facts, agentId: string, t: TaskFacts) => f.asked.has(`${agent
 export function memberActs(f: Facts, agentId: string, taskId: string | null): boolean {
   const t = taskId ? f.tasks.get(taskId) : undefined;
   if (!t || !ready(f, t) || asking(f, agentId, t)) return false;
-  if (t.stage === 0) return t.executorAgentId === agentId && LIVE.includes(t.status);
-  return (t.status === 'review' || t.status === 'waiting') && t.panel.includes(agentId);
+  return t.assigneeAgentId === agentId && [...LIVE, 'review'].includes(t.status);
 }
 
 /* The department task the task is part of: itself, or the nearest task above it that has no executor. */
@@ -165,7 +164,7 @@ export async function returnAlongLine(tx: Tx, r: { agentId: string; sourceKey: s
 /* The facts about these tasks and those above them that say who acts on them. */
 async function factsFor(db: Reader, companyId: string, ids: string[]): Promise<Facts> {
   const found = new Map<string, TaskFacts>();
-  const columns = { id: tasks.id, parentId: tasks.parentId, status: tasks.status, stage: tasks.stage, executorAgentId: tasks.executorAgentId, assigneeAgentId: tasks.assigneeAgentId, panel: tasks.panel, after: tasks.after };
+  const columns = { id: tasks.id, parentId: tasks.parentId, status: tasks.status, executorAgentId: tasks.executorAgentId, assigneeAgentId: tasks.assigneeAgentId, after: tasks.after };
   let wanted = [...new Set(ids)];
   for (let hops = 0; wanted.length && hops < DEPTH; hops++) {
     const rows = await db.select(columns).from(tasks).where(and(eq(tasks.companyId, companyId), inArray(tasks.id, wanted)));

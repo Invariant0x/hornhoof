@@ -616,7 +616,7 @@ export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting',
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type { ExternalWait } from '@hornhoof/protocol/waits';
 
-/* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
+/* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its required route. */
 export const tasks = pgTable(
   'tasks',
   {
@@ -631,20 +631,13 @@ export const tasks = pgTable(
     brief: text('brief').notNull().default(''),
     body: text('body').notNull().default(''),
     status: text('status', { enum: TASK_STATUSES }).notNull().default('open'),
-    /* Who holds the task now: the executor, the gate at its stage, or the head or orchestrator that owns it. */
+    /* The sole current owner of this task or its checking candidate. */
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
-    /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
+    /* The employee originally assigned the executable result; candidate events retain later producers. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
     assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
-    gates: jsonb('gates').$type<string[]>().notNull().default([]),
-    /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
-    panel: jsonb('panel').$type<string[]>().notNull().default([]),
     /* Tasks of the same turn that must be done first: until they are, the task waits and its holder is not woken. */
     after: jsonb('after').$type<string[]>().notNull().default([]),
-    stage: integer('stage').notNull().default(0),
-    /* It passed its last gate and its executor merges it into the turn's branch, at stage 0 again; handing that in closes it. */
-    merging: boolean('merging').notNull().default(false),
-    bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),
     /* Waiting for an external event, without changing who holds the task or its workflow stage. */
@@ -672,14 +665,10 @@ export const tasks = pgTable(
     index('tasks_turn_id').on(t.turnId),
     index('tasks_product_id').on(t.productId),
     index('tasks_external_wait_until').on(sql`(${t.externalWait}->>'until')`).where(sql`${t.externalWait} IS NOT NULL`),
-    /* What no move makes: a gate with no executor behind it, counts below zero, a closed task without its time, a task
-       under itself, gates that are not lists. */
-    check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
-    check('tasks_counts', sql`${t.stage} >= 0 AND ${t.bounces} >= 0 AND ${t.silent} >= 0`),
+    check('tasks_counts', sql`${t.silent} >= 0`),
     check('tasks_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
-    check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
     check('tasks_work_kind', sql`${t.workKind} IS NULL OR ${t.workKind} IN ('bug', 'known_behavior', 'unknown_path', 'legacy_code')`),
     check('tasks_risk_class', sql`${t.riskClass} IS NULL OR ${t.riskClass} IN ('money', 'access', 'security', 'data', 'none')`),
   ],

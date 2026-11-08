@@ -5,14 +5,14 @@ import { agentState } from '../conversation/queue.js';
 import type { Task } from './engine.js';
 
 /* What decides who else may take a piece of work. */
-export type Work = Pick<Task, 'productId' | 'gates'>;
+export type Work = Pick<Task, 'productId'>;
 type Member = { id: string; departmentId: string; roleKey: string };
 type State = Awaited<ReturnType<typeof agentState>>;
 
 /* Its turn would go out now: signed in, on a machine that is on, and with plan left for tasks. */
 export const goesOutNow = (state: State): boolean => state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain;
 
-export const mayTake = (work: Work, peer: { id: string; productId: string | null }): boolean => (!peer.productId || peer.productId === work.productId) && !work.gates.includes(peer.id);
+export const mayTake = (work: Work, peer: { id: string; productId: string | null }): boolean => (!peer.productId || peer.productId === work.productId);
 
 /* Nothing runs or waits for it, and its turn would go out now. */
 export async function isFree(ctx: Ctx, agentId: string): Promise<boolean> {

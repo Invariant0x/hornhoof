@@ -1,9 +1,4 @@
-import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import type { Ctx } from '../../app.js';
-import { departments, taskEvents, tasks, turns } from '../../db/schema.js';
-import type { Tx } from '../tasks/engine.js';
-import { repoAt } from '../departments/repository.js';
 import type { RepoAddress } from './refs.js';
 
 export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string } | { complete: false; reason: string };
@@ -59,56 +54,3 @@ export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000)
   } catch { return { complete: false, reason: 'compare-unavailable' }; }
 };
 
-export type CompareSnapshot = { result: CompareResult; startedAt: Date; taskId: string; repositoryUrl: string | null };
-
-/* Called before the move's transaction and company lock. Older minimal contexts
-   have no reader/config; that is unknown too. Repository secrets stay in memory. */
-type OptionalComparison = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config' | 'readCompare'>>;
-function hasReader(ctx: OptionalComparison): ctx is Pick<Ctx, 'db' | 'config'> & { readCompare: CompareReader } {
-  return Boolean(ctx.config && ctx.readCompare);
-}
-function closesCode(task: typeof tasks.$inferSelect, status: string | undefined): boolean {
-  return Boolean(task.parentId && task.turnId && ['done', 'cancelled'].includes(status ?? ''));
-}
-
-export async function compareForTask(ctx: OptionalComparison, task: typeof tasks.$inferSelect, status: string | undefined): Promise<CompareSnapshot | undefined> {
-  if (!closesCode(task, status)) return undefined;
-  const snapshot: CompareSnapshot = { result: { complete: false, reason: 'compare-unavailable' }, startedAt: new Date(), taskId: task.id, repositoryUrl: null };
-  if (!hasReader(ctx)) return snapshot;
-  try {
-    const [turn] = await ctx.db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId!));
-    const [parent] = await ctx.db.select({ productId: tasks.productId }).from(tasks).where(eq(tasks.id, task.parentId!));
-    const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, parent?.productId ?? null, task.departmentId]);
-    if (found && turn) {
-      snapshot.repositoryUrl = found.repo.url;
-      snapshot.result = await ctx.readCompare(found.repo, { base: 'main', head: `turn-${turn.number}` });
-    }
-  } catch { /* A comparison failure never rolls back a submission. */ }
-  return snapshot;
-}
-
-/* Keep only commit provenance, never repository patch contents, in a task event. */
-export const comparisonProof = (result: CompareResult) => result.complete
-  ? { complete: true, baseSha: result.baseSha, headSha: result.headSha }
-  : { complete: false };
-
-/* A department review can cover products with separate repositories. A snapshot
-   of one repository says nothing about another: selecting both gates is safer. */
-async function uncoveredRepository(db: Ctx['db'] | Tx, taskIds: string[], compared: string | null): Promise<boolean> {
-  const code = await db.select({ productId: tasks.productId, departmentId: tasks.departmentId }).from(tasks)
-    .innerJoin(taskEvents, and(eq(taskEvents.taskId, tasks.id), eq(taskEvents.kind, 'created'), sql`${taskEvents.data}->>'inTurnReview' = 'true'`))
-    .where(inArray(tasks.id, taskIds));
-  const ids = code.flatMap(task => [task.productId, task.departmentId]).filter((id): id is string => id !== null);
-  const repos = await db.select({ id: departments.id, url: departments.repoUrl }).from(departments).where(inArray(departments.id, ids));
-  const urls = new Map(repos.map(repo => [repo.id, repo.url]));
-  return code.some(task => (urls.get(task.productId ?? '') ?? urls.get(task.departmentId ?? '')) !== compared);
-}
-
-/* If another merge closed while HTTP was in flight, this comparison may predate it.
-   The caller already holds the company lock; only database reads happen here. */
-export async function comparisonForReview(db: Ctx['db'] | Tx, taskIds: string[], snapshot?: CompareSnapshot): Promise<CompareResult> {
-  if (!snapshot) return { complete: false, reason: 'compare-unavailable' };
-  if (await uncoveredRepository(db, taskIds, snapshot.repositoryUrl)) return { complete: false, reason: 'uncovered-repository' };
-  const [concurrent] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(inArray(taskEvents.taskId, taskIds), ne(taskEvents.taskId, snapshot.taskId), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->>'merged' = 'true'`, gt(taskEvents.createdAt, snapshot.startedAt))).limit(1);
-  return concurrent ? { complete: false, reason: 'comparison-outdated' } : snapshot.result;
-}

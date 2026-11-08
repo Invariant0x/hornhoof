@@ -261,8 +261,8 @@ class TaskTools {
     if (!product) throw refuse(404, 'department_unknown', `${id} is not a product of your department.`);
   }
 
-  private async createdTaskText(task: Task, executor: Agent, gates: string[]): Promise<string> {
-    return `Created #${task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await this.waiting(task)}`;
+  private async createdTaskText(task: Task, executor: Agent): Promise<string> {
+    return `Created #${task.number} for ${executor.name}.${await this.waiting(task)}`;
   }
 
   private registerTasks(): void {
@@ -277,7 +277,7 @@ class TaskTools {
           .where(and(eq(tasks.companyId, this.job.companyId), notInArray(tasks.status, [...CLOSED])))
           .orderBy(desc(tasks.number))
           .limit(200);
-        const holds = (t: Task) => t.assigneeAgentId === agent.id || t.panel.includes(agent.id);
+        const holds = (t: Task) => t.assigneeAgentId === agent.id;
         const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
         return json(await taskLines(this.ctx, mine.slice(0, 40), t => sees(agent, t)));
       },
@@ -290,7 +290,7 @@ class TaskTools {
       {
         description:
           'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
-          "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence. review pins an immutable candidate and author receipts; review.quality is structured producer evidence or unavailable; gateCounts is labeled review-lifecycle. reviewPlan assigns task areas/common contracts and an integration reviewer. fixReview limits a repeat to its own original finding IDs and exact range. reviewFindings contains explicit confirmations and vendor provenance.",
+          "task.echelons is the required ordered route and current owner. Candidates and producing identities are immutable. Review and Security own their repairs in the same branch; optional Cleanup follows Review only when the head enabled it. review contains exact author receipts and quality evidence or unavailable; testEvidence proves only its exact current commit. echelonFindings contains deduplicated stage findings and independent confirmations.",
         inputSchema: { task: Ref },
       },
       async ({ task: ref }) =>
@@ -529,7 +529,7 @@ class TaskTools {
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
           const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind === 'code', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
-          return { text: await this.createdTaskText(moved.task, executor, []), moved };
+          return { text: await this.createdTaskText(moved.task, executor), moved };
         }),
     );
   }

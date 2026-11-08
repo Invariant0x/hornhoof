@@ -18,7 +18,7 @@ export const operationSourceKey = (operation: string) => `operation:${operation}
 export const runSourceKey = (run: string) => `run:${run}`;
 export const afterSourceKey = (task: string) => `task:${task}`;
 export const requestSourceKey = (request: string) => `request:${request}`;
-export const reviewSourceKey = (task: string, round: number, reviewer: string) => `review:${task}:${round}:${reviewer}`;
+export const reviewSourceKey = (task: string, stage: string, candidate: string, reviewer: string) => `review:${task}:${stage}:${candidate}:${reviewer}`;
 
 const OPEN_STATES = ['active', 'legacy_needs_plan'] as const;
 const isOpen = (wait: TaskWait): boolean => wait.endedAt === null;

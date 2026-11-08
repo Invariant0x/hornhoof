@@ -61,7 +61,7 @@ export const encodedHint = (task?: number) =>
 
 /* An agent works on a task when it runs the company, the task is its department's, or it holds, does, checks or made it. */
 export const onTask = (job: RunJob, t: Task) =>
-  job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
+  job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId].includes(job.agentId);
 
 /* The files on a task, the newest under each name, without their bytes. */
 export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {
