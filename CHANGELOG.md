@@ -41,6 +41,9 @@ where its change reaches, and tell an employee once that someone waits for them.
 - An employee can no longer wait for itself by writing its own id in capitals, and is never told that it waits for itself.
 - A push to main whose version is out already no longer shows as a failed run on GitHub: the publish job sees the
   version's tag and moves nothing.
+- Two node tests that failed now and then on a busy GitHub runner pass every time. In the shared harness test the other
+  machine now holds its claim while it builds, so the waiting machine cannot take the build in between, and the Kimi Code
+  test waits for the input line to come back after the new program redraws it.
 
 ## [0.8.3] - 2026-11-08
 
