@@ -26,7 +26,7 @@ describe('development echelon presentation', () => {
     expect(stages[0]).toHaveTextContent('Small task');
     expect(stages[0]).toHaveClass('skipped');
     expect(stages[2]).toHaveAttribute('aria-current', 'step');
-    expect(stages[2]).toHaveTextContent('Rita');
+    expect(await within(stages[2]!).findByText(language === 'ru' ? 'Исполнитель: Rita' : 'Owner: Rita')).toBeInTheDocument();
     expect(stages[3]).toHaveClass('skipped');
     expect(stages[3]).toHaveTextContent('Not required');
     expect(route).not.toHaveTextContent('Backend engineer');
@@ -42,7 +42,7 @@ describe('development echelon presentation', () => {
     const route = await screen.findByRole('list', { name: 'Task workflow' });
     expect(within(route).getAllByRole('listitem')).toHaveLength(5);
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Security');
-    expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Sam');
+    expect(await within(route).findByText('Owner: Sam')).toBeInTheDocument();
     expect(route).toHaveTextContent('External input');
   });
 
@@ -70,7 +70,7 @@ describe('development echelon presentation', () => {
     mockApi({ 'GET /api/tasks/t12': [200, { task: { ...ECHELON_TASK, echelons: { ...ECHELON_WORKFLOW, stage: 'tests', ownerAgentId: 'tester',
       stages: ECHELON_WORKFLOW.stages.map(s => s.stage === 'review' ? { ...s, status: 'complete' } : s.stage === 'tests' ? { ...s, status: 'active' } : s) } } }] });
     stream.send({ type: 'task', id: 't12', spot: { departmentId: 'd2' } });
-    expect(await within(route).findByText('Tom')).toBeInTheDocument();
+    expect(await within(route).findByText('Owner: Tom')).toBeInTheDocument();
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Tests');
   });
 

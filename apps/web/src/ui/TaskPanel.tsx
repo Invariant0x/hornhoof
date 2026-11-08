@@ -144,9 +144,10 @@ function executorClassOf(task: TaskDetail): string {
   return task.waitsFor.length > 0 ? 'next' : 'current';
 }
 
-function TaskGatesSection({ task }: { task: TaskDetail }) {
+function TaskGatesSection({ task, org }: { task: TaskDetail; org: Org | null }) {
   const t = useT();
   const { language } = useLanguage();
+  if (task.echelons) return <TaskWorkflow workflow={task.echelons} task={task} org={org} />;
   if (!task.executor) {
     return task.assignee ? <p className="muted">{`${task.assignee.name}${roleAfter(task.assignee, language)}`}</p> : null;
   }
@@ -270,7 +271,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
           </button>
         </p>
       )}
-      {task.echelons ? <TaskWorkflow workflow={task.echelons} task={task} org={org} /> : <TaskGatesSection task={task} />}
+      <TaskGatesSection task={task} org={org} />
       <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
       <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}
