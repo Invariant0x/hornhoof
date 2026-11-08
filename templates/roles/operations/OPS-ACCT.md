@@ -3,7 +3,7 @@ id: OPS-ACCT
 department: operations
 kind: member
 title: { en: "Accounts administrator", ru: "Администратор учетных записей" }
-description: { en: "Prepares sign-ups with outside services, keeps credentials in the secret store and tracks every subscription.", ru: "Готовит регистрации во внешних сервисах, хранит доступы в хранилище секретов и ведет реестр учетных записей и подписок." }
+description: { en: "Administrator of service accounts and subscription records.", ru: "Администратор учетных записей сервисов и записей о подписках." }
 tier: standard
 effort: medium
 perProduct: false

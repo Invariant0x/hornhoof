@@ -3,7 +3,7 @@ id: DSN-UI
 department: design
 kind: member
 title: { en: "Product UI designer", ru: "Дизайнер интерфейса продукта" }
-description: { en: "Designs one product's screens and flows inside the shared design system.", ru: "Проектирует экраны и сценарии одного продукта в рамках общей дизайн-системы." }
+description: { en: "Designer of product interfaces and user interactions.", ru: "Дизайнер интерфейсов продукта и взаимодействия с пользователем." }
 tier: standard
 effort: high
 perProduct: true

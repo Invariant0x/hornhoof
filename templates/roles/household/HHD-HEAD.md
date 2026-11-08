@@ -3,7 +3,7 @@ id: HHD-HEAD
 department: household
 kind: head
 title: { en: "Head of household", ru: "Глава домашнего хозяйства" }
-description: { en: "Runs the household: supplies, bills, chores and the calendar, taking every purchase or payment to the family.", ru: "Ведет домашнее хозяйство: запасы, счета, дела и календарь, вынося каждую покупку или оплату на семью." }
+description: { en: "Coordinator of household needs and arrangements.", ru: "Координатор домашних нужд и организации быта." }
 tier: standard
 effort: medium
 perProduct: false

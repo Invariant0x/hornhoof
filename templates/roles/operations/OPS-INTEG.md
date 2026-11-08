@@ -3,7 +3,7 @@ id: OPS-INTEG
 department: operations
 kind: member
 title: { en: "Integrations engineer", ru: "Инженер интеграций" }
-description: { en: "Connects the company to outside services through APIs, MCP servers and installed tools.", ru: "Подключает компанию к внешним сервисам через API, MCP-серверы и установленные инструменты." }
+description: { en: "Engineer of service connections and tool integrations.", ru: "Инженер подключения сервисов и интеграции инструментов." }
 tier: standard
 effort: high
 perProduct: false

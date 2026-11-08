@@ -3,7 +3,7 @@ id: SAL-SDR
 department: sales
 kind: member
 title: { en: "Sales development representative", ru: "Специалист по привлечению клиентов" }
-description: { en: "Finds companies that fit the ideal customer profile, researches them and drafts first messages.", ru: "Находит компании под профиль идеального клиента, изучает их и готовит первые сообщения." }
+description: { en: "Specialist in prospective customers and sales opportunities.", ru: "Специалист по потенциальным клиентам и возможностям продаж." }
 tier: fast
 effort: medium
 perProduct: false

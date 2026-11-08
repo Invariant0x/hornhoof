@@ -3,7 +3,7 @@ id: HHD-CAL
 department: household
 kind: member
 title: { en: "Calendar helper", ru: "Помощник по календарю" }
-description: { en: "Keeps the family calendar, chores and reminders, and tells people what is coming.", ru: "Ведет семейный календарь, дела по дому и напоминания и говорит людям, что впереди." }
+description: { en: "Assistant for household schedules and shared plans.", ru: "Помощник по домашнему расписанию и общим планам." }
 tier: fast
 effort: medium
 perProduct: false

@@ -3,7 +3,7 @@ id: MKT-SOCIAL
 department: marketing
 kind: member
 title: { en: "Social media manager", ru: "Менеджер социальных сетей" }
-description: { en: "Drafts posts for each social network and keeps track of what the community says.", ru: "Готовит посты для каждой соцсети и следит за тем, что говорят о компании в сообществах." }
+description: { en: "Specialist in social media content and community communication.", ru: "Специалист по материалам для социальных сетей и общению с сообществом." }
 tier: fast
 effort: medium
 perProduct: false

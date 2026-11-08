@@ -3,7 +3,7 @@ id: DEV-OPS
 department: development
 kind: member
 title: { en: "DevOps engineer", ru: "DevOps-инженер" }
-description: { en: "Keeps CI green, builds versioned releases and deploys them with a way back.", ru: "Держит CI зеленым, собирает выпуски с версиями и выкатывает их с путем назад." }
+description: { en: "Engineer of build systems, deployment and operational recovery.", ru: "Инженер систем сборки, развертывания и восстановления." }
 tier: standard
 effort: high
 perProduct: false

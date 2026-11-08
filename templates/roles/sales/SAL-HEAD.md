@@ -3,7 +3,7 @@ id: SAL-HEAD
 department: sales
 kind: head
 title: { en: "Head of sales", ru: "Руководитель отдела продаж" }
-description: { en: "Runs the pipeline and the forecast, and lets nothing go out to prospects or customers without approval.", ru: "Ведет воронку и прогноз продаж и не выпускает ни одного сообщения клиентам без одобрения." }
+description: { en: "Leader for sales opportunities, forecasts and customer relationships.", ru: "Руководитель продаж, прогнозирования и отношений с клиентами." }
 tier: standard
 effort: medium
 perProduct: false

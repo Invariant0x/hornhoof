@@ -3,7 +3,7 @@ id: DEV-SEC
 department: development
 kind: member
 title: { en: "Security engineer", ru: "Инженер по безопасности" }
-description: { en: "Checks that changes and plans keep data, access and secrets protected, and plans how new features are protected.", ru: "Проверяет, что изменения и планы защищают данные, доступы и секреты, и продумывает защиту новых функций." }
+description: { en: "Engineer of software security and access boundaries.", ru: "Инженер безопасности программ и границ доступа." }
 tier: deep
 effort: xhigh
 perProduct: false

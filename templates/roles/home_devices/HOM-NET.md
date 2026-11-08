@@ -3,7 +3,7 @@ id: HOM-NET
 department: home_devices
 kind: member
 title: { en: "Home network helper", ru: "Помощник по домашней сети" }
-description: { en: "Watches the home Wi-Fi and routers and proposes fixes, with every change left to a person.", ru: "Следит за домашним Wi-Fi и роутерами и предлагает исправления, оставляя каждое изменение человеку." }
+description: { en: "Specialist in home networks and connectivity.", ru: "Специалист по домашним сетям и подключению устройств." }
 tier: standard
 effort: high
 perProduct: false

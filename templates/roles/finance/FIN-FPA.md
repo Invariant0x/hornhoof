@@ -3,7 +3,7 @@ id: FIN-FPA
 department: finance
 kind: member
 title: { en: "Financial planning analyst", ru: "Аналитик финансового планирования" }
-description: { en: "Builds the budget, forecasts and financial model, and tracks cash and SaaS metrics.", ru: "Строит бюджет, прогнозы и финансовую модель, следит за деньгами и метриками SaaS." }
+description: { en: "Analyst of financial plans, forecasts and business performance.", ru: "Аналитик финансовых планов, прогнозов и результатов бизнеса." }
 tier: standard
 effort: high
 perProduct: false

@@ -3,7 +3,7 @@ id: FIN-BOOK
 department: finance
 kind: member
 title: { en: "Bookkeeper", ru: "Бухгалтер" }
-description: { en: "Prepares journal entries, reconciliations, accruals, payables and receivables for human review.", ru: "Готовит проводки, сверки, начисления и расчеты с поставщиками и клиентами для проверки человеком." }
+description: { en: "Specialist in accounting records and financial reconciliation.", ru: "Специалист по бухгалтерским записям и финансовой сверке." }
 tier: standard
 effort: medium
 perProduct: false

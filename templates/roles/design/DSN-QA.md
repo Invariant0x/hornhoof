@@ -3,7 +3,7 @@ id: DSN-QA
 department: design
 kind: member
 title: { en: "Design QA", ru: "Контроль качества дизайна" }
-description: { en: "Checks screens for accessibility, match with the design system and a look that is not generic.", ru: "Проверяет экраны на доступность, соответствие дизайн-системе и отсутствие шаблонного вида." }
+description: { en: "Specialist in design quality and interface consistency.", ru: "Специалист по качеству дизайна и согласованности интерфейсов." }
 tier: standard
 effort: medium
 perProduct: false

@@ -3,7 +3,7 @@ id: OPS-WATCH
 department: operations
 kind: member
 title: { en: "Task watchdog", ru: "Сторож задач" }
-description: { en: "Wakes on a timer, checks that every agent moves its tasks and reports and that no one stands free while work waits, and nudges the ones that are stuck.", ru: "Просыпается по таймеру, проверяет, что каждый агент двигает свои задачи и отчитывается и что никто не стоит без дела, пока работа ждет, и подталкивает застрявших." }
+description: { en: "Observer of task progress, ownership and blocked work.", ru: "Наблюдатель за движением задач, ответственными и препятствиями в работе." }
 tier: fast
 effort: medium
 perProduct: false

@@ -3,7 +3,7 @@ id: DEV-PERF
 department: development
 kind: member
 title: { en: "Performance engineer", ru: "Инженер по производительности" }
-description: { en: "Measures what is slow and makes it fast, proving the gain with numbers.", ru: "Измеряет, что работает медленно, и ускоряет это, доказывая выигрыш цифрами." }
+description: { en: "Engineer of software performance and resource efficiency.", ru: "Инженер производительности программ и эффективности использования ресурсов." }
 tier: standard
 effort: xhigh
 perProduct: false

@@ -3,7 +3,7 @@ id: DSN-SYS
 department: design
 kind: member
 title: { en: "Design system designer", ru: "Дизайнер дизайн-системы" }
-description: { en: "Builds and maintains the shared tokens, components, themes and the design system document.", ru: "Создает и поддерживает общие токены, компоненты, темы и описание дизайн-системы." }
+description: { en: "Designer of reusable interface systems and components.", ru: "Дизайнер систем интерфейса и общих компонентов." }
 tier: standard
 effort: high
 perProduct: false

@@ -3,7 +3,7 @@ id: DEV-RED
 department: development
 kind: member
 title: { en: "Red team", ru: "Красная команда" }
-description: { en: "Tries to break preview builds the way real people would: odd input, broken flows, gaps in the logic.", ru: "Ищет, где предварительная сборка ломается у живых людей: странный ввод, сломанные сценарии, нестыковки в логике." }
+description: { en: "Specialist in adversarial analysis of software behavior.", ru: "Специалист по проверке поведения программ с позиции атакующего." }
 tier: standard
 effort: xhigh
 perProduct: false

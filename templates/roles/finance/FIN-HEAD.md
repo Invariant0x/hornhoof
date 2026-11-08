@@ -3,7 +3,7 @@ id: FIN-HEAD
 department: finance
 kind: head
 title: { en: "Controller", ru: "Финансовый контролер" }
-description: { en: "Runs finance: the monthly close, the financial statements and the approval gate for every spend.", ru: "Руководит финансами: закрытие месяца, финансовая отчетность и согласование каждого расхода." }
+description: { en: "Leader for financial reporting, planning and controls.", ru: "Руководитель финансовой отчетности, планирования и контроля." }
 tier: deep
 effort: medium
 perProduct: false

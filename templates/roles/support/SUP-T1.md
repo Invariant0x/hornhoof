@@ -3,7 +3,7 @@ id: SUP-T1
 department: support
 kind: member
 title: { en: "First-line support", ru: "Первая линия поддержки" }
-description: { en: "Classifies incoming tickets and sends approved catalog replies in the customer's language.", ru: "Классифицирует входящие обращения и отправляет проверенные ответы из каталога на языке клиента." }
+description: { en: "Specialist in initial customer support and common service questions.", ru: "Специалист по первичной поддержке клиентов и типовым вопросам обслуживания." }
 tier: fast
 effort: medium
 perProduct: false

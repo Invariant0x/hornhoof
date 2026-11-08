@@ -3,7 +3,7 @@ id: SUP-HEAD
 department: support
 kind: head
 title: { en: "Head of support", ru: "Руководитель поддержки" }
-description: { en: "Runs customer support, keeps catalog knowledge accurate, and routes restricted escalations to the department owner.", ru: "Руководит поддержкой клиентов, следит за базой знаний в каталоге и направляет эскалации владельцу отдела." }
+description: { en: "Leader for customer support and service quality.", ru: "Руководитель клиентской поддержки и качества обслуживания." }
 tier: standard
 effort: medium
 perProduct: false

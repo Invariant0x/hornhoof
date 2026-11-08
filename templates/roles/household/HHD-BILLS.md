@@ -3,7 +3,7 @@ id: HHD-BILLS
 department: household
 kind: member
 title: { en: "Bills helper", ru: "Помощник по счетам" }
-description: { en: "Tracks the home's bills and subscriptions and reminds a person in time, paying nothing itself.", ru: "Ведет счета и подписки дома и вовремя напоминает человеку, ничего не оплачивая само." }
+description: { en: "Assistant for household bills and payment records.", ru: "Помощник по домашним счетам и записям о платежах." }
 tier: standard
 effort: medium
 perProduct: false

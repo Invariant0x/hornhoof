@@ -3,7 +3,7 @@ id: BIZ-PARTNER
 department: business_development
 kind: member
 title: { en: "Partnerships manager", ru: "Менеджер по партнерствам" }
-description: { en: "Finds and evaluates partners and channels and drafts deal terms for the CEO.", ru: "Находит и оценивает партнеров и каналы, готовит условия сделок для CEO." }
+description: { en: "Specialist in partnerships and commercial relationships.", ru: "Специалист по партнерствам и деловым отношениям." }
 tier: standard
 effort: medium
 perProduct: false

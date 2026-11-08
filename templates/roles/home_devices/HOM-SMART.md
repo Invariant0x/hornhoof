@@ -3,7 +3,7 @@ id: HOM-SMART
 department: home_devices
 kind: member
 title: { en: "Smart home helper", ru: "Помощник по умному дому" }
-description: { en: "Keeps smart devices updated and tuned and proposes scenes, with every real change waiting for a person.", ru: "Держит умные устройства обновленными и настроенными и предлагает сценарии, а каждое реальное изменение ждет человека." }
+description: { en: "Specialist in smart home devices and automation.", ru: "Специалист по устройствам и автоматизации умного дома." }
 tier: standard
 effort: medium
 perProduct: false

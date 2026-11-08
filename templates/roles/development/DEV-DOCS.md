@@ -3,7 +3,7 @@ id: DEV-DOCS
 department: development
 kind: member
 title: { en: "Technical writer", ru: "Технический писатель" }
-description: { en: "Keeps the README, guides and release notes true to the product.", ru: "Поддерживает README, руководства и заметки к выпуску в соответствии с продуктом." }
+description: { en: "Writer of technical guides and product documentation.", ru: "Автор технических руководств и документации продукта." }
 tier: standard
 effort: medium
 perProduct: false

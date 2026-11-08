@@ -3,7 +3,7 @@ id: DEV-FE
 department: development
 kind: member
 title: { en: "Frontend", ru: "Фронтенд" }
-description: { en: "Builds the interface users meet on the design system, test-first, in every language the product has.", ru: "Делает интерфейс, который встречает пользователь, на дизайн-системе через тесты, на всех языках продукта." }
+description: { en: "Engineer of user interfaces and application interactions.", ru: "Инженер пользовательских интерфейсов и взаимодействия с приложением." }
 tier: standard
 effort: xhigh
 perProduct: false

@@ -3,7 +3,7 @@ id: OPS-BUGS
 department: operations
 kind: member
 title: { en: "Weak point collector", ru: "Сборщик слабых мест" }
-description: { en: "Wakes on its timer, reads what failed and where agents stumbled, and proposes what to install ahead, what to allow and what to fix.", ru: "Просыпается по таймеру, читает, что сломалось и где агенты споткнулись, и предлагает, что установить заранее, что разрешить и что исправить." }
+description: { en: "Analyst of recurring operational failures and weak points.", ru: "Аналитик повторяющихся операционных сбоев и слабых мест." }
 tier: standard
 effort: high
 perProduct: false

@@ -3,7 +3,7 @@ id: DEV-ENG
 department: development
 kind: member
 title: { en: "Developer", ru: "Разработчик" }
-description: { en: "Builds a whole feature end to end, with all its parts, on one branch.", ru: "Делает функцию целиком, со всеми ее частями, в одной ветке." }
+description: { en: "Developer of software features and their behavior.", ru: "Разработчик программных функций и их поведения." }
 tier: standard
 effort: xhigh
 perProduct: false

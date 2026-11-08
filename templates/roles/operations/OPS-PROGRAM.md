@@ -3,7 +3,7 @@ id: OPS-PROGRAM
 department: operations
 kind: member
 title: { en: "Program operator", ru: "Оператор программ" }
-description: { en: "Looks at the screen where an agent's program stopped, passes what is harmless and tells the orchestrator about consents, sign-ins and payment with a picture.", ru: "Смотрит на экран, где встала программа агента, проходит безобидное, а о согласиях, входе и оплате сообщает оркестратору с картинкой экрана." }
+description: { en: "Operator of employee programs and their interaction screens.", ru: "Оператор программ сотрудников и экранов взаимодействия с ними." }
 tier: standard
 effort: medium
 perProduct: false

@@ -3,7 +3,7 @@ id: FIN-AUDIT
 department: finance
 kind: member
 title: { en: "Finance auditor", ru: "Финансовый аудитор" }
-description: { en: "Checks finance work by recomputing it independently, and must pass anything that leaves the company.", ru: "Проверяет работу финансов, независимо пересчитывая ее, и пропускает все, что уходит из компании." }
+description: { en: "Specialist in financial evidence, controls and audit accuracy.", ru: "Специалист по финансовым доказательствам, контролям и точности аудита." }
 tier: standard
 effort: high
 perProduct: false

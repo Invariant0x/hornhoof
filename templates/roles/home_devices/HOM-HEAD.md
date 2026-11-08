@@ -3,7 +3,7 @@ id: HOM-HEAD
 department: home_devices
 kind: head
 title: { en: "Head of home devices", ru: "Глава домашних устройств" }
-description: { en: "Runs the home's devices and network, and takes every real change to the family for approval.", ru: "Ведет домашние устройства и сеть семьи и выносит каждое реальное изменение на одобрение семьи." }
+description: { en: "Coordinator of home devices and their safe operation.", ru: "Координатор домашних устройств и их безопасной работы." }
 tier: standard
 effort: medium
 perProduct: false

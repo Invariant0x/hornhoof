@@ -3,7 +3,7 @@ id: DEV-BE
 department: development
 kind: member
 title: { en: "Backend engineer", ru: "Бэкенд-разработчик" }
-description: { en: "Builds the core of the product: services, libraries, data and integrations, test-first, in small proved steps.", ru: "Пишет ядро продукта: сервисы, библиотеки, данные и интеграции, через тесты, маленькими проверенными шагами." }
+description: { en: "Engineer of service behavior, data and software boundaries.", ru: "Инженер серверных функций, данных и границ программных систем." }
 tier: standard
 effort: xhigh
 perProduct: false

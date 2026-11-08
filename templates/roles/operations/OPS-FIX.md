@@ -3,7 +3,7 @@ id: OPS-FIX
 department: operations
 kind: member
 title: { en: "Reliability engineer", ru: "Инженер надежности" }
-description: { en: "Restores broken nodes, tools and integrations, finds the root cause and writes down how to handle it next time.", ru: "Восстанавливает сломанные узлы, инструменты и интеграции, находит первопричину и записывает, как действовать в следующий раз." }
+description: { en: "Engineer of operational reliability and incident recovery.", ru: "Инженер операционной надежности и восстановления после сбоев." }
 tier: standard
 effort: high
 perProduct: false
