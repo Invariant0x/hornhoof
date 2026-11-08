@@ -7,7 +7,7 @@ const at = (minutes: number) => new Date(T0 + minutes * 60_000);
 const min = (n: number) => n * 60;
 
 function task(number: number, over: Partial<FactsTask> = {}): FactsTask {
-  return { id: `t${number}`, number, parentId: null, executorAgentId: 'bruno', status: 'done', after: [], gates: 0, bounces: 0, workKind: null, firstLine: '', createdAt: at(0), closedAt: at(30), ...over };
+  return { id: `t${number}`, number, parentId: null, executorAgentId: 'bruno', status: 'done', after: [], workKind: null, firstLine: '', createdAt: at(0), closedAt: at(30), ...over };
 }
 const event = (taskNumber: number, kind: FactsEvent['kind'], minutes: number, data: Record<string, unknown> = {}): FactsEvent => ({ taskId: `t${taskNumber}`, kind, data, createdAt: at(minutes) });
 /* A task handed in, passed and merged at these minutes. */
@@ -64,39 +64,34 @@ describe('the time from giving a task out to accepting it', () => {
 });
 
 describe('the stages of a task', () => {
-  it('splits a task that passed at once into work, review and merge', () => {
-    const facts = pipelineFacts(input({ tasks: [task(1, { gates: 1 })], events: passed(1, 10, 25, 30) }));
+  it('splits a recorded historical handoff into work, review and merge', () => {
+    const facts = pipelineFacts(input({ tasks: [task(1)], events: passed(1, 10, 25, 30) }));
     expect(facts.stages).toEqual({ work: min(10), review: min(15), fixes: 0, merge: min(5), turnReview: 0 });
   });
 
-  it('counts the way back as fixes and each look as review', () => {
+  it('counts recorded repair intervals and each look separately', () => {
     const facts = pipelineFacts(input({
-      tasks: [task(1, { gates: 1, bounces: 1, closedAt: at(50) })],
+      tasks: [task(1, { closedAt: at(50) })],
       events: [event(1, 'submitted', 10), event(1, 'verdict', 20, { pass: false }), event(1, 'submitted', 35), event(1, 'verdict', 40, { pass: true }), event(1, 'submitted', 50, { merged: true })],
     }));
     expect(facts.stages).toEqual({ work: min(10), review: min(15), fixes: min(15), merge: min(10), turnReview: 0 });
   });
 
-  it('takes the last verdict of a panel as the end of its look', () => {
+  it('keeps a historical review interval through its last recorded verdict', () => {
     const facts = pipelineFacts(input({
-      tasks: [task(1, { gates: 1 })],
+      tasks: [task(1)],
       events: [event(1, 'submitted', 10), event(1, 'verdict', 12, { pass: true }), event(1, 'verdict', 20, { pass: true }), event(1, 'submitted', 30, { merged: true })],
     }));
     expect(facts.stages).toMatchObject({ review: min(10), merge: min(10) });
-  });
-
-  it('counts a task without gates as merging from its hand-in', () => {
-    const facts = pipelineFacts(input({ tasks: [task(1)], events: [event(1, 'submitted', 10), event(1, 'submitted', 30, { merged: true })] }));
-    expect(facts.stages).toMatchObject({ work: min(10), review: 0, merge: min(20) });
   });
 
   it('counts an open task up to now in the stage it is in', () => {
     const open = { status: 'working' as const, closedAt: null };
     const stages = (t: FactsTask, events: FactsEvent[]) => pipelineFacts(input({ until: at(100), tasks: [t], events })).stages;
     expect(stages(task(1, open), [])).toMatchObject({ work: min(100) });
-    expect(stages(task(1, { ...open, gates: 1 }), [event(1, 'submitted', 10)])).toMatchObject({ work: min(10), review: min(90) });
-    expect(stages(task(1, { ...open, gates: 1 }), [event(1, 'submitted', 10), event(1, 'verdict', 30, { pass: false })])).toMatchObject({ review: min(20), fixes: min(70) });
-    expect(stages(task(1, { ...open, gates: 1 }), [event(1, 'submitted', 10), event(1, 'verdict', 30, { pass: true })])).toMatchObject({ review: min(20), merge: min(70) });
+    expect(stages(task(1, open), [event(1, 'submitted', 10)])).toMatchObject({ work: min(10), review: min(90) });
+    expect(stages(task(1, open), [event(1, 'submitted', 10), event(1, 'verdict', 30, { pass: false })])).toMatchObject({ review: min(20), fixes: min(70) });
+    expect(stages(task(1, open), [event(1, 'submitted', 10), event(1, 'verdict', 30, { pass: true })])).toMatchObject({ review: min(20), merge: min(70) });
   });
 
   it('counts the review of a turn on its own', () => {
@@ -217,10 +212,10 @@ describe('waits', () => {
 });
 
 describe('returns, failures and interrupted turns', () => {
-  it('counts returns and the rounds of fixes, without the merge', () => {
+  it('counts explicit historical rework events and repair submissions separately', () => {
     const facts = pipelineFacts(input({
-      tasks: [task(1, { bounces: 2 }), task(2)],
-      events: [event(1, 'submitted', 1), event(1, 'submitted', 2), event(1, 'submitted', 3), event(1, 'submitted', 4, { merged: true }), event(2, 'submitted', 5)],
+      tasks: [task(1), task(2)],
+      events: [event(1, 'submitted', 1), event(1, 'verdict', 1.5, { rework: true }), event(1, 'submitted', 2), event(1, 'verdict', 2.5, { rework: true }), event(1, 'submitted', 3), event(1, 'submitted', 4, { merged: true }), event(2, 'submitted', 5)],
     }));
     expect(facts.returns).toBe(2);
     expect(facts.fixRounds).toBe(2);
@@ -256,11 +251,11 @@ describe('numbers by kind of task', () => {
   it('counts by the field, then by the first line of the body, and the rest apart', () => {
     const facts = pipelineFacts(input({
       tasks: [
-        task(1, { workKind: 'bug', bounces: 1 }), task(2, { workKind: 'bug', closedAt: at(50) }),
+        task(1, { workKind: 'bug' }), task(2, { workKind: 'bug', closedAt: at(50) }),
         task(3, { firstLine: 'Вид: старый код. Класс риска: нет.' }),
         task(4, { firstLine: 'Plain text' }),
       ],
-      events: [event(1, 'submitted', 5), event(1, 'submitted', 6)],
+      events: [event(1, 'submitted', 5), event(1, 'verdict', 5.5, { rework: true }), event(1, 'submitted', 6)],
     }));
     expect(facts.kinds).toEqual({
       bug: { tasks: 2, toAcceptance: min(40), returns: 1, fixRounds: 1 },

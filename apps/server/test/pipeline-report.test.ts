@@ -73,13 +73,13 @@ async function run(c: Company, taskId: string, number: number, kind: 'tests' | '
 /* A closed turn 7 of two tasks of development and one of sales, each with what happened to it, and a task of a later turn. */
 async function closedTurn(c: Company) {
   const seven = await c.turn(7, 'closed', 0, 120);
-  const one = await c.task(seven.id, 1, { workKind: 'bug', gates: [c.hana.id] });
-  const two = await c.task(seven.id, 2, { after: [one.id], closedAt: at(60), bounces: 1 });
+  const one = await c.task(seven.id, 1, { workKind: 'bug' });
+  const two = await c.task(seven.id, 2, { after: [one.id], closedAt: at(60) });
   const three = await c.task(seven.id, 3, { departmentId: c.sales.id, executorAgentId: c.sam.id, assigneeAgentId: c.sam.id, closedAt: at(100) });
   await passed(c, one.id, 10, 20, 30);
   await c.event(two.id, 'started', 30);
   await c.event(two.id, 'submitted', 40);
-  await c.event(two.id, 'verdict', 45, { pass: false });
+  await c.event(two.id, 'verdict', 45, { pass: false, rework: true });
   await c.event(two.id, 'submitted', 50);
   await c.event(two.id, 'submitted', 60, { merged: true });
   await c.event(three.id, 'submitted', 100);
@@ -258,7 +258,7 @@ describe('the snapshot of a turn', () => {
     expect(kept!.source).toBe('rebuilt');
     expect(kept!.facts.whole.tasks.total).toBe(3);
 
-    await c.db.update(tasks).set({ bounces: 9 }).where(eq(tasks.id, one.id));
+    await c.event(one.id, 'verdict', 31, { pass: false, rework: true });
     const again = await pipelineReport(c.db, c.companyId, 7);
     expect(again.whole.find(r => r.key === 'returns')!.value).toBe(1);
     expect(await c.db.select({ n: sql<number>`count(*)::int` }).from(turnSnapshots)).toEqual([{ n: 1 }]);
