@@ -57,11 +57,6 @@ export async function issuesForEchelon(db: Reader, task: Task, route: Route, can
   });
 }
 
-export function mechanicalVerdict(data: Record<string, unknown>): boolean {
-  const issues = z.array(FindingRecord).safeParse(data.issues);
-  return issues.success && issues.data.some(issue => issue.blocking) && issues.data.every(issue => issue.category === 'mechanical');
-}
-
 function confirmedIds(events: Event[], issues: Finding[]): Set<string> {
   const states = new Map<string, boolean>();
   for (const event of events) {

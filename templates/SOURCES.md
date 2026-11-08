@@ -111,6 +111,8 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-qa-acceptance.md` | Written for Hornhoof | msitarzewski/agency-agents testing/testing-reality-checker.md; msitarzewski/agency-agents testing/testing-evidence-collector.md; garrytan/gstack qa/SKILL.md.tmpl | Hornhoof |
 | `skills/dev-release-notes.md` | Written for Hornhoof | garrytan/gstack document-release/SKILL.md.tmpl | Hornhoof |
 | `skills/dev-review-diff.md` | Written for Hornhoof | affaan-m/ECC agents/code-reviewer.md; obra/superpowers skills/requesting-code-review/code-reviewer.md; anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md; garrytan/gstack review/checklist.md | Hornhoof |
+| `skills/dev-review-fix.md` | Written for Hornhoof | None | Hornhoof |
+| `skills/dev-security-fix.md` | Written for Hornhoof | None | Hornhoof |
 | `skills/dev-review-verdict.md` | Written for Hornhoof | obra/superpowers skills/requesting-code-review/code-reviewer.md | Hornhoof |
 | `skills/dev-security-review.md` | Written for Hornhoof | affaan-m/ECC agents/security-reviewer.md; addyosmani/agent-skills skills/security-and-hardening/SKILL.md; garrytan/gstack review/specialists/security.md; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/dev-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |

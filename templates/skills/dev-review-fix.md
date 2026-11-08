@@ -13,6 +13,6 @@ Record confirmed defects as structured issues on the exact reviewedCommit. A fai
 
 Submit the corrected candidate forward with its parent, full base and fix SHAs, same branch, changed paths, actual producing model and subscription, and run evidence. Your repair is recorded as authorship; it does not invent another independent review of your own fix. Preserve the original finding and its provenance. Ordinary findings stay with their checker, without a return to the original author. If the result pursues the wrong goal, use verdict with escalate and the evidence for the head to decide.
 
-When Review discovers access, secret, personal-data or external-input risk, add Security with its concrete reason before handoff. Cleanup is absent by default; only the head enables that optional stage after Review, using the existing dev-cleanup ability. Tests verifies the final candidate including all fixes, reusing only matching fingerprints and mutating only changed pure functions with fast tests.
+When Review discovers access, secret, personal-data or external-input risk, add Security with its concrete reason before handoff. Cleanup is absent by default; only the head enables that optional stage after Review, using the existing cleanup ability. Tests verifies the final candidate including all fixes, reusing only matching fingerprints and mutating only changed pure functions with fast tests.
 
 Follow the task's authorized integration route. Passing your checks grants no permission for main, publication, live data, access or model changes.

@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
-import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
+import { IssueInput } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -67,8 +67,7 @@ describe('templates', () => {
       expect(body(id), id).toMatch(/urgent work, small tasks, direct named orders and review fixes/);
       expect(body(id), id).toMatch(/Self-review does not replace this gate/);
     }
-    expect(body('dev-gates')).toMatch(/takes precedence[\s\S]*small\/fast paths[\s\S]*no-second-review/);
-    expect(body('dev-gates')).toMatch(/reviewer is unavailable[\s\S]*keep the branch separate/);
+    expect(body('dev-gates')).toMatch(/eligible reviewer is unavailable[\s\S]*candidate waiting/);
   });
 
   it('selects implementation checks from the task and retains the four coding cycles', () => {
@@ -165,9 +164,9 @@ describe('templates', () => {
     expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
     expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
     expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
-    expect(body('dev-gates')).toMatch(/When an independent review is assigned[\s\S]*author cannot pass it/);
-    expect(body('dev-gates')).toMatch(/When broader validation is assigned[\s\S]*exact candidate/);
-    expect(body('dev-review-verdict')).toMatch(/only the fixes/);
+    expect(body('dev-gates')).toMatch(/Every executable work result passes Review/);
+    expect(body('dev-gates')).toMatch(/Tests verifies the exact final candidate including[\s\S]*repairs/);
+    expect(body('dev-review-verdict')).toMatch(/only the fixes[\s\S]*paths they affect/);
     expect(body('dev-qa-acceptance')).toMatch(/exact candidate[\s\S]*do not assume[\s\S]*shared turn/);
     expect(body('dev-qa-acceptance')).toMatch(/Never pass something because the tests are green/);
   });
@@ -199,7 +198,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(50);
-    expect(skills).toHaveLength(177);
+    expect(skills).toHaveLength(179);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -520,14 +519,14 @@ describe('templates', () => {
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
   });
 
-  describe('differential second looks, vertical slices, author evidence and verified finding provenance', () => {
+  describe('scoped repair checks, author evidence and verified finding provenance', () => {
     const current = (): ReviewSkills => ({
       diff: templates.skills.get('dev-review-diff')!.body,
       verdict: templates.skills.get('dev-review-verdict')!.body,
       security: templates.skills.get('dev-security-review')!.body,
     });
 
-    it('satisfies every differential review, T6/T10 evidence, slice and provenance rule in the shipped skills', () => {
+    it('preserves scoped checks, T6/T10 evidence and provenance in the shipped skills', () => {
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, current())).toEqual([]);
       for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(templates.skills.get(id)!.body, id).not.toMatch(/hornhoof/i);
     });
@@ -535,6 +534,8 @@ describe('templates', () => {
     it('rejects broken-meaning skills even when required substrings remain present', () => {
       const base = current();
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, base)).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nReturn each ordinary defect to the original author.` })).toContain('current-owner-repairs-and-model-choice');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nRequire a different provider before assigning Review.` })).toContain('current-owner-repairs-and-model-choice');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
@@ -543,10 +544,8 @@ describe('templates', () => {
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
-      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
       expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
         'no-self-or-role-rule-main-release-approval',
@@ -852,7 +851,7 @@ describe('templates', () => {
       verdict: templates.skills.get('dev-review-verdict')!.body,
     });
 
-    it('matches the IssueInput category enum and mechanicalVerdict server aggregate in both readable review skills', () => {
+    it('matches the IssueInput category enum and preserves the behavior-unchanged boundary', () => {
       const { diff, verdict } = pair();
       const expected = ['security', 'data', 'spec', 'other', 'mechanical'];
       expect(documentedCategories(verdict)).toEqual(expected);
@@ -865,11 +864,6 @@ describe('templates', () => {
         expect(IssueInput.safeParse({ category: invented, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, invented).toBe(false);
       }
       expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { diff, verdict })).toEqual([]);
-      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)] })).toBe(true);
-      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('other', false)] })).toBe(false);
-      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('spec', true)] })).toBe(false);
-      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', false)] })).toBe(false);
-      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)], unresolvedFindingIds: ['11111111-1111-4111-8111-111111111111'] })).toBe(false);
     });
 
     it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
@@ -880,9 +874,9 @@ describe('templates', () => {
         ['diff', "Use 'mechanical' when a fix may change behaviour only slightly.", 'strict-behavior-unchanged-boundary'],
         ['verdict', "When in doubt, mark the finding 'mechanical' so the fix finishes faster.", 'doubt-keeps-regular-category-and-full-base-level'],
         ['diff', "Classify spec findings as 'mechanical' to run at medium.", 'doubt-keeps-regular-category-and-full-base-level'],
-        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'server-aggregate-wake-mechanical-and-no-second-review'],
-        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'server-aggregate-wake-mechanical-and-no-second-review'],
-        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'same-owner-repair-without-effort-or-return'],
+        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'same-owner-repair-without-effort-or-return'],
+        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'same-owner-repair-without-effort-or-return'],
         ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
       ];
       for (const [target, extra, expectedRule] of violations) {
@@ -926,6 +920,14 @@ const secondLookSentences = (s: ReviewSkills): string =>
 
 const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }[] = [
   {
+    id: 'current-owner-repairs-and-model-choice',
+    holds: s => /task\.echelons/.test(s.verdict) && /Review is required for every executable result/.test(s.verdict) &&
+      /failed verdict keeps ownership with you/.test(s.verdict) && /model not weaker than its producer/.test(s.verdict) &&
+      /same provider, subscription or tariff is allowed/.test(s.verdict) &&
+      forbids(s.verdict, /\breturn\w*\b[^.!?;,]*\b(?:original author|work to the author)\b/i) &&
+      forbids(s.verdict, /\brequire\w*\b[^.!?;,]*\bdifferent provider\b/i),
+  },
+  {
     id: 'native-review-first-look-only',
     holds: s => nativeReviewScoped(s.diff) && nativeReviewScoped(s.security),
   },
@@ -945,28 +947,6 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
     },
   },
   {
-    id: 'immutable-fix-range-and-own-blocking-findings',
-    holds: s =>
-      forEvery([s.verdict], text =>
-        /\btask\.fixReview\b/.test(text) &&
-        /\breviewedCommit\.\.fixCommit\b/.test(text) &&
-        /\breviewed_commit\.\.fix_commit\b/.test(text) &&
-        /\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b/.test(text) &&
-        /\bsame reviewer\b/i.test(text) &&
-        /\bmedium\b/i.test(text) &&
-        /\bfindingIds\b/.test(text) &&
-        /\bunchanged code\b[^.!?]*\bno new\b/i.test(text),
-      ),
-  },
-  {
-    id: 'turn-review-one-round',
-    holds: s =>
-      forEvery([s.verdict], text =>
-        /\bshared review\b[\s\S]*\bone round\b/i.test(text) &&
-        /\bprotected approval\b[\s\S]*\bscoped return\b[\s\S]*\baffected proof\b/i.test(text),
-      ) && forbids(`${s.diff}\n${s.verdict}`, /\breview of a turn\b[^.!?;,]*\btwo rounds\b/i),
-  },
-  {
     id: 't6-named-harm-no-coverage-chasing',
     holds: s =>
       /\bharm to a person\b/i.test(s.diff) &&
@@ -981,25 +961,11 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
       forEvery([s.verdict], text =>
         /\btask\.review\b/.test(text) &&
         /\btestEvidence\b/.test(text) &&
-        /\bgateCounts\b/.test(text) &&
         /\bproves\b/.test(text) &&
         /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(text),
       ) && forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
   },
-  {
-    id: 'vertical-slices-above-800',
-    holds: s =>
-      /\btask\.reviewPlan\b/.test(s.verdict) &&
-      /\b800\b/.test(s.verdict) &&
-      /\bvertical task slices\b[\s\S]*\bnot by folders\b/i.test(s.verdict) &&
-      /\bcommonContracts\b/.test(s.verdict) &&
-      /\bpackages\/protocol\b[\s\S]*\bschema\.ts\b[\s\S]*\broute schemas\b/.test(s.verdict) &&
-      /\bintegrationReviewerId\b/.test(s.verdict) &&
-      /\bcross-slice\b/i.test(s.verdict) &&
-      /\bauthorVendor\b/.test(s.verdict) &&
-      /\bdegraded\b/.test(s.verdict) &&
-      forbids(s.verdict, /\bsplit\b[^.!?;,]*\bby (?:top-level )?folders\b/i),
-  },
+
   {
     id: 'structured-findings-and-provenance',
     holds: s =>
@@ -1009,7 +975,7 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
       /\bconfirm_finding\b/.test(s.verdict) &&
       /\bfixCommit\b/.test(s.verdict) &&
       /\breviewerVendor\b/.test(s.verdict) &&
-      /\blegacy\b/i.test(s.verdict) &&
+      /\bcandidateId\b/.test(s.verdict) && /\bstage\b/.test(s.verdict) &&
       /\bdoes not\b[^.!?]*\b(?:fixed|APPROVE)\b/i.test(s.verdict) &&
       forbids(`${s.diff}\n${s.verdict}`, /\b(?:mark\w*|confirm\w*|count\w*)\b[^.!?;,]*\bfindingId\s+confirmed\b/i),
   },
@@ -1265,21 +1231,6 @@ const documentedCategories = (text: string): string[] => {
   return [...clause.matchAll(/['`]([a-z_]+)['`]/g)].map(m => m[1]!);
 };
 
-const sampleFinding = (category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking: boolean) => ({
-  taskId: '11111111-1111-4111-8111-111111111111',
-  findingId: '22222222-2222-4222-8222-222222222222',
-  revision: '33333333-3333-4333-8333-333333333333',
-  reviewedCommit: 'a'.repeat(40),
-  authorId: '44444444-4444-4444-8444-444444444444',
-  reviewerId: '55555555-5555-4555-8555-555555555555',
-  reviewerVendor: 'anthropic',
-  category,
-  blocking,
-  path: 'src/index.ts',
-  line: 10,
-  harm: 'Wrong behaviour.',
-});
-
 const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => boolean }[] = [
   {
     id: 'strict-behavior-unchanged-boundary',
@@ -1313,22 +1264,13 @@ const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => b
       ]),
   },
   {
-    id: 'server-aggregate-wake-mechanical-and-no-second-review',
-    holds: s =>
-      forEvery([s.verdict], text =>
-        matchesAll(text, [
-          /\bWake\.mechanical\b/,
-          /\bevery\b[^.!?]*\bissue\b[\s\S]*\bfailing verdicts?\b[\s\S]*\bmechanical\b/i,
-          /\bmixed\b[^.!?]*\bunmarked\b/i,
-          /\b(?:never|does not)\s+set\w*\s+effort\b[\s\S]*\b(?:never|does not)\s+change\w*\s+effort\s+inside\s+a\s+running\s+turn\b[\s\S]*\b(?:never|does not)\s+open\w*\s+a\s+second\s+review\b/i,
-        ]),
-      ) &&
-      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
-        negatesBefore(sentence, /\bset\w*\s+['`]?Wake\.mechanical['`]?\s+on\s+mixed\s+verdicts?\b/i),
-      ) &&
+    id: 'same-owner-repair-without-effort-or-return',
+    holds: s => /does not set effort or change effort inside a running turn/.test(s.verdict) &&
+      /never opens another review or sends a mechanical fix back to the author/.test(s.verdict) &&
       forbidsAll(`${s.diff}\n${s.verdict}`, [
-        /\bswitch\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\beffort\s+inside\s+a\s+running\s+turn\b/i,
-        /\bopen\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+        /\bswitch\w*\b[^.!?;,]*\beffort\s+inside\s+a\s+running\s+turn\b/i,
+        /\bopen\w*\b[^.!?;,]*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+        /\bset\w*\s+Wake\.mechanical\s+on\s+mixed\s+verdicts\b/i,
       ]),
   },
   {
@@ -1504,11 +1446,13 @@ describe('skills compose around an assignment without a universal role', () => {
     expect(body(id)).not.toContain('dev-review-verdict');
   });
 
-  it('keeps structured verdicts conditional on the assignment and forbids editing the reviewed item', () => {
+  it('keeps mandatory Review and its repairs with the current checking owner', () => {
     const verdict = body('dev-review-verdict');
     expect(templates.skills.get('dev-review-verdict')!.kind).toBe('gate');
-    expect(verdict).toMatch(/Never approve your own independent gate or edit the change you are assigned to judge/);
-    expect(verdict).toMatch(/task's actual gates and employee assignment determine whether this review is needed/);
+    expect(verdict).toMatch(/Only the current checking owner may act/);
+    expect(verdict).toMatch(/failed verdict keeps ownership with you[\s\S]*fix it within the assigned paths/);
+    expect(verdict).not.toContain('task.fixReview');
+    expect(verdict).toMatch(/Review is required for every executable result/);
     for (const id of ['DEV-REV', 'DEV-SEC']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-review-verdict')?.on).toBe(true);
   });
 

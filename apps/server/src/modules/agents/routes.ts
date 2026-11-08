@@ -1,5 +1,5 @@
 import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';

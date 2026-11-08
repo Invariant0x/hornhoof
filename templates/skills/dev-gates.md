@@ -5,26 +5,18 @@ description: { en: "Chooses checks from the assignment, task and risk, preservin
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m/ECC skills/council-multi-model/SKILL.md, affaan-m/ECC skills/santa-method/SKILL.md]
 ---
-You can choose and enforce a development check route for an assigned change.
+You can enforce the required development route and its applicable checks.
 
-Read the employee's assignment, task acceptance, declared risk and actual gates. Skill selection supplies abilities, not a mandatory pipeline. A standalone named order may be completed by its assigned owner; shared review, testing and release stages exist only when the task assigns them. A turn is a sprint, with order and conditions rather than fixed units of time.
+Read the current assignment and task.echelons before acting. Every executable work result passes Review. A small task skips Architecture; other work starts with a concrete plan. Development produces code and tests. One current owner writes the task branch at a time. Roles supply independent abilities; a role name or numeric gate never determines the current stage.
 
-## Security before integration
+Review checks correctness, simplicity and basic security, records confirmed findings and repairs them in the same branch within the assigned paths. Ordinary findings never return to the original author. A result pursuing the wrong goal goes to the head. The checker is another employee with a model not weaker than the producer; prefer another provider when one is available. The same provider, subscription or tariff is allowed without waiting for a second provider.
 
-Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate. This protected condition takes precedence over small/fast paths, tasks without gates and a no-second-review convention. If the required independent reviewer is unavailable, keep the branch separate and report the missing approval.
+Cleanup is absent by default. Only the head enables this optional stage for a task or turn. Then it follows Review and uses the existing cleanup ability, offered to developers and reviewers but switched off by default. It removes unnecessary work in the same branch without returning it to the author.
 
-## Development
+Security is required for access, root, permissions or secrets, personal data and external-input risks. The head enables it at assignment; Review can add it with a concrete reason. An independent Security engineer checks and repairs the sensitive result before authorized integration into a shared branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate. If an eligible reviewer is unavailable, keep the candidate waiting and tell the head. Do not skip a required stage or expand access to find a checker.
 
-Keep a connected block with one owner and resolve shared-file collisions. A design step is needed only when the assignment or missing architecture requires it. For small work preserve context, state the change and its check briefly, and omit unnecessary process. The owner may choose a visual check for a simple visual change; required approvals remain.
+Tests verifies the exact final candidate including Review, optional Cleanup and Security repairs. Select only applicable checks for the changed code; reuse a completed result only when its input fingerprint matches. A new or changed test always runs. Mutate only changed pure functions with direct fast tests; database, process and network code does not enter that mutation scope. Read full finished logs, actual part SHAs and environment receipts. Missing, refused or unsupported checks are NOT_RUN, never PASS. Follow the assignment's check route; only whole suites use run_tests under the generic policy, and a stricter assignment can require every check there. Do not duplicate unchanged passed checks.
 
-## Review
+A coordination group without its own executable output closes with a checked report and references to accepted current child candidates and evidence. Unfinished Review, unaccepted or stale child results block closure. A parent with its own executable output follows the same required Review route; its title grants no exemption.
 
-When an independent review is assigned, the author cannot pass it. Read the exact comparison and existing author evidence, use the assigned scope and report all blocking findings together. Check code, tests and obvious security problems; sensitive access/sign-in/secrets/permissions and data risks require the independent expertise the task and protected condition demand. Prefer another provider where available and report degraded independence honestly. A scoped return checks its original findings and new breakage, not unrelated unchanged work.
-
-## Testing
-
-When broader validation is assigned, one owner freezes the exact candidate and coordinates required suites, types/build/language checks, user-facing surfaces and quality measurements. Run types/build/language and quality checks in the checker's own workspace. Only whole suites use run_tests, split into groups over compatible free machines; read every part's actual SHA and full log. Reuse a proved result only for the same candidate/fingerprint; after fixes rerun what failed and what changed, rather than starting duplicate full runs. A missing or refused stage is NOT_RUN, never PASS.
-
-## Release
-
-Release requires actual passed required checks, release notes, a tested rollback and the authorized human's approval of the exact commit. Publication and live updates use the project's approved route. Merely having an ability never authorizes an action on another person's machine or a public release.
+After Tests, integrate only by the task's authorized route. Main, publication and live updates require the authorized human's approval of the exact commit. Ability selection grants no permission to release or change another person's machine.
