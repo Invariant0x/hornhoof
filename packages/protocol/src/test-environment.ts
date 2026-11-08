@@ -291,21 +291,29 @@ function fingerprintIndex(prints: UnitFingerprint[]): Map<string, string> {
   return index;
 }
 
+function requireCanonicalPrints(head: Map<string, string>, inventory: TestUnit[]): void {
+  const canonical = new Set(inventory.map(fingerprintKey));
+  const extra = [...head.keys()].some(key => !canonical.has(key) && key !== fingerprintKey(PREPARATION_UNIT));
+  if (extra || inventory.some(unit => !head.has(fingerprintKey(unit)))) throw new Error('The final fingerprints must cover the canonical test inventory exactly.');
+}
+
+function candidateMutationSources(snapshot: EnvironmentSnapshot, scope: NonNullable<EnvironmentSnapshot['candidate']>): { declared: Set<string>; selected: Set<string> } {
+  const { mutation } = snapshot.description.manifest;
+  if (mutation.status === 'supported' && (!scope.mutation || scope.mutation.selection.status !== 'ready')) throw new Error('Candidate mutation applicability is missing or blocked.');
+  return { declared: new Set(mutation.status === 'supported' ? mutation.sourcePaths : []), selected: new Set(scope.mutation?.selection.selected.map(fn => fn.file) ?? []) };
+}
+
 /* The same influencing identity at the original base needs no new check; indivisible groups stay together. */
 export function candidateTestUnits(snapshot: EnvironmentSnapshot): TestUnit[] {
   const scope = snapshot.candidate;
   if (!scope) throw new Error('Candidate test selection needs its pinned base and final fingerprints.');
   const base = fingerprintIndex(scope.baseFingerprints), head = fingerprintIndex(scope.fingerprints);
-  const inventory = snapshot.description.inventory, canonical = new Set(inventory.map(fingerprintKey));
-  const extra = [...head.keys()].some(key => !canonical.has(key) && key !== fingerprintKey(PREPARATION_UNIT));
-  if (extra || inventory.some(unit => !head.has(fingerprintKey(unit)))) throw new Error('The final fingerprints must cover the canonical test inventory exactly.');
+  const inventory = snapshot.description.inventory;
+  requireCanonicalPrints(head, inventory);
   const required = snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)?.requiredSuiteIds;
   if (!required) throw new Error('Candidate test selection needs a known profile.');
-  const { mutation } = snapshot.description.manifest;
-  if (mutation.status === 'supported' && (!scope.mutation || scope.mutation.selection.status !== 'ready')) throw new Error('Candidate mutation applicability is missing or blocked.');
-  const mutationSources = new Set(mutation.status === 'supported' ? mutation.sourcePaths : []);
-  const selectedSources = new Set(scope.mutation?.selection.selected.map(fn => fn.file) ?? []);
-  const eligible = inventory.filter(unit => required.includes(unit.suiteId) && (!mutationSources.has(unit.file) || selectedSources.has(unit.file)));
+  const mutation = candidateMutationSources(snapshot, scope);
+  const eligible = inventory.filter(unit => required.includes(unit.suiteId) && (!mutation.declared.has(unit.file) || mutation.selected.has(unit.file)));
   const changed = new Set(eligible.filter(unit => head.get(fingerprintKey(unit)) !== base.get(fingerprintKey(unit))).map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
   return eligible.filter(unit => changed.has(`${unit.suiteId}\0${unit.selectionUnit}`));
 }
