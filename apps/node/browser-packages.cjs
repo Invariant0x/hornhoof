@@ -1,4 +1,4 @@
-// Prints the Debian packages Playwright's Chromium needs on a platform, such as debian12-arm64, from Playwright's
+// Prints the Debian packages Playwright's Chromium, Firefox and WebKit need on a platform, such as debian12-arm64, from Playwright's
 // own table. The table is not exported, so its section of the bundle runs alone. Run at image build time only.
 const fs = require('node:fs');
 
@@ -10,5 +10,6 @@ if (start < 0 || end < 0) throw new Error(`No package table in ${bundle}`);
 const esm = section => Object.values(section)[0];
 const deps = new Function('__esm', `${src.slice(start, end)}\ninit_nativeDeps();\nreturn deps;`)(esm);
 const wanted = deps[platform];
-if (!wanted?.tools?.length || !wanted?.chromium?.length) throw new Error(`No packages for ${platform}`);
-console.log([...wanted.tools, ...wanted.chromium].join(' '));
+const browsers = ['chromium', 'firefox', 'webkit'];
+if (!wanted?.tools?.length || browsers.some(browser => !wanted[browser]?.length)) throw new Error(`No packages for ${platform}`);
+console.log([...new Set([...wanted.tools, ...browsers.flatMap(browser => wanted[browser])])].join(' '));
