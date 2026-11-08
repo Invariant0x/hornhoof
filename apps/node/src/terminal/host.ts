@@ -309,6 +309,8 @@ type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+/* The prompt Hornhoof typed, whole or the part of it a program got. */
+const typedPrompt = (prompt: string, typed: string) => flat(typed).includes(flat(prompt)) || flat(prompt).includes(flat(typed));
 const heardWords = (receipt: WordReceipt) => receipt.state === 'queued' || receipt.state === 'taken';
 
 const interruptionCount = (screen: string) => [...screen.matchAll(/Interrupted · What should Antigravity CLI do instead\?/g)].length;
@@ -1190,6 +1192,18 @@ export class TerminalHost {
     return true;
   }
 
+  /* Whether a prompt the program tells of is what a person sent while this turn's prompt waited. A busy machine can tell
+     of it once that prompt began to go in: it is still theirs when it is not that prompt and came of their Enter in this
+     turn, told of by no channel yet or by another one first. What it is decides, not when the node hears of it. */
+  private personsPrompt(a: Agent, prompt: string | null): boolean {
+    if (a.promptWaits) return true;
+    return prompt !== null && a.typing != null && !a.took && this.personPressed(a) && !typedPrompt(prompt, a.typing);
+  }
+
+  private personPressed(a: Agent): boolean {
+    return Boolean(a.personWords) || (a.pressed != null && a.pressed.jobId === a.turn?.jobId);
+  }
+
   /* What a person sent while this turn's prompt waited to go in is theirs, in this turn as Hornhoof knows from their Enter.
      It does not take the prompt's place, and its end does not end the turn. */
   private personSent(a: Agent): void {
@@ -1611,8 +1625,9 @@ export class TerminalHost {
 
   private operatorStarted(a: Agent): void { this.operator?.started(a.key); }
 
-  private tookTurn(a: Agent, id?: string): void {
-    if (a.promptWaits) return this.personSent(a);
+  /* prompt: what the program says it took, where its log says. */
+  private tookTurn(a: Agent, id?: string, prompt: string | null = null): void {
+    if (this.personsPrompt(a, prompt)) return this.personSent(a);
     this.operatorStarted(a);
     const first = !a.took;
     a.busy = a.took = true;
@@ -2026,7 +2041,7 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
-    if (news.started) this.tookTurn(a);
+    if (news.started) this.tookTurn(a, undefined, news.prompt ?? null);
     if (news.aborted) this.interrupted(a);
     else if (news.failed !== undefined) this.endTurn(a, { status: 'failed', message: '', failure: isRecord(raw.error) ? FAILURE.kimi(raw.error) : failure('unknown', news.failed) }, undefined, news.blocked);
     else if (news.ended) this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
@@ -2148,8 +2163,8 @@ export class TerminalHost {
   }
 
   private async promptHook(a: Agent, data: Record<string, unknown>): Promise<string | void> {
-    if (a.promptWaits) return this.personSent(a);
     const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
+    if (this.personsPrompt(a, prompt)) return this.personSent(a);
     const retained = this.takeRetainedAssignment(a, prompt);
     /* Claude's transcript confirms queued words after this hook returns. */
     return queuedInClaude(a, this.overIn(a)) ? undefined : this.promptTaken(a, prompt, retained);
