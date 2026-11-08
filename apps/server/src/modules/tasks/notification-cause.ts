@@ -30,7 +30,7 @@ function answerAction(note: ActionNote): string {
 
 function actionOf(note: ActionNote): string | undefined {
   if (note.kind === 'answered') return answerAction(note);
-  if (note.kind === 'verdict' && note.data?.pass === false) return 'returned work';
+  if (note.kind === 'verdict' && note.data?.pass === false) return note.data.wrongGoal === true ? 'escalated work' : 'kept work for repair';
   if (note.kind === 'report' && note.data?.done === false) return 'reported blocked work';
   return ACTIONS[note.kind];
 }
