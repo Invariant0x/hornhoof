@@ -135,8 +135,33 @@ export class OperatorObserver {
 
   tick(): void {
     if (!this.options.connected()) return;
-    for (const id of Object.keys(this.state.instances)) this.transition(() => this.checkQuestion(this.state.instances[id]!));
-    for (const id of Object.keys(this.state.deliveries)) this.transition(() => this.checkDelivery(this.state.deliveries[id]!));
+    const errors: unknown[] = [];
+    this.transition(() => {
+      const check = (instance: Instance, delivery?: Delivery) => {
+        const beforeInstance = { ...instance, question: instance.question && { ...instance.question } };
+        const beforeDelivery = delivery && { ...delivery, alarms: [...delivery.alarms] };
+        const outbox = this.state.outbox.length, facts = this.staged!.facts.length, changed = this.staged!.changed;
+        try {
+          if (delivery) this.checkDelivery(delivery);
+          else this.checkQuestion(instance);
+        } catch (error) {
+          this.state.instances[instance.instance] = beforeInstance;
+          if (beforeDelivery) this.state.deliveries[beforeDelivery.id] = beforeDelivery;
+          this.state.outbox.length = outbox;
+          this.staged!.facts.length = facts;
+          this.staged!.changed = changed;
+          errors.push(error);
+        }
+      };
+      for (const id of Object.keys(this.state.instances)) check(this.state.instances[id]!);
+      for (const id of Object.keys(this.state.deliveries)) {
+        const delivery = this.state.deliveries[id]!;
+        /* A delivery always has its program; one without it has nothing to alarm about. */
+        const owner = this.state.instances[delivery.instance];
+        if (owner) check(owner, delivery);
+      }
+    });
+    if (errors.length) throw errors[0];
   }
 
   private checkDelivery(delivery: Delivery): void {

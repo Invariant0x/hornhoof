@@ -5,6 +5,37 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.8.2] - 2026-11-08
+
+Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,
+and stop nodes from spending a whole processor core on their program observer.
+
+### Added
+
+- Give every employee an assignment on its card, apart from its role. A head sets the assignment of a worker in its own
+  department with set_employee_assignment, and a reset keeps it.
+- Split the orchestrator's company skill into structure, staffing, people and resources abilities.
+- Mark the commit on GitHub when a run of the whole product passes, so the GitHub build can skip tests that already passed.
+
+### Changed
+
+- Skills of all departments stand alone: none names or relies on another, and any set of ticked skills works together.
+- Roles are one line about who the employee is; how it works lives in its skills.
+- The generalist developer role is gone: an employee with the skills that cover the whole chain does that work.
+- install.sh back-node returns a node to 0.8.1.
+
+### Fixed
+
+- A node checks all its programs in one step a second. Before, it copied its whole observer state once for each program
+  and delivery it remembered, and with a few hundred of them it sat at 100% CPU with nothing running, so tool and hook
+  calls through it timed out.
+
+### Before you update
+
+- Update the server before its nodes. Startup applies migration 0086: generalist developers and pending hires of that role
+  become developers with their saved skills, and holders of the company skill get the new orchestrator abilities.
+- Agents start a new session with their next turn, since their instructions change.
+
 ## [0.8.1] - 2026-11-07
 
 Prepare a product's test environment once for the machines that share it, reuse unchanged green test files, and load each
