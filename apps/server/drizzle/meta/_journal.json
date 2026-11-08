@@ -610,6 +610,13 @@
       "when": 1794139083647,
       "tag": "0087_required_task_routes",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794147715894,
+      "tag": "0088_remove_task_gates",
+      "breakpoints": true
     }
   ]
 }

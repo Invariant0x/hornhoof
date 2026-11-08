@@ -17,6 +17,7 @@ import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from 
 import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
+import { routeOf, routeSnapshot } from './echelons-store.js';
 import { onTask, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 
 export const EXTERNAL_WAIT_MS = 2 * 3_600_000;
@@ -206,15 +207,15 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
     ? await ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, input.actor.agentId))
     : [];
   requireMessageTask(task, input.agentId, sender);
-  const id = await insertOrDeliverTurn(ctx, { ...turn, ...taskTurn(task, input.agentId, turn.message) }, required);
+  const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) }, required);
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));
   return { id, resumed: { task: resumed, before: task.externalWait } };
 }
 
-function taskTurn(task: Task, agentId: string, message: TurnMessage): { message: TurnMessage; taskId: string } {
+async function taskTurn(ctx: Ctx, task: Task, agentId: string, message: TurnMessage): Promise<{ message: TurnMessage; taskId: string }> {
   const to = task.assigneeAgentId === agentId ? {} : { to: agentId };
-  return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message', ...to } } };
+  return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }, routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId)), why: 'message', ...to } } };
 }
 
 const waitEndedWake = (task: Task, agentId: string, reason: string, unavailable?: string): Wake =>

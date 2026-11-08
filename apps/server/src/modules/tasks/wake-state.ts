@@ -1,54 +1,38 @@
 import { lastBytes, type Failure } from '@hornhoof/protocol';
+import { ECHELON_STAGES, type EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
-import { requestedPromptOf } from '../conversation/requested-prompt.js';
 import { wordsForTurn } from '../conversation/turn-words.js';
+import { routeOf, routeSnapshot } from './echelons-store.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), again: z.boolean().optional(), mechanical: z.boolean().optional(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
+const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.enum(ECHELON_STAGES).nullable(), candidateId: z.uuid().nullable(), version: z.number().int().nonnegative(), to: z.string().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
 
-const NOTICES = new Set(['done', 'reported', 'cancelled', 'turn', 'reviewed', 'review_passed']);
-const GIVER_NEWS = new Set(['blocked', 'stuck_at_gate', 'tests', 'work']);
-const REVIEW = new Set(['review', 'turn_review']);
+const NOTICES = new Set(['done', 'reported', 'cancelled', 'turn', 'reviewed']);
+const GIVER_NEWS = new Set(['blocked', 'switched', 'tests', 'work']);
+const REVIEW = new Set(['review']);
 const RUN_ENDS = new Set(['tests', 'work']);
 
-/* Only the server's explicit signals qualify a repeat or mechanical changes. */
-const effortSignals = (wake: Pick<Wake, 'why' | 'again' | 'mechanical'>): Pick<TaskWake, 'again' | 'mechanical'> => ({ ...(wake.why === 'review' && wake.again === true ? { again: true } : {}), ...(wake.why === 'changes' && wake.mechanical === true ? { mechanical: true } : {}) });
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>, route: Pick<EchelonsSnapshot, 'stage' | 'candidateId'>): TaskWake => ({ why: wake.why, status: task.status, stage: route.stage, candidateId: route.candidateId, version: wake.version ?? task.version });
 
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text' | 'again' | 'mechanical'>): TaskWake => ({ why: wake.why, ...effortSignals(wake), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
-
-/* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);
 
 /* A message addressed to someone other than the task's assignee stays deliverable unless the task was cancelled. */
 const directMessage = (task: Task, agentId: string, state: TaskWake | null): boolean =>
   state?.why === 'message' && state.to === agentId && task.status !== 'cancelled';
 
-const legacyNotice = (task: Task, agentId: string, kind: string, prompt: string): boolean =>
-  kind !== 'worker' && task.createdByAgentId === agentId && legacyReport(task, prompt);
-
-function legacyReport(task: Task, prompt: string): boolean {
-  const ref = `#${task.number} "${task.title}"`;
-  const notices = [
-    `${ref}, which you gave out, passed its gates and is done.`,
-    `${ref}, which you gave out, was reported done`,
-    `${ref}, which you gave out, was cancelled`,
-    `${ref} is closed.`,
-    `The reviewers of ${ref} gave their verdicts,`,
-    `Nobody found anything that blocks in the ${task.title.toLowerCase()}:`,
-  ];
-  return notices.some(prefix => prompt.startsWith(prefix)) || (!CLOSED.includes(task.status) && prompt.startsWith(`${ref}, which you gave out,`));
+async function samePhase(db: Store, task: Task, state: TaskWake | null): Promise<boolean> {
+  if (!state) return false;
+  const route = await routeOf(db, task);
+  return sameStatus(task, state) && state.stage === route.state.stage && state.candidateId === route.state.candidateId && sameVersion(task, state);
 }
-
-const samePhase = (task: Task, state: TaskWake | null): boolean =>
-  state === null || (sameStatus(task, state) && state.stage === task.stage && state.merging === task.merging && sameVersion(task, state));
 
 /* Messages follow their recipient through status changes within the same workflow stage. */
 const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.status === task.status;
@@ -56,12 +40,11 @@ const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'mess
 const sameVersion = (task: Task, state: TaskWake): boolean => state.version === undefined || state.version === task.version;
 
 export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId;
-const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && !task.merging && task.assigneeAgentId === agentId;
+const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && task.assigneeAgentId === agentId;
 const review = (task: Task, agentId: string): boolean => task.status === 'review' && task.assigneeAgentId === agentId;
 
 function recipient(task: Task, agentId: string, why = ''): boolean {
   if (why === 'assigned') return assignment(task, agentId);
-  if (why === 'merge') return task.merging && task.assigneeAgentId === agentId;
   if (REVIEW.has(why)) return review(task, agentId);
   if (GIVER_NEWS.has(why)) return task.createdByAgentId === agentId || onTask(task, agentId);
   return onTask(task, agentId);
@@ -82,13 +65,13 @@ const heldByWait = (task: Task, state: TaskWake | null): boolean => Boolean(task
 
 async function applies(db: Store, task: Task, agentId: string, state: TaskWake | null): Promise<boolean> {
   if (isNotice(state) || directMessage(task, agentId, state)) return true;
-  return !heldByWait(task, state) && !CLOSED.includes(task.status) && samePhase(task, state) && (await wakeRecipient(db, task, agentId, state?.why));
+  return !heldByWait(task, state) && !CLOSED.includes(task.status) && (await samePhase(db, task, state)) && (await wakeRecipient(db, task, agentId, state?.why));
 }
 
 /* Validate again when a delayed outbox wake is queued, before it can reach a live terminal. */
 export async function taskForWake(db: Db, wake: Wake): Promise<Task | null> {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, wake.taskId));
-  return task ? checkedTask(db, task, wake.agentId, taskWakeOf(task, wake), wake.why) : null;
+  return task ? checkedTask(db, task, wake.agentId, taskWakeOf(task, wake, routeSnapshot(await routeOf(db, task), task.assigneeAgentId)), wake.why) : null;
 }
 
 /* Every task action, including a repeat, goes through the same policy before it can wake anybody. */
@@ -111,12 +94,11 @@ export async function repeatedTurn(db: Db, jobId: string, run: Repeat): Promise<
   return taskWake ? { ...found, taskWake } : null;
 }
 
-/* A running turn may have started work or received messages since it was queued. Keep its purpose and workflow stage,
-   but refresh the status and version for the next turn. Legacy notices retain their exception for the task's giver. */
+/* A repeat keeps its original candidate and stage, while refreshing progress within that assignment. */
 export async function repeatWake(db: Db, { job, task, agent }: Ended, run: string): Promise<TaskWake | null> {
   const before = await stateOf(db, job.id);
-  const why = before ? before.why : (legacyNotice(task, agent.id, agent.kind, requestedPromptOf(job)) ? 'done' : 'go_on');
-  const state = { ...before, why, status: task.status, stage: before?.stage ?? task.stage, merging: before?.merging ?? task.merging, version: task.version };
+  const route = routeSnapshot(await routeOf(db, task), task.assigneeAgentId);
+  const state = { ...(before ?? taskWakeOf(task, { why: 'go_on' }, route)), status: task.status, version: task.version };
   return (await checkedTask(db, task, agent.id, state, run, job.id)) ? state : null;
 }
 
@@ -170,7 +152,7 @@ export function staleOutput(text: string): string {
 function staleFailure(task: Task, run: string, status: 'queued' | 'running', program: StaleProgram | null): Failure {
   const state = status === 'queued' ? 'not started' : program ? `${program.state}${program.tool ? ` (${program.tool})` : ''}, since ${new Date(program.since).toISOString()}` : 'no data';
   const signAt = status === 'running' && program?.signAt != null ? new Date(program.signAt).toISOString() : 'no data';
-  const text = `Stale turn: #${task.number} no longer waits for this action from the agent. Technical reason: task status=${task.status}, stage=${task.stage}, merging=${task.merging}, action=${run}, turn status=${status}. Program state: ${state}. Last sign of life: ${signAt}.`;
+  const text = `Stale turn: #${task.number} no longer waits for this action from the agent. Technical reason: task status=${task.status}, taskVersion=${task.version}, action=${run}, turn status=${status}. Program state: ${state}. Last sign of life: ${signAt}.`;
   return { kind: 'unknown', text, retryable: false };
 }
 

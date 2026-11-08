@@ -16,7 +16,7 @@ import { afterRestart, afterRestartOutsideTask } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
 import { afterFailure } from './failures.js';
 import { settle, tell } from './turns.js';
-import { routeOf } from './echelons-store.js';
+import { routeOf, routeSnapshot } from './echelons-store.js';
 import { wakeNotice } from './notification.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
@@ -331,7 +331,7 @@ async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Ta
   const notice = await wakeNotice(ctx, task, w);
   const prompt = notice.action + wakePrompt(agent, task, w) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
   const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }) : undefined;
-  return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w), ...notice, reportContext };
+  return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w, routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId)), ...notice, reportContext };
 }
 
 async function waitsForBefore(db: Ctx['db'], task: Task, w: Wake): Promise<boolean> {
