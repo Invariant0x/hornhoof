@@ -97,7 +97,7 @@ async function testsStage(context) {
   const { selection, ports } = context;
   if (selection.unavailable) return unavailable('tests', selection.unavailable);
   if (!selection.packages.length) return unavailable('tests', 'nothing_selected');
-  if (selection.packages.some(item => !item.units.length)) return ended('tests', 'failed', 1, 'empty_test_selection');
+  if (selection.packages.some(item => !item.units.length && adapterOf(context.suites.find(suite => suite.id === item.packageId).run))) return ended('tests', 'failed', 1, 'empty_test_selection');
   const codes = [], counts = [];
   for (const item of selection.packages) {
     const suite = context.suites.find(candidate => candidate.id === item.packageId);

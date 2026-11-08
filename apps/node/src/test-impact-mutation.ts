@@ -45,6 +45,13 @@ function unsafeImports(file: ts.SourceFile, files: Map<string, ts.SourceFile>): 
 function someNode(node: ts.Node, predicate: (node: ts.Node) => boolean): boolean {
   return predicate(node) || Boolean(ts.forEachChild(node, child => someNode(child, predicate)));
 }
+function unsafeInitialization(file: ts.SourceFile): boolean {
+  return file.statements.some(node => {
+    if (ts.isVariableStatement(node)) return node.declarationList.declarations.some(item => item.initializer && !ts.isArrowFunction(item.initializer) && !ts.isFunctionExpression(item.initializer)
+      && someNode(item.initializer, child => ts.isCallExpression(child) || unsafeSyntax(child) || (ts.isIdentifier(child) && FORBIDDEN.has(child.text))));
+    return !(ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node));
+  });
+}
 function unsafeJudge(path: string, files: Map<string, ts.SourceFile>, graph: Graph): boolean {
   return [...graph.closure(path)].some(file => {
     const node = files.get(file);
@@ -71,10 +78,10 @@ function reference(node: ts.Identifier): boolean {
   return !(ts.isPropertyAccessExpression(parent) && parent.name === node) && !(ts.isPropertyAssignment(parent) && parent.name === node)
     && !(ts.isVariableDeclaration(parent) && parent.name === node) && !(ts.isParameter(parent) && parent.name === node);
 }
-function safeCall(node: ts.CallExpression, names: Functions, constants: Set<string>, seen: Set<string>): boolean {
+function safeCall(node: ts.CallExpression, names: Functions, constants: Set<string>, seen: Set<string>, locals: Set<string>): boolean {
   const callee = node.expression;
   if (ts.isIdentifier(callee)) return names.has(callee.text) && pureFunction(callee.text, names, constants, seen);
-  return ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === 'Math' && MATH.has(callee.name.text);
+  return !locals.has('Math') && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === 'Math' && MATH.has(callee.name.text);
 }
 function unsafeSyntax(node: ts.Node): boolean {
   if (ts.isNewExpression(node) || ts.isAwaitExpression(node) || ts.isYieldExpression(node) || ts.isDeleteExpression(node) || ts.isThrowStatement(node) || ts.isTaggedTemplateExpression(node)) return true;
@@ -90,7 +97,7 @@ function pureFunction(name: string, functions: Functions, constants: Set<string>
   const unsafe = (child: ts.Node): boolean => {
     if (ts.isTypeNode(child)) return false;
     if (unsafeSyntax(child)) return true;
-    if (ts.isCallExpression(child)) return !safeCall(child, functions, constants, next) || child.arguments.some(argument => unsafe(argument));
+    if (ts.isCallExpression(child)) return !safeCall(child, functions, constants, next, locals) || child.arguments.some(argument => unsafe(argument));
     if (ts.isIdentifier(child) && reference(child)) return !locals.has(child.text) && !functions.has(child.text) && !['Math', 'undefined'].includes(child.text);
     if (ts.isFunctionLike(child)) return true;
     return Boolean(ts.forEachChild(child, unsafe));
@@ -103,11 +110,14 @@ function bounds(file: ts.SourceFile, node: FunctionNode): { startLine: number; e
 function selectFile(result: MutationSelection, file: string, ranges: [number, number][], files: Map<string, ts.SourceFile>, graph: Graph, fastTests: Map<string, string[]>): void {
   if (FIXTURE.test(file)) { result.excluded.push({ file, reason: 'fixture_or_test' }); return; }
   const parsedFile = files.get(file);
-  if (!parsedFile || unsafeImports(parsedFile, files)) { result.excluded.push({ file, reason: 'unsafe_module' }); return; }
+  if (!parsedFile || unsafeImports(parsedFile, files) || unsafeInitialization(parsedFile)) { result.excluded.push({ file, reason: 'unsafe_module' }); return; }
   const functions = functionsOf(parsedFile), constants = constantNames(parsedFile);
   for (const [name, node] of functions) {
     const { startLine, endLine } = bounds(parsedFile, node);
     if (!ranges.some(([start, count]) => start <= endLine && start + count > startLine)) continue;
+    if ([...functions.values()].some(other => other !== node && bounds(parsedFile, other).startLine <= endLine && bounds(parsedFile, other).endLine >= startLine)) {
+      result.excluded.push({ file, name, reason: 'shared_function_line' }); continue;
+    }
     if (!pureFunction(name, functions, constants)) { result.excluded.push({ file, name, reason: 'purity_unproven' }); continue; }
     const tests = [...new Set(fastTests.get(file) ?? [])].filter(test => !unsafeJudge(test, files, graph)).sort();
     if (!tests.length) { result.problems.push({ file, code: 'no_safe_fast_tests' }); continue; }
