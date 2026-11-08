@@ -5,6 +5,7 @@ import { PREPARATION_UNIT, type EnvironmentDescription, type RepositoryScope, ty
 import { checkCacheContext, type CacheContext } from './test-cache.js';
 import { matchesPattern, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
 import { readCommit, type GitEntry } from './test-mirror.js';
+import type { MutationDelta, MutationSelection } from './test-impact-mutation.js';
 
 /* What a test file's result depends on, read from the pinned commit alone: nothing is installed and no repository code runs.
    A git object id hashes a file's content, so a fingerprint is a digest of paths, modes and ids. Whatever this cannot follow widens
@@ -24,7 +25,7 @@ type Scan = { edges: string[]; runs: string[]; opaque: boolean };
 /* opaque: the packages of what it reaches and cannot follow. */
 type Reach = { digest: string; opaque: string[] };
 
-const FORMAT = 'hornhoof-fingerprint-v2';
+const FORMAT = 'hornhoof-fingerprint-v3';
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const REGULAR = new Set(['100644', '100755']);
 const DOCUMENT = /^(?!templates\/|(?:AGENTS|CONTRIBUTING|CHANGELOG)\.md$)(?!.*(?:^|\/)(?:test|tests|__tests__)\/).*\.md$/;
@@ -403,8 +404,9 @@ async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, strin
   return new Map([...found].map(([id, files]) => [id, tree.pairsDigest(files)]));
 }
 
-function versionOf(description: FingerprintInput['description'], id: string): [string, string | null] {
-  return [id, description.runtimeCapabilities.find(runtime => runtime.id === id)?.version ?? null];
+function versionOf(description: FingerprintInput['description'], id: string): [string, string | null, string | null] {
+  const runtime = description.runtimeCapabilities.find(runtime => runtime.id === id);
+  return [id, runtime?.version ?? null, runtime?.fingerprint ?? null];
 }
 /* A service counts for a suite only where they share every profile, so a suite that may run without it keeps its results. */
 const servicesOf = (manifest: Manifest, suite: Suite | null) => manifest.services.filter(service => suite === null || suite.profiles.every(profile => service.profiles.includes(profile)));
@@ -448,6 +450,12 @@ const reachingTests = (graph: Graph, mutation: Supported, file: string): string[
 export function fastTestsOf(input: FingerprintInput, mutation: Supported, files: string[]): Map<string, string[]> {
   const graph = new Graph(new Tree(input));
   return new Map(files.map(file => [file, reachingTests(graph, mutation, file)]));
+}
+
+/* The parser is needed only by a mutation planner in the prepared check environment. Ordinary descriptions do not load it. */
+export async function selectPureMutations(input: FingerprintInput, mutation: Supported, delta: MutationDelta): Promise<MutationSelection> {
+  const { selectMutationFunctions } = await import('./test-impact-mutation.js');
+  return selectMutationFunctions(input, mutation, delta, testGraph(input), fastTestsOf(input, mutation, mutation.sourcePaths));
 }
 /* The same transitive judges for the server's result cache and the mutator's saved snapshot. An unreadable input widens
    through inputsOf to the repository: an unknown helper or executable configuration may read across package boundaries. */

@@ -76,6 +76,12 @@ test('a scenario that changed says so once', { timeout: 60_000 }, async () => {
   assert.deepEqual((await runs('apps/web/e2e/about.spec.ts')).notes, ['browser scenario: apps/web/e2e/about.spec.ts']);
 });
 
+test('editing the selector with a node-test regression stays in its affected packages', { timeout: 60_000 }, async () => {
+  const selection = await select(['apps/node/src/test-impact.ts', 'scripts/test/author-check.test.mjs'].map(path => ({ path, kind: 'modified' })));
+  assert.equal(selection.unavailable, undefined);
+  assert.deepEqual(suites(selection), ['node', 'release-scripts']);
+});
+
 test('a file moved into the scenarios still runs the tests of where it was', { timeout: 60_000 }, async () => {
   const selection = await select([{ kind: 'renamed', previousPath: 'apps/web/src/ui/AgentTerminal.tsx', path: 'apps/web/e2e/moved.ts' }]);
   assert.deepEqual(suites(selection), ['web']);

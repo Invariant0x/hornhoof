@@ -63,10 +63,15 @@ export function changedLines(hunks, coverage, paths) {
   return sum;
 }
 
+function validCounts(counts) {
+  const { total, passed, failed, skipped } = counts;
+  return [total, passed, failed, skipped].every(value => Number.isSafeInteger(value) && value >= 0) && passed + failed + skipped === total ? counts : null;
+}
+
 export function parseVitestJson(text) {
   try {
     const { numTotalTests: total, numPassedTests: passed, numFailedTests: failed } = JSON.parse(text);
-    return Number.isInteger(total) ? { passed, failed, skipped: total - passed - failed, total } : null;
+    return validCounts({ passed, failed, skipped: total - passed - failed, total });
   } catch { return null; }
 }
 
@@ -74,7 +79,7 @@ export function parseTap(text) {
   const count = name => Number(new RegExp(`^# ${name} (\\d+)$`, 'm').exec(text ?? '')?.[1] ?? NaN);
   const total = count('tests');
   if (Number.isNaN(total)) return null;
-  return { passed: count('pass'), failed: count('fail') + count('cancelled'), skipped: count('skipped') + count('todo'), total };
+  return validCounts({ passed: count('pass'), failed: count('fail') + count('cancelled'), skipped: count('skipped') + count('todo'), total });
 }
 
 export const countDuplicates = output => (output.match(/^DUPLICATE /gm) ?? []).length;

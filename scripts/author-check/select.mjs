@@ -38,7 +38,7 @@ function once(work) {
 
 async function adapterSelection(environment, changes, suites, ports) {
   const known = suites.filter(suite => adapterOf(suite.run));
-  const changed = changes.filter(change => change.kind !== 'deleted' && isLintable(change.path)).map(change => change.path);
+  const changed = changes.filter(change => change.kind !== 'deleted' && isLintable(change.path) && !opaqueOwner(suites, change.path)).map(change => change.path);
   const inventory = environment.inventory.filter(unit => known.some(suite => suite.id === unit.suiteId));
   const collection = once(() => ports.collect(changed));
   const requiredSuiteIds = known.filter(suite => adapterOf(suite.run) === 'vitest').map(suite => suite.id);
@@ -49,8 +49,13 @@ async function adapterSelection(environment, changes, suites, ports) {
 
 const opaqueOwner = (suites, path) => {
   const owner = ownerOf(suites, path);
-  return owner && !adapterOf(owner.run) ? owner : null;
+  return owner && adapterOf(owner.run) !== 'vitest' ? owner : null;
 };
+
+function graphOrPolicy(suites, change) {
+  const owner = opaqueOwner(suites, change.path);
+  return !owner || adapterOf(owner.run) === 'node-test';
+}
 
 function wholeOf(environment, suites, changes) {
   const owners = new Map(changes.map(change => [opaqueOwner(suites, change.path)?.id, change]));
@@ -58,6 +63,16 @@ function wholeOf(environment, suites, changes) {
     packageId: item.id, mode: 'whole-package', units: environment.inventory.filter(unit => unit.suiteId === item.id),
     reasons: [{ code: 'unsupported_language', path: owners.get(item.id).path }],
   }));
+}
+
+function mergePackages(packages) {
+  const groups = Map.groupBy(packages, item => item.packageId);
+  return [...groups.keys()].sort().map(packageId => {
+    const members = groups.get(packageId);
+    const units = new Map(members.flatMap(item => item.units).map(unit => [`${unit.suiteId}\0${unit.file}`, unit]));
+    const reasons = new Map(members.flatMap(item => item.reasons ?? []).map(reason => [JSON.stringify(reason), reason]));
+    return { packageId, mode: members.some(item => item.mode === 'whole-package') ? 'whole-package' : 'related', units: [...units.values()], reasons: [...reasons.values()] };
+  });
 }
 
 /* Each suite's package fully selected is the whole fast suite, which an author runs only when asked for by name. */
@@ -106,12 +121,12 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const documents = changes.filter(document);
   const kept = changes.filter(change => !document(change) && !outsideFast(change, later));
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
-  const rest = kept.filter(change => !opaqueOwner(suites, change.path));
+  const rest = kept.filter(change => graphOrPolicy(suites, change));
   const selection = await adapterSelection(environment, rest, suites, ports);
   const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
-  const packages = [...selection.packages, ...wholeOf(environment, suites, opaque)];
+  const packages = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
   if (isWholeSuite(packages, suites) && !allowWhole && !reachesEveryone(packages)) return { unavailable: 'selection_is_whole_suite', notes };
   return { packages, notes };
 }
