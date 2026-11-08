@@ -31,4 +31,14 @@ describe('one current assignment under retries and identity changes', () => {
     await f.db.update(agents).set({ skills: [] }).where(eq(agents.id, f.reviewer.id));
     await expect(verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'I no longer have this ability.', reviewedCommit: HEAD }).then(() => null)).rejects.toMatchObject({ status: 409 });
   });
+  it.each(['subscription', 'skill'])('refuses a repair submission after the checking %s changes', async changed => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, code);
+    const candidateId = (await f.detail()).echelons.candidateId;
+    if (changed === 'skill') await f.db.update(agents).set({ skills: [] }).where(eq(agents.id, f.reviewer.id));
+    else await f.db.update(agents).set({ subscriptionId: f.codex.id }).where(eq(agents.id, f.reviewer.id));
+    f.atCommit('c'.repeat(40));
+    await expect(submit(f.ctx, f.reviewer.id, f.task.id, { ...code, summary: 'Repair from a stale assignment.' }).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons).toMatchObject({ stage: 'review', candidateId });
+  });
 });
