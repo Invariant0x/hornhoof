@@ -11,10 +11,9 @@ const FONTS = { name: '13.5px', task: '12px', state: '13px' };
 /* The same turn as a department of this one agent would see it. */
 function aloneIn({ tree, org }: Tree, name: string): Tree {
   const mine = (agent: { name: string }) => agent.name === name, department = org.departments[0]!;
-  const reviews = tree.reviews!.map(r => ({ ...r, reviewers: r.reviewers.filter(p => mine(p.agent)) })).filter(r => r.reviewers.length);
   return {
     org: { ...org, departments: [{ ...department, employees: department.employees.filter(mine), repository: { ...department.repository!, branch: 'main' } }] },
-    tree: { ...tree, reviews, review: reviews.at(-1) ?? null, lines: tree.lines.filter(l => mine(l.agent)), activity: tree.activity!.filter(a => mine(a.agent)),
+    tree: { ...tree, lines: tree.lines.filter(l => mine(l.agent)), activity: tree.activity!.filter(a => mine(a.agent)),
       idle: tree.idle.filter(i => mine(i.agent)), waiting: tree.waiting!.filter(w => mine(w.agent)), time: tree.time.filter(t => mine(t.agent)) },
   };
 }

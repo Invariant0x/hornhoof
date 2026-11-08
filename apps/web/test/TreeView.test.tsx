@@ -67,14 +67,14 @@ describe('Tree plates', () => {
     expect(openAgent).toHaveBeenCalledWith(agent);
   });
 
-  it('keeps the review verdict and its details beside the lane in TreeCard', async () => {
-    const user = userEvent.setup(), reviewer = REVIEW_TREE.review!.reviewers[0]!.agent.id;
+  it('keeps the current task workflow and findings beside its owner lane', async () => {
+    const user = userEvent.setup(), line = REVIEW_TREE.lines.find(line => line.echelons.stage === 'review')!;
     render(view(REVIEW_TREE));
-    await user.click(document.querySelector(`.dept-chip[data-row="${reviewer}"] .schip`)!);
+    await user.click(document.querySelector(`.dept-chip[data-row="${line.agent.id}"] .schip`)!);
     const card = screen.getByRole('dialog');
-    expect(card).toHaveTextContent('Review of turn 3');
-    expect(card).toHaveTextContent('Findings');
-    expect(card).toHaveTextContent('Task');
+    expect(card).toHaveTextContent(`#${line.number} ${line.title}`);
+    expect(within(card).getByRole('list', { name: 'Task workflow' })).toHaveTextContent('Review In progressOwner: Vera');
+    expect(within(card).getByRole('region', { name: 'Findings by stage' })).toHaveTextContent('Unique findings: 2');
   });
 
   it('lets a row be clicked as far as the drawing goes, past a long badge too', () => {
@@ -249,7 +249,7 @@ describe('Tree navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Show everything' }));
     const far = position(world)[2];
     expect(far).toBeLessThan(.3);
-    rerender(view({ ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [], reviews: [], review: null }));
+    rerender(view({ ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [] }));
     await user.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(position(world)[2]).toBeLessThanOrEqual(far);
   });

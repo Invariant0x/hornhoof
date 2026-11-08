@@ -1,7 +1,7 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from './task-route';
 import { vi } from 'vitest';
-import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -280,6 +280,7 @@ export const FINISHED_TURN: TurnView = { ...TURN, id: 'u2', number: 2, title: 'L
 type TreeExample = {
   id: string; agent: TreeAgent; number: number; part: number; created: number; cut?: number; merged?: number; done?: number; after?: number;
   title: string; segments: [number, number, SegmentKind][]; moves: [number, string, string][];
+  stage?: 'review' | 'security' | 'tests'; findings?: number;
 };
 
 const treeAt = (minute: number) => new Date(Date.UTC(2026, 9, 30, 9, minute)).toISOString();
@@ -416,6 +417,8 @@ function exampleLine(e: TreeExample, now: number, repository: boolean): TreeLine
   const live = e.agent.id === 'b2' && now === 320 || e.agent.id === 's1';
   return {
     taskId: e.id, number: e.number, title: e.title, agent: e.agent,
+    echelons: taskRoute(e.stage ?? 'development', e.agent.id), ownerSince: treeAt(e.created),
+    echelonFindings: { ...emptyEchelonFindings(), uniqueReported: e.findings ?? 0, review: { reported: e.findings ?? 0, confirmed: 0 } },
     part: { id: 't' + e.part, number: e.part, title: e.part === 41 ? 'Card payments' : e.part === 48 ? 'Refunds' : 'Tell customers about card payments' },
     branch: repository && end(e.cut) ? 'task-' + e.number : null,
     createdAt: treeAt(e.created), cutAt: end(e.cut), mergedAt: end(e.merged), doneAt: end(e.done),
@@ -443,26 +446,25 @@ function exampleIdle(lines: TreeLine[], now: string): IdleStretch[] {
   return idle.sort((a, b) => Number(!!a.to) - Number(!!b.to) || (!a.to ? rank[a.kind] - rank[b.kind] : 0) || length(b) - length(a));
 }
 
-function exampleReview(): TreeReview {
-  const panel: [TreeAgent, number, number][] = [
-    [{ id: 'b6', name: 'Vera' }, 454, 2], [{ id: 'b7', name: 'Gleb' }, 472, 3], [{ id: 'b8', name: 'Rita' }, 451, 0],
-  ];
-  return { taskId: 'r54', number: 54, openedAt: treeAt(435), closedAt: null, head: { id: 'b0', name: 'Dana' },
-    reviewers: panel.map(([agent, end, findings]) => ({
-      agent, verdict: end <= 460 ? { at: treeAt(end), pass: findings === 0, findings } : null,
-      segments: exampleSegments([[435, end, 'work']], 460), lastActionAt: treeAt(Math.min(459, end)), live: end > 460,
-    })),
-  };
-}
+/* Independent tasks keep their own current owner and stage. */
+const CHECKED_EXAMPLES: TreeExample[] = [
+  { id: 'b54', agent: { id: 'b6', name: 'Vera' }, number: 54, part: 41, created: 435, cut: 435,
+    title: 'Check card payment receipts', stage: 'review', findings: 2,
+    segments: [[435, 454, 'work'], [454, 900, 'stall']], moves: [] },
+  { id: 'b55', agent: { id: 'b7', name: 'Gleb' }, number: 55, part: 48, created: 440, cut: 440,
+    title: 'Check refund access', stage: 'security', segments: [[440, 900, 'work']], moves: [] },
+  { id: 'b56', agent: { id: 'b8', name: 'Rita' }, number: 56, part: 41, created: 445, cut: 445,
+    title: 'Verify card payment results', stage: 'tests', segments: [[445, 900, 'work']], moves: [] },
+];
 
-function exampleTree(examples: TreeExample[], now: number, repository: boolean, review: TreeReview | null = null): DepartmentTree {
+function exampleTree(examples: TreeExample[], now: number, repository: boolean): DepartmentTree {
   const lines = examples.map(e => exampleLine(e, now, repository)), at = treeAt(now);
-  const time = [...lines.map(l => exampleTime(l.agent, l.segments, at)), ...(review?.reviewers ?? []).map(r => exampleTime(r.agent, r.segments, at))];
-  return { now: at, turn: TREE_TURN, repository, stage: review ? 'review' : 'work', lines, review, time, idle: exampleIdle(lines, at) };
+  const time = lines.map(l => exampleTime(l.agent, l.segments, at));
+  return { now: at, turn: TREE_TURN, repository, lines, time, idle: exampleIdle(lines, at) };
 }
 
 export const DEV_TREE = exampleTree(DEV_EXAMPLES, 320, true);
-export const REVIEW_TREE = exampleTree(DEV_EXAMPLES, 460, true, exampleReview());
+export const REVIEW_TREE = exampleTree([...DEV_EXAMPLES, ...CHECKED_EXAMPLES], 460, true);
 export const SALES_TREE = exampleTree(SALES_EXAMPLES, 320, false);
 
 /* Extra employees keep existing two-person schema examples small. */

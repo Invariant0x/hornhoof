@@ -809,13 +809,14 @@ async function showTree(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('Department work tree', () => {
-  it('opens a reviewer window from the names in a turn review summary', async () => {
+  it('opens the current checker window from a task workflow card', async () => {
     const user = userEvent.setup();
     shell(treeRoute(REVIEW_TREE), TREE_ORG);
     const graph = await showTree(user);
-    await user.click(within(graph).getByRole('button', { name: '#54 Review of turn 3' }));
-    const summary = screen.getByRole('dialog', { name: '#54 Review of turn 3' });
-    expect(summary).toHaveTextContent('2 of 3');
+    await user.click(graph.querySelector('[data-row="b6"]')!);
+    const summary = screen.getByRole('dialog');
+    expect(summary).toHaveTextContent('#54 Check card payment receipts');
+    expect(within(summary).getByRole('list', { name: 'Task workflow' }).querySelector('[aria-current="step"]')).toHaveTextContent('Review');
     await user.click(within(summary).getByRole('button', { name: /Vera/ }));
     expect(await screen.findByRole('complementary', { name: 'Vera, Backend engineer' })).toBeInTheDocument();
   });
@@ -1139,17 +1140,15 @@ describe('Department work tree', () => {
   });
 });
 
-it('keeps failed unnumbered verdicts amber and opens the reviewer window', async () => {
+it('keeps attributed task findings visible and opens the current checker window', async () => {
   const user = userEvent.setup();
-  const review = REVIEW_TREE.review!;
-  const tree = { ...REVIEW_TREE, review: { ...review, reviewers: review.reviewers.map((r, i) => i === 0 ? { ...r, verdict: { at: r.verdict!.at, pass: false, findings: null } } : r) } };
-  shell(treeRoute(tree), TREE_ORG);
+  shell(treeRoute(REVIEW_TREE), TREE_ORG);
   const graph = await showTree(user);
-  const amber = graph.querySelector('.ring.a');
-  expect(amber).toBeInTheDocument();
-  expect(amber!.parentElement!.querySelector('.ic-ok')).not.toBeInTheDocument();
   await user.click(graph.querySelector('[data-row="b6"]')!);
-  await user.click(within(within(await screen.findByRole('dialog')).getAllByRole('heading', { level: 4 })[0]!).getByRole('button'));
+  const card = await screen.findByRole('dialog');
+  expect(within(card).getByRole('region', { name: 'Findings by stage' })).toHaveTextContent('Unique findings: 2');
+  expect(within(card).getByRole('list', { name: 'Task workflow' }).querySelector('[aria-current="step"]')).toHaveTextContent('Owner: Vera');
+  await user.click(within(within(card).getAllByRole('heading', { level: 4 })[0]!).getByRole('button'));
   expect(await screen.findByRole('complementary', { name: 'Vera, Backend engineer' })).toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

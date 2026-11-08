@@ -120,7 +120,7 @@ for (const lang of ['en', 'ru'] as const) {
         if (mode === 'pending') await held;
         if (mode === 'error') return route.fulfill({ status: 503, json: { error: { code: 'unavailable' } } });
         const { tree } = wholeTurn(true);
-        if (mode === 'empty') return route.fulfill({ json: { tree: { ...tree, turn: null, lines: [], reviews: [], review: null, time: [], idle: [] } } });
+        if (mode === 'empty') return route.fulfill({ json: { tree: { ...tree, turn: null, lines: [], time: [], idle: [] } } });
         const longName = 'Bruno Very Long Employee Name For A Narrow Screen';
         tree.lines = tree.lines.map(l => l.agent.name === 'Bruno' ? { ...l, agent: { ...l.agent, name: longName } } : l);
         return route.fulfill({ json: { tree } });

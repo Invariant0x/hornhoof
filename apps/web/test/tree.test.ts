@@ -10,7 +10,7 @@ describe('work tree layout', () => {
     const line = { ...DEV_TREE.lines[0]!, createdAt: '2026-10-30T11:30:00.000Z', cutAt: '2026-10-30T11:30:00.000Z',
       mergedAt: null, doneAt: null, live: true, moves: [], segments: [{ kind: 'work' as const, from: '2026-10-30T11:30:00.000Z', to: null }] };
     const tree = { ...DEV_TREE, now: '2026-10-30T12:00:00.000Z', turn: { ...DEV_TREE.turn!, startedAt: '2026-10-30T00:00:00.000Z' },
-      lines: [line], reviews: [], review: null, waiting: [], activity: [], idle: [] };
+      lines: [line], waiting: [], activity: [], idle: [] };
     const layout = treeLayout(tree, { width: 375, phone: true }, 1);
     expect(layout.pulses).toHaveLength(1);
     expect(layout.pulses[0]![1]![0] - layout.pulses[0]![0]![0]).toBeCloseTo(19);
@@ -24,7 +24,7 @@ describe('work tree layout', () => {
   });
 
   it('keeps the department lane order when a reviewer starts a later task', () => {
-    const order = REVIEW_TREE.review!.reviewers.map(r => r.agent.id).concat(REVIEW_TREE.lines.map(l => l.agent.id));
+    const order = REVIEW_TREE.lines.map(line => line.agent.id).reverse();
     const layout = treeLayout(REVIEW_TREE, { ...box, agentOrder: order }, 1);
     expect(layout.rows.filter(r => r.type === 'lane').map(r => r.agent!.id)).toEqual(order);
   });
@@ -40,15 +40,16 @@ describe('work tree layout', () => {
 
   it('uses the same current task number for lanes and Speed, including a review-only agent', () => {
     expect(currentTaskNumber(REVIEW_TREE, REVIEW_TREE.lines[0]!.agent.id)).toBe(REVIEW_TREE.lines[0]!.number);
-    expect(currentTaskNumber(REVIEW_TREE, REVIEW_TREE.review!.reviewers[0]!.agent.id)).toBe(REVIEW_TREE.review!.number);
+    const review = REVIEW_TREE.lines.find(line => line.echelons.stage === 'review')!;
+    expect(currentTaskNumber(REVIEW_TREE, review.agent.id)).toBe(review.number);
     expect(currentTaskNumber(REVIEW_TREE, 'not-in-this-turn')).toBeUndefined();
   });
 
   it('keeps an unlinked head turn and queued review messages on one head lane', () => {
-    const head = REVIEW_TREE.review!.head;
+    const head = { id: 'b0', name: 'Dana' };
     const activity = [{ jobId: 'held-head', agent: head, task: null, segments: [{ kind: 'alarm' as const, from: REVIEW_TREE.turn!.startedAt, to: null,
       alarm: { reason: 'node_silent' as const, since: Date.parse(REVIEW_TREE.turn!.startedAt) } }] },
-    { jobId: 'queued-review', agent: head, task: { id: 'r90', number: 90, title: 'Review' }, segments: [{ kind: 'queued' as const, from: REVIEW_TREE.review!.openedAt, to: null, waitsForAgent: head }] }];
+    { jobId: 'queued-review', agent: head, task: { id: 'b54', number: 54, title: 'Check card payment receipts' }, segments: [{ kind: 'queued' as const, from: REVIEW_TREE.lines.find(line => line.echelons.stage === 'review')!.ownerSince, to: null, waitsForAgent: head }] }];
     const tree = { ...REVIEW_TREE, activity };
     const layout = treeLayout(tree, box, 1);
     expect(layout.rows.filter(r => r.agent?.id === head.id)).toHaveLength(1);
@@ -56,7 +57,7 @@ describe('work tree layout', () => {
     expect(layout.targets).toContainEqual(expect.objectContaining({ pick: { kind: 'activity', agentId: head.id, jobId: 'held-head', segmentIndex: 0 } }));
     expect(layout.badges).toContainEqual(expect.objectContaining({ row: head.id, kind: 'alarm' }));
     expect(currentTaskNumber(tree, head.id)).toBeUndefined();
-    expect(currentTaskNumber({ ...tree, activity: [activity[1]!] }, head.id)).toBe(90);
+    expect(currentTaskNumber({ ...tree, activity: [activity[1]!] }, head.id)).toBe(54);
   });
 
   it('keeps all 38 tasks in time order on one lane, labelled by the current task', () => {
@@ -74,19 +75,16 @@ describe('work tree layout', () => {
     expect(layout.paths.filter(p => p.kind === 'segment')).toHaveLength(38);
   });
 
-  it('keeps developers and every review in the same lanes during and after review', () => {
-    const first = { ...REVIEW_TREE.review!, taskId: 'r90', number: 90, openedAt: DEV_TREE.turn!.startedAt,
-      closedAt: REVIEW_TREE.review!.openedAt };
-    for (const stage of ['review', 'work'] as const) {
-      const last = { ...REVIEW_TREE.review!, closedAt: stage === 'work' ? REVIEW_TREE.now : null, reviewers: REVIEW_TREE.review!.reviewers.map(r => ({ ...r, live: stage === 'review' && r.live })) };
-      const tree = { ...REVIEW_TREE, stage, reviews: [first, last] };
-      const layout = treeLayout(tree, box, 1);
-      const agentIds = new Set([...tree.lines.map(l => l.agent.id), ...first.reviewers.map(r => r.agent.id)]);
-      expect(layout.rows.filter(r => r.type === 'lane').map(r => r.agent!.id)).toEqual([...agentIds]);
-      expect(layout.from).toBe(treeLayout(DEV_TREE, box, 1).from);
-      expect(layout.marks.filter(m => m.kind === 'review').map(m => m.pick.taskId)).toEqual(['r90', 'r54']);
-      expect(layout.marks.filter(m => m.kind === 'verdict')).toHaveLength(4);
+  it('keeps independent Development, Review, Security and Tests tasks in their owner lanes', () => {
+    const layout = treeLayout(REVIEW_TREE, box, 1);
+    expect(layout.rows.filter(row => row.type === 'lane').map(row => row.agent!.id)).toEqual(REVIEW_TREE.lines.map(line => line.agent.id));
+    for (const line of REVIEW_TREE.lines) {
+      const row = layout.rows.find(row => row.agent?.id === line.agent.id)!;
+      expect(row.line).toBe(line);
+      expect(row.pick).toEqual({ kind: 'line', taskId: line.taskId, agentId: line.agent.id });
     }
+    expect(new Set(REVIEW_TREE.lines.map(line => line.echelons.stage))).toEqual(new Set(['development', 'review', 'security', 'tests']));
+    expect(layout.from).toBe(treeLayout(DEV_TREE, box, 1).from);
   });
 
   it('labels each agent by its latest line and keeps historical lines dimmed', () => {
@@ -109,12 +107,15 @@ describe('work tree layout', () => {
     expect(l.marks).toContainEqual(expect.objectContaining({ kind: 'merge', x: mx, y: yt }));
   });
 
-  it('keeps developer lanes while reviewers fork at the review opening and end at verdicts', () => {
-    const l = treeLayout(REVIEW_TREE, box, 1);
-    expect(l.rows.filter(r => r.type === 'lane').map(r => r.agent?.id)).toEqual([...REVIEW_TREE.lines.map(r => r.agent.id), ...REVIEW_TREE.review!.reviewers.map(r => r.agent.id)]);
-    expect(l.paths.filter(p => p.kind === 'fork' && REVIEW_TREE.review!.reviewers.some(r => r.agent.id === p.row)).every(p => p.points[0]![0] === l.x(REVIEW_TREE.review!.openedAt))).toBe(true);
-    expect(l.marks.filter(m => m.kind === 'verdict').map(m => m.verdict?.findings)).toEqual([2, 0]);
-    expect(l.marks).toContainEqual(expect.objectContaining({ kind: 'review', x: l.x(REVIEW_TREE.review!.openedAt) }));
+  it('forks each current checker line at its own ownership boundary', () => {
+    const layout = treeLayout(REVIEW_TREE, box, 1);
+    const checks = REVIEW_TREE.lines.filter(line => line.echelons.stage !== 'development');
+    expect(checks).toHaveLength(3);
+    for (const line of checks) {
+      const fork = layout.paths.find(path => path.kind === 'fork' && path.row === line.agent.id)!;
+      expect(fork.points[0]![0]).toBe(layout.x(line.ownerSince));
+      expect(layout.marks).toContainEqual(expect.objectContaining({ kind: 'fork', pick: { kind: 'line', taskId: line.taskId, agentId: line.agent.id } }));
+    }
   });
 
   it('starts every window before the turn and clamps the minute scale before zoom', () => {
@@ -129,7 +130,7 @@ describe('work tree layout', () => {
 
   it.each([0, 1, 12, 60])("keeps a young turn's fork beside the plates on a phone's screen, %i minutes in", elapsed => {
     const now = new Date(Date.parse(DEV_TREE.turn!.startedAt) + elapsed * 60_000).toISOString();
-    const layout = treeLayout({ ...DEV_TREE, now, lines: [], reviews: [], review: null, waiting: [], activity: [], idle: [] }, { width: 343, phone: true }, 1);
+    const layout = treeLayout({ ...DEV_TREE, now, lines: [], waiting: [], activity: [], idle: [] }, { width: 343, phone: true }, 1);
     expect(layout.x(DEV_TREE.turn!.startedAt) + 4).toBeLessThanOrEqual(343 - 12 - layout.labelWidth);
   });
 
@@ -140,7 +141,7 @@ describe('work tree layout', () => {
 
   it('keeps every row its natural height on any screen and beside any number of lanes', () => {
     const heights = (tree: typeof DEV_TREE, phone: boolean) => treeLayout(tree, { width: phone ? 375 : 1100, phone }, 1).rows.map(r => [r.type, r.h]);
-    const one = { ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [], reviews: [], review: null };
+    const one = { ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [] };
     const natural = [['axis', 32], ['main', 40], ['turn', 48], ['lane', 96]];
     expect(heights(one, false)).toEqual(natural);
     expect(heights(one, true)).toEqual(natural);
@@ -209,5 +210,5 @@ it('keeps review lines plain too when there is no repository', () => {
   const l = treeLayout(tree, box, 1);
   expect(l.rows.some(r => r.type === 'main' || r.type === 'turn')).toBe(false);
   expect(l.paths.some(p => p.kind === 'fork' || p.kind === 'merge')).toBe(false);
-  expect(l.marks.filter(m => m.kind === 'start')).toHaveLength(tree.lines.length + tree.review!.reviewers.length);
+  expect(l.marks.filter(m => m.kind === 'start')).toHaveLength(tree.lines.length);
 });

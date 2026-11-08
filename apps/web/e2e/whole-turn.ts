@@ -1,5 +1,6 @@
+import { emptyEchelonFindings, type EchelonStage } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
-import type { AgentTime, Department, DepartmentTree, Employee, Org, TreeActivity, TreeAgent, TreeLine, TreeReview, TreeSegment } from '../src/types';
+import type { AgentTime, Department, DepartmentTree, Employee, Org, TreeActivity, TreeAgent, TreeLine, TreeSegment } from '../src/types';
 import { ME } from './api';
 
 const at = (clock: string) => `2026-11-03T${clock}:00.000Z`;
@@ -13,25 +14,30 @@ const segment = (kind: TreeSegment['kind'], from: string, to: string | null): Tr
 function line(number: number, agent: TreeAgent, from: string, to: string | null, segments: TreeSegment[]): TreeLine {
   return { taskId: `t${number}`, number, title: number === 62 ? 'Night checkout work' : `Checkout step ${number}`, agent,
     part: number === 109 ? null : { id: 't109', number: 109, title: 'Checkout turn' }, branch: `task-${number}`,
+    echelons: taskRoute('development', agent.id), echelonFindings: emptyEchelonFindings(), ownerSince: from,
     createdAt: from, cutAt: from, mergedAt: to, doneAt: null, waitsFor: [], segments, moves: [], lastActionAt: to, live: false };
 }
 
-function review(number: number, opened: string, closed: string | null, during: boolean): TreeReview {
-  const panel = ['Vera', 'Rita', 'Gleb'];
-  return { taskId: `r${number}`, number, openedAt: at(opened), closedAt: closed ? at(closed) : null, head: actor('Hana'),
-    reviewers: panel.map((name, i) => {
-      const started = number === 90 ? '05:30' : '11:00';
-      const ended = number === 90 ? ['06:10', '06:12', '06:13'][i]! : ['11:15', '11:20', '11:40'][i]!;
-      const live = number === 121 && during && i === 2;
-      return { agent: actor(name), verdict: live ? null : { at: at(ended), pass: number !== 90 || i !== 0, findings: number === 90 && i === 0 ? 2 : 0 },
-        segments: [segment('work', started, live ? null : ended)], lastActionAt: at(live ? '11:29' : ended), live };
-    }),
-  };
+/* The three agents own different tasks, each with its own required route. */
+function checkingLines(number: number, during: boolean): TreeLine[] {
+  const stages: EchelonStage[] = ['review', 'tests', 'security'];
+  return ['Vera', 'Rita', 'Gleb'].map((name, i) => {
+    const started = number === 90 ? '05:30' : '11:00';
+    const ended = number === 90 ? ['06:10', '06:12', '06:13'][i]! : ['11:15', '11:20', '11:40'][i]!;
+    const live = number === 121 && during && i === 2;
+    const taskNumber = number === 90 ? [90, 95, 105][i]! : number + i;
+    const result = line(taskNumber, actor(name), at(started), live ? null : at(ended), [segment('work', started, live ? null : ended)]);
+    result.title = `Check checkout step ${taskNumber}`;
+    result.echelons = taskRoute(stages[i]!, result.agent.id);
+    result.echelonFindings = { ...emptyEchelonFindings(), uniqueReported: i === 0 ? 2 : 0, review: { reported: i === 0 ? 2 : 0, confirmed: 0 } };
+    result.live = live;
+    return result;
+  });
 }
 
-function times(lines: TreeLine[], reviews: TreeReview[], now: string): AgentTime[] {
+function times(lines: TreeLine[], now: string): AgentTime[] {
   return actors.map(agent => {
-    const list = [...lines.filter(l => l.agent.id === agent.id).flatMap(l => l.segments), ...reviews.flatMap(r => r.reviewers.filter(p => p.agent.id === agent.id).flatMap(p => p.segments))];
+    const list = lines.filter(l => l.agent.id === agent.id).flatMap(l => l.segments);
     const seconds = (kind: TreeSegment['kind']) => Math.round(list.filter(s => s.kind === kind).reduce((n, s) => n + (Date.parse(s.to ?? now) - Date.parse(s.from)) / 1000, 0));
     return { agent, work: seconds('work'), after: seconds('after'), person: seconds('person'), stall: seconds('stall'), lost: seconds('lost'), alarm: seconds('alarm'), queued: agent.name === 'Hana' ? 29950 : 0, unknown: seconds('unknown') };
   });
@@ -60,22 +66,23 @@ export function wholeTurn(during: boolean): { tree: DepartmentTree; org: Org; de
     { jobId: 'head-follow-up', agent: head.agent, task: null, segments: headHistory.slice(2, 4) },
     ...(!during ? [{ jobId: 'head-final-check', agent: head.agent, task: null, segments: headHistory.slice(4) }] : []),
     ...['06:13', '06:35'].map((from, i) => ({ jobId: `review-summary-${i}`, agent: head.agent,
-      task: { id: `r${i ? 95 : 90}`, number: i ? 95 : 90, title: 'Review summary' },
+      task: { id: `t${i ? 95 : 90}`, number: i ? 95 : 90, title: 'Checkout findings' },
       segments: [{ kind: 'queued' as const, from: at(from), to: '2026-11-03T10:33:35.000Z', waitsForAgent: head.agent }],
     })),
   ];
-  const fix = line(120, actor('Bruno'), at('10:35'), at('11:00'), [segment('work', '10:35', '11:00')]);
+  const fix = line(120, actor('Vera'), at('10:35'), at('11:00'), [segment('work', '10:35', '11:00')]);
+  fix.echelons = taskRoute('review', fix.agent.id);
   const final = line(135, actor('Sid'), at('11:42'), during ? null : at('12:08'), [segment('work', '11:42', during ? null : '12:08')]);
   const externalWait = { reason: 'Image build', since: at('11:10'), until: at('12:00') };
   const external = line(140, actor('Ostap'), at('11:10'), during ? null : at('12:03'), [
     { ...segment('after', '11:10', during ? null : '12:00'), externalWait }, ...(!during ? [segment('work', '12:00', '12:03')] : []),
   ]);
   external.externalWait = during ? externalWait : null;
-  const reviews = [review(90, '05:30', '06:13', false), review(121, '11:00', during ? null : '11:40', during)];
-  const lines = [...night, head, fix, ...(during ? [] : [final]), external];
+  const checks = [...checkingLines(90, false), ...checkingLines(121, during)];
+  const lines = [...night, head, fix, ...checks, ...(during ? [] : [final]), external];
   const waiting = during ? ['Bruno', 'Timur', 'Eva', 'Vera', 'Rita'].map(name => ({ agent: actor(name), waitsForAgent: actor('Hana'),
-    from: at(name === 'Vera' ? '11:15' : name === 'Rita' ? '11:20' : '11:05'), kind: 'stall' as const, taskId: name === 'Vera' || name === 'Rita' ? 'r121' : 't120', number: 120, title: 'Waiting for the head' })) : [];
-  const time = times(lines, reviews, now);
+    from: at(name === 'Vera' ? '11:15' : name === 'Rita' ? '11:20' : '11:05'), kind: 'stall' as const, taskId: name === 'Vera' ? 't121' : name === 'Rita' ? 't122' : 't120', number: name === 'Vera' ? 121 : name === 'Rita' ? 122 : 120, title: 'Waiting for the head' })) : [];
+  const time = times(lines, now);
   const headTime = time.find(t => t.agent.id === head.agent.id)!;
   for (const kind of ['work', 'after', 'person', 'stall', 'lost', 'alarm'] as const) {
     headTime[kind] = headHistory.filter(s => s.kind === kind).reduce((sum, s) => sum + (Date.parse(s.to ?? now) - Date.parse(s.from)) / 1000, 0);
@@ -91,7 +98,7 @@ export function wholeTurn(during: boolean): { tree: DepartmentTree; org: Org; de
   idle.push(...waits.map(w => ({ ...w, waitsFor: [], question: null })));
   for (const entry of time) entry.stall += waits.filter(w => w.agent.id === entry.agent.id).reduce((sum, w) => sum + (Date.parse(w.to ?? now) - Date.parse(w.from)) / 1000, 0);
   const tree: DepartmentTree = { now, turn: { id: 'turn-4', number: 4, branch: 'turn-4', startedAt: at('00:00') }, repository: true,
-    stage: during ? 'review' : 'work', lines, review: reviews[1]!, reviews, waiting, activity, time, idle };
+    lines, waiting, activity, time, idle };
   const employees: Employee[] = actors.map(a => ({ ...a, kind: a.name === 'Hana' ? 'head' : 'worker', roleId: a.name === 'Hana' ? 'DEV-HEAD' : 'DEV-ENG',
     title: { en: a.name === 'Hana' ? 'Head of development' : 'Developer', ru: a.name === 'Hana' ? 'Руководитель разработки' : 'Разработчик' },
     model: '', modelName: null, provider: 'codex', effort: null, state: during && ['Hana', 'Gleb'].includes(a.name) ? 'working' : 'sleeping',
