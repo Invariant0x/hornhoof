@@ -673,6 +673,28 @@ describe('migration 0085', () => {
 describe('migration 0086 composable skills', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
+  it('preserves sole and mixed pending staffing cards when retiring the developer role', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Proposal upgrade')`);
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${C}, 'orchestrator', 'Coordinator', '') returning id`)).rows[0]!.id;
+    const legacy = { role: 'DEV-GEN', name: 'Mira', model: 'saved-model', checked: true, skills: { on: ['dev-tdd'], off: [] } };
+    const other = { role: 'DEV-BE', name: 'Backend', checked: false };
+    for (const [brief, items] of [['01 sole', [legacy]], ['02 mixed', [other, legacy]]] as const) {
+      await db.execute(sql`insert into proposals (company_id, agent_id, kind, brief, items) values (${C}, ${agent}, 'staff', ${brief}, ${JSON.stringify(items)}::jsonb)`);
+    }
+    const read = async () => (await db.execute<{ fields: unknown; items: unknown }>(sql`select to_jsonb(p) - 'items' as fields, items from proposals p order by brief`)).rows;
+    const before = await read();
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const after = await read();
+    expect(after.map(row => row.fields)).toEqual(before.map(row => row.fields));
+    expect(after.map(row => row.items)).toEqual([[{ ...legacy, role: 'DEV-ENG' }], [other, { ...legacy, role: 'DEV-ENG' }]]);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect(await read()).toEqual(after);
+  });
+
   it('retires only the saved DEV-GEN role key without changing card text, skill choices or run settings', async () => {
     const client = await freshPglite();
     onTestFinished(() => client.close());
