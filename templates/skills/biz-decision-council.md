@@ -5,15 +5,11 @@ description: { en: "Tests a costly decision from several independent angles befo
 kind: procedure
 sources: [affaan-m/ECC skills/council/SKILL.md]
 ---
-Use this for a decision that is costly to undo: an exclusive partnership, a new market, a large discount or revenue share.
+Use this ability to examine an assigned decision that is costly to reverse, such as exclusivity, market entry or a large commercial concession. Inputs are the proposal, sourced economics, constraints and decision owner's question.
 
-1. Write the decision as a yes or no question, with the proposal attached.
-2. Review it in separate passes, one angle per pass, each in a fresh context, or by a member on another provider if your company has one:
-   - **Customer**: would the people we sell to want this, and what do they lose?
-   - **Money**: what it costs, when it pays back, what it does to margin. Ask Finance through your head and the orchestrator for numbers you lack.
-   - **Operator**: who does the work, what breaks, what it takes from current plans.
-   - **Skeptic**: the strongest case against, and the most likely way this fails.
-3. Each pass gives a verdict (go, change, stop), its main reason, and the evidence that would change its mind.
-4. Write the synthesis: where the passes agree, where they disagree, and your recommendation. Keep the disagreements visible; do not average them away.
+1. State one decision question and attach the proposal or reference its exact revision.
+2. Evaluate it in separate fresh-context passes, one perspective each: customer value and loss; cost, margin and payback; implementation burden and displaced work; and the strongest case against it. If independent employees or providers are assigned, give each the same evidence and preserve their independence.
+3. Each pass recommends go, change or stop, names its main evidence and says what fact would change its conclusion. Missing financial or operating facts stay gaps.
+4. Synthesize agreement, disagreement, unresolved risk and the recommendation. Do not average incompatible judgments into false consensus.
 
-The angles are roles, not real people; never write in the name of a real person. The council advises; the CEO decides.
+Return the evidence and perspectives with a proposed decision. The perspectives are analytical viewpoints, not real people; never impersonate a named person or fabricate a review. This advice does not grant authority to spend, promise terms, assign employees or send messages. The CEO decides the commercial commitment and a human signs contracts.

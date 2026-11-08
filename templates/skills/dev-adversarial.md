@@ -5,6 +5,8 @@ description: { en: "Looks for where a preview build breaks: odd input, broken fl
 kind: gate
 sources: [garrytan/gstack review/specialists/red-team.md, msitarzewski/agency-agents security/security-penetration-tester.md, trailofbits/skills]
 ---
+You can test the failure paths of an authorized isolated preview.
+
 Check only preview or sandbox builds your task names, never production and never real customer data.
 
 1. **Read what the change claims** and assume it is wrong somewhere. Your job is to find where.

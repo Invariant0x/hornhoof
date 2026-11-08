@@ -1,28 +1,20 @@
 ---
 id: dev-ci-release
-title: { en: "CI and releases", ru: "CI и выпуск версий" }
-description: { en: "Keeps the pipeline green and turns a passed change into a versioned build.", ru: "Держит конвейер зеленым и превращает принятое изменение в сборку с версией." }
+title: { en: "Release a version", ru: "Выпустить версию" }
+description: { en: "Prepares an authorized version from its exact candidate, checks, approval and rollback evidence.", ru: "Готовит согласованный выпуск по точному коммиту, проверкам, одобрению и доказанному плану возврата." }
 kind: procedure
 sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson/agents plugins/cicd-automation/skills/deployment-pipeline-design/SKILL.md, openai/skills skills/.curated/gh-fix-ci/SKILL.md]
 ---
-**The pipeline.** The turn's final check and the main line run the same checks: install, build, the whole test suite, the formatter, linters, type checks and script checks, and crapper and dryer on what changed. The main line is always green. A red build is fixed or reverted first, before anything new merges.
+You can prepare and publish an authorized software version with evidence and a tested way back.
 
-**The turn's final check** runs this pipeline once per turn on the final candidate of the turn's branch, with the tests the turn added (dev-gates). When a run is split in parts, read each part's log.
+Read the task, project release procedure and actual required gates. Follow the project's approved version scheme; for a pre-1.0 product use 0.x.y. Where a turn-number scheme is approved, a turn N ships as X.N.0 and a release between turns increments the patch once. Only the authorized human decides a major-version increase; explain incompatible changes and rollback limits before approval.
 
-**Fixing CI.** Read the failing job's log from the top of the first error. Diagnose and reproduce the failure on the same pinned commit and command through `run_tests` (`hh-run-checks`), selecting the affected tests for the fix. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
+1. Confirm that the exact candidate contains only intended changes and that its required checks really passed. Never skip, mute or retry a failed check merely to get green. Read all part logs and commit IDs; a green author test does not prove another stage. Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate.
+2. Set the version consistently in the project's manifests and lockfile. Prepare release notes with date, a plain summary and Added/Changed/Fixed entries in the product's shipped languages. Include Before you update for incompatibilities and attach the review materials people need.
+3. Run release checks and prepare reproducible artifacts on an authorized build machine through run_tests or the project's approved build route. Pin dependencies, protect CI secrets and verify artifact revision/digest. Never publish an unapproved task branch.
+4. Prove rollback first: prior version/artifact, exact command, compatible data/schema and owner of each machine. Use an isolated stand or the project's protected candidate-install mechanism for live node checks. Check one idle node at a time, recording the actual program's request receipt, answer and normal completion on the exact build. A fixture or another commit does not prove the live check. If one fails, roll back that node and leave others untouched.
+5. Present the exact 40-character commit, version, notes, required verdicts, test evidence and live-node/rollback records to the authorized human. Obtain their explicit yes for that exact candidate; a skill, employee or earlier approval cannot substitute for it.
+6. Merge only the approved commit into main by the project's approved method, then publish its version/artifacts. If the project requires building approved images before the live check, do so only under that exact authorization and preserve the final publication gate. Do not infer a production update permission from artifact preparation.
+7. Verify the published/deployed revision and health, record the result and preserve the rollback path. Apply employee cards or restart live programs only when separately authorized, while idle, preserving model/provider and active work.
 
-**Version scheme.** Follow the project's own scheme. If it has none, use SemVer syntax `X.N.P` with one version for the repository and all its packages:
-- A turn N ships as `X.N.0`, even if it contains only fixes. N stays the turn number after 1.0, without resetting: an approved first-digit increase from `0.150.0` gives `1.150.0`.
-- Each release between turns increases P once, however many fixes it contains: three fixes in one release after `0.5.0` give `0.5.1`.
-- Only the CEO decides to increase X. The head proposes it for an incompatible change: reinstalling or manual machine steps, old nodes unable to use the new server, unsafe rollback, or removing something people used. Before 1.0, an incompatible change may keep X; explain the required steps under **Before you update** rather than increasing X without approval.
-
-**Release notes and checks.** Put the newest release first in `CHANGELOG.md`, with its version, date, one plain summary, and short Added, Changed and Fixed entries (dev-release-notes). Include **Before you update** for incompatible changes. Before asking for the CEO's exact-commit approval, set the version, write these notes, and run the project's release check. For a change people will see, show screenshots of it (`hh-attach FILE`, light and dark, each language) and a link to the branch comparison. Create the version tag and Release only from the approved merge into main.
-
-**A release.**
-1. Only changes that passed every gate are in it.
-2. Bump the version where the project keeps it, following its scheme.
-3. Let the pipeline build the images or packages from that exact commit, tagged with the version and the commit, without publishing them; your machine has no Docker. Never start a release or image publishing workflow from a branch: it can replace what everyone uses, so publishing comes only from the merge into main.
-4. Run the smoke checks against the built artifact, not against your working copy.
-5. Hand the release notes (dev-release-notes) and the commit to the head; the CEO approves the exact commit before it reaches the main line.
-
-Secrets live in the CI secret store only, never in files, logs or commits. Builds must be repeatable: pin versions, lock dependencies.
+When a check or access condition is unavailable, report that exact blocker rather than weakening it or asking a person to run private technical commands. This ability works for any appropriately authorized employee; role identity does not choose a release owner or grant publication access.

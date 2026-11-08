@@ -5,6 +5,8 @@ description: { en: "Finds the root cause of a bug before changing any code.", ru
 kind: procedure
 sources: [obra/superpowers skills/systematic-debugging/SKILL.md]
 ---
+You can locate the cause of an observed software failure before changing it.
+
 No fix without a root cause.
 
 1. **Read the error** completely: the message, the stack, the line. Most answers are in it.

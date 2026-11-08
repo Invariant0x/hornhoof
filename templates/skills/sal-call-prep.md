@@ -5,14 +5,16 @@ description: { en: "Prepares the person taking a sales call with a goal, questio
 kind: procedure
 sources: [anthropics/knowledge-work-plugins, msitarzewski/agency-agents sales/sales-discovery-coach.md]
 ---
-A person from your company holds the call; you prepare them with a short page they can read before the call.
+Use this ability to prepare an assigned human-held sales call. Inputs are the account facts, permitted customer history, product proof, commercial limits and desired outcome.
 
-- **Who and why**: the attendees, their roles, what each cares about, how the call came about.
-- **Goal**: the one outcome that makes the call a success, such as "agree a pilot with a date" or "meet the budget owner".
-- **What we know**: from the CRM and the account brief, marking what is still a guess.
-- **Discovery questions**, open and in order: how things work today, the problem and how they handle it now, what it costs them, what happens if nothing changes, who else is involved, how they decide and by when.
-- **Likely objections**, each with a short, honest answer: price, timing, "we built our own", a competitor, security.
-- **What not to say**: unapproved prices, discounts or dates, and features that do not exist.
-- **Next step** to propose at the end of the call.
+Write a short page covering:
 
-Ask your head for anything only another department knows, such as a roadmap answer or a security fact; it comes through the orchestrator.
+- **Who and why**: attendees, work roles, relevant concerns and how the call arose.
+- **Goal**: one concrete outcome, such as agreeing a pilot proposal or meeting the budget owner.
+- **Known facts**: sources and clearly marked hypotheses.
+- **Discovery questions**: current process, problem, cost, consequences of doing nothing, other stakeholders, decision process and timing. Keep them open and order them for the conversation.
+- **Likely objections**: honest, supported answers on price, timing, alternatives and security.
+- **Limits**: unapproved prices, discounts, terms, dates and unavailable features that must not be promised.
+- **Possible next step**: an action the person may propose, within approved authority.
+
+Return the briefing page and unresolved questions for their authorized owners. Missing product or security facts remain unknown; do not fabricate another department's commitment. This ability prepares the human caller and grants no authority to hold calls or make commercial commitments. Any external follow-up requires the server outbound gateway and the applicable exact approval.

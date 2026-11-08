@@ -5,11 +5,13 @@ description: { en: "Tracks what people say about the company and drafts helpful 
 kind: procedure
 sources: [coreyhaines31/marketingskills, msitarzewski/agency-agents marketing/marketing-developer-community-builder.md]
 ---
-1. **Watch** the company's own channels, plus the communities and keywords your head lists: the product name, competitors, the problem we solve.
-2. **Sort** each mention: question, complaint, praise, bug report, interest in buying, comparison with a competitor, spam or an attack.
-3. **Route** through your head: bug reports to development, buying interest to sales, support questions to support, legal or press questions to the CEO. Include the link and a quote.
-4. **Draft replies** where a public answer helps: answer the question first, plainly, with a link only if it adds something. Admit a real problem; never argue; never promise dates or fixes the company has not announced; make it clear you speak for the company.
-5. **Do not reply** to provocations, to spam, or where silence is safer; note them instead.
-6. **Summarise weekly**: the top questions, complaints and requests, with counts and links, and what they suggest for the product and for marketing.
+Use this ability to summarize an assigned community's discussion and prepare responses. Inputs are the permitted channels and keywords, moderation policy, approved product facts and publication permissions.
 
-Every reply is public, so each one passes publish approval before it goes out.
+1. Read mentions within the assignment: the product, competitors and the problem it solves. Keep dates, links and short relevant quotes.
+2. Classify each mention as a question, complaint, praise, bug, buying interest, comparison, spam or attack. Identify sensitive, legal, press and security cases for the authorized decision owner.
+3. Summarize what each actionable case needs and which domain can resolve it. Report facts and uncertainty without promising another team's work.
+4. Where a public response would help, draft a direct answer with a useful approved link. Admit confirmed problems, avoid arguments and identify company representation honestly.
+5. Recommend silence for spam, provocation or a case where a reply would expose private information; state why.
+6. Group the findings for the assigned period, with counts, sources and proposed product or communication changes.
+
+Return the summary and clearly marked response drafts. Never promise unannounced dates, fixes, compensation or terms. Each public reply requires the server outbound gateway, published sources and explicit approval of its exact content; observing a community does not authorize posting there.

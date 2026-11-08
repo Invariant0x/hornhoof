@@ -5,7 +5,7 @@ description: { en: "Checks a model or spreadsheet for broken formulas, hidden nu
 kind: checklist
 sources: [anthropics/financial-services plugins/agent-plugins/model-builder/skills/audit-xls/SKILL.md]
 ---
-Go through the workbook sheet by sheet and record each problem with its sheet and cell.
+Use the assigned workbook, its source records, period, units and tolerance. You must not be its maker. Go through it sheet by sheet and record each problem with its sheet and cell. Keep any stress changes in a disposable copy, not the deliverable being checked.
 
 - **Structure**: inputs, calculations and outputs are separate; every input is on the inputs sheet; no hidden sheets, rows or columns carry numbers.
 - **Typed numbers in formulas**: a constant inside a calculation (=B4*1.2) is a finding unless it is a documented unit conversion.
@@ -18,3 +18,5 @@ Go through the workbook sheet by sheet and record each problem with its sheet an
 - **Stress**: set a main input to zero and then double it; outputs should move the way the business would, with no errors.
 
 Report the problems ranked by how much they change an output, with the corrected value where you can compute it.
+
+Do not fix the workbook being checked; send findings to the maker through your head. Before any figures leave the company, independently rebuild every key number from source records with SQL or a script, without first using the maker's workings, and confirm they match. A spreadsheet review alone is no substitute. Humans alone post entries, make payments and file returns.

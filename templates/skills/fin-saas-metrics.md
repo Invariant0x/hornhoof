@@ -18,3 +18,5 @@ Compute these every month from billing records. Keep one written definition for 
 - **Burn multiple**: net cash burned / net new ARR.
 
 Show each metric's trend over six months with its inputs. Say when the history is short or one customer swings a number. Tie MRR back to revenue in the statements and explain the gap.
+
+Keep dated billing and cost sources with the calculations. Before these figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. Agents never post entries, make payments or file returns.

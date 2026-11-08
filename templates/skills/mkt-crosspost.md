@@ -5,11 +5,13 @@ description: { en: "Adapts one approved piece for several networks and publishes
 kind: procedure
 sources: [affaan-m/ECC skills/crosspost/SKILL.md]
 ---
-1. Take one core piece that is approved or ready for approval.
-2. For each network the plan names, write a native version: its own hook, length, format (thread, carousel, short text, video script) and call to action. Keep the facts identical across versions.
-3. Put all versions in one approval package, so the reviewers and the CEO see them side by side.
-4. After approval, each version goes out at its planned time from the company's account for that network, exactly as approved.
-5. Right after publishing, open each post as a visitor: text, images, links and preview cards are right. Do not edit a live post yourself; report any problem to your head at once.
-6. Record each post: network, link, time, and the approval it belongs to.
+Use this ability to adapt an assigned core piece for several specified networks. Inputs are the source revision, approved facts, destination accounts, audience, language and each network's format and publication policy.
 
-Never publish to a network or account outside the plan, and never from a personal account.
+1. Preserve the source's facts and permitted claims while writing a native version for each destination: hook, length, structure, media description and call to action.
+2. Show all variants together with their source revision, account, language and intended time. Keep differences visible so each item can be assessed on its own.
+3. Mark missing images, alt text, links or approval details rather than inventing them.
+4. If the assignment includes publication, use only the authorized server outbound gateway and published catalog revisions. Every public variant requires explicit approval of its exact rendered content; approval of the source or campaign is insufficient.
+5. Read delivery state before any retry. An unknown result needs destination verification, not blind reposting.
+6. For an authorized published item, inspect the visitor view for text, media, links and previews, and record its URL, time and approval reference. Propose corrections instead of editing or deleting public records without approval.
+
+Return the native variants and, only when publication was assigned and authorized, their delivery evidence. Never add networks or accounts outside the assignment or use a personal account.

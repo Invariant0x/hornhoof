@@ -5,13 +5,12 @@ description: { en: "Estimates the total, reachable and winnable market from the 
 kind: procedure
 sources: [wshobson/agents plugins/startup-business-analyst/skills/market-sizing-analysis/SKILL.md]
 ---
-1. Define the market in one sentence: which customers, which problem, which region, which year. A vague market gives a meaningless number.
-2. Size it bottom-up first: number of target customers x share that has the problem x what they would pay per year. Cite each input and say whether it is measured, a credible estimate, or your assumption.
-3. Cross-check top-down from industry reports or public company figures. If the two results differ by more than about three times, find out why before reporting either.
-4. Report three layers:
-   - **Total market**: everyone with the problem, at today's prices.
-   - **Reachable market**: those the company can reach today with its product, languages, regions and channels.
-   - **Winnable share**: what the company could win in three years, with the reasoning (competitors, sales capacity).
-5. Give each layer as a range (low, expected, high) and name the input that moves it most.
+Use this ability to estimate the size of an assigned market. Inputs are the customer problem, region, year, product scope, price assumptions and permitted evidence.
 
-Show the arithmetic in a table so anyone can recompute it. Prefer recent sources and give each one's date. Never round up to make a market look bigger.
+1. Define the market in one precise sentence: customers, problem, geography and period.
+2. Estimate bottom-up: target customer count x share with the problem x annual willingness to pay. Cite each input and label it measured, estimated or assumed.
+3. Cross-check with industry reports or public company evidence. If the approaches differ by more than about three times, investigate before treating either as dependable.
+4. Report total demand, the portion reachable with the current product/languages/regions/channels, and a reasoned share winnable in three years given competition and sales capacity.
+5. Give low, expected and high ranges for each layer, with the most influential input and sensitivity.
+
+Return a table with formulas, dated sources, definitions and uncertainty so the arithmetic can be recomputed. Use the same units and period throughout. Never round upward to make a market look larger or present a market estimate as a promised result. This estimate does not authorize spending, external claims or a market-entry commitment.

@@ -5,36 +5,15 @@ description: { en: "Where business development checks item by item, in a batch, 
 kind: procedure
 sources: []
 ---
-How work moves through business development. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
+Use this ability to choose a verification plan for an assigned business opportunity or partner proposal. Inputs are the decision, evidence, proposed commitments, recipients, risk and available checks. The task determines its assigned evaluators and gates.
 
-## Item by item
+1. Describe the opportunity or channel, rationale, evidence owner, proposed kill condition and measures such as opportunities advanced or proposals accepted. Missing policy remains a question for the authorized decision owner.
+2. Separate reversible internal research from external commitments. No promise reaches a partner without the authorized human approval, every partner message uses the server outbound gateway, and a human signs every contract. Keep one assigned writer for shared account state without granting credentials.
+3. Compare opportunities as one table using a consistent rubric. Recompute score totals and market-size arithmetic from sourced inputs with formulas or a script.
+4. Select a source-check sample suited to the decision's risk. An unsupported number is a finding affecting the associated research, not a detail to hide in an average.
+5. Require code checks to have fast tests including rejected cases. A missing check remains a gap and cannot be represented as a pass.
+6. For model assessments, require independently labeled versioned examples, an owner-set threshold, separate false-accept and false-reject counts, and examples from real misses. Revalidate on check, prompt, list or model changes, not on every opportunity. Keep company examples private. Partner/market judgment without a validated set cannot certify acceptance; use authorized human assessment. No model result waives exact message approval or contract-signature requirements.
 
-- A human signs every contract, and no promise reaches a partner before the department owner approves it.
-- Every message to a partner passes the outbound gate. A message sent cannot be taken back.
-- An account is held by one member at a time.
+For outbound review, use the company and product scoped private example set `model-check-set:outbound_review`; never copy its examples into a template or repository.
 
-## In a batch
-
-- The list of opportunities is scored and ranked as one table, not one idea at a time (biz-opportunity-scoring).
-
-## By sample
-
-- The head checks a sample of the numbers behind the scores against their sources. A number without a source goes back, with the rest of that research.
-
-## By code
-
-- Score totals and the arithmetic of market sizes come from a formula or a script, and the same formula runs over the whole list.
-- Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
-
-## By a model
-
-- Reviewing a message to a partner is a model check with its set: `model-check-set:outbound_review`.
-- A link like this means the set of this department and product. The set itself is private to the company and goes into no template or repository.
-- Judging a partner or a market has no example set yet.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. An action that cannot be undone keeps its approval item by item, whatever a set shows.
-
-## Descriptions and measures
-
-- BIZ-HEAD writes a short description of each channel or market the company pursues on its first turn: why it is on the list, who owns it and its kill condition. Keep it in the department notebook.
-- Name the department's own measures, such as opportunities moved forward and proposals accepted, in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
-- A new company has these rules from its start and writes its descriptions on its first turn.
+Return the proposed checks, evidence, limitations and protected approvals. This plan imposes no department role duties, turn schedule, downstream handoff or permission to act.

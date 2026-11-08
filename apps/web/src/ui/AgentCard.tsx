@@ -20,53 +20,62 @@ type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; on
 const FAILURE_TEXT_MAX = 300;
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
-const SKILL = /<!-- hh:skill ([a-z0-9-]+) -->\n## [^\n]*\n\n([\s\S]*?)\n<!-- \/hh:skill -->/g;
+const SKILL = /^(<!-- hh:skill [a-z0-9-]+ -->\n## [^\n]*\n\n)([\s\S]*)(\n<!-- \/hh:skill -->)$/;
+const ASSIGNMENT = /^(<!-- hh:assignment -->\n## [^\n]*\n\n)([\s\S]*)(\n<!-- \/hh:assignment -->)$/;
+type PartFrame = { open: string; body: string; close: string };
+type PromptEdits = { base: string | null; skills: Record<string, string> };
 
-/* What a person edits in a part: the role's text, or a skill's body without its markers and title. */
+function frameOf(part: Part): PartFrame | null {
+  const match = (part.kind === 'assignment' ? ASSIGNMENT : part.kind === 'skill' ? SKILL : null)?.exec(part.text);
+  return match ? { open: match[1]!, body: match[2]!, close: match[3]! } : null;
+}
+
+/* Editable bodies have no markers or heading; identity parts retain their complete text. */
 export function bodyOf(part: Part): string {
-  if (part.kind !== 'skill') return part.text;
-  const m = /^<!-- hh:skill [a-z0-9-]+ -->\n## [^\n]*\n\n([\s\S]*)\n<!-- \/hh:skill -->$/.exec(part.text);
-  return m ? m[1]! : part.text;
+  return frameOf(part)?.body ?? part.text;
 }
 
-/* The role's text and each skill's body from an edited raw text, or null when its first part or the skill markers changed. */
-export function fromRaw(raw: string, parts: Part[]): { base: string | null; skills: Record<string, string> } | null {
-  const header = parts.find(p => p.kind === 'header')?.text ?? '';
-  if (!raw.startsWith(header)) return null;
-  const blocks = [...raw.matchAll(SKILL)];
-  const ids = parts.filter(p => p.kind === 'skill').map(p => p.id);
-  if (blocks.length !== ids.length || blocks.some((b, i) => b[1] !== ids[i])) return null;
-  for (let i = 0; i < blocks.length; i++) {
-    const end = blocks[i]!.index + blocks[i]![0].length;
-    if (raw.slice(end, blocks[i + 1]?.index ?? raw.length).trim()) return null;
-  }
-  const base = raw
-    .slice(header.length, blocks[0]?.index ?? raw.length)
-    .replace(/^\n\n/, '')
-    .replace(/\n\n$/, '');
-  return { base: parts.some(p => p.kind === 'base') ? base : null, skills: Object.fromEntries(blocks.map(b => [b[1]!, b[2]!])) };
+const escapePattern = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/* The wire's base field is the assignment. Identity, part order, headings and markers stay unchanged. */
+export function fromRaw(raw: string, parts: Part[]): PromptEdits | null {
+  const editable: Part[] = [];
+  const pattern = parts.map(part => {
+    const frame = frameOf(part);
+    if (!frame) return escapePattern(part.text);
+    editable.push(part);
+    return `${escapePattern(frame.open)}([\\s\\S]*?)${escapePattern(frame.close)}`;
+  }).join('\n\n');
+  const match = new RegExp(`^${pattern}$`).exec(raw);
+  if (!match || match[0] !== raw) return null;
+  const edits: PromptEdits = { base: null, skills: {} };
+  editable.forEach((part, index) => {
+    if (part.kind === 'assignment') edits.base = match[index + 1]!;
+    else if (part.id) edits.skills[part.id] = match[index + 1]!;
+  });
+  return edits;
 }
 
-const keyOf = (p: Part) => (p.kind === 'base' ? 'base' : (p.id ?? ''));
+const keyOf = (p: Part) => (p.kind === 'base' || p.kind === 'assignment' ? p.kind : (p.id ?? ''));
 
 /* The raw text with the edits made by skill in place of the parts' own text. */
 export function toRaw(parts: Part[], drafts: Record<string, string>): string {
   return parts
     .map(p => {
-      const draft = p.kind === 'header' ? undefined : drafts[keyOf(p)];
-      if (draft === undefined) return p.text;
-      return p.kind === 'base' ? draft : p.text.replace(/^(<!-- hh:skill [a-z0-9-]+ -->\n## [^\n]*\n\n)[\s\S]*(\n<!-- \/hh:skill -->)$/, (_, open: string, close: string) => open + draft + close);
+      const frame = frameOf(p);
+      const draft = drafts[keyOf(p)];
+      return frame && draft !== undefined ? frame.open + draft + frame.close : p.text;
     })
     .join('\n\n');
 }
 
-/* The edits by skill an edited raw text makes, or null when its first part or the skill markers changed. */
+/* Unsaved editable bodies from raw text, or null when a read-only part or a boundary changed. */
 function draftsOf(raw: string, parts: Part[]): Record<string, string> | null {
   const parsed = fromRaw(raw, parts);
   if (!parsed) return null;
   const drafts: Record<string, string> = {};
   for (const p of parts) {
-    const text = p.kind === 'base' ? parsed.base : p.kind === 'skill' ? parsed.skills[p.id ?? ''] : undefined;
+    const text = p.kind === 'assignment' ? parsed.base : p.kind === 'skill' ? parsed.skills[p.id ?? ''] : undefined;
     if (text != null && text !== bodyOf(p)) drafts[keyOf(p)] = text;
   }
   return drafts;
@@ -195,18 +204,18 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
 
   function savePrompt() {
     if (!card) return;
-    let next: { base: string | null; skills: Record<string, string> };
+    let next: PromptEdits;
     if (rawDraft !== null) {
       const parsed = fromRaw(rawDraft, card.parts);
       if (!parsed) return setBroken(true);
       next = parsed;
     } else {
-      const { base: own, ...skills } = drafts;
+      const { assignment: own, ...skills } = drafts;
       next = { base: own ?? null, skills };
     }
     const body: { base?: string; skillText?: Record<string, string> } = {};
-    const basePart = card.parts.find(p => p.kind === 'base');
-    if (basePart && next.base !== null && next.base !== bodyOf(basePart)) body.base = next.base;
+    const assignmentPart = card.parts.find(p => p.kind === 'assignment');
+    if (assignmentPart && next.base !== null && next.base !== bodyOf(assignmentPart)) body.base = next.base;
     for (const p of card.parts.filter(x => x.kind === 'skill')) {
       const text = next.skills[p.id ?? ''];
       if (text !== undefined && text !== bodyOf(p)) body.skillText = { ...body.skillText, [p.id!]: text };
@@ -256,6 +265,22 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
   const count = (n: number) => n.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB');
   const editable = card.canEdit;
   const stateAgent = liveState(card, live);
+  const assignmentPart = card.parts.find(p => p.kind === 'assignment');
+  const rawEdits = rawDraft === null ? null : fromRaw(rawDraft, card.parts);
+  const rawInvalid = rawDraft !== null && rawEdits === null;
+  const assignment = rawEdits?.base ?? drafts.assignment ?? (assignmentPart ? bodyOf(assignmentPart) : '');
+
+  function editAssignment(text: string) {
+    if (!card) return;
+    if (raw) {
+      const carried = draftsOf(rawDraft ?? card.raw, card.parts);
+      if (!carried) return setBroken(true);
+      setRawDraft(toRaw(card.parts, { ...carried, assignment: text }));
+    } else {
+      setDrafts(d => ({ ...d, assignment: text }));
+    }
+    setBroken(false);
+  }
 
   /* An edit carries over to the other view; a raw text with broken markers stays in the raw view until it is fixed. */
   function showRaw(next: boolean) {
@@ -362,6 +387,24 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
           </section>
         )}
 
+        {assignmentPart && (
+          <section className="ac-prompt" aria-labelledby={`${id}-assignment`}>
+            <div className="ac-prompt-top">
+              <h4 id={`${id}-assignment`}>
+                <label htmlFor={`${id}-assignment-text`}>{t.agent.assignment}</label>
+              </h4>
+            </div>
+            <textarea
+              id={`${id}-assignment-text`}
+              className="ac-text"
+              rows={Math.min(14, Math.max(3, assignment.split('\n').length + 1))}
+              value={assignment}
+              readOnly={!editable || rawInvalid}
+              onChange={e => editAssignment(e.target.value)}
+            />
+          </section>
+        )}
+
         <section className="ac-prompt" aria-labelledby={`${id}-prompt`}>
           <div className="ac-prompt-top">
             <h4 id={`${id}-prompt`}>{t.agent.prompt}</h4>
@@ -379,7 +422,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
           <p className="muted">{t.agent.length(count(card.instructions.length), count(card.instructions.max))}</p>
           {orchestrator && <p className="muted">{t.agent.orchestratorNote}</p>}
           {orchestrator ? (
-            <pre className="ac-text">{card.raw}</pre>
+            <pre className="ac-text">{toRaw(card.parts, drafts)}</pre>
           ) : raw ? (
             <>
               <label className="sr" htmlFor={`${id}-raw`}>
@@ -388,7 +431,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
               <textarea id={`${id}-raw`} className="ac-text" rows={18} value={rawDraft ?? card.raw} readOnly={!editable} onChange={e => setRawDraft(e.target.value)} />
             </>
           ) : (
-            card.parts.map(p =>
+            card.parts.filter(p => p.kind !== 'assignment').map(p =>
               p.kind === 'header' ? (
                 <div key="header" className="ac-part">
                   <span>{t.agent.header}</span>
@@ -403,14 +446,14 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
                     className="ac-text"
                     rows={Math.min(14, Math.max(3, bodyOf(p).split('\n').length + 1))}
                     value={drafts[keyOf(p)] ?? bodyOf(p)}
-                    readOnly={!editable}
-                    onChange={e => setDrafts(d => ({ ...d, [keyOf(p)]: e.target.value }))}
+                    readOnly={!editable || p.kind !== 'skill'}
+                    onChange={p.kind === 'skill' ? e => setDrafts(d => ({ ...d, [keyOf(p)]: e.target.value })) : undefined}
                   />
                 </div>
               ),
             )
           )}
-          {broken && (
+          {(broken || rawInvalid) && (
             <p className="alert" role="alert">
               {t.agent.rawBroken}
             </p>

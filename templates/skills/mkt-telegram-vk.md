@@ -5,14 +5,14 @@ description: { en: "Runs the company's Telegram and VK channels for the Russian-
 kind: procedure
 sources: []
 ---
-Use this when the company speaks to a Russian-speaking audience, where Telegram channels and VK communities often matter more than other networks.
+Use this ability to adapt assigned communication for Telegram or VK audiences. Inputs are the approved message, audience, company accounts, moderation rules and relevant channel limits.
 
-- **Telegram channel**: posts are read in the feed, without clicks. Lead with the point, keep it short, use formatting sparingly, and post no more often than the plan says.
-- **Comments and chats**: draft answers to questions under posts for approval. Do not open a public chat until your head has given moderation rules for it.
-- **VK community**: longer posts and photos work; keep the community page filled in with contacts, links and a description of the product.
-- **Paid placement**: a post bought in someone else's channel is advertising. It needs approval as a paid placement and must follow the local rules for labelling online ads.
-- **Bots**: a Telegram bot is a product; it goes to development through your head.
-- **Accounts**: post only from the company accounts operations set up, never from a personal account.
-- **Numbers**: subscribers, views per post, reactions and clicks. Report the weekly change, not single posts.
+- **Telegram channel**: make the point useful in the feed, use formatting sparingly and fit the assigned frequency.
+- **Comments and chats**: prepare responses under the approved moderation policy. Opening a public chat is a separate public action requiring authorization.
+- **VK community**: adapt text and media to the community's audience, and identify missing approved contacts, links or product information.
+- **Paid placement**: mark any purchased placement as a paid commitment. Verify applicable advertising registration and labeling requirements and obtain spending and publication approval before commitment.
+- **Bots**: describe required product behavior as a proposal; creating or deploying a bot needs its own authorized assignment and checks.
+- **Accounts**: use only the company accounts the assignment authorizes, never personal ones. Do not create accounts or accept terms by implication.
+- **Measurement**: report subscriber, view, reaction and click trends for the assigned period, with sources and denominators where available.
 
-Every post and every reply passes publish approval before it goes out.
+Return channel-native drafts, moderation or account gaps, and the requested measurements. Every public post and reply requires the server outbound gateway, published sources and explicit approval of its exact content; channel selection does not waive those conditions.

@@ -5,10 +5,12 @@ description: { en: "Watches public sources for signs that a target company may b
 kind: procedure
 sources: [affaan-m/ECC skills/lead-intelligence/SKILL.md]
 ---
-1. Keep the list of signals your head approved for the customer profile, such as hiring for a role we help, funding, a new market or product, a leadership change, a public complaint about a competitor, or a technology change on their site.
-2. Check the sources for each signal on a schedule: job boards, news, company blogs, public repositories, review sites.
-3. For each hit record the company, the signal, the date, the link and why it matters to us. Old signals count for little.
-4. Score the company again with the signal and pass strong ones to prospecting.
-5. After a full turn, drop signals that never led to a reply or a meeting, and suggest new ones from won deals.
+Use this ability to identify buying signals within an assigned market. Inputs are the approved customer profile, signal definitions, source scope and observation period.
 
-Use only public sources and the company's own data. Do not track people beyond their public work role.
+1. List permitted signals, such as relevant hiring, funding, market entry, product launches, leadership changes, technology changes or public dissatisfaction with an alternative. Propose additions rather than silently changing the approved profile.
+2. Read allowed public sources and company records: company sites, job boards, news, public repositories or review sites.
+3. For each hit, record the company, signal, source, event date, observation date and reason it matters. Mark stale or uncertain signals.
+4. Assess how the evidence changes fit and urgency using the same criteria across candidates.
+5. Where outcome data exists, compare signals with replies, meetings or won deals. Identify weak signals to retire and new hypotheses to test; do not treat a small sample as proof.
+
+Return a ranked signal list and proposed changes with their evidence. Use only public work information and company data the assignment permits; never track unrelated private behavior. A buying signal authorizes no outreach, private-data collection or account access.

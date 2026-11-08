@@ -5,16 +5,18 @@ description: { en: "Writes the full description of a shared component: its parts
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md, wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md]
 ---
-Write a spec for each shared component before development builds it:
+Specify the shared component named in the assignment using the approved design system as input. Prefer a justified variant of an existing component over a duplicate.
 
-- **Purpose**: what it is for, and what it is not for (name the component to use instead).
-- **Anatomy**: its parts, which are required and which optional.
-- **Variants**: the sizes and kinds it comes in and when to choose each. Fewer is better.
-- **States**: default, hover, focus, active, disabled, loading, error, selected, as they apply. Focus is always visible.
-- **Tokens**: the meaning tokens each part uses.
-- **Behaviour**: keyboard use, what a click or tap does, how it handles long text, overflow and narrow screens.
-- **Accessibility**: role, accessible name, how its state is announced, a touch target of at least 44 by 44 px.
-- **Content**: rules for its labels and messages in every language the product supports. A translation often runs longer than its source.
-- **Do and don't**: two or three examples of each.
+Include:
 
-Show every variant and state on one mockup page. When an existing component almost fits, propose a variant before a new component.
+- **Purpose**: intended use, excluded uses and the existing alternatives.
+- **Anatomy**: parts, required and optional.
+- **Variants**: sizes and kinds, with a rule for choosing each.
+- **States**: default, hover, focus, active, disabled, loading, error and selected where applicable; visible focus throughout.
+- **Tokens**: semantic tokens used by each part, without private colours or spacing.
+- **Behaviour**: keyboard, pointer and touch actions, long text, overflow and layout at narrow and wide widths.
+- **Accessibility**: role, accessible name, state announcements and touch targets of at least 44 by 44 px.
+- **Content**: labels and messages in every supported language, with expansion and direction changes considered.
+- **Examples**: two or three correct and incorrect uses.
+
+Show all variants and states on a mockup page, at representative narrow and wide widths and in each supported theme. Record affected products, compatibility and unresolved system decisions. Return the spec and examples to the recipient named in the task; a proposed component becomes approved only through the system's authorized change process.

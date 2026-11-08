@@ -5,15 +5,13 @@ description: { en: "Tracks nodes and subscriptions against the work planned and 
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/capacity-plan/SKILL.md]
 ---
-Capacity in Hornhoof is two things: nodes, the machines agents run on, and subscriptions, the AI provider plans people bring. A subscription belongs to its owner and serves wherever its owner works; you report on it, you never move it.
+Compare the resources named in the assignment with the planned workload. Nodes are machines that run work; subscriptions are provider plans owned by a person or the company. A personal subscription remains its owner's and is not yours to move.
 
-Once per turn, and before any big piece of work starts:
+1. Record each node's owner, CPU, memory, free disk, assigned work, busy periods and outages from current measurements.
+2. Record each subscription's owner, provider, plan, usage, limits and reset time from authorized records.
+3. Read the workload plan for the period being assessed: staffing, builds, tests and research. Mark unavailable forecasts as unknown.
+4. Identify gaps such as disk or memory exhaustion, provider limits or no alternate provider for an assigned independent check.
+5. Propose the smallest remedy for each gap, with verified cost and tradeoffs: authorized cleanup, added capacity, quieter scheduling or a different plan.
+6. Return the measurements, sources, forecast assumptions and proposals to the task's decision maker.
 
-1. List each node: owner, CPU, memory, free disk, the agents it carries, and how often it was busy or offline.
-2. List each subscription: owner, provider, plan, the agents using it, how close it came to its limits, and when the limits reset.
-3. Read the plans the orchestrator shares for the coming turn: which departments grow, which work is heavy (builds, tests, research).
-4. Find the gaps: a node that will run out of disk or memory, a provider that will hit its limits, a department with no second provider for cross-checks.
-5. For each gap propose one fix with its cost: clean up, add a node, add a plan, shift heavy work to quieter hours, move routine tasks to a cheaper tier.
-6. Send the proposals to the CEO through the orchestrator. Buying anything or adding a machine is the CEO's decision.
-
-Keep the numbers from each turn so a trend, not one bad day, drives the proposal.
+Keep dated measurements so trends can be compared. Buying a plan or adding a machine needs the CEO's approval. This analysis grants no authority to move subscriptions, delete work or change access.

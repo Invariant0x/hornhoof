@@ -5,9 +5,12 @@ description: { en: "Routes every external sales message through the server outbo
 kind: gate
 sources: []
 ---
-Every message from Sales to someone outside the company goes through the server outbound gateway (`"outbound_submit"` and `"outbound_status"`): emails, messages, follow-ups, sequences and proposals. Sending account credentials stay on the server and are never read by agents.
+Use this ability to validate or carry out an assigned external commercial message: email, direct message, follow-up, sequence or proposal. Every such message goes through the server outbound gateway ("outbound_submit" and "outbound_status"). Sending credentials stay on the server and are never read by agents.
 
-1. **Compose from published catalog entries**: reference only published template, price, discount, terms, claim, link and segment revisions for the channel and language. Do not paste unapproved prices, free-form URLs, secrets or recipient personal data.
-2. **Server checks and independent review**: the server verifies consent, suppression, daily limits, exact money math and unsubscribe links, and runs certified independent-vendor model checks in a fresh context when policy requires them.
-3. **Exact approval by the department owner or the CEO**: when the department's policy, price rules or an escalated check require human approval, the server binds the request to the exact rendered bytes or exact approach (channel, template revision, segment and language). Wait for explicit approval from the department owner (or the CEO / CEO delegate when no owner is set); silence is not approval.
-4. **Check delivery safely**: read delivery state with `"outbound_status"`. If an attempt ends as `unknown`, quota and the sending account stay held; never resend blindly until a human checks the receiving side first. A prospect reply asking for custom pricing, legal terms or contract changes always escalates to the department owner or the CEO.
+1. **Published sources**: reference only published template, price, discount, terms, claim, link and segment revisions for the account, channel and language. Do not paste unapproved prices, free-form URLs, secrets or recipient personal data. Never substitute another language silently.
+2. **Server checks**: the server verifies consent, suppression, daily account and domain limits, exact monetary arithmetic and unsubscribe links. Required certified independent-vendor model checks use a fresh context; missing checks are not passes.
+3. **Exact human authority**: where policy, price rules or an escalated check requires approval, wait for the department owner's explicit approval, or the CEO / CEO delegate when no owner is set. The server binds it to exact rendered bytes or the exact approved approach: channel, template revision, segment and language. Silence is not approval. Public items always require per-item approval; approach approval does not waive it.
+4. **Safe delivery**: dispatch only within the assignment and approved scope. Read status; an `unknown` result holds quota and the sending account until a human checks the receiving side. Never resend blindly.
+5. **Restricted commitments**: custom prices, discounts, legal terms, contract changes and unapproved delivery promises require the authorized human decision. A human signs contracts.
+
+Return revisions, check and approval references, and delivery state. Selecting this ability grants no sending account, consent or commercial authority.

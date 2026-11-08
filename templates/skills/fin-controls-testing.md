@@ -16,3 +16,5 @@ Each quarter, or when your head asks, test whether the controls the company reli
 7. For each failure, recommend a fix and say what risk stays open until then.
 
 Report to your head. The people who run a control own its fix, not you.
+
+During this check, do not edit the records, controls or access being checked. Agents never post entries, make payments or file returns. Any figures released outside the company need a separate checker to rebuild the key numbers from source records with SQL or a script and confirm they match.

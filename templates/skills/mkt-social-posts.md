@@ -5,12 +5,14 @@ description: { en: "Drafts posts that fit each network's format and audience, ma
 kind: procedure
 sources: [coreyhaines31/marketingskills]
 ---
-1. **Start from approved material**: a published article, a launch, a feature that exists, a real customer result. Never invent news.
-2. **One idea per post**. The first line must stop the scroll on its own: a concrete fact, a number, a problem the reader has.
-3. **Fit the network**: length, tone, links, hashtags and images as each network expects. A post copied unchanged across networks reads as spam.
-4. **Worth reading without a click**: the value is in the post; the link is for those who want more.
-5. **Two hooks**: write two versions of the first line and say which you prefer.
-6. **Timing**: propose a time for each post based on when our audience is active, within the number of posts per network your head's plan allows.
-7. **Check facts and links**, and note what each claim relies on.
+Use this ability to draft posts for an assigned network and audience. Inputs are verified source material, approved claims, the brand voice, target account, language and posting limits.
 
-Hand over each draft with its network, account, time, image and alt text. It goes to publish approval through your head. Only the exact approved text goes out, and only from the accounts operations set up for the company.
+1. Start from a real article, launch, existing feature or customer result approved for use. Never invent news.
+2. Keep one idea per post. Give the first line a concrete fact, problem or supported number that makes sense alone.
+3. Fit the network's format, length, links, media and audience expectations instead of copying identical text everywhere.
+4. Put useful information in the post itself; a link adds detail rather than withholding the answer.
+5. Offer two opening hooks and explain the preferred one.
+6. Propose timing from available audience evidence within the assigned account limits. Do not create a sending schedule without authorization.
+7. Check facts and permitted links; identify the source for every claim. Include media requirements and useful alt text.
+
+Return each draft with network, account, language, proposed time and sources. A draft does not authorize posting or replying. Public items require published catalog sources through the server outbound gateway and explicit approval of the exact rendered content, using only the authorized company account.

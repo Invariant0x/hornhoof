@@ -5,15 +5,15 @@ description: { en: "Decides whether a partner is worth pursuing and at what leve
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills/partnerships-architect/SKILL.md]
 ---
-For each candidate partner, write:
+Use this ability to assess an assigned prospective partner or channel. Inputs are the proposed relationship, company goals, product facts, commercial constraints and permitted evidence.
 
-1. **Who they are**: what they sell, to whom, size, region, how they reach customers. Cite public sources; mark what the partner told us as their claim.
-2. **Why together**: the shared customer, what each side gains, and why that customer is better off. If you cannot name the shared customer, stop: there is no partnership.
-3. **Type**: referral, reseller, integration, technology, co-marketing or marketplace. Each needs different work; name the one that fits.
-4. **Tier verdict**: strategic (worth engineering and leadership time), standard (a defined program, little custom work) or not now, with the reason in two sentences.
-5. **Economics**: expected deals or users per quarter, revenue share or fees, our cost to serve. Use biz-channel-economics for the numbers.
-6. **First-phase plan**: three to five milestones, each with an owner department and a measurable result, such as a working integration or the first five referred customers.
-7. **Exit terms**: what ends the partnership (missed targets, conflict, breach), the notice period, and what happens to shared customers and data.
-8. **Risks**: dependence on one partner, brand, data they would see, exclusivity they ask for.
+1. Describe the candidate's business, customers, size, region and reach, separating public evidence from the candidate's own claims.
+2. Explain the shared customer, what each side gains and why the customer benefits. If there is no supported shared customer, say the fit is unproved.
+3. Identify the relationship type: referral, reseller, integration, technology, co-marketing or marketplace.
+4. Recommend strategic, standard or not now, with the expected benefit and required effort.
+5. Estimate customer or deal volume, shares/fees and cost to serve using sourced inputs and visible formulas. Show low, expected and high cases and a walk-away point; unknown costs remain gaps.
+6. Propose three to five initial milestones with measurable results and required capabilities, without committing other departments.
+7. Assess exit conditions, notice and treatment of shared customers and data.
+8. Record dependence, brand exposure, data access, exclusivity, legal concerns and uncertainty.
 
-Hand the evaluation to your head. Do not send it, or anything that reads like an offer, to the partner. Work that needs Development, Marketing or Sales goes as a request through your head.
+Return the evaluation with sources, dates and confidence. Never send it as an offer or promise terms. The CEO authorizes commercial commitments; any partner message needs exact approval from the department owner or CEO through the authorized server outbound gateway, and a human signs the contract.

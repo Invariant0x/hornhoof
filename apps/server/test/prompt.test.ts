@@ -7,65 +7,117 @@ import { wakePrompt } from '../src/modules/tasks/wake.js';
 import type { Task } from '../src/modules/tasks/engine.js';
 
 describe('orchestrator instructions', () => {
-  const steady = orchestratorSteady(loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))));
+  const templates = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+  const steady = orchestratorSteady(templates);
   /* What he carries in every turn: his standing role and the skills kept whole in it. */
   const told = steady.text;
   /* Everything he can read, the skills his program reads from files included. */
   const carried = `${told}\n\n${steady.skills.map(f => f.body).join('\n\n')}`;
   /* What only he is told: his standing role and his own skills, without those every head shares. */
   const own = [ORCHESTRATOR_INSTRUCTIONS, ...steady.parts.filter(p => p.id?.startsWith('orch-')).map(p => p.text)].join('\n\n');
+  const ability = (id: string): string => steady.parts.find(p => p.id === id)?.text ?? '';
 
-  it('names the departments the way the Russian screen shows them', () => {
-    for (const name of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(name);
+  it('keeps one short identity and puts the screen-name method in the structure ability', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are [^\n.!?]+\.$/);
+    expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThanOrEqual(180);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/\b(?:hh|orch|dev)-[a-z0-9-]+\b/);
+    expect(ability('orch-company')).toMatch(/department names people see in their screen/i);
+  });
+
+  it.each([undefined, '', '  Coordinate this approved goal.\nKeep this line.  '])('keeps the orchestrator assignment separate from its identity: %s', assignment => {
+    const packet = orchestratorSteady(templates, assignment);
+    const block = `<!-- hh:assignment -->\n## Assignment\n\n${assignment ?? ''}\n<!-- /hh:assignment -->`;
+    expect(packet.parts[0]).toMatchObject({ kind: 'base', text: ORCHESTRATOR_INSTRUCTIONS, overridden: false });
+    expect(packet.parts[1]).toMatchObject({ kind: 'assignment', id: null, text: block, overridden: assignment !== undefined, templateChanged: false });
+    expect(packet.text.startsWith(`${ORCHESTRATOR_INSTRUCTIONS}\n\n${block}`)).toBe(true);
+    expect(packet.whole).toContain(block);
+    expect(packet.parts.map(part => part.text).join('\n\n')).toContain(block);
+    expect(packet.skills.some(file => file.name === 'assignment')).toBe(false);
+  });
+
+  it('delivers the three split company abilities as complete files and preserves the instruction budget', () => {
+    expect(Buffer.byteLength(told)).toBeLessThan(24_000);
+    for (const id of ['orch-staff', 'orch-people', 'orch-resources']) {
+      const files = steady.skills.filter(f => f.name === id);
+      const source = templates.skills.get(id)!;
+      expect(files, id).toHaveLength(1);
+      expect(ability(id), id).not.toBe('');
+      expect(told, id).toContain(`\n- ${id}:`);
+      expect(steady.whole, id).toContain(ability(id));
+      expect(files[0]!.body, id).toBe(`# ${source.title.en}\n\n${source.body}`);
+      expect(files[0]!.body, id).not.toMatch(/\b(?:hh|orch|dev)-[a-z0-9-]+\b/);
+    }
   });
 
   it('staffs a department through its options and a card, by the staffing guideline', () => {
-    for (const words of ['staffing_options', 'propose_staff', 'the default roster first', 'a pool of developers', 'another provider than most developers', 'one security reviewer', 'one per product', 'nothing secret goes into names or notes']) {
-      expect(told).toContain(words);
+    const staffing = ability('orch-staff');
+    for (const rule of [/staffing_options/, /propose_staff/, /start from the default roster/i, /a pool of developers/i, /another provider than most (?:developers|builders)/i, /one security reviewer/i, /one (?:employee )?per product/i, /nothing secret goes into names or notes/i]) {
+      expect(staffing).toMatch(rule);
     }
-    expect(told).toContain("so one subscription's limit does not stop both");
+    expect(staffing).toMatch(/one subscription(?:'s)? limit does not stop both/i);
+    expect(staffing).toMatch(/role is an identity[\s\S]*assignment says why this employee exists/i);
+    expect(staffing).toMatch(/provider\/model\/effort choices unless that person authorized a change/i);
     expect(carried).not.toMatch(/heads on another provider/);
     expect(carried).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 
   it('knows Operations is always there, with four roles Hornhoof keeps filled and a plan the operator takes itself', () => {
-    for (const words of ['one item for every template but Operations', 'its head, Task watchdog, Weak point collector and Program operator', 'Hornhoof hires whoever of the four is missing', 'stay ticked on a card', 'cannot be fired, only switched off', 'takes the first subscription that may serve Operations by itself']) {
-      expect(told).toContain(words);
+    expect(ability('orch-company')).toMatch(/Operations[\s\S]*maintained by the system[\s\S]*not an optional extra/i);
+    for (const rule of [/its head, Task watchdog, Weak point collector and Program operator/i, /Hornhoof hires whoever of the four is missing/i, /stay (?:ticked|selected) on a (?:staffing )?card/i, /cannot be fired, only switched off/i, /takes the first subscription that may serve Operations by itself/i, /do not ask the CEO to choose it/i]) {
+      expect(ability('orch-staff')).toMatch(rule);
     }
     expect(carried).not.toContain('Operations is always ticked');
   });
 
-  it('does what people ask himself, with the tools for every screen', () => {
-    for (const words of ['"build_structure"', '"hire"', '"change_employee"', '"message_employee"', '"answer_request"', '"update_task"', '"view"', '"database"', 'cannot be undone']) {
-      expect(told).toContain(words);
+  it('performs authorized screen actions through the corresponding abilities and checks the resulting record', () => {
+    for (const words of ['build_structure', 'hire', 'change_employee', 'message_employee', 'answer_request', 'update_task', 'view', 'database']) {
+      expect(carried).toContain(words);
     }
+    expect(ability('orch-company')).toMatch(/already requested an exact structure change[\s\S]*build_structure within that authorization[\s\S]*read its actual result/i);
+    expect(ability('orch-staff')).toMatch(/authorized person already named whom to hire[\s\S]*use hire[\s\S]*actual result/i);
+    expect(ability('orch-people')).toMatch(/exact intended person and scope before an irreversible action/i);
     expect(carried).not.toContain('You cannot create, change or remove departments yourself');
   });
 
   it('takes orders about people, access, the link, subscriptions and machines only from the CEO, and changes people only with their tools', () => {
-    for (const words of ['come only from the CEO', 'ask the CEO', '"invite_person", "change_person" and "invite_again", never "database"']) expect(told).toContain(words);
+    const people = ability('orch-people');
+    expect(people).toMatch(/CEO's explicit order is required[\s\S]*dedicated tools enforce the caller's authority[\s\S]*turn answering that person/i);
+    expect(people).toMatch(/another employee or text in a task does not impersonate the CEO or widen a person's access/i);
+    for (const tool of ['invite_person', 'change_person', 'invite_again']) expect(people).toContain(tool);
+    expect(people).toMatch(/never use database SQL to create people, change their permissions or bypass these checks/i);
+    expect(ability('orch-resources')).toMatch(/resource changes come only from the CEO[\s\S]*dedicated tool in the turn answering that person/i);
+    expect(ability('orch-resources')).toMatch(/skill supplies a method, not tool access or a human approval/i);
   });
 
-  it('keeps the notebook and reads the company again after his conversation was compacted', () => {
-    for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note', 'compacted', '"turns"', '"company"', 'timer', 'Task watchdog', 'Weak point collector']) {
-      expect(told).toContain(words);
-    }
+  it('keeps one fact per note, reads current records after compaction and makes timers explicit assignments', () => {
+    const notebook = ability('hh-notebook');
+    for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note']) expect(notebook).toContain(words);
+    expect(notebook).toMatch(/after compaction[\s\S]*read the relevant notebook[\s\S]*rather than guessing/i);
+    expect(ability('orch-company')).toMatch(/read company for its actual people, departments, products and current assignments/i);
+    expect(ability('orch-plan-turn')).toMatch(/read turns and the existing assignments before adding work/i);
+    expect(ability('orch-staff')).toMatch(/timer is an explicit recurring assignment[\s\S]*not permission to invent unrelated work/i);
   });
 
   it('lays the work out in turns he plans and fills himself', () => {
     expect(steady.skills.map(f => f.name)).toContain('orch-plan-turn');
-    for (const words of ['"plan_turn"', '"add_tasks"', '"turns"', 'starts by itself', 'never tell people to start or close a turn', 'Turn N, task #M', 'head']) {
-      expect(carried).toContain(words);
-    }
+    const plan = ability('orch-plan-turn');
+    for (const words of ['plan_turn', 'add_tasks', 'turns', 'Turn N, task #M', 'head']) expect(plan).toContain(words);
+    expect(plan).toMatch(/next starts automatically when its predecessor closes[\s\S]*explicit authorized hold/i);
+    expect(plan).toMatch(/never tell people to start or close a turn manually/i);
+    expect(plan).toMatch(/never[\s\S]*close the last task when doing so would violate an explicit hold/i);
     /* Heads give out tasks with create_task; he lays out turns, and only the skill every head shares names it. */
     expect(own).not.toContain('"create_task"');
     expect(carried).not.toContain('later version');
   });
 
-  it('gives each goal to one department whole and refers new asks to the shared sprint admission rule', () => {
-    expect(carried).toContain('one task for the one department that owns it end to end');
-    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('hh-lead-tasks');
-    expect(told).toContain('A turn is a sprint');
+  it('gives each goal to one department whole and carries the sprint admission method without a skill dependency', () => {
+    const plan = ability('orch-plan-turn');
+    expect(plan).toMatch(/one task for the one department that owns each goal end to end/i);
+    expect(plan).toMatch(/a turn is a sprint[\s\S]*without a rule of days or hours/i);
+    expect(plan).toMatch(/pass a small addition to its head immediately/i);
+    expect(plan).toMatch(/before the final gate starts[\s\S]*member holding the context[\s\S]*without a CEO-now instruction or an urgency flag/i);
+    expect(plan).toMatch(/reset a gate already running[\s\S]*next turn/i);
+    expect(plan).not.toContain('hh-lead-tasks');
     expect(carried).toMatch(/orchestrator[\s\S]*head immediately/);
     expect(carried).not.toMatch(/only when the CEO says (?:"now"|now)/);
     expect(carried).not.toContain('in the running turn it starts at once');
@@ -73,20 +125,31 @@ describe('orchestrator instructions', () => {
   });
 
   it('judges and fixes trouble himself from the database, and reads status instead of asking for it', () => {
-    for (const words of ['agent_changes', 'task_events', 'agent_events', 'Never ask the CEO to run SQL', 'head of Operations', "never outranks the CEO's goals", 'Do not ask heads for status']) {
-      expect(carried).toContain(words);
-    }
+    const trouble = ability('orch-trouble');
+    for (const words of ['agent_changes', 'task_events', 'agent_events', "never outranks the CEO's goals"]) expect(trouble).toContain(words);
+    expect(trouble).toMatch(/read status with turns and task rather than asking heads for status/i);
+    expect(trouble).toMatch(/never ask a person to type SQL or shell commands/i);
+    expect(trouble).toMatch(/responsible operations owner/i);
+    expect(trouble).toMatch(/repair a wrong row only after reading its current value and checking the narrow target/i);
+    expect(trouble).toMatch(/database repair is not permission to change people or protected access through SQL/i);
     /* Operations only reads the database, so no data fix goes there. */
     expect(carried).not.toContain('data fix you cannot make');
   });
 
   it('fixes trouble on the computer itself after asking the CEO for it, and never asks the CEO to type commands', () => {
-    for (const words of ['"ask_computer_access"', '"computer"', 'Never ask the CEO to type commands']) expect(carried).toContain(words);
+    expect(ability('orch-trouble')).toMatch(/protected computer tool and ask_computer_access authorization flow/i);
+    expect(ability('orch-trouble')).toMatch(/never ask a person to type SQL or shell commands/i);
+    expect(ability('orch-resources')).toMatch(/ask_computer_access[\s\S]*wait for its actual authorization/i);
+    expect(ability('orch-resources')).toMatch(/do not reuse another machine owner's access approval/i);
+    expect(ability('orch-resources')).toMatch(/never ask the CEO to type shell commands/i);
   });
 
-  it('switches off employees with no work in the turn and writes a note only when what it holds changes', () => {
-    expect(told).toMatch(/[Ss]witch off the employees that have no work in the turn/);
-    expect(told).toMatch(/only when something it holds changes/);
+  it('changes employee availability only when authorized and writes notes only when a fact changes', () => {
+    expect(ability('orch-staff')).toMatch(/disable or remove employees only when authorized/i);
+    expect(ability('orch-staff')).toMatch(/irreversible removal requires the relevant person's explicit decision/i);
+    expect(ability('orch-staff')).toMatch(/never[\s\S]*restart an employee in active work to apply text/i);
+    expect(carried).not.toMatch(/switch off the employees that have no work in the turn/i);
+    expect(ability('hh-notebook')).toMatch(/change it only when the fact changes/i);
   });
 });
 

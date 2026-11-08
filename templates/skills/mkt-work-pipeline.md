@@ -5,38 +5,15 @@ description: { en: "Where marketing checks item by item, in a batch, by sample a
 kind: procedure
 sources: []
 ---
-How work moves through marketing. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
+Use this ability to choose a verification plan for an assigned marketing output or channel. Inputs are its audience, account, content, language, approved approach, risk, channel policy and available check evidence. The task determines the assigned checkers and gates.
 
-## Item by item
+1. Describe the channel and output: whom it reaches, account, limits, permitted claims, approval scope and measures such as reach and complaints. Record missing policy rather than inventing it.
+2. Identify irreversible exposure. Public items require explicit human approval of each exact rendered item through the server outbound gateway. Campaign or approach approval never waives this. Sending credentials remain on the server.
+3. Plan deterministic checks for published prices, claims and links, consent, suppression, unsubscribe, per-account and per-domain limits, and valid page markup. Code checks need tests including rejected cases; a missing check remains an explicit gap requiring authorized human assessment.
+4. Group reversible internal drafts, campaign preparation or a site audit where shared evidence makes comparison useful. A batch is a way to inspect work, not approval to dispatch it.
+5. Apply channel policy: a new channel needs each piece checked in a fresh context by a provider independent of its author. Later sampling follows the authorized owner's rate; a failed sample or rising complaints stops channel dispatch pending a decision. Sampling never substitutes for public per-item approval.
+6. For model checks, require a versioned example set with known answers labeled independently, an owner-set threshold, separate false-accept and false-reject counts, and new examples from real misses. Revalidate when the check, prompt, lists or model changes. Keep company examples private. An unvalidated check, including subjective brand review without a valid set, proves no pass.
 
-- Everything public and every message to a list passes the outbound gate (mkt-publish-approval). What went out cannot be taken back, and risk adds up piece by piece.
-- While a channel is new, each piece is checked once, in a fresh context, on another provider than its author's.
-- The department owner approves each approach, meaning a template and a segment.
+For outbound review, use the company and product scoped private example set `model-check-set:outbound_review`; never copy its examples into a template or repository.
 
-## In a batch
-
-- Where the department owner has lifted piece by piece approval for a channel, the pieces of an approved campaign go out together (mkt-campaign-plan).
-- Search work looks over a whole site at a time (mkt-seo-audit).
-
-## By sample
-
-- Past a channel's start, check a sample under the owner's policy. A failed sample or a rise in complaints stops the channel.
-
-## By code
-
-- The rules of the outbound gate, where a piece reaches people directly: the price list, approved links and claims, do-not-contact flags and consent, unsubscribe, and daily limits per sending account and per domain.
-- Page markup goes through a validator (mkt-schema-markup).
-- Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
-
-## By a model
-
-- Reviewing a piece before it goes out is a model check with its set: `model-check-set:outbound_review`.
-- A link like this means the set of this department and product. The set itself is private to the company and goes into no template or repository.
-- Brand review (mkt-brand-voice) has no example set yet.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. An action that cannot be undone keeps its approval item by item, whatever a set shows.
-
-## Descriptions and measures
-
-- MKT-HEAD writes a short description of each channel on its first turn: who it reaches, from which account, its limits, its approach and the sample its owner set. Keep it in the department notebook; the product's own story stays in its marketing context (mkt-product-context).
-- Name the department's own measures, such as reach and complaints, in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
-- A new company has these rules from its start and writes its descriptions on its first turn.
+Return the checks, evidence, gaps and protected approvals needed for this output. This plan does not assign role duties, impose a turn cadence or grant publication rights.

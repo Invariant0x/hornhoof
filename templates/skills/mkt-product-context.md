@@ -5,16 +5,18 @@ description: { en: "Keeps one shared document on who the product is for, what it
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/product-marketing/SKILL.md]
 ---
-Every marketing text starts from one shared context document per product, kept where your company named. Everyone who writes reads it first; its owner keeps it current.
+Use this ability to maintain the approved factual context for an assigned product. Inputs are product documentation, owner decisions, permitted sales and support evidence, and the designated document location.
 
-It holds:
+Record:
 
-- **Product**: what it does in one sentence, and the three to five things it does best.
-- **Audience**: the main kinds of buyers and users, their job, their problem in their own words, what they use today.
-- **Positioning**: the category, the main alternative, and why we win against it, one line each.
-- **Proof**: the facts we may claim, each with its source: numbers, customer results, features that exist today. Nothing else may be claimed.
-- **Voice**: three words that describe it, words we use and words we never use, in every language the company uses.
-- **Markets**: where we sell, in which languages, which channels matter there.
-- **Off limits**: claims, comparisons and topics we avoid, and why.
+- **Product**: one sentence describing it and three to five supported strengths.
+- **Audience**: buyers and users, their work, their problem in their words and present alternatives.
+- **Positioning**: category, main alternative and evidenced differences.
+- **Proof**: claims the company may make, each with its source and date, including features available today and customer results approved for use.
+- **Voice**: defining words, preferred and banned expressions, and examples for each language in scope.
+- **Markets**: regions, languages and relevant channels.
+- **Off limits**: excluded claims, comparisons and topics, with reasons.
 
-Build it from what the company knows: product docs, the CEO's notes, sales call notes, real customer words. Where a fact is missing, write "unknown" and ask through the orchestrator. Review it each turn and after any product or price change, and date every update.
+Separate confirmed facts, owner decisions, hypotheses and unknowns. Date updates and identify what changed after a product, price or policy revision. Read only customer evidence the assignment permits and remove identifying details unnecessary to the document.
+
+Return or update the context in the assigned location, with sources and unresolved decisions. A draft addition is not an approved claim or price. Changes to commercial commitments need their authorized human decision, and public use requires the server publication gateway and exact approval of each public item.

@@ -5,6 +5,8 @@ description: { en: "Reads a change against its brief and the engineering rules a
 kind: procedure
 sources: [affaan-m/ECC agents/code-reviewer.md, obra/superpowers skills/requesting-code-review/code-reviewer.md, anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md, garrytan/gstack review/checklist.md]
 ---
+You can inspect a change against its brief and report confirmed defects.
+
 Read a change against its brief and find what will break. The check is the same for your own change and for someone else's. On your own change, read the diff cold: judge what the code does, not what you meant it to do.
 
 **What to read.** The brief first, then what the branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`, and the code around it. A narrower scope your task sets, such as a slice or a range of commits, replaces the branch.
@@ -16,13 +18,13 @@ Read a change against its brief and find what will break. The check is the same 
 3. **Silent failures.** Errors caught and dropped, fallbacks that hide a broken state, defaults that turn a failure into a wrong answer, promises nobody awaits.
 4. **Data.** Migrations safe for existing rows, transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
 5. **Obvious security problems.** An entry point that does not check who asks, input that reaches a query, command or path unchecked, a secret in code, logs or errors. Deeper checks of access, sign-in, secrets and permissions belong to a security review.
-6. **Tests.** Do they fail without the change, and does every bug or review fix start with a failing test (T6)? Do they test behaviour, not mocks?
-7. **The engineering rules and the rules of each language** (dev-engineering-rules, dev-language-rules). Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
-8. **The numbers.** `crapper` and `dryer` run at the testing gate, after review, so a review neither runs them nor asks the author for them. When the reviewed commit already has their results from the test engineer or QA's shared final check, read them against its scope; T11 says what blocks.
+6. **Tests.** Do the assigned checks reproduce the named harm? When the assignment requires a separate regression test, does it fail before the fix and pass after it? For a permitted visual check, inspect that evidence instead. Tests check behaviour, not mocks.
+7. **The repository and language rules.** Read the documented style, patterns, security and checks before judging the diff. Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
+8. **The numbers.** Read applicable existing `crapper` and `dryer` results when the task requires those measures; do not run them again or demand unassigned final metrics from an author. A CRAP score of 10 or higher in a new or more complex function blocks until resolved; record unchanged old complexity separately. A duplicate scoring 0.8 or higher needs removal or an explicit accepted reason. Read the assigned checker's actual receipts and scope; missing, refused or unsupported measurements are NOT_RUN, not a pass.
 9. **Simplicity.** Code that could be half as long and still clear.
 
-**Evidence.** Read what was proved on the reviewed commit instead of rerunning its tests (T10): a run on another commit proves nothing about what you review. T1, T6, T10 and T11 are in dev-testing-policy.
+**Evidence.** Read completed results for the reviewed commit instead of rerunning them. A different commit, a selector-only collection or an unavailable stage proves nothing about the reviewed candidate. Ask for additional tests only for a named harm, not a coverage percentage.
 
 **Each finding** has a place (file and line), what goes wrong and the harm to a person. Check it against the code before you report it: a wrong finding costs its reader a round.
 
-**What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. On someone else's change at a gate, give the verdict with dev-review-verdict.
+**What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. When assigned an independent gate, record a verdict pinned to the actual commit, with all confirmed blocking findings and nonblocking notes; never approve your own work.

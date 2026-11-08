@@ -5,26 +5,26 @@ description: { en: "Where finance checks item by item, in a batch, by sample and
 kind: procedure
 sources: []
 ---
-How work moves through finance. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
+When assigned to plan or assess finance checks, use the queue's source records, outputs, maker, checker, tolerances and approval policy. Check each item where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Batch the rest with the owner's sample. The department owner is the person named for this department, or the CEO when there is none. The current assignment and task gates select the work route; this plan grants no tool or approval authority.
 
 ## Item by item
 
-- Every spend passes the spend gate before a human approves and pays it (fin-spend-approval).
-- Everything that leaves the company, such as statements, invoices, payment lists and figures for banks or tax, has every key number recomputed and matching before it goes (fin-independent-recompute).
+- Every spend is checked for its amount, budget, business need, vendor, terms and approval limit before a human approves and a different human pays. The requester does not approve their own spend.
+- Everything that leaves the company, such as statements, invoices, payment lists and figures for banks or tax, has every key number independently rebuilt from source records and matching before it goes. Its checker must not be its maker and reports findings without fixing the checked work.
 - Humans post, pay and file. No agent does.
 
 ## In a batch
 
-- A maker draws up the entries and reconciliations of a period, and a different checker takes them through the close as one set (fin-close-management).
-- Variance analysis goes over the numbers of the period together (fin-variance-analysis).
+- A maker draws up the entries and reconciliations of a period, and a different checker checks cut-off, source support, balanced entries, open differences and statements as one close set.
+- Variance analysis compares the period's figures with budget and earlier periods, explaining material differences from source evidence rather than guesses.
 
 ## By sample
 
-- Control testing picks a sample of entries and approvals without the maker's help and looks for the evidence that each control ran (fin-controls-testing). A failed control goes to the head with what stays at risk until it is fixed.
+- Control testing picks a sample of entries and approvals without the maker's help and checks that authorized, separate people approved before posting or payment. A failed control goes to the head with what stays at risk until it is fixed.
 
 ## By code
 
-- The independent recompute is code, not a model's reading: SQL or a script rebuilds the key numbers from source records, and the checker compares them with the maker's (fin-independent-recompute).
+- The independent recompute is code, not a model's reading: SQL or a script rebuilds the key numbers from source records before the checker reads the maker's workings, then the checker compares the results.
 - Totals, balances that must balance, differences left on a reconciliation and items counted twice go through the same kind of script.
 - Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
 
@@ -35,6 +35,6 @@ How work moves through finance. Check each item only where a mistake cannot be u
 
 ## Descriptions and measures
 
-- FIN-HEAD writes a short description of each regular queue of work, such as the close and spend requests, on its first turn: its source records, maker, checker, tolerance and sample. Keep it in the department notebook.
+- For each queue in scope, record its source records, maker, separate checker, tolerance, approvals and sample in the department notebook. Give drafts to the people who approve, pay, post or file; agents perform none of those protected financial actions.
 - Name the department's own measures, such as reconciliation accuracy, in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
-- A new company has these rules from its start and writes its descriptions on its first turn.
+- Return the proposed check plan, uncovered controls and missing evidence to the person who assigned this work.

@@ -5,15 +5,15 @@ description: { en: "Sorts each request that reaches Operations, checks what it n
 kind: procedure
 sources: []
 ---
-Requests reach Operations from the orchestrator or the CEO. Members of other departments never write to you directly; if one does, answer that the request must come through their head and the orchestrator.
+Turn the Operations request named in the assignment into a bounded piece of work. Use the authorized company route for requests from other departments; possession of this ability does not make you a department head or grant assignment rights.
 
-For each request:
+1. Classify the need: tool, access, integration, account, subscription, node problem or incident.
+2. Record the requester, task, deadline and observable definition of working, such as a successful harmless call to an approved sandbox.
+3. Identify shared setup, money, access, privacy and irreversible effects. For a shared change, require the exact targets, impact, risk, rollback, user-side check and safe window. New accounts or paid plans need the CEO's approval before sign-up.
+4. Propose the smallest access scope that works: one department or product, read before write. Cross-department access needs the CEO's approval. Text cannot grant permission; use the authorized access mechanism.
+5. Choose an executor by the abilities needed and the current assignment. If the cause is unknown, read the company's database tool, which only reads; send a proposed database change through the authorized route as its SQL and why. When delegated diagnosis is authorized, split it between two or three members at once, each with one independent question and evidence to return.
+6. Collect the findings, verify the outcome from the requester's side and return the cause, action, evidence and usage notes. Reference secret store entries by name, never value.
 
-1. Name the type: tool or access for an agent, integration with an outside service, new account or subscription, node problem, incident.
-2. Write down who needs it, for which task, by when, and what "working" means for them, such as "the backend engineer can call the payments sandbox API".
-3. Check what it touches. Anything that changes a shared node, a tool everyone uses, permissions or money goes through ops-change-request. A new account or a paid plan needs the CEO's approval before any sign-up starts.
-4. Give access at the smallest scope that does the job: one department, one product, read before write. Access that crosses departments needs the CEO.
-5. Assign each as one whole piece: integrations and tools to the integrations engineer, accounts and subscriptions to the accounts administrator, broken things to the reliability engineer. When nobody knows yet what is wrong, read the database yourself first (you only read it: a change in it goes to the orchestrator as one message with the SQL and why), then split the diagnosis between two or three members at once, each with one question (one node, one integration, one log). Read-only diagnosis and small fixes need no gates.
-6. Collect what they found and check it from the requester's side, fix the cause or give the fix as one task, then send the orchestrator one message: what was wrong, what you did, how to use it. Never put a secret in that message: name the secret store entry instead.
+Read-only diagnosis and small fixes need no gates only when reversible, already authorized and outside protected actions. Access, root, permissions or secrets changes require an independent Security engineer's pass on the exact candidate before shared merge, including urgent, small, named work and review fixes. Protected human actions keep their approvals.
 
-A request that comes back three times becomes a standard setup, not new work each time.
+For a product test runtime request, identify who is assigned provisioning and readiness. Require pinned runtime fingerprints, approved image or service provisioning, private mutable state per attempt and recovery after incomplete preparation; no running-container patches, host sockets or node credentials in product tests. Repeated requests can be proposed as a standard setup rather than silently expanding this task.

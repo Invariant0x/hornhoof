@@ -5,23 +5,19 @@ description: { en: "Checks that an interface has its own character and does not 
 kind: checklist
 sources: []
 ---
-Interfaces made by AI drift towards the same stock look. Check each screen and give a verdict: distinct, borderline or generic.
+Assess the assigned interface against its approved direction and user task. Return a verdict of distinct, borderline or generic, supported by screenshots.
 
-Signs of a generic interface (count them):
+Count these signs:
 
-- [ ] A centred hero with a big headline, a gradient background and two buttons.
-- [ ] Three or four identical cards in a row, each with an icon, a title and two lines.
-- [ ] Purple or blue gradients, glass effects or glows the brand gives no reason for.
-- [ ] Emoji used as icons, or icons that decorate instead of inform.
-- [ ] Shadows and rounded corners on every box, so nothing stands out.
-- [ ] Filler words: "Unlock the power of", "Seamless", "Revolutionize", or their twins in another language.
-- [ ] Every section with the same height and rhythm, top to bottom.
-- [ ] Nothing a user would remember after closing the page.
+- [ ] A centred hero with a large headline, gradient and two buttons without a task-based reason.
+- [ ] Repeated identical icon, title and two-line cards.
+- [ ] Gradients, glass effects or glows unsupported by the brand.
+- [ ] Emoji as icons or icons that only decorate.
+- [ ] Shadows and rounded corners on every box, weakening hierarchy.
+- [ ] Filler claims such as "Unlock the power of", "Seamless" or "Revolutionize", including translated equivalents.
+- [ ] The same section height and rhythm throughout.
+- [ ] Nothing memorable about the product's own content or interaction.
 
-Then check what should be there:
+Also check that the approved direction is visible, at least one element is specific to the product, and density, type and colour follow the user's task. Three or more signs, or no element of the product's own, is a fail under this check. Give the reason and suggested correction for each finding; do not treat the score as permission to bypass the design system or accessibility.
 
-- [ ] The direction your head approved for this product is visible on the screen.
-- [ ] At least one element belongs to this product alone: its data, its words, its way of showing things.
-- [ ] Density, type and colour follow from the users' task, not from a template.
-
-Three or more signs, or no element of the product's own, is a fail. Report each sign with a screenshot and what to change; do not redesign it yourself.
+For a task-assigned independent review, the checker is not the author and does not redesign the item under review. Deliver the findings through the task's route.

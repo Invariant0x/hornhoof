@@ -5,6 +5,8 @@ description: { en: "Turns an approved design into tasks an engineer who knows no
 kind: procedure
 sources: [obra/superpowers skills/brainstorming/SKILL.md, obra/superpowers skills/writing-plans/SKILL.md, anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md]
 ---
+You can describe a new or dependent implementation as checkable steps.
+
 Before a plan, make sure the goal is understood: what it is for, who uses it, what is out of scope, what would make it a failure even if it works. Ask whoever gave you the task when that is unclear.
 
 A plan says what the implementer cannot decide alone:

@@ -596,6 +596,13 @@
       "when": 1794068211613,
       "tag": "0085_work_fast_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794082067594,
+      "tag": "0086_composable_skills",
+      "breakpoints": true
     }
   ]
 }

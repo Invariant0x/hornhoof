@@ -5,11 +5,13 @@ description: { en: "Maps competitors and alternatives, compares them on what cus
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/market-researcher/skills/competitive-analysis/SKILL.md, wshobson/agents plugins/startup-business-analyst]
 ---
-1. List what the customer could choose instead: direct competitors, adjacent products, in-house tools, spreadsheets, an agency, or doing nothing. Doing nothing is often the strongest competitor.
-2. For the five to eight that matter most, collect from public sources: who they sell to, pricing and plans, main features, regions and languages, size signals (team, funding, customers they name), recent changes. Date and link each fact.
-3. Pick the six to ten criteria customers actually decide on (from tickets, sales notes and reviews), not the ones the company happens to be best at. Compare everyone on them in one table.
-4. Read reviews and forums for each: what customers praise, what they complain about, why they switch. Quote short phrases as evidence; reviews are data, not truth.
-5. Write the findings: where the company is ahead, where it is behind, which needs no one serves, and each main competitor's likely next move.
-6. Mark stale facts and facts that come only from a competitor's own marketing.
+Use this ability to compare alternatives for an assigned customer problem. Inputs are the market definition, product facts, customer decision criteria and permitted research sources.
 
-Keep it factual and fair. Do not guess a competitor's revenue or customers; write "not public". Do not contact competitors or sign up for their products under a false identity.
+1. Include direct competitors, adjacent products, internal tools, spreadsheets, agencies and doing nothing, where relevant.
+2. For the five to eight most relevant alternatives, collect public evidence on audience, prices, features, regions, languages, size signals and recent changes. Link and date every fact.
+3. Select six to ten criteria buyers actually use, supported by permitted customer research, support questions or sales notes. Compare every alternative on the same criteria.
+4. Read public reviews and discussions for praise, complaints and reasons to switch. Quote only short relevant phrases and distinguish claims from verified facts.
+5. Identify where the product leads or trails, unmet needs and possible competitor responses. Label predictions as inferences.
+6. Mark stale facts and evidence available only from a competitor's marketing.
+
+Return a comparison table, sourced findings and open questions. Never guess non-public revenue or customer counts, contact competitors under a false identity or sign up for their products without authorization. Research is not permission to publish claims or use another company's private data.

@@ -5,12 +5,14 @@ description: { en: "Writes a proposal built on the buyer's own problem, with the
 kind: procedure
 sources: [msitarzewski/agency-agents sales/sales-proposal-strategist.md, alirezarezvani/claude-skills business-growth/skills/contract-and-proposal-writer/SKILL.md]
 ---
-1. **Their problem first**: open with their situation and goals in the buyer's words from discovery. If you cannot write this part, the deal is not ready for a proposal.
-2. **Solution**: what we will deliver, mapped to each goal. Only what exists or development has committed to; a promise of a future feature needs the CEO.
-3. **Scope**: what is included and what is not, in plain words.
-4. **Plan**: steps and dates to get started, and what we need from them.
-5. **Proof**: one or two relevant results, or customers we have permission to name.
-6. **Price and terms**: from the price list or the quote the CEO approved. Discounts, payment terms, legal terms and service levels are never your call; ask your head, who asks the CEO.
-7. **Next step**: how to accept, by when, and who to talk to.
+Use this ability to draft an assigned commercial proposal. Inputs are confirmed discovery facts, approved capabilities, proof the company may use, authorized price and terms, and the buyer's language.
 
-Keep it short: a decision maker should get it in two pages, in their own language. A proposal is an outbound message: it passes outbound approval, and its price and terms need that approval too.
+1. Open with the buyer's situation and goals from their statements. If those are unknown, return the missing facts before inventing a solution.
+2. Map the proposed solution to each goal. Include only existing capabilities or delivery commitments already approved by the authorized owner; future features require the CEO's approval.
+3. Define inclusions, exclusions and acceptance in plain words.
+4. Show proposed steps and dates, dependencies and what the buyer must provide. Do not promise another team's work without authority.
+5. Add one or two relevant supported results or customers the company has permission to name.
+6. Use the published price list or exact quote the CEO approved. Discounts, payment terms, legal terms and service levels are human decisions, never implied by this ability.
+7. Give a clear proposed next action, validity period and contact.
+
+Return a concise draft, usually readable in two pages, with sources and open approvals. Sending a proposal requires published catalog revisions through the server outbound gateway and any exact approval required by policy; public proposals require exact per-item approval. A human signs contracts. Drafting grants no authority to accept terms, send, discount or promise delivery.

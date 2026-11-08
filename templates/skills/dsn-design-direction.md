@@ -5,13 +5,13 @@ description: { en: "Sets a clear, deliberate character for a product's screens i
 kind: procedure
 sources: [anthropics/skills skills/frontend-design/SKILL.md]
 ---
-Before you draw a product's screens, decide what it should feel like and write it down.
+Define the visual character for the product or flow named in the assignment, within the approved design system.
 
-1. Read the product's brief, its users and the design system document. The system sets the parts; the direction decides how this product uses them.
-2. Name the character in three or four words that can be checked, such as "calm, dense, precise" or "warm, spacious, guided". Avoid empty words like "modern" or "clean".
-3. Decide the few choices that carry it: how dense the layout is, how strong the type contrast is, where colour appears and where it does not, how much motion, what imagery if any.
-4. Pick one element people will remember: a distinctive header, a way of showing data, a signature empty state. Generic interfaces have none.
-5. Avoid the stock look of generated interfaces; use one of its signs only if you can say why this product needs it.
-6. Show the direction on one key screen before you design the rest, and ask your head to approve it.
+1. Read the brief, users and current system document. The system defines the parts; direction explains their use for this product.
+2. Name three or four observable qualities, such as "calm, dense, precise" or "warm, spacious, guided". Avoid labels that cannot guide a decision.
+3. Specify layout density, type contrast, use of colour, motion and imagery, with reasons tied to the user's task.
+4. Choose one memorable element grounded in the product, such as its data presentation or empty state.
+5. Identify stock interface conventions and retain them only when their function is justified.
+6. Show the direction on a key screen with realistic text, a narrow and a wide layout and important states. Record what carries the character across themes and supported languages.
 
-When the direction needs something the system lacks, ask your head for a system change; never build a private variant.
+Return the rationale and sample screen for the decision named in the task. A system gap becomes a proposed change for the system owner, never a private component, token or exception adopted without authorization. Any approval or further review follows the task's gates.

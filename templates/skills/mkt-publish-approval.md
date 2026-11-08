@@ -5,9 +5,12 @@ description: { en: "Routes public posts, pages and announcements through the ser
 kind: gate
 sources: [affaan-m/ECC skills/operator-approval-loop/SKILL.md]
 ---
-Every public post, announcement, newsletter or external page from Marketing goes through the server outbound gateway (`"outbound_submit"` and `"outbound_status"`). Publishing account credentials stay on the server and are never exposed to agents.
+Use this ability to validate or carry out an assigned public publication: a post, announcement, newsletter or external page. Every such item goes through the server outbound gateway ("outbound_submit" and "outbound_status"). Publishing credentials stay on the server and are never exposed to agents.
 
-1. **Build from published catalog sources**: select the registered public audience, language and published template, claim, price, terms and `https:` link revisions. Two languages are two separate submissions; never substitute another language silently.
-2. **Server verification and independent checks**: the server renders the exact bytes, blocks unapproved claims, prices, secrets or personal data, enforces channel limits, and runs certified independent-vendor model checks in a fresh context.
-3. **Per-item approval**: public publication is irreversible, so every public item requires explicit per-item approval of its exact rendered content from the department owner (or the CEO / CEO delegate when no department owner is set). Approach-level rules never waive per-item approval for public posts.
-4. **Publish and track safely**: once approved, the server dispatches the frozen bytes without modification. Any wording or source change creates a new revision that needs a new approval. If `"outbound_status"` reports `unknown`, do not republish until the destination is checked. If a live post contains an error, notify the department owner or the CEO immediately with a proposed correction; never delete or overwrite public records without approval.
+1. **Published sources**: select the registered audience, language and published template, claim, price, terms and `https:` link revisions. Each language is a separate submission; never substitute another language silently.
+2. **Server checks**: the server renders the exact bytes, rejects unapproved claims, prices, secrets or personal data, and enforces consent, suppression, unsubscribe and applicable account or domain limits. Required independent-vendor model checks run in a fresh context with valid certification; unavailable checks do not count as a pass.
+3. **Exact human approval**: every public item requires explicit approval of its exact rendered content from the department owner, or the CEO / CEO delegate when no owner is set. Campaign, approach or batch approval never waives per-item approval. Silence is not approval.
+4. **Frozen revision**: dispatch only the approved bytes through the server and within the assignment's authority. Any wording or source change creates a new revision requiring a new approval.
+5. **Delivery and correction**: read delivery state. An `unknown` result requires destination verification before retrying. Notify the authorized owner promptly of a live error with a proposed correction; never delete or overwrite public records without approval.
+
+Return the submission revision, check outcomes, exact approval reference and delivery state. This ability does not grant account access or authorize publication outside the assignment.

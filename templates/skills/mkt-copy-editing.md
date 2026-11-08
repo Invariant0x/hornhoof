@@ -5,17 +5,16 @@ description: { en: "Tightens a draft and removes vague, padded and machine-sound
 kind: checklist
 sources: [coreyhaines31/marketingskills, wshobson/agents plugins/avoid-ai-writing/skills/avoid-ai-writing/SKILL.md]
 ---
-Edit every draft before it leaves you, your own or another writer's.
+Use this ability to edit an assigned draft while preserving its intended meaning. Inputs are the brief, audience, channel, language, approved facts, glossary and house style.
 
-- [ ] **Clarity**: each sentence says one thing. A reader gets the point from the headline and the first paragraph alone.
-- [ ] **Cut**: remove words that do not change the meaning: "very", "really", "in order to", "it is important to note".
-- [ ] **Specific**: replace vague praise ("powerful", "seamless", "cutting-edge", "best-in-class") with what the product actually does.
-- [ ] **Machine tells**: remove "In today's fast-paced world", "Unlock", "Elevate", "Delve", "Whether you're X or Y", "It's not just X, it's Y", strings of three adjectives, and paragraphs that all end on a neat summary line.
-- [ ] **Rhythm**: short and long sentences mixed; no run of paragraphs with the same shape.
-- [ ] **Voice**: matches the product marketing context; each term used the same way throughout.
-- [ ] **Facts**: every number and claim has a source; links open and go where they say.
-- [ ] **Mechanics**: spelling, grammar, names of products and people, dates and prices in the format of the language.
-- [ ] **House style**: the company's own style rules are followed, such as punctuation or spellings it bans.
-- [ ] **Read aloud**: anything you stumble over gets rewritten.
+- **Clarity**: each sentence has a clear point; the headline and opening convey the main message.
+- **Cuts**: remove words that do not change meaning, such as "very", "really" or "in order to".
+- **Specificity**: replace vague praise with supported behavior or evidence. Do not invent proof to improve a sentence.
+- **Stock wording**: remove canned openings, exaggerated promises, repetitive lists of adjectives and paragraphs that always end in a tidy slogan.
+- **Rhythm**: vary sentence and paragraph lengths where it helps reading.
+- **Voice and terms**: match the approved voice and use product names consistently.
+- **Facts**: trace numbers and claims to their sources; check that permitted links open at the intended destination.
+- **Mechanics**: check grammar, spelling, names, dates, prices and language-specific formats against the brief and house style.
+- **Read aloud**: rewrite anything whose wording obstructs the meaning.
 
-Return the edited text and a short list of the changes that touched meaning, so the author can object.
+Return the edited draft and a short list of changes that affect meaning, so the assignment owner can assess them. Editing does not approve new commercial terms or publication. Public use requires the server gateway and exact approval for the edited revision, even if an earlier revision was approved.

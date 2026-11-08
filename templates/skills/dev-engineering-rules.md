@@ -5,6 +5,8 @@ description: { en: "Uncle Bob's ub-mode word for word: first make it work, then 
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md]
 ---
+You can apply a disciplined engineering method to an assigned software change. The task determines its authorized scope and check; a permitted visual check without a separate test stays valid, and required permissions and independent approvals remain in force.
+
 Every time you are asked to make a change follow:
 * First Make it Work.
 * Then Make it Right.

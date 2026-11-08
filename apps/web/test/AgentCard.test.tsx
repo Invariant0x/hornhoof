@@ -18,6 +18,17 @@ function open(routes: Record<string, unknown> = {}, me: Me = ME) {
 
 const patched = (body: unknown): [number, AgentCardView] => [200, { ...CARD, ...(body as Partial<AgentCardView>) }];
 
+const ROLE_IDENTITY = 'You are the backend engineer of the Development department.';
+const assignmentCard = (assignment = '', skill = 'Write the test first.') => {
+  const parts = [
+    ...CARD.parts.filter(p => p.kind === 'header'),
+    ...CARD.parts.filter(p => p.kind === 'base').map(p => ({ ...p, text: ROLE_IDENTITY })),
+    { kind: 'assignment' as const, id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: `<!-- hh:assignment -->\n## Assignment\n\n${assignment}\n<!-- /hh:assignment -->`, overridden: true, templateChanged: false },
+    ...CARD.parts.filter(p => p.kind === 'skill').map(p => p.id === 'dev-tdd' ? { ...p, text: p.text.replace('Write the test first.', skill) } : p),
+  ];
+  return { ...CARD, parts, raw: parts.map(p => p.text).join('\n\n') };
+};
+
 describe('AgentCard', () => {
   it('says the orchestrator made a change, and what it was', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [{ field: 'switch', personName: null, byOrchestrator: true, at: '2026-10-30T09:00:00.000Z' }] }] });
@@ -206,7 +217,8 @@ describe('AgentCard', () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, CARD] });
     expect(await screen.findByRole('textbox', { name: 'Test first' })).toHaveValue('Write the test first.');
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the API.');
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveAttribute('readonly');
     await user.click(screen.getByRole('button', { name: 'Raw' }));
     const raw = screen.getByRole('textbox', { name: 'Raw' });
     expect(raw).toHaveValue(CARD.raw);
@@ -222,13 +234,13 @@ describe('AgentCard', () => {
     open({ 'PATCH /api/agents/b1': () => new Promise(resolve => (answer = () => resolve([200, saved]))) });
     fireEvent.change(await screen.findByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Backend engineer' }), { target: { value: 'You build the billing API.' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Assignment' }), { target: { value: 'You build the billing API.' } });
     await act(async () => {
       answer();
       await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('textbox', { name: 'Test first' })).toHaveValue('Write it first.');
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the billing API.');
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 
@@ -257,7 +269,7 @@ describe('AgentCard', () => {
     await user.click(await screen.findByRole('button', { name: 'Raw' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: CARD.raw.replace('<!-- /hh:skill -->', '') } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(screen.getByText(/Keep the first part and the skill markers as they are/)).toBeInTheDocument();
+    expect(screen.getByText(/Keep the identity, headings and assignment and skill markers as they are/)).toBeInTheDocument();
     expect(calls.some(c => c.method === 'PATCH')).toBe(false);
   });
 
@@ -434,7 +446,7 @@ describe('AgentCard', () => {
     const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
     expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
-    expect(screen.getByText('Reset Bruno to the template? Its own prompt, skill changes and effort choice are lost.')).toBeInTheDocument();
+    expect(screen.getByText('Reset Bruno to the template? Skill changes and effort choice are lost. Its assignment is kept.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
     expect(await screen.findByText(/Reset to the template: Ivan/)).toBeInTheDocument();
@@ -472,7 +484,7 @@ describe('AgentCard', () => {
     const billing = CARD.raw.replace('You build the API.', 'You build the billing API.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: billing } });
     await user.click(screen.getByRole('button', { name: 'By skill' }));
-    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the billing API.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
     await user.click(screen.getByRole('button', { name: 'Raw' }));
     expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(billing.replace('Write the test first.', 'Write it first.'));
@@ -498,5 +510,138 @@ describe('AgentCard', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sub-unit' }), '');
     await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')[1]?.body).toEqual({ team: null }));
     expect(screen.getByRole('combobox', { name: 'Sub-unit' })).toHaveValue('');
+  });
+});
+
+describe('AgentCard assignment', () => {
+  it.each([
+    ['en', 'Assignment', 'Skills', 'Prompt', 'Backend engineer'],
+    ['ru', 'Назначение', 'Навыки', 'Промпт', 'Бэкенд-разработчик'],
+  ])('separates the exact saved assignment from skills and immutable role identity in %s', async (language, title, skillsTitle, promptTitle, roleTitle) => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const assignment = '\nMaintain the billing API.  \n\nKeep customer data safe.\n';
+    open({ 'GET /api/agents/b1': [200, assignmentCard(assignment)] });
+
+    const section = await screen.findByRole('region', { name: title });
+    expect(within(section).getByRole('textbox', { name: title })).toHaveValue(assignment);
+    expect(within(section).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('textbox', { name: title })).toHaveLength(1);
+    const skills = screen.getByRole('region', { name: skillsTitle });
+    const instructions = screen.getByRole('region', { name: promptTitle });
+    expect(skills.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(section.compareDocumentPosition(instructions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(within(instructions).queryByRole('textbox', { name: title })).not.toBeInTheDocument();
+    expect(within(instructions).getByRole('textbox', { name: roleTitle })).toHaveValue(ROLE_IDENTITY);
+    expect(within(instructions).getByRole('textbox', { name: roleTitle })).toHaveAttribute('readonly');
+  });
+
+  it('saves assignment text through the existing base field without editing role identity or skills', async () => {
+    const user = userEvent.setup();
+    const before = 'Maintain the API.';
+    const after = '\nMaintain billing and refunds.  \n\nKeep the audit history.\n';
+    const { calls } = open({
+      'GET /api/agents/b1': [200, assignmentCard(before)],
+      'PATCH /api/agents/b1': [200, assignmentCard(after)],
+    });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Assignment' }), { target: { value: after } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: after }));
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue(after);
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue(ROLE_IDENTITY);
+    expect(screen.getByRole('textbox', { name: 'Test first' })).toHaveValue('Write the test first.');
+  });
+
+  it('round-trips assignment and skill edits through raw text without merging the role into the assignment', async () => {
+    const user = userEvent.setup();
+    const assignment = 'Maintain the API.';
+    const changed = '\nMaintain billing.  \n\nKeep payment retries safe.\n';
+    const card = assignmentCard(assignment);
+    const { calls } = open({
+      'GET /api/agents/b1': [200, card],
+      'PATCH /api/agents/b1': [200, assignmentCard(changed, 'Write a failing check first.')],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Raw' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: card.raw.replace(assignment, changed) } });
+    await user.click(screen.getByRole('button', { name: 'By skill' }));
+
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue(changed);
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue(ROLE_IDENTITY);
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveAttribute('readonly');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test first' }), { target: { value: 'Write a failing check first.' } });
+    await user.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(card.raw.replace(assignment, changed).replace('Write the test first.', 'Write a failing check first.'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: changed, skillText: { 'dev-tdd': 'Write a failing check first.' } }));
+  });
+
+  it.each([
+    ['role identity', (raw: string) => raw.replace(ROLE_IDENTITY, 'You are the head of another department.')],
+    ['assignment marker', (raw: string) => raw.replace('<!-- /hh:assignment -->', '')],
+    ['assignment heading', (raw: string) => raw.replace('## Assignment', '## Different role')],
+  ])('refuses a raw edit of the %s and keeps it available to correct', async (_part, edit) => {
+    const user = userEvent.setup();
+    const card = assignmentCard('Maintain the billing API.');
+    const { calls } = open({ 'GET /api/agents/b1': [200, card] });
+    await user.click(await screen.findByRole('button', { name: 'Raw' }));
+    const changed = edit(card.raw);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: changed } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(changed);
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+  });
+
+  it('updates the raw assignment body from its separate editor without changing an edited skill', async () => {
+    const user = userEvent.setup();
+    const card = assignmentCard('Maintain the API.');
+    const { calls } = open({
+      'GET /api/agents/b1': [200, card],
+      'PATCH /api/agents/b1': [200, assignmentCard('Maintain billing.', 'Keep the failing case.')],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Raw' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: card.raw.replace('Write the test first.', 'Keep the failing case.') } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Assignment' }), { target: { value: 'Maintain billing.' } });
+
+    expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(card.raw.replace('Maintain the API.', 'Maintain billing.').replace('Write the test first.', 'Keep the failing case.'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: 'Maintain billing.', skillText: { 'dev-tdd': 'Keep the failing case.' } }));
+  });
+
+  it.each(['worker', 'orchestrator'] as const)('can save an empty %s assignment without a role identity part', async kind => {
+    const user = userEvent.setup();
+    const source = assignmentCard();
+    const parts = source.parts.filter(p => p.kind !== 'base');
+    const card = { ...source, kind, role: null, parts, raw: parts.map(p => p.text).join('\n\n') };
+    const { calls } = open({ 'GET /api/agents/b1': [200, card], 'PATCH /api/agents/b1': [200, card] });
+    const assignment = await screen.findByRole('textbox', { name: 'Assignment' });
+    expect(assignment).toHaveValue('');
+    fireEvent.change(assignment, { target: { value: 'Maintain service readiness.' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: 'Maintain service readiness.' }));
+  });
+
+  it('keeps the saved assignment on reset and says that it is kept', async () => {
+    const user = userEvent.setup();
+    const assignment = 'Maintain billing without changing prices.';
+    const card = assignmentCard(assignment);
+    const { calls } = open({ 'GET /api/agents/b1': [200, card], 'POST /api/agents/b1/reset': [200, card] });
+    await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
+    expect(screen.getByText(/assignment is kept/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
+
+    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue(assignment);
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue(ROLE_IDENTITY);
+  });
+
+  it('shows the assignment read-only to a person who cannot change the card', async () => {
+    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
+    open({ 'GET /api/agents/b1': [200, { ...assignmentCard('Maintain billing.'), canEdit: false }] }, listed);
+    expect(await screen.findByRole('textbox', { name: 'Assignment' })).toHaveValue('Maintain billing.');
+    expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveAttribute('readonly');
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 });

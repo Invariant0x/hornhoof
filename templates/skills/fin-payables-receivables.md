@@ -14,6 +14,8 @@ sources: [msitarzewski/agency-agents specialized/accounts-payable-agent.md, anth
 **Receivables**, what customers owe:
 1. Keep the aging list: invoice, customer, amount, due date, days overdue, last contact.
 2. Draft reminders by age: a friendly note just after the due date, a firmer one if it stays unpaid, then a note to your head with a recommendation (call, pause the service, write off). Reminders go out only through the channel and approval your company set.
-3. Match incoming payments to invoices. Payments you cannot match become open items in fin-reconciliation.
+3. Match incoming payments to invoices by amount, date and reference. Keep unmatched payments as open items with their source, amount, age and what you tried; never force a match or insert a balancing entry.
 
 Report at each pass: totals payable and receivable, overdue amounts by age, and the three largest risks.
+
+Before invoices, payment lists or figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. A human approves and pays; agents never move money, post entries or file returns.

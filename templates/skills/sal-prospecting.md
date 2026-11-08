@@ -5,11 +5,12 @@ description: { en: "Finds companies and people that fit the ideal customer profi
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/prospecting/SKILL.md, anthropics/knowledge-work-plugins]
 ---
-1. **Profile**: work from the ideal customer profile your head gives you: industry, size, region and language, the problem we solve, the signs a company has it, and who buys. If there is none, propose one from won deals and ask your head to approve it.
-2. **Sources**: company websites, job posts, directories, public profiles, news, and the company's own inbound leads. Use only sources the company allows and data that is public or was given to us. Do not scrape sites whose terms forbid it.
-3. **Score each lead**: fit with the profile (strong, partial, none), a reason to act now (a new hire, funding, a launch, a complaint about a competitor), and a named person in the right role.
-4. **Inbound leads**: triage within the time your head set: fit, who should own it, the suggested next step. Hand hot ones to your head at once.
-5. **Record** each lead in the CRM with its source, date, score and reason. Check for duplicates and a do-not-contact flag first.
-6. **Hand over** a short list, best first, with one sentence each on why now.
+Use this ability to identify and qualify prospects for an assigned customer profile. Inputs are the approved market, product fit criteria, permitted sources, inbound response targets and CRM scope.
 
-Never buy lists, never guess email addresses from patterns without your head's approval.
+1. Define industry, size, region, language, problem, observable fit signals and buying roles. If no approved profile exists, propose one from evidenced successful customers and mark it pending.
+2. Use allowed public company sites, directories, job posts, professional profiles, news and company-provided inbound leads. Respect source terms; do not scrape where prohibited.
+3. Score each lead consistently for fit, current reason to act and a relevant work contact. Support each score with evidence, distinguishing strong, partial and absent fit.
+4. Classify assigned inbound leads against the agreed response target and flag urgent opportunities with their evidence.
+5. Before any authorized CRM entry, check duplicates, consent and do-not-contact restrictions. Record source, date, fit and reason; edit only within assigned authority.
+
+Return a prioritized list with one sentence per lead explaining why it fits now and what remains unknown. Never buy contact lists or infer email addresses from patterns without explicit authorized approval. Prospecting does not authorize sending: any outreach needs the server outbound gateway, published sources and applicable exact approval.

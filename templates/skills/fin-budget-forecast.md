@@ -19,3 +19,5 @@ sources: [msitarzewski/agency-agents finance/finance-fpa-analyst.md]
 4. Show cash at the end of each month and the month cash would run out at the current pace.
 
 Keep every version with its date. Write assumptions as numbers with sources ("3 hires in Q2, per the development plan"), not as hopes.
+
+Keep the source records and calculations with the draft. Before figures leave the company, a checker who did not make them must rebuild the key numbers from source data with SQL or a script and confirm they match. Humans approve commitments, post entries, make payments and file returns; a budget or forecast author does none of these.

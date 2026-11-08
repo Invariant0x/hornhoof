@@ -5,6 +5,8 @@ description: { en: "Maps what a feature must protect, where outside input comes 
 kind: procedure
 sources: [openai/skills skills/.curated/security-threat-model/SKILL.md, wshobson/agents plugins/security-scanning/skills/stride-analysis-patterns/SKILL.md, wshobson/agents plugins/security-scanning/skills/attack-tree-construction/SKILL.md]
 ---
+You can model the trust boundaries and likely attacks of a proposed software change.
+
 For a new feature or a plan that takes in data from outside, or that lets one side act for another:
 
 1. **Draw the parts**: who and what talks to whom, where data is stored, and where data from outside comes into the product (the internet, a customer's text, an agent's output, another company).

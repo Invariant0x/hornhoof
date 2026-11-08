@@ -5,14 +5,16 @@ description: { en: "Checks that logos, colours, type and tone match the company'
 kind: checklist
 sources: [msitarzewski/agency-agents design/design-brand-guardian.md, anthropics/skills skills/brand-guidelines/SKILL.md]
 ---
-Run this on screens, emails, documents and images that carry the company's brand.
+Review the assigned screens, emails, documents or images against the approved brand rules. Read those rules and confirm their version before judging.
 
-- [ ] The logo is the approved file, at a size and with the clear space the brand rules allow; never stretched, recoloured or redrawn.
-- [ ] Colours come from the brand palette through the system's tokens.
-- [ ] Fonts are the brand fonts with the right fallbacks; no stray system font in headings.
-- [ ] Images and illustrations follow one style; no mix of stock photos and drawings without a rule for it.
-- [ ] The product name and key terms are written exactly as the brand rules say, in every language.
-- [ ] The tone matches the brand voice, with none of the claims or jokes the voice rules exclude.
-- [ ] Nothing uses another company's logo, font or images without a licence the company holds.
+- [ ] The logo is the approved file, at an allowed size and clear space, without stretching, recolouring or redrawing.
+- [ ] Colours come from the brand palette through approved system tokens.
+- [ ] Fonts and fallbacks match the brand, including headings.
+- [ ] Images and illustrations follow the approved style; mixed styles have an explicit rule.
+- [ ] Product names and key terms match the approved glossary in every supported language.
+- [ ] Tone matches the voice rules and excludes prohibited claims and jokes.
+- [ ] The company holds permission or a license for third-party logos, fonts and images.
 
-Report each mismatch with where it is, a screenshot and the rule it breaks. If the brand rules do not cover a case, ask your head instead of deciding.
+Return each mismatch with its location, screenshot or artifact and the rule it breaks. Where the rules do not settle a case, mark the decision open for the designated brand owner rather than inventing a rule. A brand pass does not approve publication or an outbound claim.
+
+If the task assigns an independent review, use a reviewer other than the author and leave the reviewed artifact unchanged. Report through the task's route.

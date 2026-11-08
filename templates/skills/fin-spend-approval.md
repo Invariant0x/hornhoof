@@ -5,7 +5,7 @@ description: { en: "Gate for every spend: checks the request against budget and 
 kind: gate
 sources: []
 ---
-No money is spent without this gate: purchases, subscriptions, contractors, ads, refunds above the support limit, AI usage above budget. Agents never pay; the gate prepares the decision for the human who does.
+No money is spent without this gate: purchases, subscriptions, contractors, ads, refunds, AI usage above budget. Agents never pay; the gate prepares the decision for the human who does.
 
 For each request, check:
 1. **Request**: who asks, what for, amount and currency, one-off or recurring (with the yearly total), vendor, when it is needed.
@@ -15,4 +15,6 @@ For each request, check:
 5. **Terms**: contract length, auto-renewal, cancellation, what data the vendor gets. Long or unusual terms go to the CEO.
 6. **Separation**: the requester does not approve their own spend, and the approver does not also pay.
 
-Verdict: approve for payment (name the human who pays), approve with changes, refuse (with the reason), or escalate to the CEO. Record every verdict in the spend log with date, amount and approver. Report any spend that skipped this gate to the CEO, however small.
+Recommendation: approve for payment (name the authorized human approver and the different human who pays), approve with changes, refuse (with the reason), or escalate to the CEO. Record the recommendation and the human's actual decision separately in the spend log with date and amount. Report any spend that skipped this gate to the CEO, however small.
+
+Before payment lists or figures leave the company, a checker who did not make them rebuilds every key number from source records with SQL or a script and confirms they match. Agents never post entries, move money or file returns; selecting this ability grants no spending or system permissions.

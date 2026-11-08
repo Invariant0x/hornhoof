@@ -5,14 +5,14 @@ description: { en: "Puts every password, key and token into the company's secret
 kind: procedure
 sources: [msitarzewski/agency-agents security/security-secrets-credential-engineer.md, wshobson/agents plugins/cicd-automation/skills/secrets-management/SKILL.md]
 ---
-Secrets live in one place: the secret store your company names. Nowhere else.
+Keep credentials only in the secret store named by the company, within the access authorized for the assignment.
 
-- Never put a secret in chat, a report, a ticket, a file, a commit, a log, a screenshot or a prompt. Not partly, not for a moment.
-- Store each secret under a clear name: service, account, purpose, such as `crm-sales-readonly`. Record its owner, scope and the date it was created or rotated.
-- Give an agent access by the entry's name, at the narrowest scope: one entry, read-only where possible, only for the departments that need it.
-- One credential per use. Do not share a key between departments, or between test and production.
-- Rotate on the schedule the company set for keys that can write or spend, when someone leaves, and at once when a secret may have leaked.
-- If you see a secret where it should not be, do not copy it anywhere. Report its location to your head as an incident, then rotate it. Deleting the text is not enough: copies may exist.
-- When an account is closed, delete its entries and record that you did.
+- Never put a secret in chat, a report, a ticket, a file, a commit, a log, a screenshot or a prompt, even partly or temporarily.
+- Name each entry by service, account and purpose, such as `crm-sales-readonly`. Record owner, scope and creation or rotation date.
+- Reference entry names and use the narrowest approved access: one entry, read-only where possible, only for intended users.
+- Use a separate credential for each purpose and for test versus production; do not share keys between departments.
+- Rotate according to the approved schedule and authorized offboarding, and request immediate containment when exposure is suspected.
+- If a secret appears elsewhere, report its location without copying it. Arrange authorized rotation; deleting the text cannot invalidate copies.
+- On authorized account closure, remove its secret entries and record the action.
 
-Report changes by entry name only, such as "created crm-sales-readonly, scope: read contacts". Never the value.
+Report only entry names, scopes and outcomes. This ability grants no access rights. Shared changes touching access, root, permissions or secrets require an independent Security engineer's pass on the exact candidate before shared merge, including urgent, small, named work and review fixes. Human approvals for access and irreversible actions remain in force.

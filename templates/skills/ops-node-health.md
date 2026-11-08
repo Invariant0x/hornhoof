@@ -5,15 +5,14 @@ description: { en: "Keeps the machines agents run on healthy: disk, memory, upda
 kind: procedure
 sources: [affaan-m/ECC skills/docker-patterns/SKILL.md]
 ---
-A node is a Linux or macOS machine where the Hornhoof node service runs agents on their owner's subscriptions.
+Assess the machines named in the health assignment from their reported state and approved node configuration.
 
-Check each node on every health round, and whenever an agent reports it slow or offline:
+1. Check that the node service is running, connected and on the approved version.
+2. Keep free disk above 15 percent, or the company's stricter limit, and check that memory and CPU are not pinned for long. Find the consumers before proposing cleanup.
+3. Clean workspaces, caches, logs or images only under approved rules. Never delete unsaved or unpushed work, or work still in use.
+4. Check installed provider tools and sign-in status. An expired sign-in goes to the subscription's owner; never request their password.
+5. Schedule approved updates so running tasks finish first. For a shared setup change, record impact, rollback, verification and approvals before execution.
+6. Check sandbox limits and isolation: CPU and memory are bounded, task state is private and host secrets are inaccessible. Remove task resources only when authorized and no longer in use.
+7. For product test environments, compare declared and actual runtime fingerprints, service readiness and immutable prepared artifacts. Verify private mutable state per attempt and recovery after interrupted preparation. Repair images and services through approved provisioning; never patch running containers. Product tests receive no host sockets or node credentials.
 
-1. The node service runs, is connected to the server and is on the version the company runs.
-2. Free disk stays above 15 percent; memory and CPU are not pinned for long. Find what uses them before you clean anything.
-3. Old workspaces, caches, logs and container images are cleaned only by rules your head approved. Never delete a work folder that holds unsaved or unpushed work.
-4. Provider command-line tools are installed and signed in. If a sign-in expired, the subscription's owner signs in again; never ask for their password.
-5. Security updates are applied in a window that cuts off no running task; other updates go through a change request.
-6. On the sandbox machine, containers run with memory and CPU limits, without access to the host's secrets, and are removed when their task ends.
-
-Record each check: node, time, the numbers, what you did. A node that fails the same check twice in a row is an incident.
+Record node, time, measurements, actions and gaps. Repeated failures are evidence for an incident, not permission to broaden the repair. Report unavailable capabilities honestly. Access, root, permissions or secrets changes require an independent Security engineer's pass on the exact candidate before shared merge, including urgent, small, named work and review fixes; protected human actions retain approval.

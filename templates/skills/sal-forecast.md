@@ -5,14 +5,12 @@ description: { en: "Estimates what will close this period from evidence in each 
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---
-1. After the weekly pipeline review, take the open deals with a close date in the period.
-2. Put each in one category, by evidence:
-   - **Commit**: the buyer agreed to buy, the signer is known, the paperwork has started.
-   - **Best case**: strong fit and an active next step, but something is open: budget, signer or a competitor.
-   - **Pipeline**: qualified, too early to count.
-3. Sum each category. Commit is what you would bet on; if past commits slipped, say by how much and correct for it.
-4. Compare with last week: what moved in or out, and why. A deal that slipped twice drops a category.
-5. Compare with the target the CEO set: the gap, and what would close it (which deals, which actions).
-6. Write it in five lines: commit, best case, pipeline, change since last week, gap and plan.
+Use this ability to forecast an assigned sales period from evidenced open deals. Inputs are the CRM snapshot, forecast period, commercial target, stage definitions and prior forecast.
 
-Send it with your status update. Every figure must match the CRM; if the CRM is wrong, get the CRM fixed first.
+1. Select deals with an evidenced close date in the period. Report missing or inconsistent records before relying on them.
+2. Classify by evidence: **commit** when the buyer agreed, signer is known and paperwork started; **best case** for strong fit and an active next step with an unresolved condition; **pipeline** for qualified but earlier opportunities.
+3. Sum each category with formulas or a script, traceable to deal records. Keep currencies and conversion rates explicit.
+4. Compare with the previous forecast: what entered, left or changed and why. Show past commit slippage and its effect on confidence. A repeatedly slipped deal needs a lower category unless new evidence justifies otherwise.
+5. Compare with the approved target, identifying the gap and concrete actions that could affect it without inventing commitments.
+
+Return the three category totals, change from the prior forecast, target gap and evidence-backed explanation. Every amount must match the source snapshot; uncertain data stays visibly uncertain. Do not alter CRM records to improve a forecast. Publishing figures or sending them outside the company needs the applicable approval and authorized outbound path.
