@@ -18,7 +18,8 @@ on:
       - '.github/pull_request_template.md'
   # Pull requests run the tests only. Images are built by hand, from any branch, under the tag of their commit alone: a real
   # node of those images then goes through the live check of guide/updates.md. A push to main builds nothing: it moves the
-  # tags every machine reads onto exactly the images the check speaks of, or stops.
+  # tags every machine reads onto exactly the images the check speaks of, moves nothing while there is no check, and stops
+  # on a check the door refuses.
   pull_request:
   workflow_dispatch:
 
@@ -172,13 +173,41 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-  # The one way a build reaches machines. It takes the images the live check ran on, as they are: a build made again would
-  # have other digests. A commit without its check stops here, the tags stay where they are, and running this job again
-  # once the check is published goes on. A merge commit is another commit: main takes a checked commit by fast-forward.
-  publish:
+  # Whether this push has a build to publish: the live check of exactly its images. A commit with no check, not yet published
+  # or with no images at all, skips the publish job and the release, and the tags stay where they are; running this job again
+  # once the check is published goes on to both. Any other no fails here. It only reads, so it holds no right to write.
+  proof:
     needs: [mark, test]
     # Tests the mark left out count as passed here too.
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    outputs:
+      found: ${{ steps.looked.outputs.found }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build the door
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npm run build -w @hornhoof/protocol
+          npm run build -w @hornhoof/server
+      - id: looked
+        name: Look for the live check of this exact build
+        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --skip-missing --outputs "$GITHUB_OUTPUT"
+
+  # The one way a build reaches machines. It takes the images the live check ran on, as they are: a build made again would
+  # have other digests, and it asks the door again itself before it moves a tag. A merge commit is another commit: main
+  # takes a checked commit by fast-forward.
+  publish:
+    needs: proof
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.result == 'success' && needs.proof.outputs.found == 'true' }}
     runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read

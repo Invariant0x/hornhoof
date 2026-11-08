@@ -334,56 +334,57 @@ function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, 
 }
 
 describe('.github/workflows/images.yml', () => {
-  it('runs the jobs in that order: the mark first, the tests on it, the images and the publish job on both, the release after the publish job', () => {
+  it('runs the jobs in that order: the mark first, the tests on it, the images and the look for the live check on both, the publish job after that look, the release after the publish job', () => {
     expect(needsOf(JOBS.mark!)).toEqual([]);
     expect(needsOf(JOBS.test!)).toEqual(['mark']);
     expect(needsOf(JOBS.images!)).toEqual(['mark', 'test']);
-    expect(needsOf(JOBS.publish!)).toEqual(['mark', 'test']);
+    expect(needsOf(JOBS.proof!)).toEqual(['mark', 'test']);
+    expect(needsOf(JOBS.publish!)).toEqual(['proof']);
     expect(needsOf(JOBS.release!)).toEqual(['publish']);
   });
 
   const BY_HAND = { event: 'workflow_dispatch', ref: 'refs/heads/turn-8' };
 
   it('skips the tests and goes straight to the publish job and the release when the mark proved the commit', () => {
-    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', proof: 'success', publish: 'success', release: 'success' });
   });
 
   it('runs the tests before the publish job when the mark did not prove it', () => {
-    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', proof: 'success', publish: 'success', release: 'success' });
   });
 
   it('skips the tests and builds the images of a run by hand when the mark proved the commit', () => {
-    expect(runWorkflow({ ...BY_HAND, proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('runs the tests before the images of a run by hand when the mark did not prove it', () => {
-    expect(runWorkflow({ ...BY_HAND, proved: false })).toEqual({ mark: 'success', test: 'success', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: false })).toEqual({ mark: 'success', test: 'success', images: 'success', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing when the tests failed', () => {
-    expect(runWorkflow({ proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ ...BY_HAND, proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('runs the tests when the first job itself failed, and goes on from them only', () => {
-    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'skipped', publish: 'success', release: 'success' });
-    expect(runWorkflow({ ...BY_HAND, markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'success', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ markJob: 'failure', tests: 'failure' })).toEqual({ mark: 'failure', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'skipped', proof: 'success', publish: 'success', release: 'success' });
+    expect(runWorkflow({ ...BY_HAND, markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'success', proof: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ markJob: 'failure', tests: 'failure' })).toEqual({ mark: 'failure', test: 'failure', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing for a pull request, marked or not', () => {
-    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('publishes and releases only for a push to main, not for a run by hand from main either', () => {
-    expect(runWorkflow({ event: 'workflow_dispatch', ref: 'refs/heads/main', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ event: 'push', ref: 'refs/heads/turn-8', proved: true })).toMatchObject({ publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'workflow_dispatch', ref: 'refs/heads/main', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', proof: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'push', ref: 'refs/heads/turn-8', proved: true })).toMatchObject({ proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing once the run is cancelled', () => {
-    expect(runWorkflow({ proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', proof: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('skips the publish job and the release, and fails nothing, when the build of a push to main has no live check yet', () => {
@@ -423,10 +424,10 @@ describe('.github/workflows/images.yml', () => {
     expect(JOBS.test!.strategy!.matrix.part).toEqual([1, 2, 3, 4]);
   });
 
-  it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
+  it('sends the first job and the tests by one variable, and images, the look for the live check, publishing and the release by another', () => {
     expect(JOBS.mark!['runs-on']).toBe(TESTS_RUNS_ON);
-    for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
-    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'publish', 'release', 'test']);
+    for (const name of ['images', 'proof', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
+    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'proof', 'publish', 'release', 'test']);
     expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
   });
 

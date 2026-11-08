@@ -36,9 +36,12 @@ test('the publish job moves exactly the images the gate judged, by digest, and t
   assert.ok(moved[0] > 0 && moved[1] > moved[0] && moved[2] > moved[1], moved.join(' '));
 });
 
-test('the publish job runs only for a push to main, after the tests', () => {
-  assert.match(images.publish, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && /);
-  assert.match(images.publish, /needs: \[mark, test\]/);
+test('the live check is looked for only for a push to main, after the tests, and the publish job runs only once it was found', () => {
+  for (const job of [images.proof, images.publish]) assert.match(job, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && /);
+  assert.match(images.proof, /needs: \[mark, test\]/);
+  assert.match(images.proof, /live-check-gate\.js --commit "\$GITHUB_SHA" --skip-missing --outputs "\$GITHUB_OUTPUT"/);
+  assert.match(images.publish, /needs: proof\n/);
+  assert.match(images.publish, / && needs\.proof\.result == 'success' && needs\.proof\.outputs\.found == 'true' \}\}\n/);
 });
 
 test('images are built by hand only, under the tag of their commit alone', () => {
