@@ -29,14 +29,22 @@ function completeInventory(data: z.infer<typeof Comparison>): boolean {
   return data.total_commits === data.commits.length && data.files.every(completePatch);
 }
 
+function comparisonHead(data: z.infer<typeof Comparison>): string | null {
+  return data.commits.at(-1)?.sha ?? (data.status === 'identical' ? data.base_commit.sha : null);
+}
+
+function comparedPaths(file: z.infer<typeof File>): string[] {
+  return file.previous_filename ? [file.filename, file.previous_filename] : [file.filename];
+}
+
 function parsedComparison(body: unknown): CompareResult {
   const parsed = Comparison.safeParse(body);
   if (!parsed.success || !completeInventory(parsed.data)) return { complete: false, reason: 'incomplete-comparison' };
   const data = parsed.data;
   if (data.status !== 'ahead' && data.status !== 'identical') return { complete: false, reason: 'not-an-ancestor' };
-  const headSha = data.commits.at(-1)?.sha ?? (data.status === 'identical' ? data.base_commit.sha : null);
+  const headSha = comparisonHead(data);
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
-  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(f => f.previous_filename ? [f.filename, f.previous_filename] : [f.filename]), diff: data.files.map(f => f.patch).join('\n') };
+  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(f => f.patch).join('\n') };
 }
 
 /* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or

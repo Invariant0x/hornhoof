@@ -44,14 +44,19 @@ function assertJob(task: Binding['task'], run: Binding['run'], job: Binding['job
 /* The producing owner, or its immutable submission, owns a quality receipt. */
 async function assertProducer(db: Store, task: Binding['task'], run: Binding['run']): Promise<void> {
   const [route] = await db.select({ state: taskRoutes.state }).from(taskRoutes).where(and(eq(taskRoutes.taskId, task.id), eq(taskRoutes.companyId, task.companyId)));
-  if (task.assigneeAgentId === run.agentId && route?.state.resultKind === 'code' && route.state.phase === 'active' && ['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '')) return;
+  if (activeProducer(task, run, route?.state)) return;
   const events = await db.select().from(taskEvents).where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, run.agentId)));
-  if (events.some(event => {
-    const candidate = EchelonCandidate.safeParse(event.data.candidate);
-    if (event.kind === 'submitted' && candidate.success && candidate.data.producedBy.agentId === run.agentId && candidate.data.commit === run.commitSha) return true;
-    return false;
-  })) return;
+  if (events.some(event => submittedProducer(event, run))) return;
   throw invalid();
+}
+
+function activeProducer(task: Binding['task'], run: Binding['run'], state: typeof taskRoutes.$inferSelect.state | undefined): boolean {
+  return task.assigneeAgentId === run.agentId && state?.resultKind === 'code' && state.phase === 'active' && ['development', 'review', 'security', 'cleanup'].includes(state.stage ?? '');
+}
+
+function submittedProducer(event: typeof taskEvents.$inferSelect, run: Binding['run']): boolean {
+  const candidate = EchelonCandidate.safeParse(event.data.candidate);
+  return event.kind === 'submitted' && candidate.success && candidate.data.producedBy.agentId === run.agentId && candidate.data.commit === run.commitSha;
 }
 
 async function binding(db: Store, taskId: string, runId: string): Promise<Binding> {

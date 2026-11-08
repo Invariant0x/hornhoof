@@ -26,23 +26,42 @@ export async function reviewEvents(db: Reader, ids: string[]): Promise<Event[]> 
 
 /* Only candidate-bound checker events create findings. Comments and supplied numeric counts have no authority. */
 export function findingsOf(events: Event[]): Finding[] {
-  const candidates = events.flatMap(event => {
+  const candidates = submittedCandidates(events);
+  const found = new Map<string, Finding>();
+  for (const finding of events.flatMap(event => attestedFindings(event, candidates))) {
+    found.set(`${finding.findingId}:${finding.stage}:${finding.revision}`, finding);
+  }
+  return [...found.values()];
+}
+
+function submittedCandidates(events: Event[]) {
+  return events.flatMap(event => {
     const parsed = EchelonCandidate.safeParse(event.data.candidate);
     return event.kind === 'submitted' && parsed.success ? [{ event, candidate: parsed.data }] : [];
   });
-  const found = new Map<string, Finding>();
-  for (const event of events) {
-    if (event.kind !== 'verdict') continue;
-    const checker = EchelonModel.safeParse(event.data.checker);
-    const values = z.array(FindingRecord).safeParse(event.data.issues);
-    if (!checker.success || checker.data.agentId !== event.agentId || !values.success) continue;
-    for (const finding of values.data) {
-      const source = candidates.find(value => value.candidate.id === finding.candidateId && value.event.taskId === event.taskId && value.event.companyId === event.companyId);
-      if (!source || finding.taskId !== event.taskId || finding.reviewerId !== event.agentId || finding.reviewerVendor !== checker.data.provider || finding.authorId !== source.candidate.producedBy.agentId || finding.reviewedCommit !== source.candidate.commit || finding.revision !== source.candidate.id || finding.stage !== event.data.stage || finding.candidateId !== event.data.candidateId) continue;
-      found.set(`${finding.findingId}:${finding.stage}:${finding.revision}`, finding);
-    }
-  }
-  return [...found.values()];
+}
+
+function attestedFindings(event: Event, candidates: ReturnType<typeof submittedCandidates>): Finding[] {
+  if (event.kind !== 'verdict') return [];
+  const checker = EchelonModel.safeParse(event.data.checker);
+  const values = z.array(FindingRecord).safeParse(event.data.issues);
+  if (!checker.success || checker.data.agentId !== event.agentId || !values.success) return [];
+  return values.data.filter(finding => {
+    const source = sourceForFinding(finding, event, candidates);
+    return source !== undefined && findingMatchesEvent(finding, event, checker.data) && findingMatchesSource(finding, source.candidate);
+  });
+}
+
+function sourceForFinding(finding: Finding, event: Event, candidates: ReturnType<typeof submittedCandidates>) {
+  return candidates.find(value => value.candidate.id === finding.candidateId && value.event.taskId === event.taskId && value.event.companyId === event.companyId);
+}
+
+function findingMatchesEvent(finding: Finding, event: Event, checker: EchelonModel): boolean {
+  return finding.taskId === event.taskId && finding.reviewerId === event.agentId && finding.reviewerVendor === checker.provider && finding.stage === event.data.stage && finding.candidateId === event.data.candidateId;
+}
+
+function findingMatchesSource(finding: Finding, candidate: EchelonCandidate): boolean {
+  return finding.authorId === candidate.producedBy.agentId && finding.reviewedCommit === candidate.commit && finding.revision === candidate.id;
 }
 
 export async function issuesForEchelon(db: Reader, task: Task, route: Route, candidate: EchelonCandidate, checker: EchelonModel, input: NewIssue[], pass: boolean): Promise<Finding[]> {
@@ -91,9 +110,15 @@ function hasUnattestedVerdict(events: Event[]): boolean {
     if (event.kind !== 'verdict') return false;
     const checker = EchelonModel.safeParse(event.data.checker);
     const issues = z.array(FindingRecord).safeParse(event.data.issues);
-    const source = events.find(value => value.kind === 'submitted' && value.companyId === event.companyId && value.taskId === event.taskId && EchelonCandidate.safeParse(value.data.candidate).success && (value.data.candidate as EchelonCandidate).id === event.data.candidateId);
+    const source = events.find(value => submittedForVerdict(value, event));
     return !checker.success || checker.data.agentId !== event.agentId || !issues.success || !source;
   });
+}
+
+function submittedForVerdict(source: Event, verdict: Event): boolean {
+  if (source.kind !== 'submitted' || source.companyId !== verdict.companyId || source.taskId !== verdict.taskId) return false;
+  const candidate = EchelonCandidate.safeParse(source.data.candidate);
+  return candidate.success && candidate.data.id === verdict.data.candidateId;
 }
 
 export async function findingTurnReport(db: Reader, companyId: string, number: number): Promise<TurnFindingReport> {
@@ -112,19 +137,30 @@ export async function confirmFinding(ctx: Pick<Ctx, 'db' | 'bus'>, actorId: stri
     const events = await reviewEvents(tx, [task.id]);
     const issue = findingsOf(events).find(finding => finding.findingId === input.findingId && finding.revision === input.revision);
     if (!issue) throw refuse(409, 'task_invalid', 'The finding or candidate revision is unknown.');
-    const [actor] = await tx.select().from(agents).where(and(eq(agents.id, actorId), eq(agents.companyId, current.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-    if (!actor || actor.id === issue.reviewerId) throw refuse(403, 'task_not_yours', 'A checker cannot confirm its own finding.');
-    const head = actor.kind === 'head' && actor.departmentId === current.departmentId;
-    if (!head) {
-      if (actor.id !== issue.authorId) throw refuse(403, 'task_not_yours', 'Only the affected producer or its head can confirm a finding.');
-      const candidate = await currentCandidate(tx, current, await routeOf(tx, current));
-      if (!input.fixCommit || input.fixCommit !== candidate.commit || input.fixCommit === issue.reviewedCommit) throw refuse(409, 'task_changed', 'The producer needs an exact current fix candidate.');
-    }
-    const previous = events.map(event => Confirmation.safeParse(event.data.findingConfirmation)).filter(result => result.success && result.data.findingId === input.findingId).at(-1);
-    if (previous?.success && previous.data.confirmed === input.confirmed && previous.data.fixCommit === input.fixCommit) return null;
+    const authority = await confirmationAuthority(tx, current, actorId, issue, input);
+    if (sameConfirmation(events, input)) return null;
     const [row] = await tx.update(tasks).set({ version: current.version + 1, updatedAt: new Date() }).where(eq(tasks.id, task.id)).returning();
-    await tx.insert(taskEvents).values({ companyId: current.companyId, taskId: task.id, agentId: actorId, kind: 'comment', text: input.reason, data: { findingConfirmation: { ...input, actorId, authority: head ? 'head' : 'author' } } });
+    await tx.insert(taskEvents).values({ companyId: current.companyId, taskId: task.id, agentId: actorId, kind: 'comment', text: input.reason, data: { findingConfirmation: { ...input, actorId, authority } } });
     return row!;
   });
   if (changed) published(ctx, changed);
+}
+
+async function confirmationAuthority(tx: Tx, current: Task, actorId: string, issue: Finding, input: z.infer<typeof ConfirmationInput>): Promise<'head' | 'author'> {
+  const [actor] = await tx.select().from(agents).where(and(eq(agents.id, actorId), eq(agents.companyId, current.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  if (!actor || actor.id === issue.reviewerId) throw refuse(403, 'task_not_yours', 'A checker cannot confirm its own finding.');
+  if (actor.kind === 'head' && actor.departmentId === current.departmentId) return 'head';
+  await requireAuthorFix(tx, current, actor.id, issue, input);
+  return 'author';
+}
+
+async function requireAuthorFix(tx: Tx, task: Task, actorId: string, issue: Finding, input: z.infer<typeof ConfirmationInput>): Promise<void> {
+  if (actorId !== issue.authorId) throw refuse(403, 'task_not_yours', 'Only the affected producer or its head can confirm a finding.');
+  const candidate = await currentCandidate(tx, task, await routeOf(tx, task));
+  if (!input.fixCommit || input.fixCommit !== candidate.commit || input.fixCommit === issue.reviewedCommit) throw refuse(409, 'task_changed', 'The producer needs an exact current fix candidate.');
+}
+
+function sameConfirmation(events: Event[], input: z.infer<typeof ConfirmationInput>): boolean {
+  const previous = events.map(event => Confirmation.safeParse(event.data.findingConfirmation)).filter(result => result.success && result.data.findingId === input.findingId).at(-1);
+  return previous?.success === true && previous.data.confirmed === input.confirmed && previous.data.fixCommit === input.fixCommit;
 }
