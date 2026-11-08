@@ -1,4 +1,6 @@
+import { and, desc, eq } from 'drizzle-orm';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
+import { startRun } from '../src/modules/testruns/runs.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
@@ -16,9 +18,14 @@ export async function testsFixture(fix = false) {
   const snapshot = (await f.detail()).echelons;
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.tester.id, subscriptionId: f.tester.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Verify final candidate', timeoutMs: 1000 }).returning();
   const run = async (commit = finalCommit, parts = 1) => {
-    const [value] = await f.db.insert(testRuns).values({ companyId: f.task.companyId, taskId: f.task.id, agentId: f.tester.id, jobId: job!.id, departmentId: f.task.departmentId, number: 1, branch: 'task-1', commitSha: commit, command: 'Changed tests', status: 'passed', finishedAt: new Date(), parts, timeoutMs: 1000 }).returning();
-    if (parts) await f.db.insert(testParts).values({ companyId: f.task.companyId, runId: value!.id, part: 1, status: 'passed', commit, exitCode: 0 });
-    return value!;
+    await startRun(f.ctx, { id: job!.id, companyId: f.task.companyId, agentId: f.tester.id, agentKind: f.tester.kind, departmentId: f.tester.departmentId }, {
+      task: f.task.id, command: 'Changed tests', candidate: { candidateId: snapshot.candidateId!, revision: snapshot.revision },
+    });
+    const [value] = await f.db.select().from(testRuns).where(and(eq(testRuns.taskId, f.task.id), eq(testRuns.agentId, f.tester.id))).orderBy(desc(testRuns.number)).limit(1);
+    const [finished] = await f.db.update(testRuns).set({ status: 'passed', finishedAt: new Date(), commitSha: commit, parts }).where(eq(testRuns.id, value!.id)).returning();
+    if (parts) await f.db.update(testParts).set({ status: 'passed', commit, exitCode: 0 }).where(eq(testParts.runId, value!.id));
+    else await f.db.delete(testParts).where(eq(testParts.runId, value!.id));
+    return finished!;
   };
   const verified = (ids: string[]) => ({ done: true, summary: 'Verified the final changed scope.', ...{ verification: { candidateId: snapshot.candidateId!, revision: snapshot.revision, runIds: ids } } });
   return { ...f, run, verified, snapshot, finalCommit };

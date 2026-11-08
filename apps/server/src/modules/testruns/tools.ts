@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
+import { EchelonRun } from '../tasks/echelons-run.js';
 import { endOwnWait } from '../tasks/external-wait.js';
 import { taskByRef } from '../tasks/views.js';
 import { refuse } from '../tasks/engine.js';
@@ -51,6 +52,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         suite: z.string().min(1).max(64).optional().describe('Product suite ID; omit to run the profile required suites.'),
         profile: z.string().min(1).max(64).optional().describe('Product profile ID; defaults to defaultProfile in the pinned manifest.'),
         task: TaskRef('whose branch it tests'),
+        candidate: EchelonRun.optional().describe('At Tests, name the exact current candidateId and route revision. The server binds this run to that assignment and pins its branch and commit.'),
         branch: Branch.optional().describe("By default the task's own: task-<number>, or the only branch that starts with task-<number>-."),
         parts: Parts,
         minutes: Minutes,

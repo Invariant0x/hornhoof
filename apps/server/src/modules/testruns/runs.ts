@@ -11,6 +11,7 @@ import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
+import { bindCandidateRun, candidateForRun, type CandidateRun, type EchelonRun } from '../tasks/echelons-run.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
@@ -560,7 +561,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 }
 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
-export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
+export type RunInput = { candidate?: EchelonRun; task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 export async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -651,13 +652,16 @@ async function nextRunNumber(tx: Tx, companyId: string): Promise<number> {
   return (last?.n ?? 0) + 1;
 }
 
-async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kind: RunKind, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, setup: RunSetup, files: string[], parts: number): Promise<Run> {
+async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kind: RunKind, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, setup: RunSetup, files: string[], parts: number, binding: CandidateRun | null): Promise<Run> {
   const { department, pin } = setup;
   return ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
     const existing = await existingRun(tx, task, input, kind, pin);
-    if (existing) return existing;
+    if (existing) {
+      if (binding) await bindCandidateRun(tx, task, binding, existing);
+      return existing;
+    }
     const number = await nextRunNumber(tx, job.companyId);
     const [row] = await tx
       .insert(testRuns)
@@ -678,6 +682,7 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
       .returning();
+    if (binding) await bindCandidateRun(tx, task, binding, row!);
     if (parts) await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
     await recordRunWait(tx, row!, mode.mode === 'product' ? 'prepare' : 'queue', new Date());
     return row!;
@@ -688,13 +693,15 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const mode = testRunMode(input, kind);
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
+  const binding = await candidateForRun(ctx.db, task, job.agentId, input, kind);
+  if (binding) input = { ...input, branch: binding.branch, expectedCommit: binding.commit };
   const found = await runRepository(ctx, task, input, kind);
   const files = await workFiles(ctx, task, input, kind);
   const parts = mode.mode === 'manual' ? mode.parts : 0;
   checkManualParts(input.command ?? '', parts);
   await checkRunCapacity(ctx, job);
   const setup = await prepareRun(ctx, job, task, input, kind, mode, found);
-  const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts);
+  const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts, binding);
   await pumpTests(ctx);
   if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;
   return startedRunSummary(ctx, run, task, found, setup.department);

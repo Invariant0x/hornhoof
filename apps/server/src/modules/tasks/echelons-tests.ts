@@ -6,6 +6,7 @@ import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { sameChecker } from './echelons-policy.js';
 import { agentIdentity } from './echelons-assign.js';
+import { requireCandidateRun } from './echelons-run.js';
 import { verifiedReuse } from './review-reuse.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
@@ -14,12 +15,14 @@ export type Verification = z.infer<typeof Verification>;
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
 /* Server-owned run and part rows prove the same final source; a status label alone proves nothing. */
-export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[]) {
+export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision = route.revision) {
   if (!ids.length || new Set(ids).size !== ids.length) throw refuse(409, 'task_invalid', 'Name distinct completed candidate runs.');
   const candidate = await currentCandidate(db, task, route);
   const runs = await db.select().from(testRuns).where(and(eq(testRuns.companyId, task.companyId), eq(testRuns.taskId, task.id), inArray(testRuns.id, ids)));
   if (runs.length !== ids.length) throw refuse(409, 'task_invalid', 'A test run is missing or belongs to another task.');
+  const testerId = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId ?? null;
   for (const run of runs) {
+    await requireCandidateRun(db, task, candidate, testedRevision, testerId, run);
     if (run.kind !== 'tests' || run.commitSha !== candidate.commit || run.branch !== candidate.branch || run.status !== 'passed' || !run.finishedAt) throw refuse(409, 'task_changed', 'A run does not verify the current candidate.');
     const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
     const complete = run.parts > 0 ? parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null) : await verifiedReuse(run);
@@ -41,7 +44,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const wakes = [{ agentId: head.id, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
   const row = await move(ctx, task, { status: 'open', assigneeAgentId: head.id, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, evidence } },
+    kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } },
   }, async tx => {
     await candidateRunEvidence(tx, task, route, input.data.runIds);
     await changeRoute(tx, route, state);
