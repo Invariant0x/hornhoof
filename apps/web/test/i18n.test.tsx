@@ -234,8 +234,8 @@ describe('work tree words', () => {
       expect(dict.dept.tree.verdict(false, 2)).toContain('2');
       expect(dict.dept.now.retryAttempt(1, null, null)).toContain('1');
       expect(dict.dept.now.retryAttempt(2, 5, '12:05')).toContain('5');
-      expect(dict.dept.stats(1, 2, 3, 0)).toContain('1');
-      expect(dict.dept.stats(1, 1, 1, 2)).toContain('2');
+      expect(dict.dept.stats(1, 2, 3)).toContain('1');
+      expect(dict.dept.stats(1, 1, 2)).toContain('2');
       expect(dict.dept.statusSummary({ working: 1, idle: 2 })).toContain('1');
       expect(dict.updates.result({ state: 'done', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
       expect(dict.updates.result({ state: 'rolled_back', version: '0.8.0' }, '0.7.0')).toContain('0.7.0');

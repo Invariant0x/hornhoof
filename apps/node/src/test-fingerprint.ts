@@ -4,7 +4,7 @@ import { matchesGlob, posix } from 'node:path';
 import { PREPARATION_UNIT, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
 import { matchesPattern, NAMED_TESTS, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
-import { readCommit, type GitEntry } from './test-mirror.js';
+import { readCommit, readMutationDelta, type GitEntry } from './test-mirror.js';
 import type { MutationDelta, MutationSelection } from './test-impact-mutation.js';
 
 /* What a test file's result depends on, read from the pinned commit alone: nothing is installed and no repository code runs.
@@ -505,4 +505,15 @@ export async function readTestFingerprints(source: Parameters<typeof readCommit>
   const tree = await readCommit(source, scope, description.commitSha, context);
   const texts = await tree.readTexts(codeFilesOf(tree.entries), READ_BYTES);
   return fingerprintUnits({ description, tracked: tree.entries, texts }, async () => { checkCacheContext(context); await nextTurn(); });
+}
+
+/* Mutation applicability comes from changed source lines and safe fast judges, not from a file-level fingerprint. */
+export async function readCandidateMutations(source: Parameters<typeof readCommit>[0], scope: RepositoryScope, description: EnvironmentDescription, baseCommit: string, context: CacheContext): Promise<{ delta: MutationDelta; selection: MutationSelection } | undefined> {
+  const { mutation } = description.manifest;
+  if (mutation.status !== 'supported') return undefined;
+  const delta = await readMutationDelta(source, scope, baseCommit, description.commitSha, mutation.sourcePaths, context);
+  const tree = await readCommit(source, scope, description.commitSha, context);
+  const texts = await tree.readTexts(codeFilesOf(tree.entries), READ_BYTES);
+  const selection = await selectPureMutations({ description, tracked: tree.entries, texts }, mutation, delta);
+  return { delta, selection };
 }

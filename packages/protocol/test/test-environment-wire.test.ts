@@ -100,3 +100,37 @@ it('preserves both pinned influencing fingerprint sets in a candidate descriptio
   expect(protocol.parseNodeMessage(JSON.stringify(reply))).toEqual(reply);
   expect(protocol.parseNodeMessage(JSON.stringify({ ...reply, result: { ...reply.result, baseFingerprints: { ...reply.result.baseFingerprints, commitSha: 'main' } } }))).toBeNull();
 });
+
+function candidateMutation() {
+  const baseCommit = 'a'.repeat(40), commit = 'b'.repeat(40), file = 'apps/node/src/redact.ts';
+  return {
+    delta: { baseCommit, commit, changes: [{ path: file, ranges: [[1, 1]] }] },
+    selection: { version: 1, status: 'ready', baseCommit, commit,
+      selected: [{ file, name: 'redact', startLine: 1, endLine: 1, lines: [1], tests: ['apps/node/test/redact.test.ts'], reason: 'changed_pure_function' }],
+      excluded: [], problems: [] },
+  };
+}
+
+it('retains the bound pure mutation scope in the authenticated node reply and candidate snapshot', () => {
+  const value = description(), mutation = candidateMutation();
+  const candidate = { baseCommit: mutation.delta.baseCommit, fingerprints: [], baseFingerprints: [], mutation };
+  const reply = { type: 'tests.described', requestId: '33333333-3333-4333-8333-333333333333', commitSha: value.commitSha,
+    result: { status: 'ready', description: value, fingerprints: [], baseFingerprints: { commitSha: candidate.baseCommit, fingerprints: [] }, mutation },
+  };
+  expect(protocol.parseNodeMessage(JSON.stringify(reply))).toEqual(reply);
+  expect(protocol.EnvironmentSnapshot.safeParse({ description: value, profile: 'fast', candidate }).success).toBe(true);
+});
+
+it.each(['delta-head', 'delta-base', 'selection-head', 'selection-base', 'invalid-range', 'lines-outside-function'] as const)('refuses %s in a described mutation scope', problem => {
+  const value = description(), mutation = candidateMutation();
+  if (problem === 'delta-head') mutation.delta.commit = 'c'.repeat(40);
+  if (problem === 'delta-base') mutation.delta.baseCommit = 'c'.repeat(40);
+  if (problem === 'selection-head') mutation.selection.commit = 'c'.repeat(40);
+  if (problem === 'selection-base') mutation.selection.baseCommit = 'c'.repeat(40);
+  if (problem === 'invalid-range') mutation.delta.changes[0]!.ranges = [[0, -1]];
+  if (problem === 'lines-outside-function') mutation.selection.selected[0]!.lines = [2];
+  const reply = { type: 'tests.described', requestId: '33333333-3333-4333-8333-333333333333', commitSha: value.commitSha,
+    result: { status: 'ready', description: value, fingerprints: [], baseFingerprints: { commitSha: 'a'.repeat(40), fingerprints: [] }, mutation },
+  };
+  expect(protocol.parseNodeMessage(JSON.stringify(reply))).toBeNull();
+});

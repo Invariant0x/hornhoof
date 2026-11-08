@@ -10,7 +10,7 @@ import { withCheckSlot } from './check-queue.js';
 import { prepareServiceArtifacts, openServices, type OpenedServices, type ServiceArtifacts, type ServiceContext, type ServiceDefinition, type ServiceDefinitions } from './test-services.js';
 import type { JobUser } from './isolation.js';
 import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
-import { readTestFingerprints } from './test-fingerprint.js';
+import { readCandidateMutations, readTestFingerprints } from './test-fingerprint.js';
 import { matchesPattern as match } from './test-impact.js';
 
 type Source = Parameters<typeof readCommit>[0];
@@ -97,14 +97,15 @@ export async function readTestEnvironment(source: Source, repositoryScope: Repos
 }
 /* A description with what lets the server reuse results. Only the description is needed for a run: without fingerprints, everything
    runs. A manifest that names no full run reuses nothing, so nothing of the commit is read for them. */
-export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints, baseCommit?: string): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[]; baseFingerprints?: { commitSha: string; fingerprints: UnitFingerprint[] } }> {
+export async function describeTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext, fingerprints = readTestFingerprints, baseCommit?: string): Promise<{ description: EnvironmentDescription; fingerprints?: UnitFingerprint[]; baseFingerprints?: { commitSha: string; fingerprints: UnitFingerprint[] }; mutation?: Awaited<ReturnType<typeof readCandidateMutations>> }> {
   const description = await readTestEnvironment(source, repositoryScope, commitSha, context);
   if (baseCommit !== undefined) {
     const sameRuntime = { ...context, runtimes: description.runtimeCapabilities };
     const finalPrints = UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, sameRuntime));
     const base = await readTestEnvironment(source, repositoryScope, baseCommit, sameRuntime);
     const basePrints = UnitFingerprints.parse(await fingerprints(source, repositoryScope, base, sameRuntime));
-    return { description, fingerprints: finalPrints, baseFingerprints: { commitSha: base.commitSha, fingerprints: basePrints } };
+    const mutation = await readCandidateMutations(source, repositoryScope, description, baseCommit, sameRuntime);
+    return { description, fingerprints: finalPrints, baseFingerprints: { commitSha: base.commitSha, fingerprints: basePrints }, ...(mutation ? { mutation } : {}) };
   }
   if (!description.manifest.execution?.fullRun) return { description };
   try { return { description, fingerprints: UnitFingerprints.parse(await fingerprints(source, repositoryScope, description, context)) }; }

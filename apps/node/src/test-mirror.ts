@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
 import { GitCredentialMask, gitEnv, gitPreparationFailure, type GitPreparationError } from './workspace.js';
+import type { MutationDelta } from './test-impact-mutation.js';
 import { signalProcessGroup } from './process-group.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
@@ -186,4 +187,23 @@ export async function readCommit(source: Source, scope: RepositoryScope, commitS
     });
     return texts;
   } };
+}
+
+/* Compare the pinned objects, without checkout filters, text converters, hooks or repository commands. Reading each
+   literal source separately avoids interpreting quoted Git path headers as repository paths. */
+export async function readMutationDelta(source: Source, scope: RepositoryScope, baseCommit: string, commit: string, paths: string[], context: CacheContext): Promise<MutationDelta> {
+  await mirrorAt(source, scope, baseCommit, context, async () => {});
+  const changes: MutationDelta['changes'] = [];
+  await mirrorAt(source, scope, commit, context, async mirror => {
+    await gitBytes(['--git-dir', mirror, 'merge-base', '--is-ancestor', baseCommit, commit], context);
+    for (const path of [...new Set(paths)].sort()) {
+      RepositoryPath.parse(path);
+      const diff = await gitBytes(['--literal-pathspecs', '--git-dir', mirror, 'diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', baseCommit, commit, '--', path], context);
+      if (!diff.length) continue;
+      const ranges: [number, number][] = [...diff.toString('utf8').matchAll(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm)]
+        .map(match => [Number(match[1]), Number(match[2] ?? 1)] as [number, number]).filter(([, count]) => count > 0);
+      changes.push({ path, ranges });
+    }
+  });
+  return { baseCommit, commit, changes };
 }
