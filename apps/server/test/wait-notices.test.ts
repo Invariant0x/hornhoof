@@ -1,9 +1,15 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, tasks, waitNotices } from '../src/db/schema.js';
-import { deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../src/modules/tasks/wait-notices.js';
+import { agents, taskEvents, tasks, waitNotices } from '../src/db/schema.js';
+import { comment } from '../src/modules/tasks/engine.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
+import { ANSWERED_WAIT_MS, deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../src/modules/tasks/wait-notices.js';
 import type { mcp } from './helpers.js';
 import { waitCompany } from './wait-company.js';
+
+const later = (ms: number) => new Date(Date.now() + ms).toISOString();
+const waitOn = (client: Awaited<ReturnType<typeof mcp>>, task: number, employee: string, reason: string, until = later(60_000)) =>
+  client.callTool({ name: 'wait_for', arguments: { task, reason, until, on: { kind: 'employee', employee } } });
 
 describe('wait recipient notices', () => {
   it('does not create a recipient notice for a task with no wait', async () => {
@@ -78,10 +84,6 @@ describe('wait recipient notices', () => {
   });
 
   describe('a wait said again', () => {
-    const later = (ms: number) => new Date(Date.now() + ms).toISOString();
-    const waitOn = (client: Awaited<ReturnType<typeof mcp>>, task: number, employee: string, reason: string, until = later(60_000)) =>
-      client.callTool({ name: 'wait_for', arguments: { task, reason, until, on: { kind: 'employee', employee } } });
-
     it('tells the employee once while the same wait on it stands, and keeps the new reason and date', async () => {
       const c = await waitCompany();
       const task = await c.task();
@@ -138,6 +140,57 @@ describe('wait recipient notices', () => {
       const told = await c.messages(c.head.id);
       expect(told).toHaveLength(1);
       expect(told[0]!.data).toMatchObject({ text: expect.stringContaining('Acceptance, asked again') });
+    });
+  });
+
+  describe('a wait said again after an answer', () => {
+    /* The holder waits on the head, and the head answers on the task, which ends the wait. */
+    async function answered(how: 'comment' | 'message') {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run(c.agent.id, task.id);
+      const head = await c.run(c.head.id);
+      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on a-host')).isError).toBeFalsy();
+      const answer = () => how === 'comment'
+        ? head.client.callTool({ name: 'comment', arguments: { task: task.number, text: 'Here is the report.' } })
+        : head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Here is the report.' } });
+      expect((await answer()).isError).toBeFalsy();
+      expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toBeNull();
+      return { ...c, number: task.number, taskId: task.id, worker, answer };
+    }
+
+    it.each(['comment', 'message'] as const)('tells the employee nothing new when the holder waits on them again after their %s', async how => {
+      const c = await answered(how);
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, now read')).isError).toBeFalsy();
+      expect((await c.answer()).isError).toBeFalsy();
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, read twice')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(1);
+      expect(await c.db.select().from(waitNotices)).toHaveLength(1);
+      expect((await c.db.select().from(tasks).where(eq(tasks.id, c.taskId)))[0]!.externalWait).toMatchObject({ reason: 'The report on a-host, read twice', on: { employee: c.head.id } });
+    });
+
+    it('tells the employee again when their answer is older than the time it holds', async () => {
+      const c = await answered('comment');
+      await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - ANSWERED_WAIT_MS - 1_000) }).where(and(eq(taskEvents.taskId, c.taskId), eq(taskEvents.kind, 'comment')));
+      expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(2);
+    });
+
+    it('tells the employee again when someone else ended the wait', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run(c.agent.id, task.id);
+      await waitOn(worker.client, task.number, c.head.id, 'The report on a-host');
+      await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.watcher.id }, task.id, 'The alert on a-host is gone.')).wakes);
+      expect((await waitOn(worker.client, task.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(2);
+    });
+
+    it('tells another employee the wait moved to after the answer', async () => {
+      const c = await answered('comment');
+      expect((await waitOn(c.worker.client, c.number, c.watcher.id, 'The alert on a-host')).isError).toBeFalsy();
+      expect(await c.messages(c.head.id)).toHaveLength(1);
+      expect(await c.messages(c.watcher.id)).toHaveLength(1);
     });
   });
 

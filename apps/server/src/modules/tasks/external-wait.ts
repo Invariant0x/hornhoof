@@ -101,7 +101,7 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitA
   const wait = waitOf(input, now);
   const run = input.run ? { run: await namedRun(ctx, task, agentId, input.run) } : {};
   const externalWait = { ...wait, ...run, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
-  const notice = (await heardOfWait(ctx.db, task, externalWait, now)) ? null : await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
+  const notice = (await heardOfWait(ctx.db, task, agentId, externalWait, now)) ? null : await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
   const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => {
     await keepNotice(notice)(tx);
     await keepWaitRecord(tx, task, externalWait, input.plan, agentId);

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, like, lte, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { accessOf, canReach } from '../../auth/access.js';
-import { agents, people, requests, tasks, taskWaits, waitNotices, type ExternalWait } from '../../db/schema.js';
+import { agents, people, requests, taskEvents, tasks, taskWaits, waitNotices, type ExternalWait } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -18,6 +18,9 @@ export type NewWaitNotice = typeof waitNotices.$inferInsert;
 type Notice = typeof waitNotices.$inferSelect;
 const pending = and(isNull(waitNotices.deliveredAt), isNull(waitNotices.cancelledAt));
 const LEASE_MS = 2 * 60_000;
+/* How long an employee's own answer to a wait on them keeps them aware of it: the holder waiting on them again in this time
+   tells them nothing new. */
+export const ANSWERED_WAIT_MS = 10 * 60_000;
 
 export async function recordWaitNotice(db: Writer, notice: NewWaitNotice): Promise<void> {
   await db.insert(waitNotices).values(notice).onConflictDoNothing({ target: [waitNotices.companyId, waitNotices.dedupKey] });
@@ -36,15 +39,30 @@ export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string):
   };
 }
 
-/* Whether the employee a new wait names heard of it already: the task still waits on them, as only its holder can, and the
-   notice of that wait went out. Saying the wait again then changes only its words and date. */
-export async function heardOfWait(db: Pick<Db, 'select'>, task: Task, next: ExternalWait, now: Date): Promise<boolean> {
+/* Whether the employee a new wait names heard of it already. Either the task still waits on them, as only its holder can, and
+   the notice of that wait went out; or they ended the holder's last wait on them with their own words on the task lately.
+   Saying the wait again then changes only its words and date. */
+export async function heardOfWait(db: Pick<Db, 'select'>, task: Task, waiter: string, next: ExternalWait, now: Date): Promise<boolean> {
+  if (next.on?.kind !== 'employee') return false;
+  const employee = next.on.employee;
   const before = task.externalWait;
-  if (before?.on?.kind !== 'employee' || next.on?.kind !== 'employee' || before.on.employee !== next.on.employee || new Date(before.until) <= now) return false;
+  if (!before) return answeredLately(db, task.id, waiter, employee, now);
+  if (before.on?.kind !== 'employee' || before.on.employee !== employee || new Date(before.until) <= now) return false;
   const [unsent] = await db.select({ id: waitNotices.id }).from(waitNotices).where(and(
-    eq(waitNotices.companyId, task.companyId), eq(waitNotices.agentId, next.on.employee), like(waitNotices.dedupKey, `request:${task.id}:%`), pending,
+    eq(waitNotices.companyId, task.companyId), eq(waitNotices.agentId, employee), like(waitNotices.dedupKey, `request:${task.id}:%`), pending,
   )).limit(1);
   return !unsent;
+}
+
+/* The task's last two changes of its wait: the employee's comment or message on it that ended the wait, and before it the
+   waiter's wait on that employee. */
+async function answeredLately(db: Pick<Db, 'select'>, taskId: string, waiter: string, employee: string, now: Date): Promise<boolean> {
+  const [ended, placed] = await db.select({ kind: taskEvents.kind, agentId: taskEvents.agentId, data: taskEvents.data, createdAt: taskEvents.createdAt }).from(taskEvents)
+    .where(and(eq(taskEvents.taskId, taskId), sql`${taskEvents.data} -> 'externalWait' is not null`)).orderBy(desc(taskEvents.id)).limit(2);
+  if (ended?.kind !== 'comment' || ended.agentId !== employee || ended.data.externalWait !== null) return false;
+  if (now.getTime() - ended.createdAt.getTime() > ANSWERED_WAIT_MS) return false;
+  const wait = placed?.data.externalWait as ExternalWait | null | undefined;
+  return placed?.agentId === waiter && wait?.on?.kind === 'employee' && wait.on.employee === employee;
 }
 
 /* A notice about a wait holds while that wait stands as it was written for. A task moving on does not spoil it, and a date
