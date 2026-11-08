@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { testParts, testRuns } from '../src/db/schema.js';
+import { tasks, testParts, testRuns } from '../src/db/schema.js';
 import { report } from '../src/modules/tasks/engine.js';
 import { testsFixture } from './development-echelons-verification.js';
 
@@ -21,6 +21,12 @@ describe('Tests failure belongs to the current candidate', () => {
     expect((await f.detail()).echelons).toMatchObject({ phase: 'escalated', stage: 'tests', candidateId: f.snapshot.candidateId });
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
     expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'content', candidateId: f.snapshot.candidateId, runIds: [f.failedRun.id] } });
+  });
+  it('escalates to the department head when a worker originally created the task', async () => {
+    const f = await failedFixture();
+    await f.db.update(tasks).set({ createdByAgentId: f.author.id }).where(eq(tasks.id, f.task.id));
+    const moved = await report(f.ctx, f.tester.id, f.task.id, f.input);
+    expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
   });
   it.each(['no_machine', 'clone_failed', 'timeout'])('keeps %s failure retryable at Tests without certifying readiness', async error => {
     const f = await failedFixture(error, null);
