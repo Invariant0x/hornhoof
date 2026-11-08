@@ -5,8 +5,10 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, requests, tasks, teams } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
-import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, invitePerson, setUpCompany, testApp, ownPlan } from './helpers.js';
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
@@ -33,7 +35,16 @@ async function company() {
     ...as(ceo),
   });
   const brunoId = hired.json().hired[0] as string;
-  return { app, db, ceo, oleg, dev: dev!, sales: sales!, teamKey, codex, brunoId, role };
+  const codeSource = async () => {
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev!.id));
+    app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  };
+  const snapshot = async (id: string) => {
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId);
+  };
+  return { app, db, ceo, oleg, dev: dev!, sales: sales!, teamKey, codex, brunoId, role, codeSource, snapshot };
 }
 
 const open = (app: FastifyInstance, token: string, id: string) => app.inject({ url: `/api/agents/${id}`, ...as(token) });
@@ -378,87 +389,80 @@ describe('the employee card', () => {
     expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Rob', 'Ann', 'Rita']);
   });
 
-  it.each([false, true])('removes a reviewer moved into a sub-unit from the current gate panel, picks a replacement or advances the gate, drops future gates, and cancels its queued wake (question: %s)', async withQuestion => {
-    const { app, db, ceo, dev, teamKey, brunoId } = await company();
-    const line = (role: string, name: string) => ({
-      role,
-      name,
-      model: 'claude-sonnet-5-5',
-      subscription: teamKey,
-      skills: app.ctx.templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id),
-    });
-    const staffed = await app.inject({
-      method: 'POST',
-      url: `/api/departments/${dev.id}/staff`,
-      payload: { people: [line('DEV-HEAD', 'Hana'), line('DEV-REV', 'Rita'), line('DEV-REV', 'Rob')] },
-      ...as(ceo),
-    });
+  it.each([false, true])('replaces a checker moved into a sub-unit while retaining required Review and its question (question: %s)', async withQuestion => {
+    const { app, db, ceo, dev, teamKey, brunoId, codeSource, snapshot } = await company();
+    await codeSource();
+    const line = (role: string, name: string) => ({ role, name, model: 'claude-sonnet-5-5', subscription: teamKey, skills: app.ctx.templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id) });
+    const staffed = await app.inject({ method: 'POST', url: `/api/departments/${dev.id}/staff`, payload: { people: [line('DEV-HEAD', 'Hana'), line('DEV-REV', 'Rita'), line('DEV-REV', 'Rob')] }, ...as(ceo) });
+    expect(staffed.statusCode).toBe(201);
     const [hanaId, ritaId, robId] = staffed.json().hired as [string, string, string];
     const [urgent] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
+    const create = (title: string) => createTask(app.ctx, { agentId: hanaId }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: ritaId });
+    const { task: checking } = await create('Checkout API');
+    const { task: atWork } = await create('Refund API');
+    await wakeAll(app.ctx, (await submit(app.ctx, brunoId, checking.id, { summary: 'Candidate', evidence: 'Changed tests.', review: { baseCommit: BASE } })).wakes);
+    const candidateId = (await snapshot(checking.id)).candidateId;
+    expect(await snapshot(checking.id)).toMatchObject({ stage: 'review', ownerAgentId: ritaId });
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, ritaId))).toMatchObject([{ taskId: checking.id, status: 'queued' }]);
+    const question = withQuestion ? await ask(app.ctx, ritaId, checking.id, { kind: 'question', text: 'Which checkout version?' }) : null;
 
-    const { task: atPanel } = await createTask(app.ctx, { agentId: hanaId }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [ritaId] });
-    const { task: atWork } = await createTask(app.ctx, { agentId: hanaId }, { title: 'Refund API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [ritaId] });
-    const submitted = await submit(app.ctx, brunoId, atPanel.id, { summary: 'Done', evidence: 'npm test' });
-    await wakeAll(app.ctx, submitted.wakes);
+    expect((await patch(app, ceo, ritaId, { team: urgent!.id })).statusCode).toBe(200);
+    expect(await snapshot(checking.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: robId, candidateId });
+    expect((await snapshot(atWork.id)).stages.find(step => step.stage === 'review')).toMatchObject({ status: 'pending', ownerAgentId: null });
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, ritaId))).toMatchObject([{ taskId: checking.id, status: 'failed', error: 'switched_off' }]);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject(withQuestion ? [] : [{ taskId: checking.id, status: 'queued' }]);
+    if (question) {
+      expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
+      await expect(verdict(app.ctx, robId, checking.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    }
 
-    const [beforeMove] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
-    expect(beforeMove).toMatchObject({ status: 'review', stage: 1, panel: [ritaId], assigneeAgentId: ritaId });
-    const ritaJobsBefore = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
-    expect(ritaJobsBefore).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
-
-    const question = withQuestion ? await ask(app.ctx, ritaId, atPanel.id, { kind: 'question', text: 'Which checkout version?' }) : null;
-    const movedRita = await patch(app, ceo, ritaId, { team: urgent!.id });
-    expect(movedRita.statusCode).toBe(200);
-
-    const [afterRita] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
-    expect(afterRita).toMatchObject({ status: 'review', stage: 1, panel: [robId], assigneeAgentId: robId });
-    if (question) expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
-    const [futureGate] = await db.select().from(tasks).where(eq(tasks.id, atWork.id));
-    expect(futureGate!.gates).toEqual([]);
-    const ritaJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
-    expect(ritaJobsAfter).toMatchObject([{ taskId: atPanel.id, status: 'failed', error: 'switched_off' }]);
-    const robJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, robId));
-    expect(robJobsAfter).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
-
-    const lastQuestion = withQuestion ? await ask(app.ctx, robId, atPanel.id, { kind: 'question', text: 'Can I approve checkout?' }) : null;
-    const movedRob = await patch(app, ceo, robId, { team: urgent!.id });
-    expect(movedRob.statusCode).toBe(200);
-    const [afterRob] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
-    expect(afterRob).toMatchObject({ status: 'done', panel: [] });
-    if (lastQuestion) expect((await db.select().from(requests).where(eq(requests.id, lastQuestion.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
-    const robJobsDone = await db.select().from(jobs).where(eq(jobs.agentId, robId));
-    expect(robJobsDone).toMatchObject([{ taskId: atPanel.id, status: 'failed', error: 'switched_off' }]);
+    expect((await patch(app, ceo, robId, { team: urgent!.id })).statusCode).toBe(200);
+    expect(await snapshot(checking.id)).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null, candidateId });
+    expect((await db.select().from(tasks).where(eq(tasks.id, checking.id)))[0]!.status).toBe('waiting');
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject(withQuestion ? [] : [{ taskId: checking.id, status: 'failed', error: 'switched_off' }]);
+    if (question) expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
   });
 
-  it.each([false, true])("withdraws only the departing reviewer's questions and resumes the remaining review (other question: %s)", async otherAsks => {
-    const { app, db, ceo, dev, teamKey, codex, brunoId } = await company();
+  it.each([false, true])('keeps current and independent questions when a Review owner moves into a sub-unit (other question: %s)', async otherAsks => {
+    const { app, db, ceo, dev, teamKey, codex, brunoId, codeSource, snapshot } = await company();
+    await codeSource();
+    const staff = (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId: string, model: string) => ({ companyId: dev.companyId, departmentId: dev.id, kind, roleKey, name, model, subscriptionId, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) });
     const [head, rita, rob] = await db.insert(agents).values([
-      { companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey },
-      { companyId: dev.companyId, departmentId: dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rita', model: 'claude-sonnet-5-5', subscriptionId: teamKey },
-      { companyId: dev.companyId, departmentId: dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rob', model: 'gpt-6.1-sol', subscriptionId: codex },
+      staff('Hana', 'head', 'DEV-HEAD', teamKey, 'claude-sonnet-5-5'),
+      staff('Rita', 'worker', 'DEV-REV', teamKey, 'claude-sonnet-5-5'),
+      staff('Rob', 'worker', 'DEV-REV', codex, 'gpt-6.1-sol'),
     ]).returning();
     const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
-    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout review', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [rita!.id] });
-    await submit(app.ctx, brunoId, task.id, { summary: 'Done', evidence: 'Targeted tests' });
+    const create = async (title: string, reviewerAgentId: string) => (await createTask(app.ctx, { agentId: head!.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
+    const task = await create('Checkout review', rita!.id);
+    const independent = await create('Refund review', rob!.id);
+    const code = { summary: 'Candidate', evidence: 'Changed tests.', review: { baseCommit: BASE } };
+    await submit(app.ctx, brunoId, task.id, code);
+    await submit(app.ctx, brunoId, independent.id, code);
+    const candidateId = (await snapshot(task.id)).candidateId;
     const first = await ask(app.ctx, rita!.id, task.id, { kind: 'question', text: 'Which version?' });
-    const second = otherAsks ? await ask(app.ctx, rob!.id, task.id, { kind: 'question', text: 'Which deployment?' }) : null;
+    const second = otherAsks ? await ask(app.ctx, rob!.id, independent.id, { kind: 'question', text: 'Which deployment?' }) : null;
     const { task: work } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Review tooling', brief: '', body: '', departmentId: dev.id, assigneeAgentId: rita!.id, executor: true });
     const ownQuestion = await ask(app.ctx, rita!.id, work.id, { kind: 'question', text: 'Which tool version?' });
     const [history] = await db.insert(requests).values({ companyId: dev.companyId, taskId: task.id, agentId: rita!.id, kind: 'question', text: 'Settled scope', status: 'answered', answer: 'Checkout only', answeredAt: new Date() }).returning();
 
     expect((await patch(app, ceo, rita!.id, { team: team!.id })).statusCode).toBe(200);
-
-    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: otherAsks ? 'waiting' : 'review', panel: [rob!.id], assigneeAgentId: rob!.id });
-    expect((await db.select().from(requests).where(eq(requests.id, first.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
-    if (second) expect((await db.select().from(requests).where(eq(requests.id, second.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null, agentId: rob!.id });
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, rob!.id))).toMatchObject(otherAsks ? [] : [{ taskId: task.id, status: 'queued' }]);
-    expect((await db.select().from(requests).where(eq(requests.id, ownQuestion.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
-    expect((await db.select().from(tasks).where(eq(tasks.id, work.id)))[0]).toMatchObject({ status: 'waiting', stage: 0, assigneeAgentId: rita!.id });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'review', ownerAgentId: rob!.id, candidateId });
+    for (const request of [first.request, ownQuestion.request, ...(second ? [second.request] : [])]) expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
+    expect(await snapshot(work.id)).toMatchObject({ stage: 'architecture', phase: 'waiting', ownerAgentId: null });
+    expect((await snapshot(independent.id)).ownerAgentId).toBe(rob!.id);
     expect((await db.select().from(requests).where(eq(requests.id, history!.id)))[0]).toMatchObject({ status: 'answered', answer: 'Checkout only' });
+    await expect(verdict(app.ctx, rob!.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    const [person] = await db.select().from(people);
+    const answered = await answer(app.ctx, { personId: person!.id }, first.request.id, { answer: 'Use the current checkout.' });
+    expect(answered.wakes.map(wake => wake.agentId)).toEqual([rob!.id]);
+    await verdict(app.ctx, rob!.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the specified version.' });
+    expect((await snapshot(task.id)).stage).toBe('tests');
+    if (second) await expect(verdict(app.ctx, rob!.id, independent.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked.' })).rejects.toMatchObject({ reason: 'task_invalid' });
   });
 
-  it('keeps an executor question when the executor moves into a sub-unit without leaving a review panel', async () => {
-    const { app, db, ceo, dev, teamKey, brunoId } = await company();
+  it('keeps an executor question when moving into a sub-unit leaves its current assignment', async () => {
+    const { app, db, ceo, dev, teamKey, brunoId, snapshot } = await company();
     const [head] = await db.insert(agents).values({ companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey }).returning();
     const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
     const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true });
@@ -466,7 +470,8 @@ describe('the employee card', () => {
 
     expect((await patch(app, ceo, brunoId, { team: team!.id })).statusCode).toBe(200);
 
-    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'waiting', stage: 0, panel: [], assigneeAgentId: brunoId });
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'waiting', assigneeAgentId: null, executorAgentId: brunoId });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'architecture', phase: 'waiting', ownerAgentId: null, candidateId: null });
     expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
   });
 });
