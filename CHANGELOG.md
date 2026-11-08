@@ -17,6 +17,10 @@ Keep the checks of one change small and in the workspace of whoever builds or re
   the `AUTHOR_CHECK` setting and the `review.authorCheckPlan` field of a submit are gone.
 - `npm run check:author` checks the change in the workspace where it is called, instead of printing a line for run_tests,
   and builds the protocol and the node again when their files changed since their last build; its `--plan` option is gone.
+- An agent's worktree gets its commit's dependencies from the company's shared harness before its program starts: one
+  machine builds them for a commit and every other takes them, as for the full test runs. A worktree that already holds
+  dependencies stays as it is, a repository without a test environment costs nothing, and a program never waits longer
+  than ten minutes for them.
 
 ### Fixed
 
