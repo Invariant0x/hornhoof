@@ -815,7 +815,8 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
   const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
   const partOwner = createsIndependent && declaration?.kind === 'part' ? declaration.part.executor : null;
-  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, [revised.set.assigneeAgentId, partOwner].filter((id): id is string => Boolean(id)));
+  const newOwner = revised.set.assigneeAgentId === task.assigneeAgentId ? null : revised.set.assigneeAgentId;
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, [newOwner, partOwner].filter((id): id is string => Boolean(id)));
   let independent: Task | null = null;
   let changed: Task[] = [];
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;

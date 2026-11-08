@@ -640,6 +640,17 @@ describe('work for someone in a team that takes only urgent work', () => {
   });
 
   describe('leaves what someone holds with them', () => {
+    it('still refuses new independent work for the same existing holder after its team takes only urgent work', async () => {
+      const c = await company();
+      const top = await c.root();
+      const prerequisite = await c.under(top.id);
+      const held = await c.under(top.id, toSimon(c));
+      await c.db.update(teams).set({ urgentOnly: true }).where(eq(teams.id, c.quick.id));
+      await expect(updateTask(c.ctx, c.head.id, held.id, { after: [prerequisite.id], independentPart: { title: 'More examples', brief: 'Independent.', body: 'Write additional examples.', executor: c.simon.id } })).rejects.toMatchObject({ reason: 'urgent_only_team' });
+      expect(await c.db.select().from(tasks).where(eq(tasks.parentId, held.id))).toEqual([]);
+      expect(await c.read(held.id)).toMatchObject({ assigneeAgentId: c.simon.id, after: [] });
+    });
+
     it('when their team took only urgent work after they got it', async () => {
       const c = await company();
       const held = await c.under((await c.root()).id, toSimon(c));
