@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { testParts } from '../src/db/schema.js';
+import { testParts, testRuns } from '../src/db/schema.js';
 import { report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
@@ -20,6 +20,22 @@ describe('Tests verifies the final candidate without changing it', () => {
     const run = await f.manualRun();
     expect(run.command).toBe('Changed tests');
     expect(run.environmentSnapshot).toBeNull();
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons.phase).toBe('active');
+  });
+  it.each(['base', 'manifest', 'missing-fingerprint', 'duplicate-fingerprint', 'receipt', 'receipt-commit', 'selection'] as const)('rejects %s evidence after a product run has passed', async problem => {
+    const f = await testsFixture(), run = await f.run();
+    expect(run.status).toBe('passed');
+    const snapshot = structuredClone(run.environmentSnapshot!);
+    if (problem === 'base') snapshot.candidate!.baseCommit = 'f'.repeat(40);
+    if (problem === 'manifest') snapshot.description.manifestHash = 'f'.repeat(64);
+    if (problem === 'missing-fingerprint') snapshot.candidate!.fingerprints.pop();
+    if (problem === 'duplicate-fingerprint') snapshot.candidate!.fingerprints.push(snapshot.candidate!.fingerprints[0]!);
+    await f.db.update(testRuns).set({ environmentSnapshot: snapshot }).where(eq(testRuns.id, run.id));
+    const [part] = await f.db.select().from(testParts).where(eq(testParts.runId, run.id));
+    if (problem === 'receipt') await f.db.update(testParts).set({ environmentReceipt: null }).where(eq(testParts.id, part!.id));
+    if (problem === 'receipt-commit') await f.db.update(testParts).set({ environmentReceipt: { ...part!.environmentReceipt!, commitSha: BASE } }).where(eq(testParts.id, part!.id));
+    if (problem === 'selection') await f.db.update(testParts).set({ environmentSelection: { selection: { kind: 'suite', suiteId: 'vitest', files: ['web/test/other.test.ts'] }, after: [] } }).where(eq(testParts.id, part!.id));
     await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons.phase).toBe('active');
   });

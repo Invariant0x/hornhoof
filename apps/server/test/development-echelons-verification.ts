@@ -1,8 +1,13 @@
+import { randomUUID } from 'node:crypto';
+import { hashTestEnvironment } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
-import { startRun } from '../src/modules/testruns/runs.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { acceptDescription, noteTestCapabilities } from '../src/modules/testruns/describe.js';
+import { partDone, startRun } from '../src/modules/testruns/runs.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
+import { planningEnvironment } from './fixtures/run-planning/environment.js';
 
 export async function testsFixture(fix = false) {
   const f = await fixture();
@@ -17,17 +22,53 @@ export async function testsFixture(fix = false) {
   } else await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
   const snapshot = (await f.detail()).echelons;
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.tester.id, subscriptionId: f.tester.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Verify final candidate', timeoutMs: 1000 }).returning();
-  const manualRun = async (commit = finalCommit, parts = 1) => {
+  const start = async (command?: string) => {
     await startRun(f.ctx, { id: job!.id, companyId: f.task.companyId, agentId: f.tester.id, agentKind: f.tester.kind, departmentId: f.tester.departmentId }, {
-      task: f.task.id, command: 'Changed tests', candidate: { candidateId: snapshot.candidateId!, revision: snapshot.revision },
+      task: f.task.id, ...(command ? { command } : {}), candidate: { candidateId: snapshot.candidateId!, revision: snapshot.revision },
     });
     const [value] = await f.db.select().from(testRuns).where(and(eq(testRuns.taskId, f.task.id), eq(testRuns.agentId, f.tester.id))).orderBy(desc(testRuns.number)).limit(1);
+    return value!;
+  };
+  const manualRun = async (commit = finalCommit, parts = 1) => {
+    const value = await start('Changed tests');
     const [finished] = await f.db.update(testRuns).set({ status: 'passed', finishedAt: new Date(), commitSha: commit, parts }).where(eq(testRuns.id, value!.id)).returning();
     if (parts) await f.db.update(testParts).set({ status: 'passed', commit, exitCode: 0 }).where(eq(testParts.runId, value!.id));
     else await f.db.delete(testParts).where(eq(testParts.runId, value!.id));
     return finished!;
   };
+  const run = async (commit = finalCommit, parts = 1) => {
+    const value = await start(), request = { ...value.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
+    await f.db.update(testRuns).set({ environmentRequest: request }).where(eq(testRuns.id, value.id));
+    const { snapshot: environment } = await planningEnvironment(), description = environment.description, manifest = description.manifest;
+    manifest.runtimes = [{ id: 'node', version: '22' }];
+    manifest.profiles = [{ id: 'fast', requiredSuiteIds: ['vitest'] }];
+    manifest.suites = [{ ...manifest.suites[0]!, profiles: ['fast'], finalChecks: [] }];
+    manifest.execution = { version: 2 };
+    description.repositoryScope = request.repositoryScope;
+    description.commitSha = finalCommit;
+    description.inventory = [description.inventory[0]!];
+    description.manifestSource = JSON.stringify(manifest);
+    description.manifestHash = await hashTestEnvironment(description.manifestSource);
+    const runtimes = [{ id: 'node', version: '22.0.0', fingerprint: 'e'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'f'.repeat(64) }];
+    description.runtimeCapabilities = runtimes;
+    const unit = description.inventory[0]!, fingerprints = [{ suiteId: unit.suiteId, file: unit.file, fingerprint: '1'.repeat(64) }];
+    noteTestCapabilities(f.ctx, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: runtimes });
+    await acceptDescription(f.ctx, BUILTIN, { type: 'tests.described', requestId: request.requestId, commitSha: finalCommit,
+      result: { status: 'ready', description, fingerprints, baseFingerprints: { commitSha: BASE, fingerprints: fingerprints.map(print => ({ ...print, fingerprint: '2'.repeat(64) })) } } });
+    const planned = await f.db.select().from(testParts).where(eq(testParts.runId, value.id));
+    if (planned.length !== 1 || planned[0]!.environmentSelection?.selection.kind !== 'batch') throw new Error('The fixture needs one authenticated candidate batch.');
+    const part = planned[0]!, selection = part.environmentSelection!.selection;
+    if (selection.kind !== 'batch') throw new Error('The fixture needs a batch selection.');
+    await f.db.update(testParts).set({ status: 'running', builtin: true, startedAt: new Date() }).where(eq(testParts.id, part.id));
+    await partDone(f.ctx, BUILTIN, { type: 'tests.done', partId: part.id, ok: true, error: null, exitCode: 0, commit: finalCommit, log: 'Candidate batch passed.',
+      environmentReceipt: { version: 2, profile: 'fast', selection, commitSha: finalCommit, manifestHash: description.manifestHash, runtimes,
+        outcomes: [{ index: 0, status: 'passed', exitCode: 0 }], dependencies: { key: null, hit: false }, environments: [],
+        phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } } });
+    if (parts === 0) await f.db.delete(testParts).where(eq(testParts.runId, value.id));
+    const [finished] = await f.db.update(testRuns).set({ commitSha: commit, parts }).where(eq(testRuns.id, value.id)).returning();
+    return finished!;
+  };
   const verified = (ids: string[]) => ({ done: true, summary: 'Verified the final changed scope.', ...{ verification: { candidateId: snapshot.candidateId!, revision: snapshot.revision, runIds: ids } } });
-  return { ...f, run: manualRun, manualRun, verified, snapshot, finalCommit };
+  return { ...f, run, manualRun, verified, snapshot, finalCommit };
 }
 
