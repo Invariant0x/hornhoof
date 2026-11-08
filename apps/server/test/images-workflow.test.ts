@@ -267,25 +267,68 @@ type Job = { needs?: string | string[]; if?: string; 'runs-on': string; permissi
 const JOBS = (parse(WORKFLOW) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job) => [job.needs ?? []].flat();
 
-type Results = Record<string, 'success' | 'failure' | 'skipped'>;
-type Scenario = { event?: string; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; cancelled?: boolean };
+type Result = 'success' | 'failure' | 'skipped';
+type Results = Record<string, Result>;
+/* What the registry holds for the commit of a push: a live check of exactly its build, none at all, or anything else the
+   door refuses (a proof that is no proof, of another commit or other images, partial, stale, or a registry it cannot read). */
+type Proof = 'found' | 'missing' | 'refused';
+type Scenario = { event?: string; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; cancelled?: boolean; proof?: Proof };
+
+const GATE = /^node apps\/server\/dist\/live-check-gate\.js (.+)$/;
+const STEP_OUTPUT = /^\$\{\{ steps\.([\w-]+)\.outputs\.([\w-]+) \}\}$/;
+
+/* How a job that runs ends, by the door's answers in its steps, as live-check-gate gives them (updates.test.ts proves them):
+   any no fails the job before its later steps, except a missing check where the step asks with --skip-missing, which
+   passes with found=false. A yes there passes with found=true. Every other step succeeds. */
+function ending(job: Job, proof: Proof): { result: Result; outputs: Record<string, string> } {
+  const steps: Record<string, Record<string, string>> = {};
+  for (const step of job.steps) {
+    const args = GATE.exec(step.run ?? '')?.[1];
+    if (args === undefined) continue;
+    const skips = args.split(' ').includes('--skip-missing');
+    if (proof === 'refused' || (proof === 'missing' && !skips)) return { result: 'failure', outputs: {} };
+    if (skips && step.id) steps[step.id] = { found: String(proof === 'found') };
+  }
+  const outputs = Object.entries(job.outputs ?? {}).map(([name, value]) => {
+    const [, step, output] = STEP_OUTPUT.exec(value) ?? [];
+    return [name, steps[step ?? '']?.[output ?? ''] ?? ''];
+  });
+  return { result: 'success', outputs: Object.fromEntries(outputs) };
+}
+
+/* Every job after the jobs it needs. */
+function inOrder(): string[] {
+  const order: string[] = [];
+  const visit = (name: string) => {
+    if (order.includes(name)) return;
+    needsOf(JOBS[name]!).forEach(visit);
+    order.push(name);
+  };
+  Object.keys(JOBS).forEach(visit);
+  return order;
+}
 
 /* Which jobs run, from the workflow's own conditions, as GitHub reads them: a condition with no status function of its own
-   runs only when every job before it, however far back, succeeded. Every job that runs ends as the scenario says. */
-function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', cancelled = false }: Scenario): Results {
+   runs only when every job before it, however far back, succeeded. The first job and the tests end as the scenario says;
+   every other job that runs ends by the door's answers in it. */
+function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', cancelled = false, proof = 'found' }: Scenario): Results {
   const results: Results = {};
+  const outputs: Record<string, Record<string, string>> = {};
   const ancestors = (name: string): string[] => needsOf(JOBS[name]!).flatMap(n => [n, ...ancestors(n)]);
   const context = () => ({
     github: { event_name: event, ref },
     cancelled: () => cancelled,
-    needs: Object.fromEntries(Object.keys(results).map(n => [n, { result: results[n], outputs: { proved: n === 'mark' && results[n] === 'success' ? String(proved) : '' } }])),
+    needs: Object.fromEntries(Object.keys(results).map(n => [n, { result: results[n], outputs: outputs[n] ?? {} }])),
   });
-  for (const name of ['mark', 'test', 'images', 'publish', 'release']) {
+  for (const name of inOrder()) {
     const expression = (JOBS[name]!.if ?? 'true').replace(/^\$\{\{|\}\}$/g, '').trim();
     const ownStatus = /\b(always|cancelled|failure|success)\(\)/.test(expression);
     const allowed = ownStatus || (ancestors(name).every(n => results[n] === 'success') && !cancelled);
     const runs = allowed && Boolean(runInNewContext(expression, context()));
-    results[name] = !runs ? 'skipped' : name === 'mark' ? markJob : name === 'test' ? tests : 'success';
+    if (!runs) results[name] = 'skipped';
+    else if (name === 'mark') [results[name], outputs[name]] = [markJob, markJob === 'success' ? { proved: String(proved) } : {}];
+    else if (name === 'test') results[name] = tests;
+    else ({ result: results[name], outputs: outputs[name] } = ending(JOBS[name]!, proof));
   }
   return results;
 }
@@ -341,6 +384,38 @@ describe('.github/workflows/images.yml', () => {
   it('builds and moves nothing once the run is cancelled', () => {
     expect(runWorkflow({ proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
     expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+  });
+
+  it('skips the publish job and the release, and fails nothing, when the build of a push to main has no live check yet', () => {
+    for (const proved of [false, true]) {
+      const results = runWorkflow({ proved, proof: 'missing' });
+      expect(results).toMatchObject({ publish: 'skipped', release: 'skipped' });
+      expect(Object.values(results)).not.toContain('failure');
+    }
+  });
+
+  it('fails, and neither publishes nor releases, when the door refuses the live check for any other reason', () => {
+    for (const proved of [false, true]) {
+      const results = runWorkflow({ proved, proof: 'refused' });
+      expect(results.publish).not.toBe('success');
+      expect(results.release).toBe('skipped');
+      expect(Object.values(results)).toContain('failure');
+    }
+  });
+
+  it('publishes and releases with the live check of exactly this build', () => {
+    for (const proved of [false, true]) expect(runWorkflow({ proved, proof: 'found' })).toMatchObject({ publish: 'success', release: 'success' });
+  });
+
+  it('lets only a job with the right to read alone pass on a missing check, while the publish job asks the door as strictly as before', () => {
+    const asks = (job: Job, skipping: boolean) => job.steps.some(step => GATE.exec(step.run ?? '')?.[1].split(' ').includes('--skip-missing') === skipping);
+    const looking = Object.values(JOBS).filter(job => asks(job, true));
+    expect(looking).toHaveLength(1);
+    expect(looking[0]!.permissions).toEqual({ contents: 'read' });
+    expect(looking[0]!.steps[0]).toMatchObject({ uses: expect.stringMatching(/^actions\/checkout@[0-9a-f]{40}$/), with: { 'persist-credentials': false } });
+    expect(JSON.stringify(looking[0])).not.toMatch(/secrets\.|imagetools|:latest/);
+    expect(asks(JOBS.publish!, true)).toBe(false);
+    expect(asks(JOBS.publish!, false)).toBe(true);
   });
 
   it('runs the tests in four parts, on GitHub’s machines unless the repository variable names other runners', () => {

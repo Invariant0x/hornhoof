@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { LIVE_CHECK_LABEL, LIVE_CHECK_PROGRAMS, liveCheckTag } from '@hornhoof/protocol/live-check';
+import { LIVE_CHECK_LABEL, LIVE_CHECK_PROGRAMS, LIVE_CHECK_REFUSALS, liveCheckTag, type LiveCheckReason } from '@hornhoof/protocol/live-check';
 import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
@@ -470,6 +470,60 @@ describe('the live check of a build', () => {
       writeFileSync(bad, JSON.stringify(proofOf(SHA, LATEST, { images: { app: other, node: other, updater: other } })));
       expect((await gate(registry, '--commit', SHA, '--proof', good)).status).toBe(0);
       expect((await gate(registry, '--commit', SHA, '--proof', bad)).status).toBe(1);
+    });
+
+    /* How the proof job of the Images workflow asks for a push to main: a build with no live check yet has nothing to
+       publish, and the publish job is skipped. Any other no still stops the workflow. */
+    describe('with --skip-missing', () => {
+      const outputs = () => join(mkdtempSync(join(tmpdir(), 'hh-gate-')), 'outputs');
+
+      it.each<[string, Parameters<typeof fakeRegistry>[0]]>([
+        ['a build with no live check', { [SHA]: LATEST }],
+        ['a commit nobody built images of', {}],
+      ])('says found=false and passes for %s', async (_name, builds) => {
+        const registry = await fakeRegistry(builds, [], {});
+        const file = outputs();
+        const result = await gate(registry, '--commit', SHA, '--skip-missing', '--outputs', file);
+        expect(result.status).toBe(0);
+        expect(readFileSync(file, 'utf8')).toBe('found=false\n');
+      });
+
+      it('says found=true and names the images it judged for exactly the build of the commit', async () => {
+        const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
+        const file = outputs();
+        expect((await gate(registry, '--commit', SHA, '--skip-missing', '--outputs', file)).status).toBe(0);
+        const { app, node, updater } = proofOf(SHA, LATEST).images;
+        expect(readFileSync(file, 'utf8')).toBe(`app=${app}\nnode=${node}\nupdater=${updater}\nfound=true\n`);
+      });
+
+      it.each<[string, Parameters<typeof fakeRegistry>[0], Record<string, unknown>, LiveCheckReason]>([
+        ['a proof that is no proof', { [SHA]: LATEST }, { [SHA]: 'all fine' }, 'invalid'],
+        ['a proof of another commit', { [SHA]: LATEST }, { [SHA]: proofOf(SHA, { ...LATEST, commit: 'c'.repeat(40) }) }, 'foreign'],
+        ['a proof of other images', { [SHA]: LATEST }, { [SHA]: proofOf(SHA, LATEST, { images: { app: other, node: other, updater: other } }) }, 'foreign'],
+        ['images of another commit under its tag', { [SHA]: { commit: 'c'.repeat(40), version: '0.4.1' } }, {}, 'foreign'],
+        ['a partial proof', { [SHA]: LATEST }, { [SHA]: proofOf(SHA, LATEST, { programs: twoProgramsOnly }) }, 'partial'],
+        ['a proof older than its images', { [SHA]: { ...LATEST, created: '2026-11-02T00:00:00Z' } }, { [SHA]: proofOf(SHA, LATEST) }, 'stale'],
+      ])('stops on %s, and names nothing', async (_name, builds, proofs, reason) => {
+        const registry = await fakeRegistry(builds, [], proofs);
+        const file = outputs();
+        const result = await gate(registry, '--commit', SHA, '--skip-missing', '--outputs', file);
+        expect(result.status).toBe(1);
+        expect(result.stderr.trim().split('\n').at(-1)).toBe(`${LIVE_CHECK_REFUSALS[reason]} (${reason})`);
+        expect(existsSync(file)).toBe(false);
+      });
+
+      it.each<[string, RegExp | undefined]>([
+        ['the live check', /live-check-/],
+        ['anything', undefined],
+      ])('stops when the registry cannot read %s: unread is no missing proof', async (_what, only) => {
+        const registry = await fakeRegistry({ [SHA]: LATEST }, [], {});
+        registry.fail(500, only);
+        const file = outputs();
+        const result = await gate(registry, '--commit', SHA, '--skip-missing', '--outputs', file);
+        expect(result.status).toBe(1);
+        expect(result.stderr.trim().split('\n').at(-1)).toBe(`${LIVE_CHECK_UNREAD} (unread)`);
+        expect(existsSync(file)).toBe(false);
+      });
     });
   });
 
