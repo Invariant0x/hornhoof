@@ -505,6 +505,14 @@ test('a change in a package without an adapter takes that package whole and noth
   assert.equal(ports.seen.select[0].environment.packages.some(item => item.id === 'ruby'), false);
 });
 
+test('a changed node-test file takes its package without asking the Vitest graph to collect it', async () => {
+  const ports = selector();
+  const changes = [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'scripts/test/a.test.mjs', kind: 'modified' }];
+  const result = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages.map(item => [item.packageId, item.mode]), [['node', 'related'], ['scripts', 'whole-package']]);
+  assert.deepEqual(ports.seen.vitest.changed, ['apps/node/src/a.ts']);
+});
+
 test('a selection of the whole suite stays unavailable until it is asked for', async () => {
   const whole = { packages: ['node', 'scripts', 'ruby'].map(packageId => ({ packageId, mode: 'whole-package', units: [] })) };
   const changes = [{ path: 'package.json', kind: 'modified' }];
