@@ -12,12 +12,12 @@ import { taskDetail, taskLines, type AgentRef, type LogLine, type TaskDetail, ty
 /* What a person reads of tasks by who they see (auth/agent-view.ts): the work of the agents they see in a place they
    reach, and what they gave themselves. The rest reads as if it were not there; agents' own tools do not come this way. */
 
-export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'panel'>;
+export type TaskPlace = Pick<Task, 'departmentId' | 'productId' | 'createdByPersonId' | 'createdByAgentId' | 'assigneeAgentId' | 'executorAgentId'>;
 
 export function seesTask(viewer: AgentViewer, task: TaskPlace): boolean {
   if (!canReach(viewer.access, taskSpot(task))) return false;
   if (viewer.full || task.createdByPersonId === viewer.personId) return true;
-  return [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId, ...task.gates, ...task.panel].some(id => seesAgentId(viewer, id));
+  return [task.assigneeAgentId, task.executorAgentId, task.createdByAgentId].some(id => seesAgentId(viewer, id));
 }
 
 const shownRef = (viewer: AgentViewer, agent: AgentRef | null) => (agent && seesAgentId(viewer, agent.id) ? agent : null);
@@ -86,7 +86,6 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
     ...maskLine(viewer, detail, detail.parent !== null),
     echelonFindings: emptyEchelonFindings(),
     executor: shownRef(viewer, detail.executor),
-    gates: detail.gates.filter(g => sees(g.id)),
     createdBy: detail.createdBy?.kind === 'agent' && !sees(detail.createdBy.id) ? null : detail.createdBy,
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
     log: shownLog(viewer, detail.log),

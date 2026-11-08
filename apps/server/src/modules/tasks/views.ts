@@ -10,7 +10,7 @@ import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
 import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
-import { CLOSED, type Task } from './engine.js';
+import { type Task } from './engine.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
 import type { TaskWait } from './wait-state.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
@@ -18,7 +18,7 @@ import { openWaitsOf, shownWaits } from './wait-views.js';
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
   return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
-    ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id || task.gates.includes(agent.id) || task.panel.includes(agent.id)));
+    ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id));
 }
 
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
@@ -33,11 +33,6 @@ export type TaskLine = {
   department: Place;
   product: Place;
   assignee: AgentRef | null;
-  stage: number;
-  gateCount: number;
-  /* It passed its gates and its executor merges it. */
-  merging: boolean;
-  bounces: number;
   turn: number | null;
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
@@ -53,9 +48,6 @@ export type TaskLine = {
   createdAt: string;
   updatedAt: string;
 };
-/* In the review of a turn, returned: a reviewer who found what blocks; skipped: one who did not check it, for want of a
-   subscription or having left it. */
-export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' };
 /* for: the person the orchestrator acted for, as in a request it answered for them. */
 export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
 /* images: the pictures the agent showed, commitUrl: where its commit can be seen, proof: what test runs say of that very
@@ -87,9 +79,6 @@ export type TaskDetail = TaskLine & {
   parent: { id: string; number: number; title: string } | null;
   after: AfterView[];
   executor: AgentRef | null;
-  gates: GateView[];
-  /* A review of a department's turn: every reviewer checks at once, and the head who gets the verdicts did no work. */
-  turnReview: boolean;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
   log: LogLine[];
@@ -110,10 +99,10 @@ type Names = {
 };
 
 /* Names for everything the tasks point at, read in one go. */
-async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
+async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
   const independent = await independentViews(ctx.db, rows.map(t => t.id));
   const partExecutors = [...independent.values()].flatMap(record => record.kind === 'part' ? [record.part.executor] : []);
-  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates]), ...partExecutors, ...more].filter((x): x is string => Boolean(x)))];
+  const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId]), ...partExecutors, ...more].filter((x): x is string => Boolean(x)))];
   const placeIds = [...new Set(rows.flatMap(t => [t.departmentId, t.productId]).filter((x): x is string => Boolean(x)))];
   const turnIds = [...new Set(rows.map(t => t.turnId).filter((x): x is string => Boolean(x)))];
   const agentRows = agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(inArray(agents.id, agentIds)) : [];
@@ -161,10 +150,6 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   department: n.place(t.departmentId),
   product: n.place(t.productId),
   assignee: n.agent(t.assigneeAgentId),
-  stage: t.stage,
-  gateCount: t.gates.length,
-  merging: t.merging,
-  bounces: t.bounces,
   turn: n.turn(t.turnId),
   parentId: t.parentId,
   waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
@@ -223,7 +208,7 @@ async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<type
   });
 }
 
-/* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
+/* One task as people and agents read it: the body, its required route, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
 export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
   const { db } = ctx;
@@ -242,12 +227,8 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);
-  /* The review of a turn names everyone who checks it as it opens, and each one's verdict says where they stand. */
-  const [made] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'created'))).limit(1);
-  const reviewers = made?.data.turnReview === true && Array.isArray(made.data.panel) ? [...(made.data.panel as string[]), ...((made.data.unable as string[] | undefined) ?? [])] : null;
-  const verdicts = reviewers ? await db.select({ agentId: taskEvents.agentId, data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'))) : [];
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
-  const n = await names(ctx, [task, ...subs], [...(reviewers ?? []), ...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
   const by = byOf(n, await forWhom(db, events.map(e => e.data)));
@@ -258,20 +239,6 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     parent,
     after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
     executor: n.agent(task.executorAgentId),
-    gates: reviewers
-      ? reviewers.flatMap(id => {
-          const a = n.agent(id);
-          const given = verdicts.find(v => v.agentId === id);
-          if (!a) return [];
-          return [{ ...a, state: given ? (given.data.pass === true ? 'passed' : 'returned') : CLOSED.includes(task.status) || !task.panel.includes(id) ? 'skipped' : 'current' }];
-        })
-      : task.gates.flatMap((id, i) => {
-          const a = n.agent(id);
-          if (!a) return [];
-          const at = i + 1;
-          return [{ ...a, state: task.status === 'done' || task.merging || at < task.stage ? 'passed' : at === task.stage && !['cancelled'].includes(task.status) ? 'current' : 'next' }];
-        }),
-    turnReview: reviewers !== null,
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
     log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId, e.data), at: e.at.toISOString() })),

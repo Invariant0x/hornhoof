@@ -178,7 +178,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             /* How often it wakes on its timer, in minutes. */
             timer: a.timerMinutes,
             /* Like the department's current task, only for people who reach it. */
-            task: now.task && seesTask(viewer, now.task) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces, echelons: shownEchelons(viewer, snapshots.get(now.task.id)!) } : null,
+            task: now.task && seesTask(viewer, now.task) ? { id: now.task.id, number: now.task.number, title: now.task.title, echelons: shownEchelons(viewer, snapshots.get(now.task.id)!) } : null,
           };
         });
     /* The roles a department's employees hold, with the gate each one keeps, for the department's schema. */

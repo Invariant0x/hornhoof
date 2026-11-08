@@ -99,7 +99,7 @@ export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 export type EmployeeStatus = 'working' | 'queued' | 'handed' | 'waiting' | 'idle' | 'off';
 
 /* The task an employee is about, for people who reach its department. */
-export type EmployeeTask = { echelons: EchelonsSnapshot; id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
+export type EmployeeTask = { echelons: EchelonsSnapshot; id: string; number: number; title: string };
 
 export type ProgramView = TurnProgram;
 
@@ -355,11 +355,6 @@ export type TaskLine = {
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
-  stage: number;
-  gateCount: number;
-  /* Every gate passed it and its executor puts the work together with the rest of the turn. */
-  merging: boolean;
-  bounces: number;
   turn: number | null;
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
@@ -381,10 +376,6 @@ export type TaskDetail = TaskLine & {
   /* The tasks of its turn it comes after, and where each stands. */
   after: { id: string; number: number; title: string; status: TaskStatus }[];
   executor: AgentRef | null;
-  /* returned: a reviewer in the review of a turn who found what blocks; skipped: one who did not check it. */
-  gates: (AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' })[];
-  /* The review of a department's turn: every reviewer checks at once, and the head who gets the verdicts did no work. */
-  turnReview?: boolean;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
   subtasks: TaskLine[];
   log: TaskLogLine[];
