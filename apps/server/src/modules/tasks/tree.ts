@@ -444,11 +444,17 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   const ends = lineEndDates(task, moves);
   const since = task.ownerSince;
   const ownerCut = cutDate && cutDate < since ? since : cutDate;
+  const completedAt = ends.mergedAt ?? ends.doneAt;
+  const handedOn = task.status === 'done' && task.echelons.resultKind === 'code' ? moves.find(event => {
+    const candidate = event.data.candidate as { producedBy?: { agentId?: string } } | undefined;
+    return event.kind === 'submitted' && event.agentId === actorId && candidate?.producedBy?.agentId === actorId;
+  }) : undefined;
+  const observedEnd = handedOn && completedAt && handedOn.createdAt < completedAt ? handedOn.createdAt : completedAt;
   const asks = listOf(ix.asksByPair, `${task.id}:${agent.id}`);
   const segments = withExternalWait(withPrograms(lineSegments({
     createdAt: since,
     cutAt: ownerCut,
-    endAt: ends.mergedAt ?? ends.doneAt,
+    endAt: observedEnd,
     now,
     requests: asks,
     signs: lineSigns(task.id, moves, ix),

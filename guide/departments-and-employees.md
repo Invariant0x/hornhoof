@@ -161,7 +161,7 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Sales | - | Account executive | Head of sales, Sales development representative, Sales operations analyst |
 | Support | - | Second-line support | First-line support, Head of support, Knowledge base editor |
 
-Deep roles: Architect, Controller, Head of business development, Head of development, Security engineer.
+Deep roles: Architect, Code reviewer, Controller, Head of business development, Head of development, Security engineer.
 
 ## What if a role has nobody switched on?
 
