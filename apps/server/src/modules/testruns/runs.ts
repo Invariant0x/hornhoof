@@ -26,6 +26,7 @@ import { computerKey, computerState, Reservations, type ComputerPlace } from './
 import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
+import { PartDeliveries, RECEIVE_MS } from './delivery.js';
 import { pickMachine } from './pick.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 
@@ -96,6 +97,8 @@ function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable' | 'commitSha
 
 /* A part of a pinned run that checked another commit, or passed without saying which. */
 const COMMIT_MISMATCH = 'commit_mismatch';
+/* A part whose machine did not say within seconds that it got it. */
+const NOT_RECEIVED = 'not_received';
 
 /* Why a part ended, after its number in the result. */
 const ENDED_HOW: Record<string, (run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: Part) => string> = {
@@ -109,6 +112,7 @@ const ENDED_HOW: Record<string, (run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: P
   subscription_removed: () => 'its machine lost the plan its node ran for',
   no_machine: () => `no machine was free for it within ${took(WAIT_MS)}`,
   no_repository: () => 'the repository is no longer set',
+  [NOT_RECEIVED]: () => `its machine did not say it got it within ${took(RECEIVE_MS)}`,
   [COMMIT_MISMATCH]: (run, p) =>
     p.commit
       ? `it checked ${p.commit}, not the pinned commit ${run.commitSha}, so the run proves nothing about that commit`
@@ -127,6 +131,7 @@ const LOST_HOW: Record<string, string> = {
   machine_offline: 'went offline',
   machine_disconnected: 'was disconnected from the company',
   subscription_removed: 'lost the plan its node ran for',
+  [NOT_RECEIVED]: `did not say it got it within ${took(RECEIVE_MS)}`,
 };
 /* A part lost in any way but a restart its node reported may still run on its machine. */
 const mayStillRun = (why: string) => why in LOST_HOW && why !== 'machine_restarted';
@@ -192,10 +197,11 @@ async function companyComputers(db: Ctx['db'], companyId: string) {
   return { rows, live };
 }
 
-/* Only nodes that say how busy they are know test runs, only those with a user of their own for runs take them, and one
-   that waits for an update takes none. */
+/* Only nodes that say how busy they are know test runs, only those with a user of their own for runs take them, one that
+   waits for an update takes none, and only one that confirms each part it gets takes any: a part sent to another could
+   wait out its whole time limit on a machine that never had it. */
 const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
-  !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null;
+  !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null && testCapabilities(ctx, node).testDispatch === 1;
 
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
@@ -484,6 +490,40 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
     .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(id)));
 }
 
+const deliveries = new WeakMap<Ctx, PartDeliveries>();
+function deliveriesOf(ctx: Ctx): PartDeliveries {
+  let sent = deliveries.get(ctx);
+  if (!sent) {
+    sent = new PartDeliveries(() => void checkTestReceipts(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'Test parts no machine said it got could not be given out again.')));
+    deliveries.set(ctx, sent);
+  }
+  return sent;
+}
+export function closeTestDeliveries(ctx: Ctx): void { deliveries.get(ctx)?.close(); deliveries.delete(ctx); }
+
+/* The node has a part it was sent: it said so, waits for a slot for it, or started it. A part runs on one machine at a
+   time, so one the node has though it does not run there under that id stops there: it went to another machine after
+   this one said nothing in time, or it ended meanwhile. */
+export async function partReceived(ctx: Ctx, id: NodeIdentity, partId: string): Promise<void> {
+  if (!isId(partId) || deliveriesOf(ctx).received(partId, id)) return;
+  const [here] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(id)));
+  if (!here) ctx.hub.send(id, { type: 'tests.cancel', partId });
+}
+
+/* Parts whose machine did not say within RECEIVE_MS that it got them: each goes to another machine under a new id, as a
+   lost part does, so nothing that machine says of the old id counts, and the machine is told to stop it should it have
+   it after all. */
+export async function checkTestReceipts(ctx: Ctx, now = new Date()): Promise<void> {
+  const due = deliveriesOf(ctx).due(now.getTime());
+  for (const { partId, node } of due) {
+    const which = and(eq(testParts.id, partId), ofNode(node))!;
+    const [running] = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(which, eq(testParts.status, 'running')));
+    if (!running) continue;
+    ctx.hub.send(node, { type: 'tests.cancel', partId });
+    await loseParts(ctx, which, NOT_RECEIVED);
+  }
+}
+
 /* How a part's end counts for its run. A part of a pinned run that checked another commit, or passed without saying
    which, proves nothing about that commit, whatever its command did. One that failed before it reached any commit keeps
    its own reason. */
@@ -502,6 +542,7 @@ async function keepPartResults(ctx: Ctx, run: Run, part: Part, ended: Part, msg:
 /* The node's end of a part: its result, and its log on the task, also for a part that ended here first. */
 export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Promise<void> {
   const { db } = ctx;
+  deliveriesOf(ctx).received(msg.partId, id);
   if (isId(msg.partId)) {
     const [found] = await db.select({ part: testParts, run: testRuns }).from(testParts).innerJoin(testRuns, eq(testRuns.id, testParts.runId)).where(and(eq(testParts.id, msg.partId), ofNode(id)));
     if (found && found.part.status !== 'queued') {
@@ -524,6 +565,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
    meanwhile stop. A node of a build before test runs knows none. */
 export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = []): Promise<void> {
   const known = has.filter(isId);
+  for (const partId of known) deliveriesOf(ctx).received(partId, id);
   await loseParts(ctx, and(ofNode(id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
     const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(id)));
@@ -537,6 +579,7 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
    waited too long for a machine. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
   const { db } = ctx;
+  await checkTestReceipts(ctx, now);
   const open = await db
     .select({ part: testParts, run: testRuns })
     .from(testParts)
@@ -892,9 +935,12 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) return;
+    /* Waited for before it goes, as the node may say it got it before this pass goes on. */
+    deliveriesOf(ctx).expect(part.id, place.node, Date.now());
     const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, withKept(partMessage(run, part, found.repo, task.number), kept));
     /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
     if (!sent) {
+      deliveriesOf(ctx).forget(part.id);
       await db
         .update(testParts)
         .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })

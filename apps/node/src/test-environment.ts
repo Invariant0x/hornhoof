@@ -211,7 +211,9 @@ export function harnessVersion(description: EnvironmentDescription): string {
   return digest(JSON.stringify({ dependencies, prepare, services, reset, inputs: description.inputDigests }));
 }
 export const harnessPlatform = (): string => `${process.platform}-${process.arch}`;
-export type TestCapabilities = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1 };
+export type TestCapabilities = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1; testDispatch?: 1 };
+/* What every node says of itself however its test user is set up: it confirms each part it gets. */
+export const TEST_DISPATCH = { testDispatch: 1 } as const;
 export async function nodeTestCapabilities(dir: string, user: JobUser | null): Promise<TestCapabilities> {
   if (!user || user.uid === 0 || user.uid === process.getuid?.()) return {};
   const cacheRoot = await privateCacheRoot(join(dir, 'cache'));
@@ -265,9 +267,13 @@ export class NodeTestMessages {
     });
     this.syncing.set(message.requestId, { stop, done }); return done;
   }
+  /* The part is said to be here before anything else happens to it, and again for a copy, so Hornhoof hears within
+     seconds whether it reached a node that takes it. A stopping node says nothing, and the part goes elsewhere. */
   private run(message: TestRunMessage): Promise<void> | void {
     const { options } = this;
-    if (options.stopped() || options.testing.has(message.partId) || options.unconfirmed.has(message.partId)) return;
+    if (options.stopped()) return;
+    options.emit({ type: 'tests.received', partId: message.partId });
+    if (options.testing.has(message.partId) || options.unconfirmed.has(message.partId)) return;
     const stop = new AbortController(), done = Promise.resolve().then(() => options.run(message, stop.signal));
     options.testing.set(message.partId, { stop, done }); return done;
   }

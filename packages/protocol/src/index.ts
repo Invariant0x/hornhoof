@@ -457,6 +457,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
     /* It takes the harness of a product ahead of any run, and shares what it builds through Hornhoof. */
     testHarness: z.literal(1).optional(),
+    /* It says tests.received of each part the moment the part reaches it. Hornhoof gives no part to a node without it. */
+    testDispatch: z.literal(1).optional(),
     /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
@@ -476,6 +478,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape }),
+  /* The node has the part it was sent, said before it waits for a slot, prepares or runs anything, and again for each copy
+     of it. Hornhoof gives a part it hears nothing of within seconds to another machine. */
+  z.object({ type: z.literal('tests.received'), partId: z.string() }),
   z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */
@@ -506,6 +511,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
     /* It takes the harness of a product ahead of any run, and shares what it builds through Hornhoof. */
     testHarness: z.literal(1).optional(),
+    testDispatch: z.literal(1).optional(),
   }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({

@@ -15,7 +15,7 @@ import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protoco
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
-import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
+import { TestPartUser, NodeTestMessages, TEST_DISPATCH, isNodeTestMessage, nodeTestCapabilities, type readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -318,7 +318,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
-  const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
+  const testCapabilities: TestCapabilities = { ...(await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; })), ...TEST_DISPATCH };
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);

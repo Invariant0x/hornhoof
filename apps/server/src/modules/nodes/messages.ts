@@ -16,7 +16,7 @@ import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { harnessGreeted, harnessSynced } from '../testruns/harness.js';
-import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
+import { partDone, partReceived, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
@@ -368,7 +368,10 @@ async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Pr
     case 'status': noteTestCapabilities(ctx, id, msg); return false;
     case 'tests.harness.done': await harnessSynced(ctx, id, msg); return true;
     case 'tests.described': await acceptDescription(ctx, id, msg); await pumpTests(ctx); return true;
-    case 'tests.started': await partStarted(ctx, id, msg.partId); return true;
+    /* Each word of a part on a node says the node has it. */
+    case 'tests.received': await partReceived(ctx, id, msg.partId); return true;
+    case 'tests.waiting': await partReceived(ctx, id, msg.partId); return true;
+    case 'tests.started': await partReceived(ctx, id, msg.partId); await partStarted(ctx, id, msg.partId); return true;
     case 'tests.done': await partDone(ctx, id, msg); return true;
     default: return false;
   }
