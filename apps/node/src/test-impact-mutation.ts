@@ -25,32 +25,43 @@ function parsed(input: FingerprintInput): Map<string, ts.SourceFile> {
 }
 function importedTypes(node: ts.ImportDeclaration): boolean {
   const clause = node.importClause;
-  return Boolean(clause?.isTypeOnly || (clause && !clause.name && clause.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.every(item => item.isTypeOnly)));
+  if (!clause) return false;
+  return clause.isTypeOnly || (!clause.name && onlyNamedTypes(clause.namedBindings));
+}
+function onlyNamedTypes(bindings: ts.NamedImportBindings | undefined): boolean {
+  return Boolean(bindings && ts.isNamedImports(bindings) && bindings.elements.every(item => item.isTypeOnly));
 }
 function resolves(files: Map<string, ts.SourceFile>, from: string, specifier: string): boolean {
   const target = posix.join(posix.dirname(from), specifier), stem = target.replace(/\.[cm]?js$/, '');
   return [target, ...['.ts', '.tsx', '.mts', '.cts', '.js', '/index.ts', '/index.js'].map(extension => stem + extension)].some(path => files.has(path));
 }
+function runtimeImport(node: ts.Statement): string | null | undefined {
+  if (ts.isImportEqualsDeclaration(node)) return undefined;
+  if (ts.isImportDeclaration(node) && importedTypes(node)) return null;
+  if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return null;
+  if (ts.isExportDeclaration(node) && node.isTypeOnly) return null;
+  if (!node.moduleSpecifier) return null;
+  return ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : undefined;
+}
 function unsafeImports(file: ts.SourceFile, files: Map<string, ts.SourceFile>): boolean {
   return file.statements.some(node => {
-    if (ts.isImportDeclaration(node) && importedTypes(node)) return false;
-    if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return ts.isImportEqualsDeclaration(node);
-    if (ts.isExportDeclaration(node) && node.isTypeOnly) return false;
-    if (!node.moduleSpecifier) return false;
-    if (!ts.isStringLiteral(node.moduleSpecifier)) return true;
-    const specifier = node.moduleSpecifier.text;
+    const specifier = runtimeImport(node);
+    if (specifier === undefined) return true;
+    if (specifier === null) return false;
     return specifier.startsWith('.') ? !resolves(files, file.fileName, specifier) : !(specifier === 'vitest' && FIXTURE.test(file.fileName));
   });
 }
 function someNode(node: ts.Node, predicate: (node: ts.Node) => boolean): boolean {
   return predicate(node) || Boolean(ts.forEachChild(node, child => someNode(child, predicate)));
 }
+const DECLARATIONS = new Set([ts.SyntaxKind.ImportDeclaration, ts.SyntaxKind.ExportDeclaration, ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.TypeAliasDeclaration, ts.SyntaxKind.InterfaceDeclaration]);
+function unsafeInitializer(item: ts.VariableDeclaration): boolean {
+  const value = item.initializer;
+  if (!value || ts.isArrowFunction(value) || ts.isFunctionExpression(value)) return false;
+  return someNode(value, child => ts.isCallExpression(child) || unsafeSyntax(child) || (ts.isIdentifier(child) && FORBIDDEN.has(child.text)));
+}
 function unsafeInitialization(file: ts.SourceFile): boolean {
-  return file.statements.some(node => {
-    if (ts.isVariableStatement(node)) return node.declarationList.declarations.some(item => item.initializer && !ts.isArrowFunction(item.initializer) && !ts.isFunctionExpression(item.initializer)
-      && someNode(item.initializer, child => ts.isCallExpression(child) || unsafeSyntax(child) || (ts.isIdentifier(child) && FORBIDDEN.has(child.text))));
-    return !(ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node));
-  });
+  return file.statements.some(node => ts.isVariableStatement(node) ? node.declarationList.declarations.some(unsafeInitializer) : !DECLARATIONS.has(node.kind));
 }
 function unsafeJudge(path: string, files: Map<string, ts.SourceFile>, graph: Graph): boolean {
   return [...graph.closure(path)].some(file => {
@@ -59,13 +70,15 @@ function unsafeJudge(path: string, files: Map<string, ts.SourceFile>, graph: Gra
       || someNode(node, child => ts.isIdentifier(child) && FORBIDDEN.has(child.text));
   });
 }
+function assignedFunction(item: ts.VariableDeclaration): [string, FunctionNode][] {
+  const value = item.initializer;
+  return ts.isIdentifier(item.name) && value && (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) ? [[item.name.text, value]] : [];
+}
 function functionsOf(file: ts.SourceFile): Functions {
   const functions: Functions = new Map();
   for (const node of file.statements) {
     if (ts.isFunctionDeclaration(node) && node.name && node.body) functions.set(node.name.text, node);
-    if (ts.isVariableStatement(node)) for (const item of node.declarationList.declarations) {
-      if (ts.isIdentifier(item.name) && item.initializer && (ts.isArrowFunction(item.initializer) || ts.isFunctionExpression(item.initializer))) functions.set(item.name.text, item.initializer);
-    }
+    if (ts.isVariableStatement(node)) for (const item of node.declarationList.declarations.flatMap(assignedFunction)) functions.set(...item);
   }
   return functions;
 }
@@ -75,50 +88,75 @@ function constantNames(file: ts.SourceFile): Set<string> {
 }
 function reference(node: ts.Identifier): boolean {
   const parent = node.parent;
-  return !(ts.isPropertyAccessExpression(parent) && parent.name === node) && !(ts.isPropertyAssignment(parent) && parent.name === node)
-    && !(ts.isVariableDeclaration(parent) && parent.name === node) && !(ts.isParameter(parent) && parent.name === node);
+  const named = ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent) || ts.isVariableDeclaration(parent) || ts.isParameter(parent);
+  return !named || parent.name !== node;
 }
 function safeCall(node: ts.CallExpression, names: Functions, constants: Set<string>, seen: Set<string>, locals: Set<string>): boolean {
   const callee = node.expression;
   if (ts.isIdentifier(callee)) return names.has(callee.text) && pureFunction(callee.text, names, constants, seen);
   return !locals.has('Math') && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === 'Math' && MATH.has(callee.name.text);
 }
+const EFFECTS = new Set([ts.SyntaxKind.NewExpression, ts.SyntaxKind.AwaitExpression, ts.SyntaxKind.YieldExpression, ts.SyntaxKind.DeleteExpression, ts.SyntaxKind.ThrowStatement, ts.SyntaxKind.TaggedTemplateExpression]);
 function unsafeSyntax(node: ts.Node): boolean {
-  if (ts.isNewExpression(node) || ts.isAwaitExpression(node) || ts.isYieldExpression(node) || ts.isDeleteExpression(node) || ts.isThrowStatement(node) || ts.isTaggedTemplateExpression(node)) return true;
+  if (EFFECTS.has(node.kind)) return true;
   if (ts.isBinaryExpression(node)) return node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
   return (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator);
 }
+function localNames(node: FunctionNode, body: ts.ConciseBody, constants: Set<string>): Set<string> {
+  const locals = new Set([...constants, ...node.parameters.map(parameter => parameter.name.getText())]);
+  someNode(body, child => { if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name)) locals.add(child.name.text); return false; });
+  return locals;
+}
+interface BodyContext { functions: Functions; constants: Set<string>; seen: Set<string>; locals: Set<string> }
+function unknownReference(node: ts.Identifier, context: BodyContext): boolean {
+  return reference(node) && !context.locals.has(node.text) && !context.functions.has(node.text) && !['Math', 'undefined'].includes(node.text);
+}
+function unsafeBody(child: ts.Node, context: BodyContext): boolean {
+  if (ts.isTypeNode(child)) return false;
+  if (unsafeSyntax(child)) return true;
+  if (ts.isCallExpression(child)) return !safeCall(child, context.functions, context.constants, context.seen, context.locals) || child.arguments.some(argument => unsafeBody(argument, context));
+  if (ts.isIdentifier(child)) return unknownReference(child, context);
+  if (ts.isFunctionLike(child)) return true;
+  return Boolean(ts.forEachChild(child, next => unsafeBody(next, context)));
+}
+function asynchronous(node: FunctionNode): boolean {
+  return Boolean(('asteriskToken' in node && node.asteriskToken) || node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword));
+}
 function pureFunction(name: string, functions: Functions, constants: Set<string>, seen: Set<string> = new Set()): boolean {
   const node = functions.get(name)!;
-  if (seen.has(name) || !node.body || ('asteriskToken' in node && node.asteriskToken) || node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return false;
-  const next = new Set([...seen, name]), locals = new Set([...constants, ...node.parameters.map(parameter => parameter.name.getText())]);
-  for (const parameter of node.parameters) if (parameter.initializer || !ts.isIdentifier(parameter.name)) return false;
-  someNode(node.body, child => { if (ts.isVariableDeclaration(child) && ts.isIdentifier(child.name)) locals.add(child.name.text); return false; });
-  const unsafe = (child: ts.Node): boolean => {
-    if (ts.isTypeNode(child)) return false;
-    if (unsafeSyntax(child)) return true;
-    if (ts.isCallExpression(child)) return !safeCall(child, functions, constants, next, locals) || child.arguments.some(argument => unsafe(argument));
-    if (ts.isIdentifier(child) && reference(child)) return !locals.has(child.text) && !functions.has(child.text) && !['Math', 'undefined'].includes(child.text);
-    if (ts.isFunctionLike(child)) return true;
-    return Boolean(ts.forEachChild(child, unsafe));
-  };
-  return !unsafe(node.body);
+  if (seen.has(name) || !node.body || asynchronous(node)) return false;
+  if (node.parameters.some(parameter => parameter.initializer || !ts.isIdentifier(parameter.name))) return false;
+  return !unsafeBody(node.body, { functions, constants, seen: new Set([...seen, name]), locals: localNames(node, node.body, constants) });
 }
 function bounds(file: ts.SourceFile, node: FunctionNode): { startLine: number; endLine: number } {
   return { startLine: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, endLine: file.getLineAndCharacterOfPosition(node.getEnd()).line + 1 };
 }
+function sharesLine(file: ts.SourceFile, node: FunctionNode, functions: Functions): boolean {
+  const { startLine, endLine } = bounds(file, node);
+  return [...functions.values()].some(other => other !== node && bounds(file, other).startLine <= endLine && bounds(file, other).endLine >= startLine);
+}
+function functionExclusion(file: ts.SourceFile, name: string, node: FunctionNode, functions: Functions, constants: Set<string>): string | null {
+  if (sharesLine(file, node, functions)) return 'shared_function_line';
+  return pureFunction(name, functions, constants) ? null : 'purity_unproven';
+}
+function sourceOf(file: string, files: Map<string, ts.SourceFile>): { source: ts.SourceFile } | { reason: string } {
+  if (FIXTURE.test(file)) return { reason: 'fixture_or_test' };
+  const source = files.get(file);
+  return !source || unsafeImports(source, files) || unsafeInitialization(source) ? { reason: 'unsafe_module' } : { source };
+}
 function selectFile(result: MutationSelection, file: string, ranges: [number, number][], files: Map<string, ts.SourceFile>, graph: Graph, fastTests: Map<string, string[]>): void {
-  if (FIXTURE.test(file)) { result.excluded.push({ file, reason: 'fixture_or_test' }); return; }
-  const parsedFile = files.get(file);
-  if (!parsedFile || unsafeImports(parsedFile, files) || unsafeInitialization(parsedFile)) { result.excluded.push({ file, reason: 'unsafe_module' }); return; }
+  const found = sourceOf(file, files);
+  if ('reason' in found) { result.excluded.push({ file, reason: found.reason }); return; }
+  selectFunctions(result, found.source, ranges, files, graph, fastTests);
+}
+function selectFunctions(result: MutationSelection, parsedFile: ts.SourceFile, ranges: [number, number][], files: Map<string, ts.SourceFile>, graph: Graph, fastTests: Map<string, string[]>): void {
+  const file = parsedFile.fileName;
   const functions = functionsOf(parsedFile), constants = constantNames(parsedFile);
   for (const [name, node] of functions) {
     const { startLine, endLine } = bounds(parsedFile, node);
     if (!ranges.some(([start, count]) => start <= endLine && start + count > startLine)) continue;
-    if ([...functions.values()].some(other => other !== node && bounds(parsedFile, other).startLine <= endLine && bounds(parsedFile, other).endLine >= startLine)) {
-      result.excluded.push({ file, name, reason: 'shared_function_line' }); continue;
-    }
-    if (!pureFunction(name, functions, constants)) { result.excluded.push({ file, name, reason: 'purity_unproven' }); continue; }
+    const reason = functionExclusion(parsedFile, name, node, functions, constants);
+    if (reason) { result.excluded.push({ file, name, reason }); continue; }
     const tests = [...new Set(fastTests.get(file) ?? [])].filter(test => !unsafeJudge(test, files, graph)).sort();
     if (!tests.length) { result.problems.push({ file, code: 'no_safe_fast_tests' }); continue; }
     result.selected.push({ file, name, startLine, endLine, lines: Array.from({ length: endLine - startLine + 1 }, (_, index) => startLine + index), tests, reason: 'changed_pure_function' });
