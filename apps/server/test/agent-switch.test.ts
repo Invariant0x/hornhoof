@@ -12,7 +12,6 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { answer, ask, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
-import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -52,7 +51,6 @@ async function company() {
     const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
     return routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId);
   };
-  const assigned = async (task: Awaited<ReturnType<typeof memberTask>>) => ({ agentId: task.assigneeAgentId!, taskId: task.id, why: 'assigned' as const, taskWake: taskWakeOf(task, { why: 'assigned' }, await snapshot(task.id)) });
   const jobsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt));
   let n = 0;
   /* Hornhoof's tools as a running turn of this agent sees them; the turn is not on the node. */
@@ -64,7 +62,7 @@ async function company() {
   const off = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, id))));
   /* On, but without a subscription to check anything with. */
   const unable = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id))));
-  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, codex: codex!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, hire, patch, memberTask, snapshot, assigned, jobsOf, tools, off, unable };
+  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, codex: codex!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, hire, patch, memberTask, snapshot, jobsOf, tools, off, unable };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -111,10 +109,10 @@ describe('switching an agent off and on', () => {
   });
 
   it('waits for the head to assign Development again after an employee returns', async () => {
-    const { ctx, db, builtin, hana, bruno, patch, memberTask, assigned, jobsOf } = await company();
+    const { ctx, db, builtin, hana, bruno, patch, memberTask, jobsOf } = await company();
     const task = await memberTask();
     await patch(bruno.id, { on: false });
-    await wakeAll(ctx, [await assigned(task)]);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
     await pumpWaiting(ctx);
     expect(await jobsOf(bruno.id)).toEqual([]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ assigneeAgentId: null, status: 'waiting' });
@@ -159,12 +157,13 @@ describe('giving work to agents that are on', () => {
   });
 
   it('refuses to hand a task over to an employee that is off', async () => {
-    const { hana, bea, off, tools, memberTask } = await company();
+    const { db, hana, bruno, bea, off, tools, memberTask } = await company();
     const task = await memberTask();
     await off(bea.id);
     const res = await call(await tools(hana), 'update_task', { task: task.number, executor: bea.id });
     expect(res.isError).toBe(true);
-    expect(text(res)).toContain('Bea is switched off');
+    expect(text(res)).toContain('new owner must be available');
+    expect((await row(db, task.id)).assigneeAgentId).toBe(bruno.id);
   });
 
   it('gives no turn work to a department whose head is off, or whose employees are all off', async () => {
@@ -209,8 +208,8 @@ describe('one eligible owner of the required Review', () => {
     expect(sent.task).toMatchObject({ status: 'review', assigneeAgentId: rita.id });
     expect(sent.wakes.map(w => w.agentId)).toEqual([rita.id]);
     expect(await snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: rita.id });
-    await expect(verdict(ctx, rex.id, task.id, { pass: true, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_not_yours' });
-    const passed = await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' });
+    await expect(verdict(ctx, rex.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_not_yours' });
+    const passed = await verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' });
     expect(passed.task.status).not.toBe('done');
     expect((await snapshot(task.id)).stage).toBe('tests');
   });
@@ -245,10 +244,10 @@ describe('one eligible owner of the required Review', () => {
     await submit(ctx, bruno.id, task.id, done);
     const candidateId = (await snapshot(task.id)).candidateId;
     await off(bruno.id);
-    const repair = await verdict(ctx, rita.id, task.id, { pass: false, comment: 'The total ignores tax.' });
+    const repair = await verdict(ctx, rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: 'The total ignores tax.' });
     expect(repair.task.assigneeAgentId).toBe(rita.id);
     expect(repair.wakes.some(w => w.agentId === bruno.id)).toBe(false);
-    expect(await snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'repair', ownerAgentId: rita.id, candidateId });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: rita.id, candidateId });
   });
 
   it('allows only the current owner to ask and waits for the answer before accepting its verdict', async () => {
@@ -257,11 +256,11 @@ describe('one eligible owner of the required Review', () => {
     await submit(ctx, bruno.id, task.id, done);
     await expect(ask(ctx, rex.id, task.id, { kind: 'question', text: 'Which currency?' })).rejects.toMatchObject({ reason: 'task_not_yours' });
     const asked = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
-    await expect(verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
     const [ceo] = await db.select().from(people);
     const answered = await answer(ctx, { personId: ceo!.id }, asked.request.id, { answer: 'Yes, with tax.' });
     expect(answered.wakes.map(w => [w.agentId, w.why])).toEqual([[rita.id, 'answered']]);
-    await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Tax is covered.' });
+    await verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Tax is covered.' });
     expect((await snapshot(task.id)).stage).toBe('tests');
   });
 });
@@ -290,10 +289,11 @@ describe('work an agent held when it was switched off', () => {
   });
 
   it('drops queued turns after the switched-off employee leaves its assignment', async () => {
-    const { ctx, db, bruno, patch, memberTask, off, assigned } = await company();
+    const { ctx, db, bruno, patch, memberTask, off } = await company();
     const task = await memberTask();
     await off(bruno.id);
-    await wakeAll(ctx, [await assigned(task)]);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    expect(await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'queued')))).toHaveLength(1);
     await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, bruno.id));
     await patch(bruno.id, { on: false });
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'queued')))).toEqual([]);
@@ -329,12 +329,12 @@ describe('work an agent held when it was switched off', () => {
     const asked = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     expect((await patch(rita.id, { on: false })).statusCode).toBe(200);
     expect(await snapshot(task.id)).toMatchObject({ stage: 'review', ownerAgentId: rex.id, candidateId });
-    await expect(verdict(ctx, rex.id, task.id, { pass: true, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(verdict(ctx, rex.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
     const [ceo] = await db.select().from(people);
     const answered = await answer(ctx, { personId: ceo!.id }, asked.request.id, { answer: 'Yes, with tax.' });
     expect(answered.wakes.map(w => w.agentId)).toEqual([rex.id]);
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, rita.id), eq(jobs.status, 'queued')))).toEqual([]);
-    await verdict(ctx, rex.id, task.id, { pass: true, comment: 'Tax is covered.' });
+    await verdict(ctx, rex.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Tax is covered.' });
     expect((await snapshot(task.id)).stage).toBe('tests');
   });
 
@@ -405,6 +405,6 @@ describe('work an agent held when it was switched off', () => {
     const current = await snapshot(question!.taskId);
     expect(current.stage).toBe('review');
     expect(current.ownerAgentId).not.toBe(rita.id);
-    await expect(verdict(ctx, current.ownerAgentId!, question!.taskId, { pass: true, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(verdict(ctx, current.ownerAgentId!, question!.taskId, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
   });
 });
