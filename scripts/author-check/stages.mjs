@@ -189,6 +189,7 @@ const STEPS = [formatStage, lintStage, typesStage, testsStage, crapperStage, dry
 export async function runStages(input, ports) {
   const paths = input.plan.changes.filter(change => change.kind !== 'deleted').map(change => change.path);
   const context = { ...input, ports, paths, numbers: { tests: null, changedLines: null, worstCrap: null, dryerFlags: null } };
+  ports.log(`TEST_SELECTION ${JSON.stringify({ version: 1, commit: input.sha, baseCommit: input.plan.base, status: input.selection.unavailable ? 'NOT_RUN' : 'selected', sourcePaths: input.plan.changes.map(change => change.path), packages: input.selection.packages ?? [], reason: input.selection.unavailable ?? null, fullSuiteComparator: 'unavailable' })}`);
   for (const note of input.selection.notes) ports.log(`NOTE ${note}`);
   const stages = [];
   for (const step of STEPS) {
