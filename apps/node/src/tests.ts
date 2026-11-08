@@ -543,16 +543,17 @@ const worktreeBuilds = new CheckSlotQueue(() => 1);
 /* The agent's clone or worktree its program checks its change in, at the commit it stands at. fs: file work there as its owner. */
 export type Worktree = {
   id: string; checkout: string; commitSha: string; repo: { url: string; token: string }; repositoryScope: RepositoryScope; owner: JobUser;
-  fs: Pick<AgentFs, 'entry' | 'readPlain' | 'kind' | 'mkdir' | 'move' | 'remove'>;
+  fs: Pick<AgentFs, 'entry' | 'readPlain' | 'mkdir' | 'move' | 'remove'>;
 };
 /* slot: the machine's turn for heavy work, which a build waits for. limitMs: how long all of it may take. */
 export type WorktreeOptions = Pick<Options, 'dir' | 'hidden' | 'signal' | 'proc' | 'harness' | 'runtimes'> & {
   slot?: <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>) => Promise<T>; limitMs?: number;
 };
 
-/* Whether the worktree holds any of them already: they may be the agent's own install, so they stay as they are. */
+/* Whether the worktree holds any of them already: they may be the agent's own install, so they stay as they are. Whatever
+   stands there counts, a link that leads nowhere too. */
 async function holdsAny(tree: Worktree, paths: string[]): Promise<boolean> {
-  for (const path of paths) if (await tree.fs.kind(join(tree.checkout, path))) return true;
+  for (const path of paths) if (await tree.fs.entry(join(tree.checkout, path))) return true;
   return false;
 }
 /* What the worktree's own manifest names, read as its owner and only from a plain file, so a worktree that holds its

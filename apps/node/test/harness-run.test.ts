@@ -443,6 +443,16 @@ describe("an agent's worktree", () => {
     expect(await installed(f)).toBe(0);
   });
 
+  it('leaves a worktree as it is where a link stands in their place, even one that leads nowhere', async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
+    const tree = await worktree(f, one);
+    execFileSync('ln', ['-s', join(f.root, 'gone'), join(tree.checkout, 'node_modules')]);
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    expect((await lstat(join(tree.checkout, 'node_modules'))).isSymbolicLink()).toBe(true);
+    expect(shared.keysSeen).toEqual([]);
+    expect(await installed(f)).toBe(0);
+  });
+
   it('costs nothing and says nothing where the repository keeps no test environment', async () => {
     const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
     /* A commit nobody could fetch, so any reading of it would fail. */
