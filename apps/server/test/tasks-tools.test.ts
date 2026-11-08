@@ -56,7 +56,7 @@ describe('task tools', () => {
     const c = await company();
     const words = 'Report: права доступа и полный текст.\n'.repeat(500).slice(0, 11999) + '!';
     const owner = kind === 'report' ? c.head : c.bruno;
-    const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report', small: true })).task;
+    const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report', small: true, paths: ['logic/totals.ts'] })).task;
     const client = await c.tools(owner);
     const args = kind === 'comment' ? { text: words } : kind === 'submit' ? { summary: words, evidence: words, review: { baseCommit: BASE } } : { done: true, summary: words };
     const result = await call(client, kind, { task: task.number, ...args });
@@ -75,7 +75,7 @@ describe('task tools', () => {
     const c = await company();
     const words = 'Finding: проверка доступа, данные и повтор. 🌿\n'.repeat(400).slice(0, 12000);
     expect(words.length).toBe(12000);
-    const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Long review', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, small: true, reviewerAgentId: c.rita.id, testsAgentId: c.tess.id })).task;
+    const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Long review', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: c.rita.id, testsAgentId: c.tess.id })).task;
     await submit(c.ctx, c.bruno.id, task.id, { summary: 'Ready.', evidence: 'Targeted checks.', review: { baseCommit: BASE } });
     const client = await c.tools(c.rita);
     const result = await call(client, 'verdict', { task: task.number, pass: true, reviewedCommit: HEAD, comment: words });
@@ -95,15 +95,15 @@ describe('task tools', () => {
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
     expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
     expect(await names(head)).toEqual(['approval_policy', 'ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'confirm_finding', 'create_task', 'end_wait', 'escalate_missed_goal', 'forget', 'improvements', 'message_employee', 'notebook', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'propose_improvement', 'remember', 'replan_wait', 'report', 'request_approval', 'resolve_goal_risk', 'rewrite_note', 'run_tests', 'run_work', 'set_employee_assignment', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'tell_orchestrator', 'test_harness', 'test_run', 'update_task', 'verdict', 'wait_for', 'work_run']);
-    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'test_harness', 'test_run', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'test_harness', 'test_run', 'verdict', 'wait_for', 'work_run']);
   });
 
-  it("tells a head to give work to members, and to itself only when no member can do it", async () => {
+  it("describes one whole department result and explicit scope for its checking owners", async () => {
     const { head, tools } = await company();
     const create = (await (await tools(head)).listTools()).tools.find(t => t.name === 'create_task')!;
-    expect(create.description).toContain('Gives work to a member of your department');
-    expect(create.description).toContain('Name yourself only when no member can do it.');
-    expect(create.description).not.toContain('(or yourself)');
+    expect(create.description).toContain('Assigns one whole result in your department.');
+    expect(create.description).toContain('Scope repository paths explicitly');
+    expect(create.description).toContain('eligible skill owners are selected');
   });
 
   it('tells the head to assign connected blocks to one developer and independent blocks at once, and the orchestrator one task per goal', async () => {
@@ -128,7 +128,7 @@ describe('task tools', () => {
     const [task] = await db.select().from(tasks);
     expect(task).toMatchObject({ executorAgentId: bruno.id, createdByAgentId: head.id });
     const route = await routeOf(db, task!);
-    expect(route.stages.find(step => step.stage === 'review')).toMatchObject({ ownerAgentId: rita.id, status: 'pending' });
+    expect(route.state.stages.find(step => step.stage === 'review')).toMatchObject({ ownerAgentId: rita.id, status: 'pending' });
     const outside = await call(client, 'create_task', { title: 'Call leads', brief: '', body: '', executor: sam.id });
     expect(outside.isError).toBe(true);
   });
@@ -268,30 +268,43 @@ describe("a task's kind and risk class", () => {
     expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ workKind: null, riskClass: null });
   });
 
-  it('change with update_task without waking whoever holds the task, and a log line says so', async () => {
+  it('changes the work kind without waking whoever holds the task, and a log line says so', async () => {
     const { db, ctx, head, bruno, tools } = await company();
     const client = await tools(head);
     await call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
     const [row] = await db.select().from(tasks);
-    const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'legacy_code', riskClass: 'data' });
+    const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'legacy_code' });
     expect(moved.wakes).toEqual([]);
-    expect(moved.task).toMatchObject({ workKind: 'legacy_code', riskClass: 'data' });
+    expect(moved.task).toMatchObject({ workKind: 'legacy_code' });
     const updated = await db.select().from(taskEvents).where(eq(taskEvents.kind, 'updated'));
-    expect(updated.at(-1)!.data).toEqual({ fields: ['workKind', 'riskClass'] });
-    const again = await call(client, 'update_task', { task: row!.number, workKind: 'unknown_path', riskClass: 'none' });
+    expect(updated.at(-1)!.data).toEqual({ fields: ['workKind'] });
+    const again = await call(client, 'update_task', { task: row!.number, workKind: 'unknown_path' });
     expect(again.isError).toBeFalsy();
-    expect((await db.select().from(tasks))[0]).toMatchObject({ workKind: 'unknown_path', riskClass: 'none' });
+    expect((await db.select().from(tasks))[0]).toMatchObject({ workKind: 'unknown_path' });
   });
 
-  it('leave its wait, its place in line and its version as they are', async () => {
+  it('leaves the wait, queue position and version intact when only the work kind changes', async () => {
     const { db, ctx, head, bruno, tools } = await company();
     await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
     const until = new Date(Date.now() + 3_600_000).toISOString();
     const [row] = await db.update(tasks).set({ externalWait: { reason: 'A build', since: new Date().toISOString(), until } }).returning();
-    const moved = await updateTask(ctx, head.id, row!.id, { riskClass: 'data' });
+    const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'known_behavior' });
     expect(moved.task.externalWait).toMatchObject({ reason: 'A build', until });
     expect(moved.task.version).toBe(row!.version);
-    expect((await updateTask(ctx, head.id, row!.id, { riskClass: 'data' })).task.updatedAt).toEqual(moved.task.updatedAt);
+    expect((await updateTask(ctx, head.id, row!.id, { workKind: 'known_behavior' })).task.updatedAt).toEqual(moved.task.updatedAt);
+  });
+
+  it('adds required Security and informs the current owner when the head changes the risk', async () => {
+    const { db, ctx, head, bruno, tools } = await company();
+    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    const [row] = await db.select().from(tasks);
+    const before = await routeOf(db, row!);
+    const moved = await updateTask(ctx, head.id, row!.id, { riskClass: 'data' });
+    const after = await routeOf(db, moved.task);
+    expect(moved.wakes.map(wake => wake.agentId)).toEqual([bruno.id]);
+    expect(after.state).toMatchObject({ stage: before.state.stage, candidateId: before.state.candidateId, security: { required: true, reason: 'data', addedBy: head.id } });
+    expect(after.state.stages.find(step => step.stage === 'security')).toMatchObject({ status: 'pending' });
+    expect(after.revision).toBeGreaterThan(before.revision);
   });
 
   it('still wake the holder when the body changes with them', async () => {
