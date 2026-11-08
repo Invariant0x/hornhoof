@@ -248,7 +248,7 @@ describe('install.sh a server serves', () => {
     const ANOTHER_KIMI = 'hornhoof-kimi-55555555';
     const ELSEWHERE = 'hornhoof-kimi-99999999';
     const HERE = { STUB_CONTAINERS: `${KIMI}=${SERVER} ${CODEX}=${SERVER} ${MACHINE}=${SERVER} ${ANOTHER_KIMI}=${SERVER} ${ELSEWHERE}=https://another.example.test` };
-    const BACK = 'ghcr.io/invariant0x/hornhoof-node@sha256:1703324e18e59af650d3d69be9dcac3f12352d53ecefc71ae805e91f10aa1b73';
+    const BACK = 'ghcr.io/invariant0x/hornhoof-node@sha256:17feb15d86794a40a9d9f0e55e7fdc890672f93b3d5b0bead6aed984f0ea0a1f';
     const check = (node = KIMI, commit = COMMIT) => ['check-node', node, commit];
     const changes = (r: ReturnType<typeof install>) => r.calls.filter(c => /^docker (stop|rm|run -d)/.test(c));
     const nothingHappened = (r: ReturnType<typeof install>) => {

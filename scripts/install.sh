@@ -38,8 +38,8 @@ STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
 NODE_REPOSITORY=ghcr.io/invariant0x/hornhoof-node
 LATEST_NODE=$NODE_REPOSITORY:latest
-# Where back-node goes: 0.6.1, the way back the owner set for this check, by the digest of its image for every computer.
-BACK_NODE=$NODE_REPOSITORY@sha256:1703324e18e59af650d3d69be9dcac3f12352d53ecefc71ae805e91f10aa1b73
+# Where back-node goes: 0.8.1, the last release that passed its live check, by the digest of its image for every computer.
+BACK_NODE=$NODE_REPOSITORY@sha256:17feb15d86794a40a9d9f0e55e7fdc890672f93b3d5b0bead6aed984f0ea0a1f
 case "$BUILD_IMAGE" in
   __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
   *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
