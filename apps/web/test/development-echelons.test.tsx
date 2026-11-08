@@ -7,7 +7,7 @@ import { TASK_DETAIL, mockApi } from './api-mock';
 import { ECHELON_ORG, ECHELON_TASK, ECHELON_WORKFLOW } from './echelon-fixture';
 import { fakeStream } from './fake-stream';
 
-function panel(task: typeof TASK_DETAIL, language = 'en') {
+function panel<T extends typeof TASK_DETAIL>(task: T, language = 'en') {
   localStorage.setItem('hh-lang', language);
   mockApi({
     'GET /api/org': [200, ECHELON_ORG],
@@ -69,14 +69,15 @@ describe('development echelon presentation', () => {
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
     mockApi({ 'GET /api/tasks/t12': [200, { task: { ...ECHELON_TASK, workflow: { ...ECHELON_WORKFLOW, stage: 'Tests', ownerId: 'tester',
       stages: ECHELON_WORKFLOW.stages.map(s => s.name === 'Review' ? { ...s, status: 'complete' } : s.name === 'Tests' ? { ...s, status: 'active' } : s) } } }] });
-    stream.send({ type: 'task' });
+    stream.send({ type: 'task', id: 't12', spot: { departmentId: 'd2' } });
     expect(await within(route).findByText('Tom')).toBeInTheDocument();
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Tests');
   });
 
   it('lists A in Review and B in Development with their own engine stage', () => {
+    const independent = { ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', workflow: { ...ECHELON_WORKFLOW, stage: 'Development' as const } };
     render(<><TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />
-      <TaskRow task={{ ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', workflow: { ...ECHELON_WORKFLOW, stage: 'Development' } }}
+      <TaskRow task={independent}
         on={false} place="" onOpen={() => {}} /></>);
     expect(screen.getByRole('button', { name: /#12/ })).toHaveTextContent('Review');
     expect(screen.getByRole('button', { name: /#13/ })).toHaveTextContent('Development');
