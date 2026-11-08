@@ -204,6 +204,34 @@ describe('GET /api/departments/:id/tree', () => {
     expect(checker!.unknown).toBeLessThan(60);
   });
 
+  it('keeps completed author time separate from later checking time after acceptance', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Checkout API');
+    const start = new Date(Date.now() - 60 * 60_000);
+    const handedOver = new Date(start.getTime() + 20 * 60_000);
+    const checked = new Date(start.getTime() + 40 * 60_000);
+    await c.db.update(tasks).set({ createdAt: start }).where(eq(tasks.id, task.id));
+    await c.db.update(taskEvents).set({ createdAt: start }).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'created')));
+    const observed = async (agentId: string, from: Date, to: Date) => {
+      const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.claude.id, agentId, taskId: task.id,
+        kind: 'conversation', prompt: 'Work on the current stage', timeoutMs: 3_600_000, status: 'done', createdAt: from, startedAt: from, finishedAt: to }).returning();
+      await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId, jobId: job!.id, kind: 'program', createdAt: from,
+        data: { program: { state: 'thinking', since: from.getTime(), tool: null }, alarm: null } });
+    };
+    await observed(c.bruno.id, start, handedOver);
+    await observed(c.rita.id, handedOver, checked);
+    await c.accepted(c.bruno.id, task.id);
+    await c.db.update(taskEvents).set({ createdAt: handedOver }).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted')));
+    const response = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) });
+    expect(response.statusCode).toBe(200);
+    const { tree } = response.json<{ tree: DepartmentTree }>();
+    const author = tree.time.find(time => time.agent.id === c.bruno.id)!;
+    expect(author.work).toBeCloseTo(1200, 0);
+    expect(author.unknown ?? 0).toBeLessThan(60);
+    expect(tree.time.find(time => time.agent.id === c.rita.id)?.work).toBeCloseTo(1200, 0);
+    expect(tree.lines.find(line => line.taskId === task.id)?.mergedAt).toEqual(expect.any(String));
+  });
+
   it('keeps candidate and finding details private for a scoped tree reader', async () => {
     const c = await company();
     const task = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security' });
