@@ -19,8 +19,8 @@ describe('stage decisions without a return to the author', () => {
     expect(moved.task.assigneeAgentId).toBe(f.security.id);
     expect(await f.detail()).toMatchObject({ echelons: { stage: 'security', security: { required: true, reason: 'Totals include untrusted input.', addedBy: f.reviewer.id } } });
   });
-  it('escalates a wrong goal to the head instead of returning it to the author', async () => {
-    const f = await fixture();
+  it.each([undefined, 'author'] as const)('escalates a wrong goal to the actual head when its creator is %s', async creator => {
+    const f = await fixture({ creator });
     await submit(f.ctx, f.author.id, f.task.id, code);
     const moved = await verdict(f.ctx, f.reviewer.id, f.task.id, { ...pass, pass: false, comment: 'The requested total is missing; this implements a different goal.', ...{ escalate: true } });
     expect(moved.task.assigneeAgentId).toBeNull();

@@ -26,6 +26,13 @@ describe('forward handoff and instructions 205/206', () => {
     expect(moved.wakes.map(w => w.agentId)).toEqual([f.head.id]);
   });
 
+  it('asks the actual head for a missing checker when the task creator is its author', async () => {
+    const f = await fixture({ creator: 'author', reviewerModel: 'unclassified-model' });
+    const moved = await submit(f.ctx, f.author.id, f.task.id, submitted);
+    expect(moved.task.assigneeAgentId).toBeNull();
+    expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
+  });
+
   it('prefers an eligible different provider without requiring one', async () => {
     const f = await fixture({ authorProvider: 'claude', autoReviewer: true });
     const crossProvider = await f.hire('Other provider', 'worker', 'DEV-REV', f.codex.id, 'gpt-6.1-sol');
