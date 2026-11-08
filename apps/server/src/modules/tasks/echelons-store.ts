@@ -6,9 +6,17 @@ import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-export type RouteInput = { reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
+export type RouteInput = { resultKind?: EchelonsSnapshot['resultKind']; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
+  const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
+  if (resultKind === 'coordination') {
+    await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: {
+      kind: 'development_echelons', version: 1, resultKind, stage: null, phase: 'active', candidateId: null, assignment: null, stages: [],
+      security: { required: false, reason: null, addedBy: null },
+    } });
+    return;
+  }
   const stage = task.small ? 'development' : 'architecture';
   const required = task.riskClass !== null && task.riskClass !== 'none';
   const step = (name: EchelonStep['stage'], ownerAgentId: string | null = null): EchelonStep => ({
@@ -19,7 +27,7 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
   const security = step('security', input.securityAgentId ?? null);
   if (!required) Object.assign(security, { status: 'skipped', reason: 'no_declared_risk' });
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
-    kind: 'development_echelons', version: 1, stage, phase: 'active', candidateId: null, assignment: null,
+    kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
     stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), ...(input.cleanup ? [step('cleanup')] : []), security, step('tests', input.testsAgentId ?? null)],
     security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null },
   } });

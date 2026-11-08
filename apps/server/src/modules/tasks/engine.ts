@@ -1,4 +1,4 @@
-import { architectureReport } from './echelons-report.js';
+import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity } from './echelons-assign.js';
 import { producedCandidate } from './echelons-candidates.js';
@@ -516,6 +516,7 @@ function stuckGoes(ctx: Live, task: Task): { also: (tx: Tx) => Promise<void>; te
 }
 
 export type NewTask = {
+  resultKind?: 'code' | 'coordination';
   title: string;
   brief: string;
   body: string;
@@ -784,7 +785,8 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: Subm
   if (replay) return replay;
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
-  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage) || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
+  if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');
+  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
   const review = checked?.review ?? await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
@@ -1080,6 +1082,11 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     stillOpen(task);
     await refuseWaiting(ctx.db, task);
     return architectureReport(ctx, task, route, agentId, r.summary);
+  }
+  if (r.done && route.state.resultKind === 'coordination') {
+    stillOpen(task);
+    await refuseWaiting(ctx.db, task);
+    return coordinationReport(ctx, task, route, agentId, r.summary);
   }
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);

@@ -14,7 +14,7 @@ export function TaskWorkflow({ workflow, task, org }: { workflow: EchelonsSnapsh
   const labels = useT().tasks.echelons;
   const reason = (value: string) => labels.reasons[value as keyof typeof labels.reasons] ?? value;
   return <section className="fit">
-    <h4>{labels.heading}</h4>
+    <h4>{workflow.resultKind === 'coordination' ? labels.coordination : labels.heading}</h4>
     <p className="muted" role="status">{labels.phases[workflow.phase]}</p>
     <ol className="tgates" aria-label={labels.heading}>
       {workflow.stages.map(stage => {

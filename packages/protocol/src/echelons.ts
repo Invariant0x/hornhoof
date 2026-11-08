@@ -15,8 +15,9 @@ export type EchelonStep = {
 export type EchelonsSnapshot = {
   kind: 'development_echelons';
   version: 1;
+  resultKind: 'code' | 'coordination';
   revision: number;
-  stage: EchelonStage;
+  stage: EchelonStage | null;
   phase: EchelonPhase;
   ownerAgentId: string | null;
   stages: EchelonStep[];

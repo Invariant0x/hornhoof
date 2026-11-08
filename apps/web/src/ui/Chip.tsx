@@ -13,7 +13,7 @@ export const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', qu
 const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
   if (!e.task) return '';
   const route = e.task.echelons;
-  const stage = route.ownerAgentId === e.id ? `${t.tasks.echelons.stages[route.stage]} ` : '';
+  const stage = route.ownerAgentId === e.id && route.stage ? `${t.tasks.echelons.stages[route.stage]} ` : '';
   return `${stage}#${e.task.number} ${e.task.title}`;
 };
 

@@ -969,6 +969,7 @@ export const en = {
   },
   tasks: {
     echelons: {
+      coordination: 'Checked coordination report',
       heading: 'Task workflow',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
       phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed' },

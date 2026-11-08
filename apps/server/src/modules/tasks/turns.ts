@@ -1,3 +1,4 @@
+import { createRoute } from './echelons-store.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
@@ -130,6 +131,7 @@ async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId:
         updatedAt: new Date(),
       })
       .returning();
+    await createRoute(tx, row!, { resultKind: 'coordination' });
     await note(tx, row!, { kind: 'created', actor: { agentId }, text: row!.brief, data: { planned: true, ...(improvement ? { improvement } : {}) } });
     rows.push(row!);
   }

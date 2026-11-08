@@ -75,7 +75,7 @@ function pipelineGroups(members: Employee[]) {
   return groups;
 }
 
-const ownsStage = (e: Employee): boolean => Boolean(e.task && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
+const ownsStage = (e: Employee): boolean => Boolean(e.task && e.task.echelons.resultKind === 'code' && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
 
 /* Idle staff and observers stay outside the route; role metadata never assigns a workflow stage. */
 function outsideFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {

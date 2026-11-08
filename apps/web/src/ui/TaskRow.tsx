@@ -24,7 +24,7 @@ export function TaskRow({ task, on, place, onOpen, showTurn = true }: { task: Ta
         <span className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</span>
         {place}
         {ownerName && <span>{t.tasks.echelons.owner(ownerName)}</span>}
-        <span className="trow-gate">{t.tasks.echelons.stages[workflow.stage]}</span>
+        <span className="trow-gate">{workflow.stage ? t.tasks.echelons.stages[workflow.stage] : t.tasks.echelons.coordination}</span>
         {showTurn && task.turn !== null && <span>{t.tasks.turn(task.turn)}</span>}
       </span>
     </button>

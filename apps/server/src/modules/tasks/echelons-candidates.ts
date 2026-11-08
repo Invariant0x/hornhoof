@@ -3,7 +3,8 @@ import { RepoPath } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import type { Ctx } from '../../app.js';
+import type { Db } from '../../db/client.js';
+import type { Tx } from './engine.js';
 import { taskEvents } from '../../db/schema.js';
 import { refuse, type Task } from './engine.js';
 import type { Route } from './echelons-store.js';
@@ -20,7 +21,7 @@ export function producedCandidate(route: Route, producer: CheckerIdentity, revie
   });
 }
 
-export async function currentCandidate(db: Ctx['db'], task: Task, route: Route): Promise<EchelonCandidate> {
+export async function currentCandidate(db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> {
   const [event] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId),
     sql`${taskEvents.data}->'candidate'->>'id' = ${route.state.candidateId}`)).orderBy(desc(taskEvents.id)).limit(1);
   const parsed = EchelonCandidate.safeParse(event?.data.candidate);

@@ -12,7 +12,7 @@ type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates'
 export async function echelonVerdict(ctx: Reader, agentId: string, taskId: string, verdict: ReviewVerdict & { comment: string }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
-  if (task.assigneeAgentId !== agentId || route.state.phase !== 'active' || !['review', 'security', 'cleanup'].includes(route.state.stage)) {
+  if (task.assigneeAgentId !== agentId || route.state.phase !== 'active' || !['review', 'security', 'cleanup'].includes(route.state.stage ?? '')) {
     throw refuse(403, 'task_not_yours', 'This task is not at your checking stage.');
   }
   if (!verdict.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
