@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -79,6 +79,30 @@ describe.each([
     expect(await fs.kind(join(root, 'tree.git', 'inside'))).toBeNull();
     expect(await fs.kind(join(root, 'locked', '.git'))).toBeNull();
     chmodSync(join(root, 'locked'), 0o755);
+  });
+
+  it('moves a folder into place with its links as they are, and never over anything already there', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    const from = join(root, 'staging', 'node_modules');
+    mkdirSync(join(from, '.bin'), { recursive: true });
+    writeFileSync(join(from, 'dep'), 'locked');
+    symlinkSync('../dep', join(from, '.bin', 'tool'));
+    mkdirSync(join(root, 'repo'));
+    const to = join(root, 'repo', 'node_modules');
+    await fs.move(from, to);
+    expect(readFileSync(join(to, 'dep'), 'utf8')).toBe('locked');
+    expect(readlinkSync(join(to, '.bin', 'tool'))).toBe('../dep');
+    expect(existsSync(from)).toBe(false);
+    mkdirSync(from);
+    writeFileSync(join(from, 'other'), 'theirs');
+    await expect(fs.move(from, to)).rejects.toThrow(/already/);
+    expect(readFileSync(join(to, 'dep'), 'utf8')).toBe('locked');
+    /* A link that leads nowhere still stands in the way: nothing goes through it. */
+    symlinkSync(join(root, 'elsewhere'), join(root, 'repo', 'linked'));
+    await expect(fs.move(from, join(root, 'repo', 'linked'))).rejects.toThrow(/already/);
+    expect(lstatSync(join(root, 'repo', 'linked')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(root, 'elsewhere'))).toBe(false);
   });
 
   it('says why a write failed', async () => {

@@ -1,6 +1,6 @@
 /* File work in agents' folders for a node that runs as root, done as the agents' own user: the node never follows a link
    an agent left there into its own files. One request per line on stdin, one answer per line on stdout. */
-const { cpSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } = require('node:fs');
+const { cpSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 
 const OPS = {
@@ -33,6 +33,19 @@ const OPS = {
   copy: ({ path, from }) => {
     if (typeof from !== 'string') throw new Error('copy needs from.');
     cpSync(from, path, { recursive: true });
+  },
+  /* Whole, its links as they are, and never over anything already there, a link that leads nowhere included. */
+  move: ({ path, from }) => {
+    if (typeof from !== 'string') throw new Error('move needs from.');
+    let there = true;
+    try {
+      lstatSync(path);
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') throw err;
+      there = false;
+    }
+    if (there) throw new Error(`${path} is there already, so nothing was moved over it.`);
+    renameSync(from, path);
   },
 };
 

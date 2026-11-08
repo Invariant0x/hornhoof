@@ -312,6 +312,7 @@ describe('Kimi Code in a terminal', () => {
       kind: ownFs.kind,
       remove: ownFs.remove,
       copy: ownFs.copy,
+      move: ownFs.move,
       stop() {},
     };
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));

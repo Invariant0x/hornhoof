@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +18,21 @@ export type AgentFs = {
   remove(path: string): Promise<void>;
   /* Copies a folder of the node's own, such as one from the image, with its files' modes. */
   copy(from: string, to: string): Promise<void>;
+  /* Moves a file or a folder whole, its links as they are, and never over anything already there, a link included. */
+  move(from: string, to: string): Promise<void>;
   stop(): void;
 };
+
+/* What already stands at a path, a link that leads nowhere too, keeps it from being moved over. */
+function free(path: string): void {
+  try {
+    lstatSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  throw new Error(`${path} is there already, so nothing was moved over it.`);
+}
 
 const HELPER = fileURLToPath(new URL('../hh-fs.cjs', import.meta.url));
 
@@ -53,6 +66,10 @@ export const ownFs: AgentFs = {
   },
   async copy(from, to) {
     cpSync(from, to, { recursive: true });
+  },
+  async move(from, to) {
+    free(to);
+    renameSync(from, to);
   },
   stop() {},
 };
@@ -114,6 +131,7 @@ export function agentFs(user: JobUser): AgentFs {
     write: async (path, data) => void (await ask('write', path, { data })),
     remove: async path => void (await ask('remove', path)),
     copy: async (from, to) => void (await ask('copy', to, { from })),
+    move: async (from, to) => void (await ask('move', to, { from })),
     stop() {
       child?.kill();
       child = null;

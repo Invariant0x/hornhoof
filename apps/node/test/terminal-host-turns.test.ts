@@ -31,6 +31,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       kind: ownFs.kind,
       remove: ownFs.remove,
       copy: ownFs.copy,
+      move: ownFs.move,
       stop() {},
     };
     await setUp({ user: { uid: 4242, gid: 4343 }, fs }, `${bin}:${process.env.PATH ?? ''}`);
