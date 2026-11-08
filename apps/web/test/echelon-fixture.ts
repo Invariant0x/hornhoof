@@ -19,4 +19,4 @@ export const ECHELON_ORG = {
 };
 
 /* A legacy gate index deliberately disagrees with the workflow. */
-export const ECHELON_TASK = { ...TASK_DETAIL, workflow: ECHELON_WORKFLOW, assignee: TASK_DETAIL.executor };
+export const ECHELON_TASK = { ...TASK_DETAIL, echelons: ECHELON_WORKFLOW, assignee: TASK_DETAIL.executor };

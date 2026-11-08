@@ -13,11 +13,11 @@ const ranked = LANGUAGES.map(({ id }) => ({ id, size: Object.values(dictionaries
 const locales = [...new Set([ranked[0]!.id, ranked[ranked.length - 1]!.id, ...LANGUAGES.filter(l => /^(ar|he|fa|ur)$/.test(l.id)).map(l => l.id)])];
 const longOwner = 'ReviewOwnerWithAnUnbrokenIdentifier'.repeat(8);
 const longReason = 'Review found a risk in external input. '.repeat(12);
-const workflow = { ...ECHELON_WORKFLOW, stage: 'Security' as const, ownerId: longOwner,
-  security: { required: true, addedBy: 'reviewer', reason: longReason },
-  stages: ECHELON_WORKFLOW.stages.map(stage => stage.name === 'Review' ? { ...stage, status: 'complete' as const }
-    : stage.name === 'Security' ? { ...stage, status: 'active' as const, ownerId: longOwner, reason: longReason } : stage) };
-const task = { ...detail(TASKS[0]!), workflow, body: '', brief: '', title: 'Echelon task' };
+const workflow = { ...ECHELON_WORKFLOW, stage: 'security' as const, ownerAgentId: longOwner,
+  security: { included: true, addedByAgentId: 'reviewer', reason: longReason },
+  stages: ECHELON_WORKFLOW.stages.map(stage => stage.stage === 'review' ? { ...stage, status: 'complete' as const }
+    : stage.stage === 'security' ? { ...stage, status: 'active' as const, ownerAgentId: longOwner, reason: longReason } : stage) };
+const task = { ...detail(TASKS[0]!), echelons: workflow, body: '', brief: '', title: 'Echelon task' };
 
 async function serveWorkflow(page: Page) {
   await serveApi(page);

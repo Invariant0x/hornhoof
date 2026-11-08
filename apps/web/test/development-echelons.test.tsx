@@ -33,12 +33,12 @@ describe('development echelon presentation', () => {
   });
 
   it('shows Security added by Review without inventing an extra stage or a return to the author', async () => {
-    const workflow = { ...ECHELON_WORKFLOW, revision: 4, stage: 'Security' as const, ownerId: 'security',
-      security: { required: true, reason: 'External input', addedBy: 'reviewer' },
-      stages: ECHELON_WORKFLOW.stages.map(stage => stage.name === 'Security'
-        ? { ...stage, ownerId: 'security', status: 'active' as const, reason: 'External input' }
-        : stage.name === 'Review' ? { ...stage, status: 'complete' as const } : stage) };
-    panel({ ...ECHELON_TASK, workflow });
+    const workflow = { ...ECHELON_WORKFLOW, revision: 4, stage: 'security' as const, ownerAgentId: 'security',
+      security: { included: true, reason: 'External input', addedByAgentId: 'reviewer' },
+      stages: ECHELON_WORKFLOW.stages.map(stage => stage.stage === 'security'
+        ? { ...stage, ownerAgentId: 'security', status: 'active' as const, reason: 'External input' }
+        : stage.stage === 'review' ? { ...stage, status: 'complete' as const } : stage) };
+    panel({ ...ECHELON_TASK, echelons: workflow });
     const route = await screen.findByRole('list', { name: 'Task workflow' });
     expect(within(route).getAllByRole('listitem')).toHaveLength(5);
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Security');
@@ -47,15 +47,15 @@ describe('development echelon presentation', () => {
   });
 
   it.each(['waiting', 'escalated', 'ready', 'done'] as const)('shows the engine state %s without naming the old author as current owner', async state => {
-    panel({ ...ECHELON_TASK, workflow: { ...ECHELON_WORKFLOW, state, ownerId: null } });
+    panel({ ...ECHELON_TASK, echelons: { ...ECHELON_WORKFLOW, phase: state, ownerAgentId: null } });
     const route = await screen.findByRole('list', { name: 'Task workflow' });
     const current = route.querySelector('[aria-current="step"]');
     expect(current).not.toHaveTextContent('Bruno');
     expect(screen.getByText({ waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed' }[state])).toBeInTheDocument();
   });
 
-  it.each([undefined, null])('keeps the legacy gate presentation for workflow %s', async workflow => {
-    panel({ ...TASK_DETAIL, workflow });
+  it.each([undefined, null])('keeps the legacy gate presentation for echelons %s', async echelons => {
+    panel({ ...TASK_DETAIL, echelons });
     const route = await screen.findByRole('list', { name: 'Gates' });
     expect(route).toHaveTextContent('Bruno');
     expect(route).toHaveTextContent('Tom');
@@ -67,15 +67,15 @@ describe('development echelon presentation', () => {
     panel(ECHELON_TASK);
     const route = await screen.findByRole('list', { name: 'Task workflow' });
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Review');
-    mockApi({ 'GET /api/tasks/t12': [200, { task: { ...ECHELON_TASK, workflow: { ...ECHELON_WORKFLOW, stage: 'Tests', ownerId: 'tester',
-      stages: ECHELON_WORKFLOW.stages.map(s => s.name === 'Review' ? { ...s, status: 'complete' } : s.name === 'Tests' ? { ...s, status: 'active' } : s) } } }] });
+    mockApi({ 'GET /api/tasks/t12': [200, { task: { ...ECHELON_TASK, echelons: { ...ECHELON_WORKFLOW, stage: 'tests', ownerAgentId: 'tester',
+      stages: ECHELON_WORKFLOW.stages.map(s => s.stage === 'review' ? { ...s, status: 'complete' } : s.stage === 'tests' ? { ...s, status: 'active' } : s) } } }] });
     stream.send({ type: 'task', id: 't12', spot: { departmentId: 'd2' } });
     expect(await within(route).findByText('Tom')).toBeInTheDocument();
     expect(route.querySelector('[aria-current="step"]')).toHaveTextContent('Tests');
   });
 
   it('lists A in Review and B in Development with their own engine stage', () => {
-    const independent = { ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', workflow: { ...ECHELON_WORKFLOW, stage: 'Development' as const } };
+    const independent = { ...ECHELON_TASK, id: 't13', number: 13, title: 'Independent work', echelons: { ...ECHELON_WORKFLOW, stage: 'development' as const } };
     render(<><TaskRow task={ECHELON_TASK} on={false} place="" onOpen={() => {}} />
       <TaskRow task={independent}
         on={false} place="" onOpen={() => {}} /></>);
