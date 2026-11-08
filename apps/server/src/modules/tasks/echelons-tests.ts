@@ -20,6 +20,8 @@ export const Verification = z.object({ candidateId: z.uuid(), revision: z.number
 export type Verification = z.infer<typeof Verification>;
 const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })).min(1) });
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
+type Run = typeof testRuns.$inferSelect;
+type Part = typeof testParts.$inferSelect;
 
 async function boundRuns(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[], testedRevision: number) {
   if (!ids.length || new Set(ids).size !== ids.length) throw refuse(409, 'task_invalid', 'Name distinct completed candidate runs.');
@@ -29,20 +31,34 @@ async function boundRuns(db: Ctx['db'] | Tx, task: Task, route: Route, ids: stri
   const testerId = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId ?? null;
   for (const run of runs) {
     await requireCandidateRun(db, task, candidate, testedRevision, testerId, run);
-    if (run.kind !== 'tests' || run.commitSha !== candidate.commit || run.branch !== candidate.branch || !run.finishedAt) throw refuse(409, 'task_changed', 'A run does not verify the current candidate.');
+    requireFinishedCandidate(run, candidate);
   }
   return { candidate, runs };
 }
 
-async function candidateProductSnapshot(run: typeof testRuns.$inferSelect, candidate: EchelonCandidate): Promise<EnvironmentSnapshot> {
+function requireFinishedCandidate(run: Run, candidate: EchelonCandidate): void {
+  if (run.kind !== 'tests' || run.commitSha !== candidate.commit || run.branch !== candidate.branch || !run.finishedAt) throw refuse(409, 'task_changed', 'A run does not verify the current candidate.');
+}
+
+function boundProductRequest(run: Run, candidate: EchelonCandidate, profile: string): NonNullable<Run['environmentRequest']> {
+  const request = run.environmentRequest;
+  if (run.command !== '' || !request || request.problem || request.suite || (request.profile !== undefined && request.profile !== profile) || request.baseCommit !== candidate.baseCommit) throw new Error('The run does not prove the bound candidate scope.');
+  return request;
+}
+
+function matchesProductSnapshot(snapshot: EnvironmentSnapshot, run: Run, candidate: EchelonCandidate, request: NonNullable<Run['environmentRequest']>, profile: string): boolean {
+  const { description } = snapshot, scope = description.repositoryScope;
+  return snapshot.candidate?.baseCommit === candidate.baseCommit && snapshot.profile === profile && description.commitSha === candidate.commit && run.environmentHash === description.manifestHash
+    && scope.companyId === run.companyId && scope.repositoryOwnerId === run.departmentId && scopeKey(scope) === scopeKey(request.repositoryScope);
+}
+
+async function candidateProductSnapshot(run: Run, candidate: EchelonCandidate): Promise<EnvironmentSnapshot> {
   try {
-    const snapshot = EnvironmentSnapshot.parse(run.environmentSnapshot), request = run.environmentRequest;
-    const { description } = snapshot, scope = description.repositoryScope;
+    const snapshot = EnvironmentSnapshot.parse(run.environmentSnapshot);
+    const { description } = snapshot;
     const profile = description.manifest.execution?.fullRun?.profile ?? description.manifest.defaultProfile;
-    if (run.command !== '' || !request || request.problem || request.suite || (request.profile !== undefined && request.profile !== profile)
-      || request.baseCommit !== candidate.baseCommit || snapshot.candidate?.baseCommit !== candidate.baseCommit
-      || snapshot.profile !== profile || description.commitSha !== candidate.commit || run.environmentHash !== description.manifestHash
-      || scope.companyId !== run.companyId || scope.repositoryOwnerId !== run.departmentId || scopeKey(scope) !== scopeKey(request.repositoryScope)) throw new Error('The run does not prove the bound candidate scope.');
+    const request = boundProductRequest(run, candidate, profile);
+    if (!matchesProductSnapshot(snapshot, run, candidate, request, profile)) throw new Error('The run does not prove the bound candidate scope.');
     await validateEnvironmentDescription(description);
     candidateTestUnits(snapshot);
     return snapshot;
@@ -50,25 +66,43 @@ async function candidateProductSnapshot(run: typeof testRuns.$inferSelect, candi
 }
 
 const ReusedUnit = UnitFingerprint.safeExtend({ runId: z.uuid(), commitSha: ProductCommitSha });
-function reusedCandidateUnits(run: typeof testRuns.$inferSelect, snapshot: EnvironmentSnapshot): z.infer<typeof ReusedUnit>[] {
+function requireReuseCache(cache: Run['fileCache'], count: number): void {
+  if ((cache?.reused ?? 0) !== count || (count && (cache?.mode !== 'cached' || cache.preparationReused))) throw refuse(409, 'task_invalid', 'The run has no complete per-unit reuse evidence.');
+}
+
+function reusedCandidateUnits(run: Run, snapshot: EnvironmentSnapshot): z.infer<typeof ReusedUnit>[] {
   const cache = run.fileCache, units = z.array(ReusedUnit).safeParse(cache?.reusedUnits ?? []);
-  if (!units.success || (cache?.reused ?? 0) !== units.data.length || (units.data.length && (cache?.mode !== 'cached' || cache.preparationReused))) throw refuse(409, 'task_invalid', 'The run has no complete per-unit reuse evidence.');
+  if (!units.success) throw refuse(409, 'task_invalid', 'The run has no complete per-unit reuse evidence.');
+  requireReuseCache(cache, units.data.length);
   const prints = new Map(snapshot.candidate!.fingerprints.map(unit => [unitKey(unit), unit.fingerprint]));
   if (units.data.some(unit => prints.get(unitKey(unit)) !== unit.fingerprint || unit.runId === run.id)) throw refuse(409, 'task_invalid', 'The reused unit does not have the final influencing fingerprint and a prior source.');
   return units.data;
 }
-function completeCandidateSelection(snapshot: EnvironmentSnapshot, parts: (typeof testParts.$inferSelect)[], reused: z.infer<typeof ReusedUnit>[]): void {
+type Selection = NonNullable<Part['environmentSelection']>['selection'];
+
+function selectedUnits(selection: Selection): string[] {
+  const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
+  return suites.flatMap(suite => suite.files.map(file => unitKey({ suiteId: suite.suiteId, file })));
+}
+
+function exactUnits(actual: string[], expected: Set<string>): boolean {
+  return actual.length === expected.size && new Set(actual).size === actual.length && actual.every(key => expected.has(key));
+}
+
+function completeCandidateSelection(snapshot: EnvironmentSnapshot, parts: Part[], reused: z.infer<typeof ReusedUnit>[]): void {
   const units = candidateTestUnits(snapshot), expected = new Set(units.map(unitKey));
   const selections = parts.map(part => part.environmentSelection!.selection);
-  const actual = [...reused.map(unitKey), ...selections.flatMap(selection => {
-    const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
-    return suites.flatMap(suite => suite.files.map(file => unitKey({ suiteId: suite.suiteId, file })));
-  })];
-  if (actual.length !== expected.size || new Set(actual).size !== actual.length || actual.some(key => !expected.has(key))) throw refuse(409, 'task_invalid', 'The receipts do not cover every applicable candidate test unit exactly.');
+  const actual = [...reused.map(unitKey), ...selections.flatMap(selectedUnits)];
+  if (!exactUnits(actual, expected)) throw refuse(409, 'task_invalid', 'The receipts do not cover every applicable candidate test unit exactly.');
   const suites = new Set(units.map(unit => unit.suiteId));
   const expectedFinals = new Set(snapshot.description.manifest.suites.filter(suite => suites.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id));
   const finals = selections.flatMap(selection => selection.kind === 'final' ? [selection.suiteId] : []);
-  if (finals.length !== expectedFinals.size || new Set(finals).size !== finals.length || finals.some(id => !expectedFinals.has(id))) throw refuse(409, 'task_invalid', 'The candidate is missing an applicable post-suite check.');
+  if (!exactUnits(finals, expectedFinals)) throw refuse(409, 'task_invalid', 'The candidate is missing an applicable post-suite check.');
+}
+
+function requireCompleteParts(parts: Part[], run: Run, task: Task, candidate: EchelonCandidate): void {
+  const complete = parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null);
+  if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
 }
 
 /* Server-owned run and part rows prove the same final source; a status label alone proves nothing. */
@@ -78,8 +112,7 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
     if (run.status !== 'passed') throw refuse(409, 'task_changed', 'A run did not pass.');
     const snapshot = await candidateProductSnapshot(run, candidate);
     const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-    const complete = parts.length === run.parts && parts.every((part, i) => part.companyId === task.companyId && part.part === i + 1 && part.status === 'passed' && part.commit === candidate.commit && part.exitCode === 0 && part.error === null);
-    if (!complete) throw refuse(409, 'task_invalid', 'A run has incomplete, failed or mismatched parts and no complete reuse proof.');
+    requireCompleteParts(parts, run, task, candidate);
     for (const part of parts) {
       if (!passedProductPart(snapshot, part)) throw refuse(409, 'task_invalid', 'A passed part has no valid receipt for its assigned candidate selection.');
     }
@@ -92,26 +125,37 @@ export async function candidateRunEvidence(db: Ctx['db'] | Tx, task: Task, route
 
 const INFRASTRUCTURE = new Set(['no_machine', 'clone_failed', 'files_failed', 'timeout', 'cancelled', 'machine_restarted', 'machine_offline', 'machine_disconnected', 'subscription_removed', 'no_repository', 'commit_unavailable', 'runtime_missing', 'isolation_missing']);
 
+function requireFailedParts(run: Run, parts: Part[]): void {
+  if (!run.parts || parts.length !== run.parts) throw refuse(409, 'task_invalid', 'A failed check needs complete part results.');
+}
+
+function requireFailedPart(part: Part, index: number, task: Task, candidate: EchelonCandidate): void {
+  if (part.companyId !== task.companyId || part.part !== index + 1 || !['passed', 'failed'].includes(part.status) || !part.finishedAt || (part.commit !== null && part.commit !== candidate.commit)) throw refuse(409, 'task_changed', 'A failed part is incomplete or belongs to another source.');
+}
+
+function partFailure(part: Part, run: Run, candidate: EchelonCandidate): 'content' | 'infrastructure' | null {
+  if (part.status === 'passed') return null;
+  if (run.status === 'passed') throw refuse(409, 'task_invalid', 'The run and failed part disagree.');
+  if (INFRASTRUCTURE.has(part.error ?? '')) return 'infrastructure';
+  if (part.commit !== candidate.commit || part.exitCode === null || part.exitCode === 0) throw refuse(409, 'task_invalid', 'A content failure needs the checked candidate and failing process result.');
+  return 'content';
+}
+
 async function failureKind(db: Ctx['db'] | Tx, task: Task, route: Route, ids: string[]): Promise<'content' | 'infrastructure'> {
   const { candidate, runs } = await boundRuns(db, task, route, ids, route.revision);
-  let failed = false, content = false;
+  const failures: ('content' | 'infrastructure')[] = [];
   for (const run of runs) {
     if (!['failed', 'passed', 'stopped'].includes(run.status)) throw refuse(409, 'task_invalid', 'The reported check has not ended.');
     const parts = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-    if (!run.parts || parts.length !== run.parts) throw refuse(409, 'task_invalid', 'A failed check needs complete part results.');
+    requireFailedParts(run, parts);
     for (const [index, part] of parts.entries()) {
-      if (part.companyId !== task.companyId || part.part !== index + 1 || !['passed', 'failed'].includes(part.status) || !part.finishedAt || (part.commit !== null && part.commit !== candidate.commit)) throw refuse(409, 'task_changed', 'A failed part is incomplete or belongs to another source.');
-      if (part.status === 'passed') continue;
-      if (run.status === 'passed') throw refuse(409, 'task_invalid', 'The run and failed part disagree.');
-      failed = true;
-      if (!INFRASTRUCTURE.has(part.error ?? '')) {
-        if (part.commit !== candidate.commit || part.exitCode === null || part.exitCode === 0) throw refuse(409, 'task_invalid', 'A content failure needs the checked candidate and failing process result.');
-        content = true;
-      }
+      requireFailedPart(part, index, task, candidate);
+      const kind = partFailure(part, run, candidate);
+      if (kind) failures.push(kind);
     }
   }
-  if (!failed) throw refuse(409, 'task_invalid', 'No failed check was reported.');
-  return content ? 'content' : 'infrastructure';
+  if (!failures.length) throw refuse(409, 'task_invalid', 'No failed check was reported.');
+  return failures.includes('content') ? 'content' : 'infrastructure';
 }
 
 async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification): Promise<Moved> {
@@ -132,8 +176,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
   const input = Verification.safeParse(value);
   if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
-  const identity = await agentIdentity(ctx.db, task.companyId, agentId);
-  if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed. Ask the head to assign it again.');
+  await requireTestsIdentity(ctx.db, task, route, agentId);
   if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
   const headId = await departmentHead(ctx.db, task);
   const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
@@ -149,11 +192,20 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   return { task: row, wakes };
 }
 
+async function requireTestsIdentity(db: Reader['db'], task: Task, route: Route, agentId: string): Promise<void> {
+  const identity = await agentIdentity(db, task.companyId, agentId);
+  if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed. Ask the head to assign it again.');
+}
+
+function matchesTestsReport(proof: z.infer<typeof Verified>, eventAgent: string | null | undefined, tester: string | null | undefined, candidate: EchelonCandidate, revision: number): boolean {
+  return eventAgent === tester && proof.candidateId === candidate.id && proof.commit === candidate.commit && proof.routeRevision === revision && proof.evidence.every(run => run.commit === candidate.commit);
+}
+
 export async function verifiedCandidateEvidence(db: Ctx['db'] | Tx, task: Task, route: Route, candidate: EchelonCandidate, verifiedRevision = route.revision) {
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents)
     .where(and(eq(taskEvents.companyId, task.companyId), eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report'), sql`${taskEvents.data} ? 'verifiedCandidate'`)).orderBy(desc(taskEvents.id)).limit(1);
   const proof = Verified.safeParse(event?.data.verifiedCandidate);
   const tester = route.state.stages.find(step => step.stage === 'tests')?.ownerAgentId;
-  if (!proof.success || event?.agentId !== tester || proof.data.candidateId !== candidate.id || proof.data.commit !== candidate.commit || proof.data.routeRevision !== verifiedRevision || proof.data.evidence.some(run => run.commit !== candidate.commit)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
+  if (!proof.success || !matchesTestsReport(proof.data, event?.agentId, tester, candidate, verifiedRevision)) throw refuse(409, 'task_changed', 'The current candidate has no valid Tests report.');
   return candidateRunEvidence(db, task, route, proof.data.evidence.map(run => run.runId), proof.data.testedRevision);
 }
