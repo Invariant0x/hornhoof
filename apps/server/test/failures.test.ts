@@ -11,7 +11,7 @@ import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { routeOf } from '../src/modules/tasks/echelons-store.js';
+import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { shortReason } from '../src/modules/tasks/failures.js';
 import { originalPromptOf } from '../src/modules/conversation/requested-prompt.js';
@@ -169,7 +169,8 @@ describe('named turn failures', () => {
 
   it.each([undefined, 'network', 'refused'] as const)('checks carried tasks after %s without changing the own task follow-up', async kind => {
     const c = await atWork();
-    const [carried] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 2, title: 'Refunds', status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    const [carried] = await c.db.insert(tasks).values({ companyId: c.companyId, departmentId: c.dev.id, number: 2, title: 'Refunds', status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    await c.db.transaction(tx => createRoute(tx, carried!, { paths: ['logic/refunds.ts'] }));
     await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, taskId: carried!.id, kind: 'conversation', prompt: 'Handle refunds', timeoutMs: 900000, status: 'done', result: GONE_ALONG, startedAt: c.first.startedAt, finishedAt: c.first.startedAt });
 
     await c.fail(c.first.id, kind ? failure(kind, kind !== 'refused') : undefined);

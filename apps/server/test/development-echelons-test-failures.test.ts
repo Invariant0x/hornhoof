@@ -1,3 +1,4 @@
+import { taskForWake } from '../src/modules/tasks/wake-state.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { tasks, testParts, testRuns } from '../src/db/schema.js';
@@ -20,6 +21,7 @@ describe('Tests failure belongs to the current candidate', () => {
     expect(moved.task).toMatchObject({ status: 'blocked', assigneeAgentId: null });
     expect((await f.detail()).echelons).toMatchObject({ phase: 'escalated', stage: 'tests', candidateId: f.snapshot.candidateId });
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
+    expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
     expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'content', candidateId: f.snapshot.candidateId, runIds: [f.failedRun.id] } });
   });
   it('escalates to the department head when a worker originally created the task', async () => {
@@ -27,6 +29,7 @@ describe('Tests failure belongs to the current candidate', () => {
     await f.db.update(tasks).set({ createdByAgentId: f.author.id }).where(eq(tasks.id, f.task.id));
     const moved = await report(f.ctx, f.tester.id, f.task.id, f.input);
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
+    expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
   });
   it.each(['no_machine', 'clone_failed', 'timeout'])('keeps %s failure retryable at Tests without certifying readiness', async error => {
     const f = await failedFixture(error, null);

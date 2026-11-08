@@ -1,3 +1,4 @@
+import { taskForWake } from '../src/modules/tasks/wake-state.js';
 import { describe, expect, it } from 'vitest';
 import { report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
@@ -26,5 +27,6 @@ describe('stage decisions without a return to the author', () => {
     expect(moved.task.assigneeAgentId).toBeNull();
     expect((await f.detail()).echelons.phase).toBe('escalated');
     expect(moved.wakes.map(w => w.agentId)).toEqual([f.head.id]);
+    expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
   });
 });

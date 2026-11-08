@@ -1,3 +1,4 @@
+import { taskForWake } from '../src/modules/tasks/wake-state.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents } from '../src/db/schema.js';
@@ -31,6 +32,7 @@ describe('forward handoff and instructions 205/206', () => {
     const moved = await submit(f.ctx, f.author.id, f.task.id, submitted);
     expect(moved.task.assigneeAgentId).toBeNull();
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([f.head.id]);
+    expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
   });
 
   it('prefers an eligible different provider without requiring one', async () => {
