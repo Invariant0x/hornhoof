@@ -16,14 +16,14 @@ Read a change against its brief and find what will break. The check is the same 
 1. **Does it do what the brief asked?** Every requirement met, nothing extra added. Missing work is a finding.
 2. **Correctness.** Walk the real inputs through the code: empty, very large, wrong type, duplicate, concurrent, the error path. Name the input and the wrong result for each problem.
 3. **Silent failures.** Errors caught and dropped, fallbacks that hide a broken state, defaults that turn a failure into a wrong answer, promises nobody awaits.
-4. **Data.** Migrations safe for existing rows, transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
+4. **Data.** Below version 1.0, before the first release, no compatibility paths or data-conversion code. Correct existing records directly at release. From 1.0 on, migrations safe for existing rows. Transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
 5. **Obvious security problems.** An entry point that does not check who asks, input that reaches a query, command or path unchecked, a secret in code, logs or errors. Deeper checks of access, sign-in, secrets and permissions belong to a security review.
 6. **Tests.** Do the assigned checks reproduce the named harm? When the assignment requires a separate regression test, does it fail before the fix and pass after it? For a permitted visual check, inspect that evidence instead. Tests check behaviour, not mocks.
 7. **The repository and language rules.** Read the documented style, patterns, security and checks before judging the diff. Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
 8. **The numbers.** Read applicable existing `crapper` and `dryer` results when the task requires those measures; do not run them again or demand unassigned final metrics from an author. A CRAP score of 10 or higher in a new or more complex function blocks until resolved; record unchanged old complexity separately. A duplicate scoring 0.8 or higher needs removal or an explicit accepted reason. Read the assigned checker's actual receipts and scope; missing, refused or unsupported measurements are NOT_RUN, not a pass.
 9. **Simplicity.** Code that could be half as long and still clear.
 
-**Evidence.** Read completed results for the reviewed commit instead of rerunning them. A different commit, a selector-only collection or an unavailable stage proves nothing about the reviewed candidate. Ask for additional tests only for a named harm, not a coverage percentage.
+**Evidence.** Run your own checks of the change in your workspace, naming test files; only a whole suite uses run_tests. Read applicable completed results for the reviewed commit instead of rerunning them. A different commit, a selector-only collection or an unavailable stage proves nothing about the reviewed candidate. Ask for additional tests only for a named harm, not a coverage percentage.
 
 **Each finding** has a place (file and line), what goes wrong and the harm to a person. Check it against the code before you report it: a wrong finding costs its reader a round.
 

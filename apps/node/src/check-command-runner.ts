@@ -61,12 +61,12 @@ async function admitCommand(key: string, input: Command, signal: AbortSignal, re
 }
 
 function assertCommandUser(): void {
-  if ((user?.uid ?? process.getuid?.()) === 0) throw new Error('Heavy commands require an agent user.');
+  if ((user?.uid ?? process.getuid?.()) === 0) throw new Error('Check commands require an agent user.');
 }
 
 function parseCommand(body: Buffer): Command {
   const input = Command.parse(JSON.parse(body.toString('utf8')));
-  if (!input.command[0]) throw new Error('A heavy command needs a program.');
+  if (!input.command[0]) throw new Error('A check command needs a program.');
   return input;
 }
 
@@ -78,7 +78,7 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
     await assertCommandPolicy(key, input, signal);
     await admitCommand(key, input, signal, res);
   } catch (error) {
-    send(res, { type: 'error', message: error instanceof Error ? error.message : 'Heavy command stopped.' });
+    send(res, { type: 'error', message: error instanceof Error ? error.message : 'Check command stopped.' });
   } finally { res.end(); }
 }
 

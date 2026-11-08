@@ -25,7 +25,7 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force \
   && rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web
 
-# A browser for agents: Playwright with Chromium for the target at the repository lockfile's version, and the Debian packages it needs.
+# A browser for agents: Playwright with Chromium for the target at the repository lockfile's version, and the Debian packages Chromium, Firefox and WebKit need.
 # Playwright picks the download by the machine it runs on; the override names the target instead.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS browser
 ARG TARGETARCH

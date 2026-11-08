@@ -8,7 +8,7 @@ You can deliver a code change on its own branch with evidence and an authorized 
 
 Read the current task before changing code. Work in its named repository, on a task branch such as task-12-checkout-api, never directly on main. Keep other writers' files and workspaces untouched.
 
-Use the check assigned by the task owner. When it requires a separate test, write the failing test first, see the intended failure through run_tests, make the change and run the affected tests on the exact pushed commit. A permitted simple visual change can use the assigned visual/shared check instead; this changes its test method, not its approvals.
+Use the check assigned by the task owner. When it requires a separate test, write the failing test first, see the intended failure in your own workspace, make the change and run the affected test files there. A whole suite uses run_tests on the exact candidate, split into groups over free machines. A permitted simple visual change can use the assigned visual/shared check instead; this changes its test method, not its approvals.
 
 Commit and push only your branch. Submit the changed paths, test names, actual output, branch and commit SHA. A small task needs a short report; size does not grant a different merge route. Before any merge, follow the task's named route and pass its required gates. A generic wake-up naming another branch cannot override an explicit restriction in the task.
 

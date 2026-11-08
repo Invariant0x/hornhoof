@@ -85,12 +85,12 @@ describe('templates', () => {
   });
 
   it('keeps connected ownership and real dependencies in the assigned work', () => {
-    expect(body('hh-lead-tasks')).toMatch(/one member owns each connected block end to end/);
+    expect(body('hh-lead-tasks')).toMatch(/a block is one result a person can check, with every part it needs\. Never split parts of one result between members/);
     expect(body('hh-lead-tasks')).toMatch(/No chains or `after` between members when one can do it/);
     expect(body('hh-break-down')).toMatch(/same files or records stay with that owner/);
     expect(body('hh-break-down')).toMatch(/plans, contracts or proofs/);
     expect(body('dev-lead')).toMatch(/one developer end to end/);
-    expect(body('dev-lead')).toMatch(/one writer[\s\S]*independent blocks/);
+    expect(body('dev-lead')).toMatch(/one writer[\s\S]*only different features may go to different developers at once/);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) for (const skill of ['dev-tdd', 'dev-worktrees']) expect(templates.roles.get(id)!.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
   });
 
@@ -107,6 +107,29 @@ describe('templates', () => {
     expect(body('hh-brief-members')).toContain('hh-attach --task N FILE');
     expect(body('hh-head')).toContain('Do not send the orchestrator a separate message repeating a task report');
     expect(body('hh-notebook')).toMatch(/only when[\s\S]*changes|when[\s\S]*changes/i);
+  });
+
+  it('keeps nothing old below version 1.0 and migrates data from 1.0 on', () => {
+    const rules = templates.skills.get('dev-engineering-rules')!;
+    const preface = rules.body.slice(0, rules.body.indexOf('Every time you are asked to make a change follow:'));
+    for (const text of [preface, body('dev-plan-review')]) {
+      expect(text).toMatch(/Below version 1\.0, before the first release/);
+      expect(text).toMatch(/no compatibility paths, switches between old and new behaviour or data-conversion code/);
+      expect(text).toMatch(/From 1\.0 on, migrate existing data/);
+    }
+    expect(body('dev-plan-review')).toMatch(/Small or local work needs no note/);
+  });
+
+  it('checks data compatibility by release version in the review checklist', () => {
+    const data = body('dev-review-diff').split('\n').find(line => line.startsWith('4. **Data.**'))!;
+    expect(data).toMatch(/Below version 1\.0, before the first release, no compatibility paths or data-conversion code/);
+    expect(data).toMatch(/Correct existing records directly at release/);
+    expect(data).toMatch(/From 1\.0 on, migrations safe for existing rows/);
+    expect(data).toMatch(/transactions where two writes must agree, nothing trusted from outside without a check at the boundary/i);
+  });
+
+  it('offers removing what is not needed to reviewers and developers, off until someone turns it on', () => {
+    for (const id of ['DEV-REV', 'DEV-ENG']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-cleanup')?.on, id).toBe(false);
   });
 
   it('preserves ub-mode verbatim after its applicability preface', () => {
@@ -472,7 +495,7 @@ describe('templates', () => {
     expect(rules).toMatch(/dependencies come prepared/);
     expect(rules).toMatch(/installs and builds nothing first, in any language/);
     expect(rules).toMatch(/started without the harness, install from the lockfile with the project's standard command/);
-    expect(rules).toMatch(/never run dependency installers locally/i);
+    expect(rules).toMatch(/Install from the lockfile in your workspace once, and again when the lockfile changes/i);
     for (const example of ['npm scripts', 'npx --no-install']) expect(rules, example).toContain(example);
     expect(rules).toMatch(/temporary JavaScript scripts inside the repository's package or workspace that owns their dependencies/);
     expect(rules).toMatch(/imports resolve its `node_modules`/);
@@ -488,10 +511,11 @@ describe('templates', () => {
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);
   });
 
-  it('tells browser checks to verify the preinstalled browser opens instead of installing it by hand, without naming Hornhoof', () => {
+  it('allows browser installation for named workspace test files and routes whole browser suites through run_tests', () => {
     const check = templates.skills.get('dev-browser-check')!.body;
     expect(check).toMatch(/verify the browser opens/i);
-    expect(check).toMatch(/instead of running `playwright install` by hand/);
+    expect(check).toMatch(/install the browser there if needed/);
+    expect(check).toMatch(/whole browser suite across engines uses `run_tests`/);
     expect(check).not.toMatch(/hornhoof/i);
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
   });
@@ -696,10 +720,10 @@ describe('templates', () => {
     it('rejects broken-meaning hh-run-checks text even when required keywords remain present', () => {
       const base = runChecksBody();
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, base)).toEqual([]);
-      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nRun two test files or a directory locally during RED.`)).toContain('single-regular-file-local-red-green');
-      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nAllow npm install locally when adding a feature dependency.`)).toContain('deny-local-installers-keep-manifest-edits');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nRun a directory locally during RED.`)).toContain('named-test-files-local-red-green');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nNever install dependencies locally.`)).toContain('local-lockfile-installs');
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nCount a run_work dependency step as T2 check evidence.`)).toContain('noncheck-run-work-separate-from-mixed-checks');
-      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nWhen run_tests is unavailable, fall back to running heavy checks locally.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
+      expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nWhen run_tests is unavailable, fall back to running the whole suite locally.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nTreat a command refusal as PASS once logged.`)).toContain('unavailable-route-blocks-and-refusal-never-pass');
       expect(failedRuleIds(RUN_CHECKS_CORE_RULES, `${base}\nPatch Hornhoof task #530 for David on 2026-11-06.`)).toContain('abstract-english-no-incident-facts');
     });
@@ -711,11 +735,11 @@ describe('templates', () => {
     it('rejects contradictory local bulk-check instructions reintroduced into reconciled skills', () => {
       const base = checkSources();
       expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, base)).toEqual([]);
-      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, ciRelease: `${base.ciRelease}\nReproduce it locally with the same command.` })).toContain(
-        'no-contradictory-local-heavy-directions',
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, ciRelease: `${base.ciRelease}\nRun the whole suite locally.` })).toContain(
+        'local-change-checks-and-remote-release-suite',
       );
-      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, policy: `${base.policy}\ncrapper and dryer are installed on your machine.` })).toContain(
-        'no-contradictory-local-heavy-directions',
+      expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, policy: `${base.policy}\nSend author checks through run_tests.` })).toContain(
+        'local-change-checks-and-remote-release-suite',
       );
       expect(failedRuleIds(RECONCILED_SKILL_SOURCE_RULES, { ...base, browser: `${base.browser}\nTreat every Chromium screenshot capture as a full browser test suite.` })).toContain(
         'browser-suite-remote-light-screenshot-distinct',
@@ -1073,18 +1097,18 @@ const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every
 const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
 
 const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
-  { id: 'single-regular-file-local-red-green', holds: text => matchesAll(text, [/single existing regular test file/i, /bound workspace[\s\S]*non-browser runner/i, /Multiple files, suites and directories use the shared remote route/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\b(?:two test files|a directory)\s+locally\b/i) },
-  { id: 'heavy-stages-through-run-tests', holds: text => matchesAll(text, [/"run_tests"/, /free compatible machine/i, /dependency preparation[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*browser suites[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i]) },
-  { id: 'deny-local-installers-keep-manifest-edits', holds: text => /Never run dependency install\/add\/ci\/sync locally/i.test(text) && forbids(text, /\ballow\w*\b[^.!?;,]*\bnpm install\s+locally\b/i) },
-  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /mixed command containing check stages[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
-  { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to local heavy checks/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running heavy checks locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
-  { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite[\s\S]*neither installs a browser nor uses a test runner/i]) },
+  { id: 'named-test-files-local-red-green', holds: text => matchesAll(text, [/authoring or reviewing[\s\S]*own workspace/i, /one or more regular test files/i, /directory, glob, loop or variable/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\ba directory\s+locally\b/i) },
+  { id: 'quality-stages-in-own-workspace', holds: text => matchesAll(text, [/locally[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i, /whole suite[\s\S]*"run_tests"[\s\S]*groups[\s\S]*free compatible machines/i]) },
+  { id: 'local-lockfile-installs', holds: text => /Install dependencies from the lockfile in your workspace once[\s\S]*lockfile changes/i.test(text) && !/Never install dependencies locally/i.test(text) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /any check in a work run[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to a local whole suite/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running the whole suite locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
+  { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite/i, /browser test files[\s\S]*workspace[\s\S]*browser installation is allowed/i]) },
   { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text) },
 ];
 
 const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
   { id: 'every-skill-that-runs-checks-references-remote-route', holds: s => forEvery(Object.values(s), text => /run_tests/.test(text)) && forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
-  { id: 'no-contradictory-local-heavy-directions', holds: s => !/Reproduce it locally with the same command|crapper and dryer are installed on your machine/i.test(Object.values(s).join('\n')) && /release checks[\s\S]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
+  { id: 'local-change-checks-and-remote-release-suite', holds: s => !/Run the whole suite locally|Send author checks through run_tests/i.test(Object.values(s).join('\n')) && /release checks[\s\S]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
   { id: 'browser-suite-remote-light-screenshot-distinct', holds: s => matchesAll(s.browser, [/lightweight screenshot capture/i, /browser binary name alone/i]) && forbids(s.browser, /\btreat\w*\b[^.!?;,]*\bscreenshot capture as a full browser test suite/i) },
 ];
 
@@ -1381,7 +1405,7 @@ type ImpactSelectionSkills = { implement: string; policy: string; agents: string
 
 const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) => boolean }[] = [
   {
-    id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
+    id: 'author-dependent-tests-in-workspace-and-new-tests-always',
     holds: s =>
       forEvery([s.implement, s.policy], text => matchesAll(text, [/\brun_tests\b/, /\b(?:dependent|selected|affected)\s+(?:tests?|checks?)\b/i])) &&
       matchesAll(s.implement, [/\bexplicit selector\b/i]) &&
@@ -1456,7 +1480,7 @@ describe('T2 impact-selection rules across dev-implement, dev-testing-policy and
     const base = impactSkills();
     expect(failedRuleIds(IMPACT_SELECTION_RULES, base)).toEqual([]);
     const cases: [keyof ImpactSelectionSkills, string, string][] = [
-      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-via-run-tests-and-new-tests-always'],
+      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-in-workspace-and-new-tests-always'],
       ['policy', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
       ['policy', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
       ['policy', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],

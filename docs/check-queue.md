@@ -6,12 +6,14 @@ The queue stores its metadata on the server, outside the users and folders of jo
 
 ## Local commands
 
-An agent runs a noninteractive heavy command with:
+An agent runs noninteractive checks of its change in its own workspace. Install dependencies from the lockfile once per workspace and again when the lockfile changes. Name one or more regular test files, including browser tests when the browser is installed there. Browser installation is allowed. Types, lint, format, builds, coverage, quality and changed-code mutation also run there.
+
+Only a whole test suite or declared profile uses `run_tests`, split into groups over free machines. A runner given no files, or a selection using a directory, glob, loop or variable, counts as a whole suite. Watch modes and task runners that run everything are refused in the terminal. For local checks, the wrapper uses the same guard as the terminal:
 
 ```sh
-hh-check -- npm test
-hh-check -- cargo test
-hh-check -- make build
+hh-check -- npx vitest run test/a.test.ts test/b.test.ts
+hh-check -- npx tsc --noEmit
+hh-check -- npm run build -w apps/node
 ```
 
 The wrapper preserves stdout, stderr and the command's exit status. While waiting it prints `Waiting for a machine check slot. Position 2.` Positions start at one for the next waiting command. A nested wrapper reuses its parent's live slot only for the same agent.

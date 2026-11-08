@@ -12,7 +12,7 @@ import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-describe('heavy command bridge', () => {
+describe('check command bridge', () => {
   beforeEach(() => {
     configureCheckCommands(null, (_key, input) => classifyAgentCommand({ ...input, workspaceRoot: '/tmp' }));
     onTestFinished(() => configureCheckCommands(null));
@@ -156,9 +156,9 @@ async function guardedCommandFixture() {
   mkdirSync(root, { recursive: true });
   const bin = join(root, 'bin'), sentinel = join(root, 'payload-started');
   mkdirSync(bin);
-  const compiler = join(bin, 'tsc');
-  writeFileSync(compiler, '#!/bin/sh\nprintf spawned > "$HH_GUARD_SENTINEL"\n');
-  chmodSync(compiler, 0o755);
+  const runner = join(bin, 'vitest');
+  writeFileSync(runner, '#!/bin/sh\nprintf spawned > "$HH_GUARD_SENTINEL"\n');
+  chmodSync(runner, 0o755);
   let acquired = 0;
   const client = new CheckClient(frame => {
     if (frame.type === 'check.acquire') {
@@ -171,7 +171,7 @@ async function guardedCommandFixture() {
   const bridge = new Bridge('http://127.0.0.1:1', () => {});
   await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
   onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
-  const run = async (lease?: string, command = ['tsc', '--noEmit'], signal?: AbortSignal) => {
+  const run = async (lease?: string, command = ['vitest', 'run'], signal?: AbortSignal) => {
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
       method: 'POST', signal, body: JSON.stringify({ command, cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),
     });
@@ -181,7 +181,7 @@ async function guardedCommandFixture() {
 }
 
 describe('command policy boundary', () => {
-  it('denies a missing guard before a heavy sentinel or a slot can start', async () => {
+  it('denies a missing guard before a command sentinel or a slot can start', async () => {
     const c = await guardedCommandFixture();
     const text = await c.run();
     expect(existsSync(c.sentinel)).toBe(false);
@@ -190,7 +190,7 @@ describe('command policy boundary', () => {
     expect(text).not.toContain('"type":"exit"');
   });
 
-  it('denies heavy agent payload even while the same agent holds a genuine lease', async () => {
+  it('denies a whole suite agent payload even while the same agent holds a genuine lease', async () => {
     const c = await guardedCommandFixture();
     configureCheckCommands(null, createAgentCommandGuard(c.dir));
     const text = await withCheckSlot(() => c.run(currentCheckLease()), { agentId: c.key });

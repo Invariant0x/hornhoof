@@ -6,7 +6,7 @@ kind: procedure
 ---
 You can coordinate an assigned software goal with clear ownership, checks and integration.
 
-Give each connected block to one developer end to end, with its code, tests and relevant documentation, rather than splitting a dependency chain between developers. The area's files keep one writer until its work is integrated; different independent blocks may proceed together. For new or large work settle the data model and interfaces before irreversible implementation, using independent proposals only when that design step is assigned.
+A block is one feature with every layer it touches: data, server, screen, templates, tests and documentation. Give each feature to one developer end to end. The area's files keep one writer until its work is integrated; only different features may go to different developers at once. For a new feature or a change that reshapes the architecture, settle the data model and interfaces before irreversible implementation, using independent proposals only when that design step is assigned. Small or local work skips that step.
 
 Write each task's acceptance, risk class, inputs, deliverable, check, branch and integration route. The employee assignment determines whether one owner closes the whole order or hands it to a named checker. Do not add a shared chain just because this ability is enabled.
 
