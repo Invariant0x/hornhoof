@@ -133,6 +133,30 @@ const emptyFacts = (repository: boolean, turn: TreeFacts['turn']): TreeFacts => 
   jobs: [],
 });
 
+type StoredEvent = FactTaskEvent & Pick<typeof taskEvents.$inferSelect, 'id' | 'companyId'>;
+
+function eventsByTask(events: StoredEvent[]): Map<string, StoredEvent[]> {
+  const byTask = new Map<string, StoredEvent[]>();
+  for (const event of events) {
+    const own = byTask.get(event.taskId) ?? [];
+    own.push(event);
+    byTask.set(event.taskId, own);
+  }
+  return byTask;
+}
+
+type TaskFactsContext = {
+  repoIds: Set<string>; sees: (task: Task) => boolean; seenAfter: Set<string>;
+  waits: Awaited<ReturnType<typeof openWaitsOf>>; workflows: Awaited<ReturnType<typeof routeSnapshots>>;
+  events: Map<string, StoredEvent[]>;
+};
+
+function currentTaskFacts(task: Task, context: TaskFactsContext): FactTask {
+  const { repoIds, sees, seenAfter, waits, workflows } = context;
+  const events = context.events.get(task.id) ?? [];
+  return toFactTask(task, repoIds, sees, shownWaits(waits.get(task.id) ?? [], id => seenAfter.has(id)), workflows.get(task.id)!, countedFindings(events), events);
+}
+
 /* The department's facts in a turn. until: a turn that is over, whose agents went on to other work after it. */
 export async function treeFactsOf(db: Reader, companyId: string, departmentId: string, sees: (t: Task) => boolean, turn: TreeFacts['turn'], until?: Date): Promise<TreeFacts> {
   const places = await db
@@ -189,12 +213,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
   const jobStates = await readJobStates(db, taskIds);
   const agentIds = collectAgentIds(turnTasks, events, asks, jobStates);
   const workflows = await routeSnapshots(db, turnTasks);
-  const byTask = new Map<string, typeof events>();
-  for (const event of events) {
-    const own = byTask.get(event.taskId) ?? [];
-    own.push(event);
-    byTask.set(event.taskId, own);
-  }
+  const byTask = eventsByTask(events);
   const history = await readTurnHistory(db, companyId, agentIds, from, until);
   const agentRows = agentIds.length
     ? await db.select({ id: agents.id, name: agents.name, createdAt: agents.createdAt }).from(agents).where(inArray(agents.id, agentIds)).orderBy(asc(agents.createdAt))
@@ -204,7 +223,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
     repository,
     turn,
     agents: agentRows,
-    tasks: turnTasks.map(t => toFactTask(t, repoIds, sees, shownWaits(waits.get(t.id) ?? [], id => seenAfter.has(id)), workflows.get(t.id)!, countedFindings(byTask.get(t.id) ?? []), byTask.get(t.id) ?? [])),
+    tasks: turnTasks.map(task => currentTaskFacts(task, { repoIds, sees, seenAfter, waits, workflows, events: byTask })),
     related: extraTasks.map(t => ({ id: t.id, number: t.number, title: t.title, status: t.status, visible: sees(t) })),
     events,
     requests: asks,

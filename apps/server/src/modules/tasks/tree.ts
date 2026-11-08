@@ -415,21 +415,46 @@ export function taskActor(task: FactTask): string | null {
   return task.assigneeAgentId ?? task.executorAgentId ?? null;
 }
 
+type OwnershipTask = Pick<FactTask, 'createdAt' | 'echelons' | 'assigneeAgentId' | 'executorAgentId'>;
+
+function reassignedOwner(event: FactTaskEvent): boolean {
+  return event.kind === 'updated' && Array.isArray(event.data.fields)
+    && event.data.fields.some(field => ['owner', 'ownerAgentId', 'executor'].includes(String(field)));
+}
+
+function earlierVerdict(event: FactTaskEvent, workflow: EchelonsSnapshot, current: number): boolean {
+  const previous = typeof event.data.stage === 'string' ? ECHELON_STAGES.indexOf(event.data.stage as EchelonStage) : -1;
+  return event.kind === 'verdict' && event.data.pass === true && event.data.candidateId === workflow.candidateId && previous >= 0 && previous < current;
+}
+
+function checkerHandoff(event: FactTaskEvent, workflow: EchelonsSnapshot, current: number): boolean {
+  const candidate = event.data.candidate as { id?: unknown } | undefined;
+  return (event.kind === 'submitted' && candidate?.id === workflow.candidateId) || earlierVerdict(event, workflow, current);
+}
+
+function currentChecker(task: OwnershipTask, stage: number): boolean {
+  return Boolean(task.assigneeAgentId && task.assigneeAgentId !== task.executorAgentId && stage >= 2);
+}
+
 /* A checker starts at its real handoff, not when its author's task was created. */
-export function treeOwnerSince(task: Pick<FactTask, 'createdAt' | 'echelons' | 'assigneeAgentId' | 'executorAgentId'>, moves: FactTaskEvent[]): Date {
+export function treeOwnerSince(task: OwnershipTask, moves: FactTaskEvent[]): Date {
   let since = task.createdAt;
   const workflow = task.echelons;
   const current = workflow.stage ? ECHELON_STAGES.indexOf(workflow.stage) : -1;
   for (const event of moves) {
-    const candidate = event.data.candidate as { id?: unknown } | undefined;
-    const input = event.kind === 'submitted' && candidate?.id === workflow.candidateId;
-    const previous = typeof event.data.stage === 'string' ? ECHELON_STAGES.indexOf(event.data.stage as EchelonStage) : -1;
-    const checked = event.kind === 'verdict' && event.data.pass === true && event.data.candidateId === workflow.candidateId && previous >= 0 && previous < current;
-    const reassigned = event.kind === 'updated' && Array.isArray(event.data.fields)
-      && event.data.fields.some(field => ['owner', 'ownerAgentId', 'executor'].includes(String(field)));
-    if ((reassigned || (task.assigneeAgentId && task.assigneeAgentId !== task.executorAgentId && current >= 2 && (input || checked))) && event.createdAt > since) since = event.createdAt;
+    if ((reassignedOwner(event) || (currentChecker(task, current) && checkerHandoff(event, workflow, current))) && event.createdAt > since) since = event.createdAt;
   }
   return since;
+}
+
+function submittedBy(event: FactTaskEvent, actorId: string): boolean {
+  const candidate = event.data.candidate as { producedBy?: { agentId?: string } } | undefined;
+  return event.kind === 'submitted' && event.agentId === actorId && candidate?.producedBy?.agentId === actorId;
+}
+
+function observedLineEnd(task: FactTask, moves: FactTaskEvent[], actorId: string, completedAt: Date | null): Date | null {
+  const handedOn = task.status === 'done' && task.echelons.resultKind === 'code' ? moves.find(event => submittedBy(event, actorId)) : undefined;
+  return handedOn && completedAt && handedOn.createdAt < completedAt ? handedOn.createdAt : completedAt;
 }
 
 function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; idle: IdleSource } | null {
@@ -444,12 +469,7 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   const ends = lineEndDates(task, moves);
   const since = task.ownerSince;
   const ownerCut = cutDate && cutDate < since ? since : cutDate;
-  const completedAt = ends.mergedAt ?? ends.doneAt;
-  const handedOn = task.status === 'done' && task.echelons.resultKind === 'code' ? moves.find(event => {
-    const candidate = event.data.candidate as { producedBy?: { agentId?: string } } | undefined;
-    return event.kind === 'submitted' && event.agentId === actorId && candidate?.producedBy?.agentId === actorId;
-  }) : undefined;
-  const observedEnd = handedOn && completedAt && handedOn.createdAt < completedAt ? handedOn.createdAt : completedAt;
+  const observedEnd = observedLineEnd(task, moves, actorId, ends.mergedAt ?? ends.doneAt);
   const asks = listOf(ix.asksByPair, `${task.id}:${agent.id}`);
   const segments = withExternalWait(withPrograms(lineSegments({
     createdAt: since,
