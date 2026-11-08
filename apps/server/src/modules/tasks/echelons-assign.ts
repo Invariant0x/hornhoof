@@ -17,7 +17,7 @@ export async function agentIdentity(db: Ctx['db'], companyId: string, agentId: s
 
 /* Selection never changes a subscription, model, employee or skill card. */
 export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdentity, ability: string, named: string | null): Promise<CheckerIdentity | null> {
-  const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
+  const staff = await ctx.db.select().from(agents).where(and(eq(agents.companyId, task.companyId), eq(agents.departmentId, task.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt))).orderBy(asc(agents.createdAt));
   const eligible: CheckerIdentity[] = [];
   for (const agent of staff) {
     if ((named && agent.id !== named) || (agent.productId && agent.productId !== task.productId) || !agent.skills.includes(ability)) continue;
