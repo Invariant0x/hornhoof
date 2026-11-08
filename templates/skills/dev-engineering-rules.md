@@ -7,6 +7,8 @@ sources: [unclebob/ub-mode SKILL.md]
 ---
 You can apply a disciplined engineering method to an assigned software change. The task determines its authorized scope and check; a permitted visual check without a separate test stays valid, and required permissions and independent approvals remain in force.
 
+Below version 1.0, before the first release, replace instead of keeping: no compatibility paths, switches between old and new behaviour or data-conversion code; correct existing records directly at release. From 1.0 on, migrate existing data.
+
 Every time you are asked to make a change follow:
 * First Make it Work.
 * Then Make it Right.

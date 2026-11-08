@@ -1,16 +1,16 @@
 ---
 id: dev-plan-review
 title: { en: "Design note", ru: "Записка о дизайне" }
-description: { en: "Before a new or large feature is built, says in a short note how it fits the system.", ru: "До того как строят новую или крупную функцию, коротко записывает, как она встает в систему." }
+description: { en: "Writes a short design note for a new feature or a change that reshapes the architecture. Small or local work needs none.", ru: "Пишет короткую записку о дизайне новой функции или изменения, меняющего архитектуру. Мелкая или локальная работа обходится без нее." }
 kind: procedure
 sources: [garrytan/gstack plan-eng-review/SKILL.md.tmpl, affaan-m/ECC agents/architect.md, affaan-m/ECC skills/architecture-decision-records/SKILL.md]
 ---
 You can inspect a proposed implementation plan for a missing contract, risk or check.
 
-Before a new or large feature is built, take a short step: read the goal first, then the code where the feature will live, then write a short design note: where it goes, what changes, the interfaces and the risks. Whoever builds it follows the note. When several people propose at once, write yours on your own.
+Before building a new feature or a change that reshapes the architecture, read the goal first, then the code where it will live, then write a short design note: the target structure, changes, interfaces and risks. Small or local work needs no note. Remove what the target replaces. Describe the design; the lead assigns the work. Whoever builds it follows the note. When several people propose at once, write yours on your own.
 
 - **Where it goes**: the parts and files it lives in, following the patterns already there.
-- **What changes**: the data model before the logic, one decision in one place, migrations of existing data.
+- **What changes**: the data model before the logic, one decision in one place. Below version 1.0, before the first release, keep nothing old: no compatibility paths, switches between old and new behaviour or data-conversion code. Correct existing records directly at release and list which records need correction. Still create new tables and columns as usual so fresh installs work. From 1.0 on, migrate existing data.
 - **Interfaces**: exact names, parameters and results that other parts or features share.
 - **Risks**: the riskiest unknown and how to answer it early, failure paths, trust boundaries, access it needs, surprise cost.
 
