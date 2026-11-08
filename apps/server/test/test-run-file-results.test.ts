@@ -107,6 +107,7 @@ describe('reusing green test results', () => {
     expect(await f.ranFiles(first)).toEqual(FILES);
     await f.finish(first);
     expect((await f.greenRows()).map(row => row.file)).toEqual(FILES);
+    expect((await f.runOf(first)).fileCache).toMatchObject({ verifiedFingerprints: fingerprints() });
 
     const second = await f.start({ profile: 'final' });
     expect(await f.ranFiles(second)).toEqual([]);

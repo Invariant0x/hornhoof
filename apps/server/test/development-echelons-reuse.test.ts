@@ -8,6 +8,11 @@ import { verifiedCandidateEvidence } from '../src/modules/tasks/echelons-tests.j
 import { testsFixture } from './development-echelons-verification.js';
 
 describe('fingerprint reuse in final candidate evidence', () => {
+  it('keeps the source fingerprints after temporary cache data is cleared', async () => {
+    const f = await testsFixture(), source = await f.run(f.finalCommit, 1, { cache: true });
+    expect(source.fileCache?.fingerprints).toEqual([]);
+    expect(source.fileCache).toMatchObject({ verifiedFingerprints: source.environmentSnapshot!.candidate!.fingerprints });
+  });
   it.each([false, true])('reuses an attested candidate unit while retaining required final checks=%s', async finalChecks => {
     const f = await testsFixture();
     const source = await f.run(f.finalCommit, 1, { cache: true, finalChecks });
@@ -26,7 +31,11 @@ describe('fingerprint reuse in final candidate evidence', () => {
     const f = await testsFixture(), source = await f.run(f.finalCommit, 1, { cache: true });
     const reused = await f.run(f.finalCommit, 1, { cache: true });
     expect(reused.parts).toBe(0);
-    if (problem === 'missing') await f.db.delete(testRuns).where(eq(testRuns.id, source.id));
+    if (problem === 'missing') {
+      const fileCache = structuredClone(reused.fileCache!);
+      fileCache.reusedUnits![0]!.runId = randomUUID();
+      await f.db.update(testRuns).set({ fileCache }).where(eq(testRuns.id, reused.id));
+    }
     if (problem === 'failed') await f.db.update(testParts).set({ status: 'failed', exitCode: 1 }).where(eq(testParts.runId, source.id));
     if (problem === 'receipt') await f.db.update(testParts).set({ environmentReceipt: null }).where(eq(testParts.runId, source.id));
     if (problem === 'commit') await f.db.update(testRuns).set({ commitSha: 'd'.repeat(40) }).where(eq(testRuns.id, source.id));
@@ -49,3 +58,4 @@ describe('fingerprint reuse in final candidate evidence', () => {
     await expect(verifiedCandidateEvidence(f.db, task, route, candidate).then(() => null)).rejects.toMatchObject({ status: 409 });
   });
 });
+import { randomUUID } from 'node:crypto';
