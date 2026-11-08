@@ -486,6 +486,32 @@ describe("the dependencies of an agent's worktree", () => {
     expect(events[2]).toEqual({ kind: 'text', text: expect.stringMatching(/failed to build: npm ERR! code E404$/) });
   });
 
+  it('give up on them at their deadline whatever holds them there, and the program starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    const adapter = owned(dir);
+    let told: AbortSignal | undefined;
+    const done = await runJob(adapter, shopJob(), dir, {
+      git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependenciesMs: 50,
+      dependencies: (_tree, signal) => { told = signal; return new Promise<null>(() => {}); },
+    });
+    expect(done.ok).toBe(true);
+    expect(adapter.inputs).toHaveLength(1);
+    expect(events).toEqual([{ kind: 'text', text: expect.stringMatching(/^The program starts without the shared dependencies.*did not come within 1 s\.$/) }]);
+    /* The work that holds them is told to stop, and tidies up by itself. */
+    expect(told?.aborted).toBe(true);
+  });
+
+  it('end a turn stopped while something holds them, before its program starts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const stop = new AbortController();
+    const adapter = owned(dir);
+    setTimeout(() => stop.abort(), 20);
+    const done = await runJob(adapter, shopJob(), dir, { signal: stop.signal, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: () => new Promise<null>(() => {}) });
+    expect(done).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(adapter.inputs).toEqual([]);
+  });
+
   it('end a turn stopped while they were being placed, before its program starts', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const stop = new AbortController();

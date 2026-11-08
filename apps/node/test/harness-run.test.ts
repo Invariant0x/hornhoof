@@ -22,7 +22,7 @@ vi.mock('../src/isolation.js', async original => {
 import { pruneCache } from '../src/test-cache.js';
 import { dependencyCacheKey, environmentCacheKey, harnessVersion, readTestEnvironment } from '../src/test-environment.js';
 import { type HarnessRemote } from '../src/test-harness.js';
-import { ownFs } from '../src/agent-fs.js';
+import { agentFs, ownFs } from '../src/agent-fs.js';
 import { runTests, syncHarness, worktreeHarness, type Worktree } from '../src/tests.js';
 
 const roots: string[] = [];
@@ -455,6 +455,23 @@ describe("an agent's worktree", () => {
     const broken = await worktree(f, one, 'f'.repeat(40));
     await writeFile(join(broken.checkout, '.hornhoof/test-environment.json'), 'not a manifest');
     await expect(worktreeHarness(broken, one)).rejects.toThrow();
+  });
+
+  it('reads its manifest only as a plain file, never through a link and never waiting on a pipe', async () => {
+    const f = await fixture(), one = machine(f, 'one', registry().remote('one'));
+    const manifest = (tree: Worktree) => join(tree.checkout, '.hornhoof/test-environment.json');
+    /* A manifest elsewhere that would say there is nothing to share, if the link to it were followed. */
+    const elsewhere = join(f.root, 'elsewhere.json');
+    await writeFile(elsewhere, (await readFile(join(f.source, '.hornhoof/test-environment.json'), 'utf8')).replace('"cache":"link"', '"cache":"none"'));
+    const linked = await worktree(f, one, 'f'.repeat(40));
+    await rm(manifest(linked)); execFileSync('ln', ['-s', elsewhere, manifest(linked)]);
+    await expect(worktreeHarness(linked, one)).rejects.toThrow(/not our ref|fetch/);
+    /* A pipe nobody writes into, read by the agents' own user as a node that runs as root does. */
+    const piped = await worktree(f, one, 'f'.repeat(40)), helper = agentFs({ uid: process.getuid!(), gid: process.getgid!() });
+    await rm(manifest(piped)); execFileSync('mkfifo', [manifest(piped)]);
+    try {
+      expect(await settled(worktreeHarness({ ...piped, fs: helper }, one).catch((error: unknown) => String(error)), 5_000)).not.toBe(STILL_WAITING);
+    } finally { helper.stop(); }
   });
 
   it("takes a ready build while a test part holds the machine's turn for heavy work", async () => {

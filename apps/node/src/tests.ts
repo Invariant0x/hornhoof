@@ -543,7 +543,7 @@ const worktreeBuilds = new CheckSlotQueue(() => 1);
 /* The agent's clone or worktree its program checks its change in, at the commit it stands at. fs: file work there as its owner. */
 export type Worktree = {
   id: string; checkout: string; commitSha: string; repo: { url: string; token: string }; repositoryScope: RepositoryScope; owner: JobUser;
-  fs: Pick<AgentFs, 'read' | 'kind' | 'mkdir' | 'move' | 'remove'>;
+  fs: Pick<AgentFs, 'entry' | 'readPlain' | 'kind' | 'mkdir' | 'move' | 'remove'>;
 };
 /* slot: the machine's turn for heavy work, which a build waits for. limitMs: how long all of it may take. */
 export type WorktreeOptions = Pick<Options, 'dir' | 'hidden' | 'signal' | 'proc' | 'harness' | 'runtimes'> & {
@@ -555,11 +555,14 @@ async function holdsAny(tree: Worktree, paths: string[]): Promise<boolean> {
   for (const path of paths) if (await tree.fs.kind(join(tree.checkout, path))) return true;
   return false;
 }
-/* What the worktree's own manifest names, read as its owner, so a worktree that holds its dependencies costs no fetch: 'none'
-   when the repository keeps no manifest, null when one is there but cannot be read here. */
+/* What the worktree's own manifest names, read as its owner and only from a plain file, so a worktree that holds its
+   dependencies costs no fetch: 'none' when the repository keeps no manifest, null when what is there cannot be read here. */
 async function ownManifest(tree: Worktree): Promise<TestEnvironmentV1 | 'none' | null> {
   try {
-    const text = await tree.fs.read(join(tree.checkout, MANIFEST));
+    const path = join(tree.checkout, MANIFEST), entry = await tree.fs.entry(path);
+    if (!entry) return 'none';
+    if (entry !== 'file') return null;
+    const text = await tree.fs.readPlain(path);
     return text === null ? 'none' : parseTestEnvironment(text);
   } catch { return null; }
 }

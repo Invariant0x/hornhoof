@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,6 +80,29 @@ describe.each([
     expect(await fs.kind(join(root, 'tree.git', 'inside'))).toBeNull();
     expect(await fs.kind(join(root, 'locked', '.git'))).toBeNull();
     chmodSync(join(root, 'locked'), 0o755);
+  });
+
+  it('says what stands at a path itself, a link not followed, and reads only a plain file there, never through a link or from a pipe', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    writeFileSync(join(root, 'plain'), 'text');
+    mkdirSync(join(root, 'folder'));
+    symlinkSync(join(root, 'plain'), join(root, 'linked'));
+    symlinkSync(join(root, 'elsewhere'), join(root, 'dangling'));
+    execFileSync('mkfifo', [join(root, 'pipe')]);
+    expect(await fs.entry(join(root, 'plain'))).toBe('file');
+    expect(await fs.entry(join(root, 'folder'))).toBe('dir');
+    expect(await fs.entry(join(root, 'linked'))).toBe('link');
+    expect(await fs.entry(join(root, 'dangling'))).toBe('link');
+    expect(await fs.entry(join(root, 'pipe'))).toBe('other');
+    expect(await fs.entry(join(root, 'missing'))).toBeNull();
+    expect(await fs.entry(join(root, 'plain', 'inside'))).toBeNull();
+    expect(await fs.readPlain(join(root, 'plain'))).toBe('text');
+    expect(await fs.readPlain(join(root, 'missing'))).toBeNull();
+    await expect(fs.readPlain(join(root, 'linked'))).rejects.toThrow(/link/);
+    /* Nobody writes into the pipe, so reading it would wait for ever. */
+    await expect(fs.readPlain(join(root, 'pipe'))).rejects.toThrow(/not a plain file/);
+    await expect(fs.readPlain(join(root, 'folder'))).rejects.toThrow(/not a plain file/);
   });
 
   it('moves a folder into place with its links as they are, and never over anything already there', async () => {

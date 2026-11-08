@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { cpSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, cpSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,11 @@ export type AgentFs = {
   read(path: string): Promise<string | null>;
   /* What is at the path as the agents' user sees it, links followed: a file, a folder, or nothing it can reach. */
   kind(path: string): Promise<'file' | 'dir' | null>;
+  /* What stands at the path itself, a link not followed: a plain file, a folder, a link, anything else, or nothing. */
+  entry(path: string): Promise<Entry | null>;
+  /* The text of a plain file at the path itself, or null when there is none. Never through a link, and never waiting on a pipe
+     or a device: anything else there fails at once. */
+  readPlain(path: string): Promise<string | null>;
   /* Replaces the file whole, readable by the agents' user only. */
   write(path: string, data: string): Promise<void>;
   /* Takes away a file or a folder whole; a link goes, not what it points at. */
@@ -22,6 +27,36 @@ export type AgentFs = {
   move(from: string, to: string): Promise<void>;
   stop(): void;
 };
+
+export type Entry = 'file' | 'dir' | 'link' | 'other';
+
+function entryAt(path: string): Entry | null {
+  try {
+    const stat = lstatSync(path);
+    return stat.isSymbolicLink() ? 'link' : stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : 'other';
+  } catch (err) {
+    if (['ENOENT', 'ENOTDIR'].includes((err as NodeJS.ErrnoException).code ?? '')) return null;
+    throw err;
+  }
+}
+
+function plainText(path: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    if (code === 'ELOOP') throw new Error(`${path} is a link, not a plain file.`);
+    throw err;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${path} is not a plain file.`);
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /* What already stands at a path, a link that leads nowhere too, keeps it from being moved over. */
 function free(path: string): void {
@@ -55,6 +90,12 @@ export const ownFs: AgentFs = {
     } catch {
       return null;
     }
+  },
+  async entry(path) {
+    return entryAt(path);
+  },
+  async readPlain(path) {
+    return plainText(path);
   },
   async write(path, data) {
     const temp = `${path}.hh-${process.pid}`;
@@ -127,6 +168,14 @@ export function agentFs(user: JobUser): AgentFs {
     kind: async path => {
       const data = await ask('kind', path);
       return data === 'file' || data === 'dir' ? data : null;
+    },
+    entry: async path => {
+      const data = await ask('entry', path);
+      return data === 'file' || data === 'dir' || data === 'link' || data === 'other' ? data : null;
+    },
+    readPlain: async path => {
+      const data = await ask('readPlain', path);
+      return typeof data === 'string' ? data : null;
     },
     write: async (path, data) => void (await ask('write', path, { data })),
     remove: async path => void (await ask('remove', path)),
