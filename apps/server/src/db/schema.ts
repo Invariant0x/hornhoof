@@ -1,3 +1,4 @@
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
 import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
@@ -683,6 +684,19 @@ export const tasks = pgTable(
     check('tasks_risk_class', sql`${t.riskClass} IS NULL OR ${t.riskClass} IN ('money', 'access', 'security', 'data', 'none')`),
   ],
 );
+
+/* Required route state. Existing records need explicit release preparation, never a fallback route. */
+export const taskRoutes = pgTable('task_routes', {
+  taskId: uuid('task_id').primaryKey().references(() => tasks.id),
+  companyId: companyId(),
+  revision: integer('revision').notNull().default(1),
+  state: jsonb('state').$type<Omit<EchelonsSnapshot, 'ownerAgentId' | 'revision'>>().notNull(),
+  paths: jsonb('paths').$type<string[]>().notNull().default([]),
+}, t => [
+  check('task_routes_revision', sql`${t.revision} > 0`),
+  check('task_routes_state', sql`jsonb_typeof(${t.state}) = 'object'`),
+  check('task_routes_paths', sql`jsonb_typeof(${t.paths}) = 'array'`),
+]);
 
 export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];

@@ -1,3 +1,4 @@
+import { createRoute, routeOf, changeRoute } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -21,7 +22,7 @@ import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewCon
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
-import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
+import { pendingFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
@@ -519,6 +520,8 @@ export type NewTask = {
   /* A member task: the assignee executes it and its gates review it in order. */
   executor?: boolean;
   gates?: string[];
+  reviewerAgentId?: string;
+  paths?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
   /* What the giver promises for each of them, by id, in place of the department's dates. */
@@ -587,6 +590,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     createdByAgentId: actor.agentId ?? null,
     updatedAt: new Date(),
   }).returning();
+  await createRoute(tx, child!, {});
   const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, gates: child!.gates, after: [], independentPartOf: parent.id, ...(inTurnReview ? { inTurnReview: true } : {}) } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
@@ -615,6 +619,12 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
+  if (input.reviewerAgentId) {
+    const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
+    if (reviewer.id === assignee.id || reviewer.departmentId !== input.departmentId || (reviewer.productId && reviewer.productId !== input.productId)) {
+      throw refuse(400, 'task_invalid', 'Review needs another employee in the task scope.');
+    }
+  }
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
@@ -697,6 +707,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
     .insert(tasks)
     .values(newTaskValues(actor, input, setup, { urgent, turnId, number: (last?.n ?? 0) + 1 }))
     .returning();
+  await createRoute(tx, row!, input);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
     assignee: assignee.id,
     gates,
@@ -728,8 +739,6 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
 }
 
 type GateMove = { set: Partial<Task>; wakes: Wake[] };
-type ReturnedGate = NonNullable<Awaited<ReturnType<typeof sentBack>>>;
-type ReviewSubmissionMove = { gate: GateMove; data: Record<string, unknown> };
 
 function fixWakes(wakes: Wake[], fixes: import('./review-fixes.js').Fix[]): Wake[] {
   return wakes.map(wake => {
@@ -737,24 +746,6 @@ function fixWakes(wakes: Wake[], fixes: import('./review-fixes.js').Fix[]): Wake
     const fix = fixes.find(plan => plan.reviewerId === wake.agentId);
     return fix ? { ...wake, again: true, note: `Read fixReview in the task tool. Check only findingIds ${fix.findingIds.join(', ')} in git diff ${fix.reviewedCommit}..${fix.fixCommit}. Unchanged code gives no new findings. Verify author run IDs and commit; do not rerun checks.` } : wake;
   });
-}
-
-async function reviewedSubmission(ctx: Live, task: Task, review: import('./review-context.js').Review, back: ReturnedGate): Promise<ReviewSubmissionMove> {
-  const fixes = await prepareFixReviews(ctx, task, review);
-  if (!fixes.length) {
-    const proof = review.runs.filter(run => run.verified);
-    if (!proof.length) throw refuse(409, 'task_invalid', 'A noneligible fix needs author evidence on its exact commit, not another review.');
-    return { gate: await atGate(ctx.db, task, back.stage + 1), data: { fixReviews: [], authorVerifiedFixRunIds: proof.map(run => run.id) } };
-  }
-  const findings = new Map(fixes.map(fix => [fix.reviewerId, back.findings.get(fix.reviewerId) ?? 'Check your original blocking finding.']));
-  const gate = await atGate(ctx.db, task, back.stage, findings, true);
-  return { gate: { ...gate, wakes: fixWakes(gate.wakes, fixes) }, data: { fixReviews: fixes } };
-}
-
-async function submissionGate(ctx: Live, task: Task, review: import('./review-context.js').Review | null): Promise<ReviewSubmissionMove> {
-  const back = await sentBack(ctx.db, task);
-  if (back && review) return reviewedSubmission(ctx, task, review, back);
-  return { gate: await atGate(ctx.db, task, back?.stage ?? 1, back?.findings), data: { fixReviews: [] } };
 }
 
 export async function submissionTask(ctx: Live, agentId: string, taskId: string): Promise<Task> {
@@ -774,23 +765,22 @@ type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
 /* The executor hands its work to the first gate, or finishes a task without gates. */
 export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }, checked?: CheckedSubmission): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
-  const review = checked?.review ?? (task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review));
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
+  const route = await routeOf(ctx.db, task);
+  if (route.state.stage !== 'development' || route.state.phase !== 'active') throw notYours(task, 'is not waiting for Development');
+  const review = checked?.review ?? await captureReview(ctx, task, r.review);
+  const reviewerId = route.state.stages.find(step => step.stage === 'review')?.ownerAgentId ?? null;
+  if (reviewerId) await workingAgent(ctx.db, task.companyId, reviewerId);
+  const state = { ...route.state, stage: 'review' as const, phase: reviewerId ? 'active' as const : 'waiting' as const,
+    stages: route.state.stages.map(step => step.stage === 'development' ? { ...step, status: 'complete' as const } : step.stage === 'review' ? { ...step, status: reviewerId ? 'active' as const : 'pending' as const, reason: reviewerId ? null : 'reviewer_required' } : step),
+  };
+  const wakes: Wake[] = reviewerId ? [{ agentId: reviewerId, taskId: task.id, why: 'review' }] : giver(task, 'blocked', agentId, 'Review needs an eligible owner.');
   const unstuck = stuckGoes(ctx, task);
-  /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
-  if (task.gates.length && !task.merging) {
-    const next = await submissionGate(ctx, task, review);
-    const gate = next.gate;
-    n.data = { ...n.data, ...next.data };
-    const row = await move(ctx, task, gate.set, n, unstuck.also, gate.wakes);
-    unstuck.tell();
-    return { task: row, wakes: gate.wakes };
-  }
-  /* Without gates it is past them as it is handed in: work in a repository still goes back to be merged. */
-  const past = task.merging ? { set: closing(), wakes: doneFor(task, agentId) } : await passedGates(ctx.db, task, doneFor(task, agentId));
-  const row = await move(ctx, task, past.set, n, unstuck.also, past.wakes);
+  const row = await move(ctx, task, { status: reviewerId ? 'review' : 'waiting', assigneeAgentId: reviewerId, silent: 0 }, {
+    kind: 'submitted', actor: { agentId }, text: r.summary,
+    data: { evidence: r.evidence, routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
+  }, async tx => { await changeRoute(tx, route, state); await unstuck.also(tx); }, wakes);
   unstuck.tell();
-  return { task: row, wakes: past.wakes };
+  return { task: row, wakes };
 }
 
 export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
@@ -867,23 +857,6 @@ async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] 
 
 /* Where the work was sent back from in the last round, with the findings of each reviewer who sent it back. Nothing once
    the task's gates were given again since: it starts at the first of them. */
-async function sentBack(db: Db, task: Task): Promise<{ stage: number; findings: Map<string, string> } | null> {
-  if (!task.bounces) return null;
-  const failed = await db
-    .select({ id: taskEvents.id, agentId: taskEvents.agentId, text: taskEvents.text, data: taskEvents.data })
-    .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'round' = ${String(task.bounces - 1)}`, sql`${taskEvents.data}->>'pass' = 'false'`))
-    .orderBy(asc(taskEvents.id));
-  const last = failed[failed.length - 1];
-  if (!last) return null;
-  const [regated] = await db
-    .select({ id: taskEvents.id })
-    .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'updated'), gt(taskEvents.id, last.id), sql`${taskEvents.data}->'fields' @> '["gates"]'::jsonb`))
-    .limit(1);
-  if (regated) return null;
-  return { stage: Number(last.data.stage), findings: new Map(failed.map(f => [f.agentId!, f.text])) };
-}
 
 /* Whether anyone of the role behind a gate is switched on. A reviewer without a role stands for itself. */
 async function roleOn(db: Db | Tx, named: string): Promise<boolean> {

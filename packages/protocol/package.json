@@ -42,6 +42,10 @@
     "./waits": {
       "types": "./dist/waits.d.ts",
       "default": "./dist/waits.js"
+    },
+    "./echelons": {
+      "types": "./dist/echelons.d.ts",
+      "default": "./dist/echelons.js"
     }
   },
   "types": "./dist/index.d.ts",

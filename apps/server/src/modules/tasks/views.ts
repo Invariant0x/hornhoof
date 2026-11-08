@@ -1,3 +1,5 @@
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import { routeSnapshots } from './echelons-store.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -21,6 +23,7 @@ export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'ki
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 type Place = { id: string; name: string } | null;
 export type TaskLine = {
+  echelons: EchelonsSnapshot;
   id: string;
   number: number;
   title: string;
@@ -95,6 +98,7 @@ export type TaskDetail = TaskLine & {
 };
 
 type Names = {
+  route(t: Task): EchelonsSnapshot;
   agent(id: string | null): AgentRef | null;
   place(id: string | null): Place;
   turn(id: string | null): number | null;
@@ -104,7 +108,7 @@ type Names = {
 };
 
 /* Names for everything the tasks point at, read in one go. */
-async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'id' | 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
+async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'companyId' | 'id' | 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
   const independent = await independentViews(ctx.db, rows.map(t => t.id));
   const partExecutors = [...independent.values()].flatMap(record => record.kind === 'part' ? [record.part.executor] : []);
   const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates]), ...partExecutors, ...more].filter((x): x is string => Boolean(x)))];
@@ -116,7 +120,8 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'id' |
   const afterIds = [...new Set(rows.flatMap(t => t.after))];
   const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
   const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
-  return nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits);
+  const routes = await routeSnapshots(ctx.db, rows);
+  return { ...nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits), route: t => routes.get(t.id)! };
 }
 
 type NamedRows = {
@@ -126,7 +131,7 @@ type NamedRows = {
   afterRows: Task[];
 };
 
-function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Names {
+function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Omit<Names, 'route'> {
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
@@ -146,6 +151,7 @@ function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRo
 /* sees: who reads it may see that task, so the line names what it waits for only of those. */
 const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   id: t.id,
+  echelons: n.route(t),
   number: t.number,
   title: t.title,
   brief: t.brief,
