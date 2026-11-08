@@ -1,12 +1,14 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
-import { agentEvents, agents, departments, jobs, machines, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, nodes, subscriptions, taskEvents, taskRoutes, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { Grant } from '../src/modules/templates/load.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 
 const MIN = 60_000;
@@ -18,8 +20,13 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'mac-12345', hostname: 'Mac' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, version: '0.5.0', status: 'ready', keyHash: 'node-key-hash' }).returning();
   await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, c.agent.id));
-  const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
-  const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', taskId: task!.id, createdBy: null });
+  const task = await c.db.transaction(async tx => {
+    const [row] = await tx.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', small: true, status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    await createRoute(tx, row!, {});
+    return row!;
+  });
+  const taskWake = taskWakeOf(task, { why: 'assigned' }, routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId));
+  const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', taskId: task.id, createdBy: null, message: { personId: null, text: 'Work', from: 'agent', by: c.head.id, name: c.head.name, taskWake } });
   await c.db.update(jobs).set({ sessionId: 'session' }).where(eq(jobs.id, id));
   const identity = nodeIdentity(node!.id);
   const report = (state: 'thinking' | 'retrying' | 'tool' | 'asking' | 'idle' | 'gone' = 'thinking', quiet = 80, tool?: string) => handleNodeMessage(c.ctx, identity, { type: 'job.program', jobId: id, state, since: Date.now() - quiet * MIN, screenAt: Date.now(), signAt: Date.now() - quiet * MIN, ...(tool ? { tool } : {}) });
@@ -39,7 +46,7 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
       return true;
     });
   };
-  return { ...c, id, node: node!, identity, task: task!, report, run, answer, registered };
+  return { ...c, id, node: node!, identity, task, report, run, answer, registered };
 }
 
 describe('restart_program', () => {
@@ -75,7 +82,8 @@ describe('restart_program', () => {
     const c = await stuck();
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, createdByAgentId: c.agent.id }).where(eq(tasks.id, c.task.id));
     const [event] = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.id));
-    await c.db.update(agentEvents).set({ data: { ...(event!.data as object), taskWake: { why: 'done', status: 'done', stage: 0, merging: false } } }).where(eq(agentEvents.id, event!.id));
+    const taskWake = taskWakeOf({ ...c.task, status: 'done' }, { why: 'done' }, routeSnapshot(await routeOf(c.db, c.task), null));
+    await c.db.update(agentEvents).set({ data: { ...(event!.data as object), taskWake } }).where(eq(agentEvents.id, event!.id));
     c.answer(true);
     expect((await c.run()).isError).toBeFalsy();
     expect(await c.jobOf(c.id)).toMatchObject({ status: 'running', restartedAt: expect.any(Date) });
@@ -87,9 +95,8 @@ describe('restart_program', () => {
     if (change === 'done' || change === 'cancelled') await c.db.update(tasks).set({ status: change, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
     else if (change === 'transferred') await c.db.update(tasks).set({ assigneeAgentId: c.head.id }).where(eq(tasks.id, c.task.id));
     else {
-      const [event] = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.id));
-      await c.db.update(agentEvents).set({ data: { ...(event!.data as object), taskWake: { why: 'assigned', status: 'working', stage: 0, merging: false } } }).where(eq(agentEvents.id, event!.id));
-      await c.db.update(tasks).set({ stage: 1 }).where(eq(tasks.id, c.task.id));
+      const route = await routeOf(c.db, c.task);
+      await c.db.update(taskRoutes).set({ state: { ...route.state, stage: 'review' } }).where(eq(taskRoutes.taskId, c.task.id));
     }
     c.answer(true);
     expect((await c.run()).isError).toBe(true);

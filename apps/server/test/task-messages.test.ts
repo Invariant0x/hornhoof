@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, jobs, subscriptions, tasks, taskWaits, teams } from '../src/db/schema.js';
+import { agents, jobs, subscriptions, taskRoutes, tasks, taskWaits, teams } from '../src/db/schema.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -12,6 +12,7 @@ import { withInputLock } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { queueTaskMessage, waitFor } from '../src/modules/tasks/external-wait.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { routeOf } from '../src/modules/tasks/echelons-store.js';
 import { failureCompany } from './failure-company.js';
 import { listen, mcp } from './helpers.js';
 
@@ -34,10 +35,10 @@ async function messaging() {
 
 describe('task messages reach their recipient', () => {
   it.each([
-    { team: false, gates: false, review: false },
-    { team: false, gates: true, review: false },
-    { team: true, gates: false, review: false },
-    { team: true, gates: true, review: true },
+    { team: false, review: false },
+    { team: false, review: true },
+    { team: true, review: false },
+    { team: true, review: true },
   ])('delivers the head message and the reply in the running turns: %j', async setup => {
     const c = await messaging();
     if (setup.team) {
@@ -45,7 +46,11 @@ describe('task messages reach their recipient', () => {
       await c.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, c.agent.id));
     }
     const task = await c.task();
-    if (setup.gates) await c.db.update(tasks).set({ gates: [c.agent.id], ...(setup.review ? { status: 'review', stage: 1, assigneeAgentId: c.head.id, panel: [c.head.id, c.agent.id] } : {}) }).where(eq(tasks.id, task.id));
+    if (setup.review) {
+      const route = await routeOf(c.db, task);
+      await c.db.update(tasks).set({ status: 'review', assigneeAgentId: c.head.id }).where(eq(tasks.id, task.id));
+      await c.db.update(taskRoutes).set({ state: { ...route.state, stage: 'review' } }).where(eq(taskRoutes.taskId, task.id));
+    }
     const head = await c.run(c.head.id);
     const worker = await c.run(c.agent.id, task.id);
     const sent = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'The images are ready.' } });
@@ -329,7 +334,7 @@ describe('task messages reach their recipient', () => {
   });
 
 
-  it('starts an existing queued turn when a comment ends its external wait', async () => {
+  it('replaces an obsolete queued assignment with the comment that ends its external wait', async () => {
     const c = await messaging();
     const task = await c.task();
     c.ctx.hub.isReady = () => false;
@@ -337,7 +342,9 @@ describe('task messages reach their recipient', () => {
     await waitFor(c.ctx, c.agent.id, task.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
     c.ctx.hub.isReady = () => true;
     await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.head.id }, task.id, 'Submit now.')).wakes);
-    expect((await c.turnsOf())[0]).toMatchObject({ status: 'running', prompt: expect.stringContaining('Submit now.') });
+    const turns = await c.turnsOf();
+    expect(turns[0]).toMatchObject({ status: 'obsolete', error: 'stale' });
+    expect(turns.filter(turn => turn.status === 'running')).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining('Submit now.') })]);
   });
 
   it('keeps a comment in the queued wake that resumes an external wait', async () => {

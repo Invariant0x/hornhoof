@@ -7,14 +7,20 @@ import { expireOperatorCases } from '../src/modules/program-operator/cases.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { resumeOperatorProcess } from '../src/modules/program-operator/recovery.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { stuckPrograms } from './program-operator-incident.js';
 
 type Company = Awaited<ReturnType<typeof stuckPrograms>>;
 const letter = 'A letter from the head of development: release 0.8.0 waits for your answer.';
 const say = (c: Company, agentId: string, text = letter) =>
   enqueueTurn(c.ctx, { companyId: c.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, from: 'agent', by: c.head.id, name: c.head.name } });
-const taskOf = async (c: Company, agentId: string, number: number, status: 'open' | 'working' = 'working') =>
-  (await c.db.insert(tasks).values({ companyId: c.companyId, number, title: `Task ${number}`, body: 'Do it.', status, departmentId: c.dev.id, assigneeAgentId: agentId, executorAgentId: agentId }).returning())[0]!;
+const taskOf = async (c: Company, agentId: string, number: number, status: 'open' | 'working' = 'working') => c.db.transaction(async tx => {
+  const [task] = await tx.insert(tasks).values({ companyId: c.companyId, number, title: `Task ${number}`, body: 'Do it.', small: true, status, departmentId: c.dev.id, assigneeAgentId: agentId, executorAgentId: agentId }).returning();
+  await createRoute(tx, task!, {});
+  return task!;
+});
+const taskState = async (c: Company, task: typeof tasks.$inferSelect) => taskWakeOf(task, { why: 'assigned' }, routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId));
 const taken = (c: Company, words: string) => c.runs().filter(run => run.prompt.includes(words));
 
 it.each(['operator_unavailable', 'operator_timeout'] as const)('a letter whose turn failed with %s goes out with the next turn, once', async outcome => {
@@ -111,7 +117,7 @@ it('a report on a task keeps its words: the retry says what the turn was woken f
   const c = await stuckPrograms();
   const task = await taskOf(c, c.head.id, 328);
   const report = 'Developer reported on #328: the pinned commit is 0123abc and the evidence is attached.';
-  await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: report, createdBy: null, taskId: task.id, message: { personId: null, text: report, from: 'agent', by: c.agent.id, name: c.agent.name } });
+  await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: report, createdBy: null, taskId: task.id, message: { personId: null, text: report, from: 'agent', by: c.agent.id, name: c.agent.name, taskWake: await taskState(c, task) } });
   const first = await c.runningOf(c.head.id);
   await c.unrecorded(c.head.id, first!.id);
   await c.failedTurn(first!.id);
@@ -122,8 +128,8 @@ it('a report on a task keeps its words: the retry says what the turn was woken f
 });
 
 /* A wake as a task sends it: what stands on the task when it is queued goes with it, and the queue checks that again. */
-const wake = (c: Company, agentId: string, task: typeof tasks.$inferSelect, text: string) =>
-  insertTurn(c.ctx, { companyId: c.companyId, agentId, prompt: text, createdBy: null, taskId: task.id, message: { personId: null, text, from: 'agent', by: c.agent.id, name: c.agent.name, taskWake: { why: 'report', status: task.status, stage: task.stage, merging: task.merging, version: task.version } } });
+const wake = async (c: Company, agentId: string, task: typeof tasks.$inferSelect, text: string) =>
+  insertTurn(c.ctx, { companyId: c.companyId, agentId, prompt: text, createdBy: null, taskId: task.id, message: { personId: null, text, from: 'agent', by: c.agent.id, name: c.agent.name, taskWake: await taskState(c, task) } });
 
 /* The head is busy, so both wakes wait and the first takes the second along. */
 async function headTakesTaskAlong(c: Company) {
@@ -216,7 +222,8 @@ describe('a wake that already waits on the task of the unheard turn', () => {
     await pump(c.ctx, c.head.id);
     const first = (await c.runningOf(c.head.id))!;
     const later = 'A later wake on the same task.';
-    const [waiting] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.head.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: later, timeoutMs: 1000, taskId: task.id, status: 'queued' }).returning();
+    const [current] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
+    const waiting = await c.jobOf(await wake(c, c.head.id, current!, later));
     await c.unrecorded(c.head.id, first.id);
     await c.failedTurn(first.id);
     return { first, later, waiting: waiting! };
