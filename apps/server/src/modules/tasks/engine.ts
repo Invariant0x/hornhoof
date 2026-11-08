@@ -303,7 +303,7 @@ export async function inRepository(db: Db | Tx, task: Pick<Task, 'departmentId' 
 }
 
 /* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
-async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
+export async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
   const [open] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
   return !!open;
 }

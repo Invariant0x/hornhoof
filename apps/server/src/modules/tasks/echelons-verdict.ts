@@ -4,7 +4,7 @@ import { checkingIdentity, departmentHead } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf } from './echelons-store.js';
-import { loadTask, move, refuse, type Moved, type Wake } from './engine.js';
+import { loadTask, move, refuse, waitsForPerson, type Moved, type Wake } from './engine.js';
 import type { ReviewVerdict } from './review-verdict.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
@@ -19,6 +19,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   const candidate = await currentCandidate(ctx.db, task, route);
   if (verdict.reviewedCommit !== candidate.commit) throw refuse(409, 'task_changed', 'Name the exact current candidate commit in the verdict.');
   const identity = await checkingIdentity(ctx, task, route, candidate);
+  if (await waitsForPerson(ctx.db, task.id)) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   if (verdict.escalate && verdict.pass) throw refuse(400, 'task_invalid', 'An escalation cannot certify PASS.');
   let state = route.state;
   if (verdict.security !== undefined) {
