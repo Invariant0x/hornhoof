@@ -26,7 +26,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 | Work goes on when a plan hits its limit | ❌ | ✅ |
 | Every change is reviewed by AI of other makers, then security, then tests | ❌ | ✅ |
 | One map shows every agent, what it does now and who stands idle | ❌ | ✅ |
-| Spare computers take the tests and heavy jobs | ❌ | ✅ |
+| Spare computers take the full test runs | ❌ | ✅ |
 | The company keeps running when one of your computers stops | ❌ | ✅ |
 | Nothing reaches your main branch without your approval | ❌ | ✅ |
 | Departments beyond code: design, marketing, sales, the home | ❌ | ✅ |
@@ -65,7 +65,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 *Everyone brings what they have. The company uses all of it.*
 
 - **Plans add up.** Each person connects their own plans on their own computer. All of them work on the same goal at once, and when one runs out, its task goes to the same role on another plan.
-- **Computers add up.** Laptops, a Mac mini and an old server become one pool. Tests go to the freest machine and split across several. If the computer with the server turns off, the next one takes over within a minute, at the same link.
+- **Computers add up.** Laptops, a Mac mini and an old server become one pool. The full test run splits across the freest machines. If the computer with the server turns off, the next one takes over within a minute, at the same link.
 - **Everyone sees their part.** Each person gets the departments they work in, and inside them the agents on their own plans. Someone who runs several departments sits next to the CEO as a deputy.
 - **Sign-ins stay with their owners.** Your plan's sign-in is sealed to your own machines. Nobody else can read it, the CEO included.
 - **Real departments from day one.** Development, design, marketing, sales, support, finance. Nine company templates, each department with a head and employees who know their job.
@@ -136,7 +136,7 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 | A main agent splits the work and hands it out | ❌ | ⚠️ some | ✅ |
 | Each change reviewed by the other makers at once, then security, then tests | ❌ | ❌ | ✅ |
 | Work goes on when a plan hits its limit | ❌ | ❌ | ✅ |
-| Tests go to the freest of your computers | ❌ | ❌ | ✅ |
+| The full test run splits across your free computers | ❌ | ❌ | ✅ |
 | Keeps running when the server's computer turns off | ❌ | ❌ | ✅ |
 | Live terminal of every agent in the browser, on any machine | ❌ | ⚠️ this computer only | ✅ |
 | Several people, each with their own plans and departments | ❌ | ❌ | ✅ |
