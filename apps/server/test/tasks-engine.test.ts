@@ -2,7 +2,9 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -13,38 +15,42 @@ async function company() {
   const [ceo] = await db.select().from(people);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const tess = await hire('Tess', 'worker', 'DEV-TEST');
   const ctx = app.ctx;
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const CEO = { personId: ceo!.id };
   /* A department task from the CEO, and a member task the head made from it. */
   const deptTask = async () => (await createTask(ctx, CEO, { title: 'Payments', brief: 'Take card payments.', body: 'Stripe checkout.', departmentId: dev!.id, assigneeAgentId: head.id })).task;
-  const memberTask = async (gates = [rita.id, tess.id]) => {
+  const memberTask = async (reviewerAgentId = rita.id) => {
     const parent = await deptTask();
-    return (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates })).task;
+    return (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId, testsAgentId: tess.id })).task;
   };
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
-  return { ctx, db, CEO, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, tess, deptTask, memberTask, read };
+  const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
+  return { ctx, db, snapshot, CEO, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, tess, deptTask, memberTask, read };
 }
 
+const code = { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } };
 const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: string }) => err.reason);
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('the task engine', () => {
-  it('keeps a blocked task with its giver after its executor leaves, even when the giver comments', async () => {
+  it('keeps the current stage unassigned after its executor leaves until the head assigns an owner', async () => {
     const { ctx, CEO, head, bruno, memberTask, read } = await company();
     const task = await memberTask();
     await blocked(ctx, bruno.id, task.id, 'Which currency?');
     await leaveWork(ctx, CEO, bruno);
-    expect(await read(task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: head.id, executorAgentId: bruno.id });
+    expect(await read(task.id)).toMatchObject({ status: 'waiting', assigneeAgentId: null, executorAgentId: bruno.id });
     const result = await comment(ctx, { agentId: head.id }, task.id, 'The next executor will use euros.');
     expect(result.wakes).toEqual([]);
-    expect(await read(task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: head.id, executorAgentId: bruno.id });
+    expect(await read(task.id)).toMatchObject({ status: 'waiting', assigneeAgentId: null, executorAgentId: bruno.id });
   });
 
   it('opens a blocked member task again when whoever gave it out answers in a comment, and wakes its executor with it', async () => {
@@ -101,72 +107,66 @@ describe('the task engine', () => {
     expect((await createTask(ctx, CEO, { title: 'Next', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task.number).toBe(2);
   });
 
-  it('takes a member task through its gates in order and tells the head when it is done', async () => {
-    const { ctx, head, bruno, rita, tess, memberTask, read } = await company();
+  it('hands Development to mandatory Review and then Tests without closing the result early', async () => {
+    const { ctx, bruno, rita, tess, memberTask, read, snapshot } = await company();
     const task = await memberTask();
-    expect(task).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id, gates: [rita.id, tess.id], stage: 0 });
-    const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
-    expect(sent.task).toMatchObject({ status: 'review', stage: 1, assigneeAgentId: rita.id });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'development', ownerAgentId: bruno.id });
+    const sent = await submit(ctx, bruno.id, task.id, code);
+    expect(sent.task).toMatchObject({ status: 'review', assigneeAgentId: rita.id });
     expect(woken(sent)).toEqual([[rita.id, 'review']]);
-    const first = await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Clean diff.' });
-    expect(first.task).toMatchObject({ status: 'review', stage: 2, assigneeAgentId: tess.id });
-    expect(woken(first)).toEqual([[tess.id, 'review']]);
-    const last = await verdict(ctx, tess.id, task.id, { pass: true, comment: 'Tests cover it.' });
-    expect(last.task).toMatchObject({ status: 'done', assigneeAgentId: null });
-    expect((await read(task.id)).closedAt).not.toBeNull();
-    /* It was the last work under the department task, which the head hears of once. */
-    expect(woken(last)).toEqual([[head.id, 'subtasks']]);
+    const checked = await verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Clean diff.' });
+    expect(await snapshot(task.id)).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: tess.id });
+    expect(woken(checked)).toEqual([[tess.id, 'tests']]);
+    expect((await read(task.id)).closedAt).toBeNull();
+    expect(await reason(verdict(ctx, tess.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'A verdict cannot replace finished test receipts.' }))).toBe('task_not_yours');
   });
 
-  it('sends changes back to the executor, and the third send-back at one gate also wakes the head', async () => {
-    const { ctx, head, bruno, rita, memberTask } = await company();
-    const task = await memberTask([rita.id]);
-    const round = async () => {
-      await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
-      return verdict(ctx, rita.id, task.id, { pass: false, comment: 'Missing a test for refunds.' });
-    };
-    const once = await round();
-    expect(once.task).toMatchObject({ status: 'open', stage: 0, assigneeAgentId: bruno.id, bounces: 1 });
-    expect(woken(once)).toEqual([[bruno.id, 'changes']]);
-    await round();
-    expect(woken(await round())).toEqual([
-      [bruno.id, 'changes'],
-      [head.id, 'stuck_at_gate'],
-    ]);
+  it('keeps repeated findings with the reviewer and never wakes the original producer for repair', async () => {
+    const { ctx, bruno, rita, memberTask, snapshot } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, code);
+    const candidateId = (await snapshot(task.id)).candidateId;
+    for (let i = 0; i < 3; i++) {
+      const repair = await verdict(ctx, rita.id, task.id, { pass: false, comment: 'I am fixing the missing refund test.', reviewedCommit: HEAD });
+      expect(repair.task).toMatchObject({ status: 'working', assigneeAgentId: rita.id });
+      expect(repair.wakes).toEqual([]);
+      expect(await snapshot(task.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: rita.id, candidateId });
+    }
+    await expect(submit(ctx, bruno.id, task.id, code)).rejects.toMatchObject({ reason: 'task_not_yours' });
   });
 
-  it('never lets the executor pass its own gate', async () => {
-    const { ctx, bruno, rita, memberTask } = await company();
-    expect(await reason(memberTask([rita.id, bruno.id]))).toBe('task_invalid');
-    const task = await memberTask([rita.id]);
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
-    expect(await reason(verdict(ctx, bruno.id, task.id, { pass: true, comment: 'Looks good to me.' }))).toBe('task_not_yours');
+  it('never lets the executor pass its own Review', async () => {
+    const { ctx, bruno, memberTask } = await company();
+    expect(await reason(memberTask(bruno.id))).toBe('task_invalid');
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, code);
+    expect(await reason(verdict(ctx, bruno.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Looks good to me.' }))).toBe('task_not_yours');
   });
 
-  it('refuses a verdict without a comment or from a gate that is not at its stage', async () => {
+  it('refuses a verdict without reasons or from an employee outside the current stage', async () => {
     const { ctx, bruno, rita, tess, memberTask, read } = await company();
     const task = await memberTask();
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
-    expect(await reason(verdict(ctx, tess.id, task.id, { pass: true, comment: 'Fine.' }))).toBe('task_not_yours');
-    expect(await reason(verdict(ctx, rita.id, task.id, { pass: true, comment: '  ' }))).toBe('task_invalid');
-    expect(await read(task.id)).toMatchObject({ stage: 1, status: 'review' });
+    await submit(ctx, bruno.id, task.id, code);
+    expect(await reason(verdict(ctx, tess.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' }))).toBe('task_not_yours');
+    expect(await reason(verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: '  ' }))).toBe('task_invalid');
+    expect(await read(task.id)).toMatchObject({ status: 'review', assigneeAgentId: rita.id });
   });
 
   it('refuses to cancel a finished task', async () => {
-    const { ctx, CEO, bruno, memberTask } = await company();
-    const task = await memberTask([]);
-    expect((await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' })).task.status).toBe('done');
+    const { ctx, CEO, head, deptTask } = await company();
+    const task = await deptTask();
+    expect((await report(ctx, head.id, task.id, { done: true, summary: 'Checked the coordination result.' })).task.status).toBe('done');
     expect(await reason(cancel(ctx, CEO, task.id, 'Not needed.'))).toBe('task_closed');
   });
 
   it('lets only one of two moves that read the same task land', async () => {
     const { ctx, CEO, bruno, rita, memberTask, read } = await company();
     const task = await memberTask();
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
-    const both = await Promise.allSettled([verdict(ctx, rita.id, task.id, { pass: true, comment: 'Clean.' }), cancel(ctx, CEO, task.id, 'Dropped.')]);
+    await submit(ctx, bruno.id, task.id, code);
+    const both = await Promise.allSettled([verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Clean.' }), cancel(ctx, CEO, task.id, 'Dropped.')]);
     expect(both.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
     expect((both.find(r => r.status === 'rejected') as PromiseRejectedResult).reason.reason).toBe('task_changed');
-    expect(['review', 'cancelled']).toContain((await read(task.id)).status);
+    expect(['open', 'cancelled']).toContain((await read(task.id)).status);
   });
 
   it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs, whose question the orchestrator puts into plain words', async () => {
@@ -236,41 +236,41 @@ describe('the task engine', () => {
 
   it('keeps a task open while a subtask under it is open', async () => {
     const { ctx, head, memberTask, read } = await company();
-    const child = await memberTask([]);
+    const child = await memberTask();
     expect(await reason(report(ctx, head.id, child.parentId!, { done: true, summary: 'All done.' }))).toBe('task_invalid');
     expect((await read(child.parentId!)).status).toBe('open');
   });
 
   it('takes no work in while work under it is open, and tells its executor once that work is done', async () => {
     const { ctx, db, dev, head, bruno, tess, memberTask, read } = await company();
-    const task = await memberTask([]);
-    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, executor: true });
-    expect(await reason(submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' }))).toBe('task_invalid');
+    const task = await memberTask();
+    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refund decision', brief: '', body: 'Record the agreed refund scope.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, resultKind: 'coordination' });
+    expect(await reason(submit(ctx, bruno.id, task.id, code))).toBe('task_invalid');
     expect((await read(task.id)).status).toBe('open');
-    const finished = await submit(ctx, tess.id, under.id, { summary: 'Done.', evidence: 'npm test: 3 passed' });
+    const finished = await report(ctx, tess.id, under.id, { done: true, summary: 'Checked refund scope.' });
     const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, under.id)).orderBy(taskEvents.id);
-    expect(log.at(-1)).toMatchObject({ kind: 'submitted', agentId: tess.id, text: 'Done.' });
+    expect(log.at(-1)).toMatchObject({ kind: 'report', agentId: tess.id, text: 'Checked refund scope.' });
     expect(finished.wakes).toContainEqual({
       agentId: bruno.id, taskId: task.id, why: 'subtasks',
-      cause: { actor: { agentId: tess.id }, action: 'handed in work', eventId: log.at(-1)!.id, task: { id: under.id, number: under.number }, report: 'Done.' },
+      cause: { actor: { agentId: tess.id }, action: 'reported work done', eventId: log.find(event => event.kind === 'report')!.id, task: { id: under.id, number: under.number }, report: 'Checked refund scope.' },
     });
-    expect((await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' })).task.status).toBe('done');
+    expect((await submit(ctx, bruno.id, task.id, code)).task.status).toBe('review');
   });
 
-  it('gives no work under a task that is at its gates', async () => {
-    const { ctx, dev, head, bruno, tess, memberTask } = await company();
-    const task = await memberTask([tess.id]);
-    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
+  it('gives no new implementation under a candidate already at Review', async () => {
+    const { ctx, dev, head, bruno, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, code);
     const made = createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, parentId: task.id, assigneeAgentId: bruno.id, executor: true });
     expect(await reason(made)).toBe('task_invalid');
   });
 
-  it('checks a gate with whoever of its role can, leaving out one that is on without a subscription', async () => {
+  it('assigns an eligible Review owner and excludes an employee without a subscription', async () => {
     const { ctx, db, dev, bruno, rita, memberTask } = await company();
     await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-REV', departmentId: dev.id, model: '', subscriptionId: null });
-    const task = await memberTask([rita.id]);
-    const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
-    expect(sent.task).toMatchObject({ status: 'review', stage: 1, panel: [rita.id], assigneeAgentId: rita.id });
+    const task = await memberTask();
+    const sent = await submit(ctx, bruno.id, task.id, code);
+    expect(sent.task).toMatchObject({ status: 'review', assigneeAgentId: rita.id });
     const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
     expect(log.at(-1)).toMatchObject({ kind: 'submitted', agentId: bruno.id, text: 'Done.' });
     expect(sent.wakes).toEqual([{
@@ -313,8 +313,8 @@ describe('the task engine', () => {
     const res = await updateTask(ctx, head.id, task.id, { body: 'POST /checkout with idempotency keys.' });
     expect(res.task.body).toBe('POST /checkout with idempotency keys.');
     expect(woken(res)).toEqual([[bruno.id, 'updated']]);
-    const moved = await updateTask(ctx, head.id, task.id, { executor: tess.id, gates: [] });
-    expect(moved.task).toMatchObject({ executorAgentId: tess.id, assigneeAgentId: tess.id, gates: [] });
+    const moved = await updateTask(ctx, head.id, task.id, { executor: tess.id });
+    expect(moved.task).toMatchObject({ executorAgentId: tess.id, assigneeAgentId: tess.id });
     expect(woken(moved)).toEqual([[tess.id, 'assigned']]);
   });
 });
