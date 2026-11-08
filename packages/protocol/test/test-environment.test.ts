@@ -59,6 +59,13 @@ describe('canonical TestEnvironmentV1', () => {
     expect(environment.safeParse(manifest)).toMatchObject({ success: true, data: manifest });
   });
 
+  it('accepts an impact rule that names the tests reading its files, and refuses an empty list of them', () => {
+    const base = python(), rule = { globs: ['data/**'], suiteIds: ['baskets'], tests: ['tests/test_data.py'] };
+    const manifest = { ...base, impact: { ...base.impact, fullPackageGlobs: [rule] } };
+    expect(environment.safeParse(manifest)).toMatchObject({ success: true, data: manifest });
+    expect(environment.safeParse({ ...base, impact: { ...base.impact, fullPackageGlobs: [{ ...rule, tests: [] }] } }).success).toBe(false);
+  });
+
   it('accepts the same product without services or reset and asks for no database runtime', () => {
     expect(existsSync(new URL('../../../apps/server/test/fixtures/test-environment-python/no-services/tests/test_labels.py', import.meta.url))).toBe(true);
     const base = python();

@@ -17,7 +17,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext, type Review } from './review-context.js';
+import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext } from './review-context.js';
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
@@ -768,14 +768,11 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
   return task;
 }
 
-export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
-type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
-
 /* The executor hands its work to the first gate, or finishes a task without gates. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }, checked?: CheckedSubmission): Promise<Moved> {
+export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
-  const review = checked?.review ?? (task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review));
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
+  const review = task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review);
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -791,16 +788,6 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   const row = await move(ctx, task, past.set, n, unstuck.also, past.wakes);
   unstuck.tell();
   return { task: row, wakes: past.wakes };
-}
-
-export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
-  const task = await submissionTask(ctx, agentId, taskId);
-  const third = input.outcome.attempt >= 3;
-  const wakes = third ? giver(task, 'blocked', agentId, input.text) : [{ agentId, taskId: task.id, why: 'changes' as const, text: input.text }];
-  const row = await move(ctx, task, { status: third ? 'blocked' : 'working', silent: 0 }, {
-    kind: third ? 'blocked' : 'comment', actor: { agentId }, text: input.text, data: { authorCheckOutcome: input.outcome }, ...(third ? { returned: true } : {}),
-  }, undefined, wakes);
-  return { task: row, wakes };
 }
 
 /* The panels of the other tasks at a gate now that name any of these reviewers. A task at a gate is open, so it is in the

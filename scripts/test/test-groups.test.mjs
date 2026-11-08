@@ -42,8 +42,6 @@ for (const [group, path, expected] of [
   ['the fingerprints of test files', 'apps/node/src/test-fingerprint.ts', ['node', 'release-scripts']],
   ['a risky source of the node, which mutation also lists', 'apps/node/src/redact.ts', ['node']],
   ['a risky source of the server, which mutation also lists', 'apps/server/src/auth/password.ts', ['server']],
-  ['the templates', 'templates/roles/operations/OPS-HEAD.md', ['node', 'server']],
-  ['the skills', 'templates/skills/dev-tdd.md', ['node', 'server']],
   ['the workflow of a build', '.github/workflows/images.yml', ['release-scripts', 'server']],
   ['the installer', 'scripts/install.sh', ['release-scripts', 'server']],
   ['the updater', 'apps/updater/updater.sh', ['release-scripts', 'server']],
@@ -58,6 +56,39 @@ for (const [group, path, expected] of [
     assert.deepEqual(suites(selection), expected);
   });
 }
+
+/* Templates are text the server and the node read while they run, which no import graph sees: a rule names the tests that read them. */
+const READS_TEMPLATES = /\.\.\/templates\b|\bctx\.templates\b|\btemplates\s*\}\s*=\s*[\w.]*ctx\b|\bloadTemplates\(/;
+const fastFiles = () => {
+  const fast = new Set(fastSuites(manifest).map(suite => suite.id));
+  return [...new Set(ports.listTestUnits(manifest, trackedIn(root)).filter(unit => fast.has(unit.suiteId)).map(unit => unit.file))].sort();
+};
+const chosen = selection => (selection.packages ?? []).map(item => [item.packageId, item.mode]);
+const filesOf = selection => (selection.packages ?? []).flatMap(item => item.units.map(unit => unit.file)).sort();
+
+test('a change of the templates or the skills runs every test that reads them and no other', { timeout: 60_000 }, async () => {
+  const readers = fastFiles().filter(file => READS_TEMPLATES.test(readFileSync(root + file, 'utf8')));
+  assert.ok(readers.length >= 20, readers.join('\n'));
+  for (const path of ['templates/roles/operations/OPS-HEAD.md', 'templates/skills/dev-tdd.md']) {
+    const selection = await runs(path);
+    assert.equal(selection.unavailable, undefined);
+    assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']], path);
+    assert.deepEqual(filesOf(selection), readers, path);
+  }
+});
+
+test('a change of the templates beside a test runs that test and the readers of the templates, not the whole suite', { timeout: 60_000 }, async () => {
+  const test = 'apps/server/test/test-tool-text.test.ts';
+  const selection = await select([{ path: 'templates/skills/hh-run-checks.md', kind: 'modified' }, { path: test, kind: 'modified' }]);
+  assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']]);
+  assert.ok(filesOf(selection).includes(test) && filesOf(selection).includes('apps/server/test/templates.test.ts'));
+});
+
+test('a fixture of the shared protocol runs its own package and only the server test that reads it', { timeout: 60_000 }, async () => {
+  const selection = await runs('packages/protocol/test/fixtures/hornhoof-test-environment-v1.json');
+  assert.deepEqual(chosen(selection), [['protocol', 'whole-package'], ['server', 'related']]);
+  assert.deepEqual(selection.packages[1].units.map(unit => unit.file), ['apps/server/test/test-run-product-config.test.ts']);
+});
 
 test('a change a person sees names the browser scenarios of its screen, says when it has none, and a scenario names itself alone', { timeout: 60_000 }, async () => {
   const named = async path => (await runs(path)).notes.filter(note => note.startsWith('browser '));

@@ -588,8 +588,10 @@
           "packages/protocol/test/fixtures/**"
         ],
         "suiteIds": [
-          "protocol",
           "server"
+        ],
+        "tests": [
+          "apps/server/test/test-run-product-config.test.ts"
         ]
       },
       {
@@ -610,6 +612,33 @@
         "suiteIds": [
           "server",
           "node"
+        ],
+        "tests": [
+          "apps/node/test/image.test.ts",
+          "apps/node/test/skills.test.ts",
+          "apps/server/test/agents.test.ts",
+          "apps/server/test/composable-skills.test.ts",
+          "apps/server/test/conversation.test.ts",
+          "apps/server/test/credentials.test.ts",
+          "apps/server/test/development-checks-template.test.ts",
+          "apps/server/test/gate-triggers.test.ts",
+          "apps/server/test/instructions.test.ts",
+          "apps/server/test/notebook.test.ts",
+          "apps/server/test/operations-card.test.ts",
+          "apps/server/test/operations-required.test.ts",
+          "apps/server/test/orchestrator-control.test.ts",
+          "apps/server/test/pipeline-guidance.test.ts",
+          "apps/server/test/program-operator-placement.test.ts",
+          "apps/server/test/prompt.test.ts",
+          "apps/server/test/role-levels-guide.test.ts",
+          "apps/server/test/skill-independence.test.ts",
+          "apps/server/test/staff.test.ts",
+          "apps/server/test/tasks-turn-review.test.ts",
+          "apps/server/test/templates-pipeline.test.ts",
+          "apps/server/test/templates-watch-idle.test.ts",
+          "apps/server/test/templates.test.ts",
+          "apps/server/test/test-environment-templates.test.ts",
+          "apps/server/test/timers.test.ts"
         ]
       },
       {

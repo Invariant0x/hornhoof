@@ -2,22 +2,21 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { exitCodeOf } from './judge.mjs';
-import { decodePlan, encodePlan, PLAN_CHARS } from './plan.mjs';
 import { allUnavailable } from './stages.mjs';
 
 const COMMIT = /^[a-f0-9]{40}$/;
-const USAGE = 'Usage: npm run -s check:author -- --sha <40 hex> --base <40 hex> [--plan <text>] [--allow-whole]';
+const USAGE = 'Usage: npm run -s check:author -- --sha <40 hex> --base <40 hex> [--allow-whole]';
 const OUTPUT_KEPT = 4 * 1024 * 1024;
 const GIT_BYTES = 64 * 1024 * 1024;
 
 export function parseArgs(argv) {
-  const found = { sha: null, base: null, plan: null, allowWhole: false };
+  const found = { sha: null, base: null, allowWhole: false };
   const rest = [...argv];
   while (rest.length) {
     const flag = rest.shift();
     if (flag === '--allow-whole') { found.allowWhole = true; continue; }
     const name = flag.slice(2);
-    if (!['--sha', '--base', '--plan'].includes(flag) || !rest.length) return null;
+    if (!['--sha', '--base'].includes(flag) || !rest.length) return null;
     found[name] = rest.shift();
   }
   return COMMIT.test(found.sha ?? '') && COMMIT.test(found.base ?? '') ? found : null;
@@ -57,54 +56,29 @@ export function realPorts(root, write = text => process.stdout.write(text)) {
   };
 }
 
-function writtenPlan(plan, log) {
-  const whole = encodePlan(plan);
-  if (whole.length <= PLAN_CHARS) return whole;
-  log('This change is too large to carry its lines in one command, so changedLines stays unknown in the record.');
-  return encodePlan({ ...plan, hunks: null });
-}
-
-function outsideRun(args, ports) {
-  let text;
-  try { text = writtenPlan(ports.makePlan(args), ports.log); }
-  catch (error) { ports.log(`plan_failed: ${error.message}`); return 2; }
-  if (text.length > PLAN_CHARS) { ports.log(`plan_too_long: ${text.length} characters, at most ${PLAN_CHARS}. A run cannot read the base of a change this large.`); return 2; }
-  ports.log(`Nothing was checked here. Run this line through run_tests, on the branch at ${args.sha}:`);
-  ports.log(`npm run -s check:author -- --sha ${args.sha} --base ${args.base} --plan '${text}'${args.allowWhole ? ' --allow-whole' : ''}`);
-  return 0;
-}
-
 function refuse(args, reason, paths, ports) {
   const result = allUnavailable(args.sha, reason, paths, ports.log);
   ports.log(`AUTHOR_CHECK ${JSON.stringify(result.record)}`);
   return exitCodeOf(result.stages);
 }
 
-function givenPlan(args) {
-  const plan = decodePlan(args.plan);
-  if (!args.sha.startsWith(plan.sha) || !args.base.startsWith(plan.base)) throw new Error('plan_invalid');
-  return { ...plan, sha: args.sha, base: args.base };
+function planOf(args, ports) {
+  if (!ports.hasCommit(args.base)) return { reason: 'base_unreachable' };
+  try { return { plan: ports.makePlan(args) }; } catch (error) { ports.log(`plan_failed: ${error.message}`); return { reason: 'plan_failed' }; }
 }
 
-function planOnRun(args, ports) {
-  try {
-    if (args.plan) return { plan: givenPlan(args) };
-    return ports.hasCommit(args.base) ? { plan: ports.makePlan(args) } : { reason: 'base_unreachable' };
-  } catch { return { reason: args.plan ? 'plan_invalid' : 'plan_failed' }; }
-}
-
-async function onRun(args, ports) {
+async function checked(args, ports) {
   if (ports.head() !== args.sha) return refuse(args, 'sha_mismatch', [], ports);
-  const { plan, reason } = planOnRun(args, ports);
+  const { plan, reason } = planOf(args, ports);
   if (!plan) return refuse(args, reason, [], ports);
   const failed = await ports.prepare();
   if (failed) return refuse(args, failed, plan.changes.map(change => change.path), ports);
   return (await ports.check(args, plan)).code;
 }
 
-/* The check runs only where run_tests puts it: that sets HH_TEST_PART. Anywhere else the same command prepares that line. */
-export async function main(argv, env, ports) {
+/* The check runs where it is called: in the workspace of whoever builds or reviews the change, at the commit asked for. */
+export async function main(argv, ports) {
   const args = parseArgs(argv);
   if (!args) { ports.log(USAGE); return 2; }
-  return env.HH_TEST_PART ? onRun(args, ports) : outsideRun(args, ports);
+  return checked(args, ports);
 }
