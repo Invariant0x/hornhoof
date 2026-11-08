@@ -1,3 +1,7 @@
+import { agentIdentity } from './echelons-assign.js';
+import { producedCandidate } from './echelons-candidates.js';
+import { forwardHandoff } from './echelons-handoff.js';
+import { echelonVerdict } from './echelons-verdict.js';
 import { createRoute, routeOf, changeRoute } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
@@ -21,7 +25,7 @@ import { preserveNote } from './long-text.js';
 import { authorVendor, captureReview, reviewVendor, turnReviewContext, type Review } from './review-context.js';
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
-import { verdictReview, type ReviewVerdict } from './review-verdict.js';
+import type { ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
@@ -521,6 +525,9 @@ export type NewTask = {
   executor?: boolean;
   gates?: string[];
   reviewerAgentId?: string;
+  securityAgentId?: string;
+  testsAgentId?: string;
+  cleanup?: boolean;
   paths?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
@@ -619,6 +626,10 @@ async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<N
   checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
+  if (input.cleanup !== undefined) {
+    const head = actor.agentId ? await liveAgent(ctx.db, assignee.companyId, actor.agentId) : null;
+    if (head?.kind !== 'head' || head.departmentId !== input.departmentId) throw refuse(403, 'task_not_yours', 'Only the department head may request optional Cleanup.');
+  }
   if (input.reviewerAgentId) {
     const reviewer = await workingAgent(ctx.db, assignee.companyId, input.reviewerAgentId);
     if (reviewer.id === assignee.id || reviewer.departmentId !== input.departmentId || (reviewer.productId && reviewer.productId !== input.productId)) {
@@ -768,19 +779,17 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   const route = await routeOf(ctx.db, task);
   if (route.state.stage !== 'development' || route.state.phase !== 'active') throw notYours(task, 'is not waiting for Development');
   const review = checked?.review ?? await captureReview(ctx, task, r.review);
-  const reviewerId = route.state.stages.find(step => step.stage === 'review')?.ownerAgentId ?? null;
-  if (reviewerId) await workingAgent(ctx.db, task.companyId, reviewerId);
-  const state = { ...route.state, stage: 'review' as const, phase: reviewerId ? 'active' as const : 'waiting' as const,
-    stages: route.state.stages.map(step => step.stage === 'development' ? { ...step, status: 'complete' as const } : step.stage === 'review' ? { ...step, status: reviewerId ? 'active' as const : 'pending' as const, reason: reviewerId ? null : 'reviewer_required' } : step),
-  };
-  const wakes: Wake[] = reviewerId ? [{ agentId: reviewerId, taskId: task.id, why: 'review' }] : giver(task, 'blocked', agentId, 'Review needs an eligible owner.');
+  const producer = await agentIdentity(ctx.db, task.companyId, agentId);
+  if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
+  const candidate = producedCandidate(route, producer, review);
+  const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
-  const row = await move(ctx, task, { status: reviewerId ? 'review' : 'waiting', assigneeAgentId: reviewerId, silent: 0 }, {
+  const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary,
-    data: { evidence: r.evidence, routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
-  }, async tx => { await changeRoute(tx, route, state); await unstuck.also(tx); }, wakes);
+    data: { evidence: r.evidence, candidate, routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
+  }, async tx => { await changeRoute(tx, route, next.state); await unstuck.also(tx); }, next.wakes);
   unstuck.tell();
-  return { task: row, wakes };
+  return { task: row, wakes: next.wakes };
 }
 
 export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
@@ -959,35 +968,11 @@ export async function stuckAtGate(db: Db | Tx, task: Task, stage: number, actorI
   return Number(sent?.n ?? 0) >= GATE_ROUNDS ? giver(task, 'stuck_at_gate', actorId) : [];
 }
 
-/* The agent asked a person on the task and waits for the answer. */
-async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
-  const [mine] = await db
-    .select({ id: requests.id })
-    .from(requests)
-    .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open'), ne(requests.kind, 'stuck')))
-    .limit(1);
-  return !!mine;
-}
-
 type Verdict = ReviewVerdict & { comment: string; findings?: number; evidence?: object[] };
 
-/* What the log keeps of a verdict: evidence names the test runs it stood on, with the commits they pinned. */
-const verdictData = (task: Task, v: Verdict) => ({ pass: v.pass, stage: task.stage, round: task.bounces, reviewPolicyVersion: 1, ...(v.findings !== undefined ? { findings: v.findings } : {}), ...(v.evidence?.length ? { evidence: v.evidence } : {}) });
-
-/* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
+/* One current checker owns both its verdict and its fixes. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
-  stillOpen(task);
-  if (!['review', 'waiting'].includes(task.status) || task.stage < 1 || !task.panel.includes(agentId) || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
-  if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
-  /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
-  if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const review = await verdictReview(ctx.db, task, agentId, v);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { ...verdictData(task, v), ...review }, returned: true };
-  const panel = task.panel.filter(id => id !== agentId);
-  if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
-  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
-  return closeGate(ctx, task, n, [...(await gateVerdicts(ctx.db, task)), { agentId, name: me?.name ?? '', pass: v.pass, comment: v.comment.trim(), mechanical: mechanicalVerdict(n.data!) }]);
+  return echelonVerdict(ctx, agentId, taskId, v);
 }
 
 /* Everyone at the gate has given a verdict: it passes the task on (or finishes it) when all of them passed, else the work

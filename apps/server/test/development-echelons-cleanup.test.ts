@@ -15,7 +15,7 @@ describe('optional Cleanup from instruction 207', () => {
   });
 
   it('does not let a worker add an optional stage', async () => {
-    await expect(fixture({ cleanup: true, creator: 'author' })).rejects.toMatchObject({ status: 403 });
+    await expect(fixture({ cleanup: true, creator: 'author' }).then(() => null)).rejects.toMatchObject({ status: 403 });
   });
 
   it('offers the existing cleanup ability off by default to developers and reviewers', () => {

@@ -6,7 +6,7 @@ import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 
 export type Route = typeof taskRoutes.$inferSelect;
-export type RouteInput = { reviewerAgentId?: string; paths?: string[] };
+export type RouteInput = { reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
   const stage = task.small ? 'development' : 'architecture';
@@ -16,11 +16,11 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
   });
   const architecture = step('architecture', task.assigneeAgentId);
   if (task.small) Object.assign(architecture, { status: 'skipped', reason: 'small_task', ownerAgentId: null });
-  const security = step('security');
+  const security = step('security', input.securityAgentId ?? null);
   if (!required) Object.assign(security, { status: 'skipped', reason: 'no_declared_risk' });
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
-    kind: 'development_echelons', version: 1, stage, phase: 'active', candidateId: null,
-    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), security, step('tests')],
+    kind: 'development_echelons', version: 1, stage, phase: 'active', candidateId: null, assignment: null,
+    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), ...(input.cleanup ? [step('cleanup')] : []), security, step('tests', input.testsAgentId ?? null)],
     security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null },
   } });
 }

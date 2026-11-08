@@ -15,7 +15,7 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const [codex] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'codex', kind: 'personal', label: 'Code', ownerPersonId: person!.id, status: 'ready' }).returning();
   const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId: string, model: string) =>
-    (await db.insert(agents).values({ companyId: company!.id, departmentId: department!.id, name, kind, roleKey, subscriptionId, model }).returning())[0]!;
+    (await db.insert(agents).values({ companyId: company!.id, departmentId: department!.id, name, kind, roleKey, subscriptionId, model, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [] }).returning())[0]!;
   const head = await hire('Head', 'head', 'DEV-HEAD', claude!.id, 'claude-opus-5-5');
   const author = await hire('Author', 'worker', 'DEV-BE', options.authorProvider === 'claude' ? claude!.id : codex!.id, options.authorProvider === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol');
   const reviewer = await hire('Reviewer', 'worker', 'DEV-REV', claude!.id, options.reviewerModel ?? 'claude-opus-5-5');
