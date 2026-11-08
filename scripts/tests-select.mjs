@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseNameStatus } from './author-check/plan.mjs';
 import { provedBase } from './github-tests/base.mjs';
+import { changesSince } from './github-tests/changes.mjs';
 import { git, proved } from './github-tests/marks.mjs';
 import { invocationsOf, lintCommands, outputsOf, runAll } from './github-tests/parts.mjs';
 
@@ -29,7 +29,8 @@ async function choose() {
   const found = await provedBase({ name: env.GITHUB_EVENT_NAME, event, sha: env.GITHUB_SHA }, { git, proved: async sha => (await proved(sha)).proved });
   say(found.why);
   if (!found.base) return null;
-  const changes = parseNameStatus(git('diff', '--name-status', '-z', '--find-renames', found.base, env.GITHUB_SHA));
+  const { changes, moved } = changesSince(found.base, env.GITHUB_SHA, git);
+  for (const path of moved) say(`NOTE only our own versions moved: ${path}`);
   const { chooseTests } = await import('./github-tests/choose.mjs');
   const chosen = await chooseTests(found.base, changes, root);
   for (const note of chosen.notes) say(`NOTE ${note}`);

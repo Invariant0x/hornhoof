@@ -25,6 +25,8 @@ where its change reaches, and tell an employee once that someone waits for them.
 
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
   change that reaches everything, such as one of the lockfile, still runs every test.
+- A release no longer runs every test on GitHub because it moves the version in the package files and the lockfile:
+  where only our own versions moved, the file counts as unchanged. Any other change of them still runs every test.
 
 ### Fixed
 
