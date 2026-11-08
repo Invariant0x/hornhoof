@@ -5,6 +5,13 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [Unreleased]
+
+### Changed
+
+- GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
+  change that reaches everything, such as one of the lockfile, still runs every test.
+
 ## [0.8.3] - 2026-11-08
 
 Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,

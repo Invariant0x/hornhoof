@@ -7,7 +7,7 @@
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
 #   install.sh check-node <node> <commit>                        one node goes to the build of a commit, for that build's live check
-#   install.sh back-node <node>                                  that node goes back to 0.6.1 at once, without waiting for its work
+#   install.sh back-node <node>                                  that node goes back to 0.8.3 at once, without waiting for its work
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
@@ -38,8 +38,8 @@ STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
 NODE_REPOSITORY=ghcr.io/invariant0x/hornhoof-node
 LATEST_NODE=$NODE_REPOSITORY:latest
-# Where back-node goes: 0.8.1, the last release that passed its live check, by the digest of its image for every computer.
-BACK_NODE=$NODE_REPOSITORY@sha256:17feb15d86794a40a9d9f0e55e7fdc890672f93b3d5b0bead6aed984f0ea0a1f
+# Where back-node goes: 0.8.3, the last release that passed its live check, by the digest of its image for every computer.
+BACK_NODE=$NODE_REPOSITORY@sha256:81d4bb316b6dd568ddd42fa2d6ef877ddc80b3604b75d291492d361debd5645f
 case "$BUILD_IMAGE" in
   __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
   *) DEFAULT_IMAGE=$BUILD_IMAGE ;;

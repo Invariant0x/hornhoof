@@ -57,3 +57,9 @@ The tools write to the log as they run, with `STAGE <name> <status> exit=<n|null
 ## Nothing runs on submit
 
 Submitting a task starts no test run. The author runs this command in their own workspace before submitting, and the reviewer runs it in theirs. Only the whole suite goes through `run_tests`, once per turn.
+
+## On GitHub
+
+The tests of `.github/workflows/images.yml` use this selection too, for a commit no passed run marked with `hornhoof/tests`. Its first job looks for the nearest commit whose tests passed: from the tip a push moved, the base of a pull request, or the commit a run by hand left main at, up to 20 commits back along the first parents. It then runs only the tests the change since that commit reaches, in as many parts as they fill, up to four, with the lint of the files the change left, the types and the release checks. A change the selection cannot judge, one that takes every suite whole, no such commit, or a choice that fails runs the whole suite in four parts, as before.
+
+Such a run proves the commit as the whole suite does: every test it left out passed on the commit it stood on, on the same files. The `hornhoof/tests` mark it leaves names that commit, so another run of the same commit, the push to main after a run by hand, skips the tests.

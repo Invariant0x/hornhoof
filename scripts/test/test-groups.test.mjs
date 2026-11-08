@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { before, test } from 'node:test';
@@ -9,6 +9,7 @@ import { realPorts } from '../author-check/main.mjs';
 import { fastSuites, selectTests } from '../author-check/select.mjs';
 import { runStages } from '../author-check/stages.mjs';
 import { selectionPorts } from '../author-check/wired.mjs';
+import { chooseTests } from '../github-tests/choose.mjs';
 import { trackedIn } from './tracked-files.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
@@ -157,4 +158,50 @@ async function ranFiles(t, selection) {
 test('the tests chosen run through the command of their real suite, and only they', { timeout: 120_000 }, async t => {
   const file = 'packages/protocol/test/test-environment.test.ts';
   assert.deepEqual(await ranFiles(t, { packages: [{ packageId: 'protocol', mode: 'related', units: [{ file }] }], notes: [] }), [file]);
+});
+
+/* GitHub's tests, for a commit no passed run marked, choose by this selection too: .github/workflows/images.yml. */
+test('on GitHub, a change of one file of the server runs the server tests the selector picks for it, and a change that reaches everything the whole suite', { timeout: 60_000 }, async () => {
+  const base = 'b'.repeat(40);
+  /* A file that imports next to nothing, so this test reads little of the server. */
+  const one = await chooseTests(base, [{ kind: 'modified', path: 'apps/server/src/auth/limit.ts' }], root);
+  assert.ok(one.plan, one.why);
+  assert.deepEqual([...new Set(one.plan.parts.flatMap(Object.keys))], ['server']);
+  const files = one.plan.parts.flatMap(part => part.server);
+  assert.ok(files.length > 0 && files.every(file => /^apps\/server\/test\/.+\.test\.ts$/.test(file)), files.join(' '));
+  assert.equal(one.plan.base, base);
+  for (const path of ['package-lock.json', 'packages/protocol/src/index.ts']) {
+    const whole = await chooseTests(base, [{ kind: 'modified', path }], root);
+    assert.equal(whole.plan, null, path);
+    assert.match(whole.why, /whole suite/, path);
+  }
+});
+
+/* The script as a step of the workflow runs it, in this checkout, outside this test runner: a node --test it starts reports as its own. */
+function step(args, env) {
+  const outside = { ...process.env };
+  delete outside.NODE_TEST_CONTEXT;
+  return new Promise(done => execFile(process.execPath, [`${root}scripts/tests-select.mjs`, ...args], { cwd: root, env: { ...outside, ...env }, maxBuffer: 1 << 24 }, (error, stdout, stderr) => done({ code: error ? error.code : 0, stdout, stderr })));
+}
+
+test('on GitHub, the first job leaves the whole suite to run when the event names no commit to stand on', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-groups-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'event.json'), JSON.stringify({ before: '0'.repeat(40) }));
+  writeFileSync(join(dir, 'output'), '');
+  const out = await step([], { GITHUB_EVENT_NAME: 'push', GITHUB_EVENT_PATH: join(dir, 'event.json'), GITHUB_OUTPUT: join(dir, 'output'), GITHUB_SHA: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), GITHUB_API_URL: 'http://127.0.0.1:1', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'ghs_x' });
+  assert.equal(out.code, 0, out.stderr);
+  assert.equal(readFileSync(join(dir, 'output'), 'utf8'), 'parts=[1,2,3,4]\nselection=\nbase=\n');
+  assert.match(out.stdout, /whole suite/);
+});
+
+test('on GitHub, a part runs the files of the choice with their real suite, and a part the choice does not have fails', { timeout: 120_000 }, async () => {
+  const selection = JSON.stringify({ base: 'b'.repeat(40), lint: [], parts: [{ 'release-scripts': ['scripts/test/release-version.test.mjs'] }] });
+  const ran = await step(['--run', '1'], { SELECTION: selection });
+  assert.equal(ran.code, 0, ran.stderr + ran.stdout);
+  assert.match(ran.stdout, /release-version\.test\.mjs/);
+  assert.match(ran.stdout, /# fail 0/);
+  const missing = await step(['--run', '2'], { SELECTION: selection });
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.stderr, /part 2/);
 });
