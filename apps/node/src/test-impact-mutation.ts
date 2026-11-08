@@ -40,8 +40,11 @@ function runtimeImport(node: ts.Statement): string | null | undefined {
   if (ts.isImportDeclaration(node) && importedTypes(node)) return null;
   if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return null;
   if (ts.isExportDeclaration(node) && node.isTypeOnly) return null;
-  if (!node.moduleSpecifier) return null;
-  return ts.isStringLiteral(node.moduleSpecifier) ? node.moduleSpecifier.text : undefined;
+  return importText(node.moduleSpecifier);
+}
+function importText(specifier: ts.Expression | undefined): string | null | undefined {
+  if (!specifier) return null;
+  return ts.isStringLiteral(specifier) ? specifier.text : undefined;
 }
 function unsafeImports(file: ts.SourceFile, files: Map<string, ts.SourceFile>): boolean {
   return file.statements.some(node => {
@@ -56,6 +59,7 @@ function someNode(node: ts.Node, predicate: (node: ts.Node) => boolean): boolean
 }
 const DECLARATIONS = new Set([ts.SyntaxKind.ImportDeclaration, ts.SyntaxKind.ExportDeclaration, ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.TypeAliasDeclaration, ts.SyntaxKind.InterfaceDeclaration]);
 function unsafeInitializer(item: ts.VariableDeclaration): boolean {
+  if (/\bMath\b/.test(item.name.getText())) return true;
   const value = item.initializer;
   if (!value || ts.isArrowFunction(value) || ts.isFunctionExpression(value)) return false;
   return someNode(value, child => ts.isCallExpression(child) || unsafeSyntax(child) || (ts.isIdentifier(child) && FORBIDDEN.has(child.text)));
@@ -67,8 +71,11 @@ function unsafeJudge(path: string, files: Map<string, ts.SourceFile>, graph: Gra
   return [...graph.closure(path)].some(file => {
     const node = files.get(file);
     return !node || /(?:^|\/)(?:fixtures?|__fixtures__)(?:\/|$)/.test(file) || unsafeImports(node, files)
-      || someNode(node, child => ts.isIdentifier(child) && FORBIDDEN.has(child.text));
+      || someNode(node, unsafeJudgeCode);
   });
+}
+function unsafeJudgeCode(node: ts.Node): boolean {
+  return (ts.isIdentifier(node) && FORBIDDEN.has(node.text)) || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword);
 }
 function assignedFunction(item: ts.VariableDeclaration): [string, FunctionNode][] {
   const value = item.initializer;
@@ -94,7 +101,7 @@ function reference(node: ts.Identifier): boolean {
 function safeCall(node: ts.CallExpression, names: Functions, constants: Set<string>, seen: Set<string>, locals: Set<string>): boolean {
   const callee = node.expression;
   if (ts.isIdentifier(callee)) return names.has(callee.text) && pureFunction(callee.text, names, constants, seen);
-  return !locals.has('Math') && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === 'Math' && MATH.has(callee.name.text);
+  return !names.has('Math') && !locals.has('Math') && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === 'Math' && MATH.has(callee.name.text);
 }
 const EFFECTS = new Set([ts.SyntaxKind.NewExpression, ts.SyntaxKind.AwaitExpression, ts.SyntaxKind.YieldExpression, ts.SyntaxKind.DeleteExpression, ts.SyntaxKind.ThrowStatement, ts.SyntaxKind.TaggedTemplateExpression]);
 function unsafeSyntax(node: ts.Node): boolean {
@@ -167,6 +174,7 @@ function selectFunctions(result: MutationSelection, parsedFile: ts.SourceFile, r
 export function selectMutationFunctions(input: FingerprintInput, mutation: Supported, delta: MutationDelta, graph: Graph, fastTests: Map<string, string[]>): MutationSelection {
   const result: MutationSelection = { version: 1, status: 'ready', baseCommit: delta.baseCommit, commit: delta.commit, selected: [], excluded: [], problems: [] };
   if (!validDelta(delta)) return { ...result, status: 'blocked', problems: [{ code: 'invalid_mutation_delta' }] };
+  if (!['typescript', 'javascript'].includes(mutation.language)) return { ...result, status: 'blocked', problems: [{ code: 'unsupported_mutation_language' }] };
   const files = parsed(input), allowed = new Set(mutation.sourcePaths), changes = new Map<string, [number, number][]>();
   for (const change of delta.changes) if (allowed.has(change.path)) changes.set(change.path, [...(changes.get(change.path) ?? []), ...change.ranges]);
   for (const file of [...changes.keys()].sort()) selectFile(result, file, changes.get(file)!, files, graph, fastTests);
