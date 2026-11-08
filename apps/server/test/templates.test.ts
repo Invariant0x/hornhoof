@@ -85,12 +85,12 @@ describe('templates', () => {
   });
 
   it('keeps connected ownership and real dependencies in the assigned work', () => {
-    expect(body('hh-lead-tasks')).toMatch(/one member owns each connected block end to end/);
+    expect(body('hh-lead-tasks')).toMatch(/a block is one result a person can check, with every part it needs\. Never split parts of one result between members/);
     expect(body('hh-lead-tasks')).toMatch(/No chains or `after` between members when one can do it/);
     expect(body('hh-break-down')).toMatch(/same files or records stay with that owner/);
     expect(body('hh-break-down')).toMatch(/plans, contracts or proofs/);
     expect(body('dev-lead')).toMatch(/one developer end to end/);
-    expect(body('dev-lead')).toMatch(/one writer[\s\S]*independent blocks/);
+    expect(body('dev-lead')).toMatch(/one writer[\s\S]*only different features may go to different developers at once/);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) for (const skill of ['dev-tdd', 'dev-worktrees']) expect(templates.roles.get(id)!.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
   });
 
@@ -107,6 +107,29 @@ describe('templates', () => {
     expect(body('hh-brief-members')).toContain('hh-attach --task N FILE');
     expect(body('hh-head')).toContain('Do not send the orchestrator a separate message repeating a task report');
     expect(body('hh-notebook')).toMatch(/only when[\s\S]*changes|when[\s\S]*changes/i);
+  });
+
+  it('keeps nothing old below version 1.0 and migrates data from 1.0 on', () => {
+    const rules = templates.skills.get('dev-engineering-rules')!;
+    const preface = rules.body.slice(0, rules.body.indexOf('Every time you are asked to make a change follow:'));
+    for (const text of [preface, body('dev-plan-review')]) {
+      expect(text).toMatch(/Below version 1\.0, before the first release/);
+      expect(text).toMatch(/no compatibility paths, switches between old and new behaviour or data-conversion code/);
+      expect(text).toMatch(/From 1\.0 on, migrate existing data/);
+    }
+    expect(body('dev-plan-review')).toMatch(/Small or local work needs no note/);
+  });
+
+  it('checks data compatibility by release version in the review checklist', () => {
+    const data = body('dev-review-diff').split('\n').find(line => line.startsWith('4. **Data.**'))!;
+    expect(data).toMatch(/Below version 1\.0, before the first release, no compatibility paths or data-conversion code/);
+    expect(data).toMatch(/Correct existing records directly at release/);
+    expect(data).toMatch(/From 1\.0 on, migrations safe for existing rows/);
+    expect(data).toMatch(/transactions where two writes must agree, nothing trusted from outside without a check at the boundary/i);
+  });
+
+  it('offers removing what is not needed to reviewers and developers, off until someone turns it on', () => {
+    for (const id of ['DEV-REV', 'DEV-ENG']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-cleanup')?.on, id).toBe(false);
   });
 
   it('preserves ub-mode verbatim after its applicability preface', () => {

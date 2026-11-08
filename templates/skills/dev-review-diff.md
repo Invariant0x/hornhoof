@@ -16,7 +16,7 @@ Read a change against its brief and find what will break. The check is the same 
 1. **Does it do what the brief asked?** Every requirement met, nothing extra added. Missing work is a finding.
 2. **Correctness.** Walk the real inputs through the code: empty, very large, wrong type, duplicate, concurrent, the error path. Name the input and the wrong result for each problem.
 3. **Silent failures.** Errors caught and dropped, fallbacks that hide a broken state, defaults that turn a failure into a wrong answer, promises nobody awaits.
-4. **Data.** Migrations safe for existing rows, transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
+4. **Data.** Below version 1.0, before the first release, no compatibility paths or data-conversion code. Correct existing records directly at release. From 1.0 on, migrations safe for existing rows. Transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
 5. **Obvious security problems.** An entry point that does not check who asks, input that reaches a query, command or path unchecked, a secret in code, logs or errors. Deeper checks of access, sign-in, secrets and permissions belong to a security review.
 6. **Tests.** Do the assigned checks reproduce the named harm? When the assignment requires a separate regression test, does it fail before the fix and pass after it? For a permitted visual check, inspect that evidence instead. Tests check behaviour, not mocks.
 7. **The repository and language rules.** Read the documented style, patterns, security and checks before judging the diff. Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
