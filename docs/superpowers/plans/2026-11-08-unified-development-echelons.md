@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, Drizzle/PostgreSQL, Fastify/MCP, Solid web components, Vitest and Playwright.
 
-**Spec:** Current Hornhoof task #719, CEO instructions 200/201/205/206. The older `docs/superpowers/specs/2026-11-08-development-echelons.md` is source material only; its compatibility, opt-in and strict pair policies are superseded.
+**Spec:** Current Hornhoof task #719, CEO instructions 200/201/205/206/207. The older `docs/superpowers/specs/2026-11-08-development-echelons.md` is source material only; its compatibility, opt-in and strict pair policies are superseded.
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - No `echelonsEnabled`, opt-in, nullable second route, author returns or compatibility implementation.
 - No automated old-record conversion before 1.0. Generate schema normally for fresh installation; record exact manual release data work separately. Never change the live database.
 - A reviewer must not be weaker than the producer. Prefer another underlying provider when available; the same provider, subscription and tariff are allowed without waiting for a second provider. Equal capability is allowed. Unknown capability blocks assignment. Instruction 205 replaces the former provider barrier.
-- Review is mandatory for executable work. Instruction 206 keeps the five ordered stages Architecture, Development, Review, Security and Tests; unrelated refactoring belongs to separate turns. Security is mandatory for declared sensitive risk and can be added by Review. Coordination-group/report completion semantics await David; leaf work continues independently.
+- Review is mandatory for executable work. The default route has Architecture, Development, Review, Security and Tests. Instruction 207 permits a head to request Cleanup for a task or turn, only after Review. It is absent by default and never combined with Review automatically. Use the existing dev-cleanup ability, offered off by default to developers and reviewers; create no new cleanup skill. Security is mandatory for declared sensitive risk and can be added by Review. Coordination-group/report completion semantics await David; leaf work continues independently.
 - Every change has a test written first. Author checks use `run_tests`, on exact pushed SHAs, with explicit selection; no local installs/builds/types/lint/tests or full-product author suite.
 - Existing receipts prove their original inputs only. Formatter, producer quality, comparator and browser readiness gaps remain explicit.
 - English repository text, no em dash; user-visible text in English and Russian. Commits by Ivan Korol, without trailers.
@@ -84,6 +84,7 @@
 
 **Interfaces:** Task/detail/list/org all carry the same required route snapshot; `EchelonFindingsView` is derived from visible events. Stage labels are literally Architecture, Development, Review, Security and Tests in every locale. Any capable assigned agent can check/fix; no new special role exists.
 
+- [ ] Prove the default snapshot/map has no Cleanup; a head can insert it after Review for a task or turn; the existing dev-cleanup skill is offered off by default.
 - [ ] Adapt material tests into RED for actual stage owners, skips/added Security, live refresh, finding provenance and no old author-return display. Remove cancelled null/disabled cases and invalid test helper options.
 - [ ] Implement UI on the existing design system; integrate only the useful portions of the saved material. Resolve the known empty-coverage seam and fixture 404 causes.
 - [ ] Adapt standalone Review/Security check-and-fix skills and short roles for the sole new route. Remove cancelled old-path text and inventory assumptions.
@@ -105,5 +106,5 @@
 - The current task replaces the earlier approved note wherever they disagree. No compatibility code or cancelled nullable test is carried forward.
 - Route records are separate required records rather than a nullable task switch. Fresh installation creates them through normal application writes; existing records are repaired manually at release.
 - Capability comparison uses trusted product policy bands, permits equality and fails closed for unknown identity/capability. It is an assignment policy, not a claimed benchmark result or role/effort inference.
-- Pending David: whether coordination groups aggregate child outcomes without a separate code candidate. This is a question, not an approved rule; executable leaf work and its Review/Cleanup implementation continue.
+- Pending David: whether coordination groups aggregate child outcomes without a separate code candidate. This is a question, not an approved rule; executable leaf work and its mandatory Review implementation continue.
 - Skill bookkeeping never runs local project checks. Record actual remote receipts in the execution ledger instead of invoking local `task-done` test scripts.

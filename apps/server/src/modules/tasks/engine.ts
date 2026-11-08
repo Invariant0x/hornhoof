@@ -18,7 +18,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext, type Review } from './review-context.js';
+import { authorVendor, captureReview, reviewVendor, turnReviewContext, type Review } from './review-context.js';
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';

@@ -6,7 +6,7 @@ import { setUpCompany, testApp } from './helpers.js';
 export const BASE = 'a'.repeat(40);
 export const HEAD = 'b'.repeat(40);
 
-export async function fixture(options: { small?: boolean; riskClass?: 'none' | 'security'; authorProvider?: 'claude' | 'codex'; reviewerModel?: string; autoReviewer?: boolean } = {}) {
+export async function fixture(options: { small?: boolean; riskClass?: 'none' | 'security'; authorProvider?: 'claude' | 'codex'; reviewerModel?: string; autoReviewer?: boolean; cleanup?: boolean; creator?: 'author' } = {}) {
   const { app, db } = await testApp();
   await setUpCompany(app);
   const [company] = await db.select().from(companies);
@@ -26,9 +26,9 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
   const input = {
     title: 'Keep totals', brief: 'Keep the total correct.', body: 'Change logic/totals.ts.',
     departmentId: department!.id, assigneeAgentId: author.id, executor: true,
-    small: options.small ?? true, riskClass: options.riskClass ?? 'none', paths: ['logic/totals.ts'], reviewerAgentId: options.autoReviewer ? undefined : reviewer.id, securityAgentId: security.id, testsAgentId: tester.id,
+    cleanup: options.cleanup, small: options.small ?? true, riskClass: options.riskClass ?? 'none', paths: ['logic/totals.ts'], reviewerAgentId: options.autoReviewer ? undefined : reviewer.id, securityAgentId: security.id, testsAgentId: tester.id,
   };
-  const { task } = await createTask(app.ctx, { agentId: head.id }, input);
+  const { task } = await createTask(app.ctx, { agentId: options.creator === 'author' ? author.id : head.id }, input);
   const detail = async (id = task.id) => {
     const { loadTask } = await import('../src/modules/tasks/engine.js');
     return taskDetail(app.ctx, await loadTask(db, id), () => true);
