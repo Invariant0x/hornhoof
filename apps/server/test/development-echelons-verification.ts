@@ -42,7 +42,7 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
     else await f.db.delete(testParts).where(eq(testParts.runId, value!.id));
     return finished!;
   };
-  const run = async (commit = finalCommit, parts = 1, options: { finalChecks?: boolean; cache?: boolean } = {}) => {
+  const run = async (commit = finalCommit, parts = 1, options: { finalChecks?: boolean; cache?: boolean; suitesOnly?: boolean } = {}) => {
     const value = await start(), request = { ...value.environmentRequest!, requestId: randomUUID(), builtin: true, sentAt: new Date().toISOString() };
     await f.db.update(testRuns).set({ environmentRequest: request }).where(eq(testRuns.id, value.id));
     const { snapshot: environment } = await planningEnvironment(), description = environment.description, manifest = description.manifest;
@@ -55,6 +55,7 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
       manifest.suites[0]!.profiles.push('full');
       manifest.execution.fullRun = { everyTurns: 5, replaces: 'fast', profile: 'full' };
     }
+    if (options.suitesOnly) delete manifest.execution;
     const profile = options.cache ? 'full' : 'fast';
     description.repositoryScope = request.repositoryScope;
     description.commitSha = finalCommit;
@@ -74,8 +75,9 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
       const identity = { commitSha: finalCommit, manifestHash: description.manifestHash, runtimes, dependencies: { key: null, hit: false }, environments: [],
         phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } };
       const receipt = selection.kind === 'batch' ? { ...identity, version: 2 as const, profile, selection, outcomes: [{ index: 0, status: 'passed' as const, exitCode: 0 }] }
-        : selection.kind === 'final' ? { ...identity, version: 1 as const, kind: 'final' as const, suiteId: selection.suiteId, files: [] } : null;
-      if (!receipt) throw new Error('The fixture needs a batch or final selection.');
+        : selection.kind === 'final' ? { ...identity, version: 1 as const, kind: 'final' as const, suiteId: selection.suiteId, files: [] }
+          : selection.kind === 'suite' ? { ...identity, version: 1 as const, kind: 'suite' as const, suiteId: selection.suiteId, files: selection.files } : null;
+      if (!receipt) throw new Error('The fixture needs a batch, suite or final selection.');
       await f.db.update(testParts).set({ status: 'running', builtin: true, startedAt: new Date() }).where(eq(testParts.id, part.id));
       await partDone(f.ctx, BUILTIN, { type: 'tests.done', partId: part.id, ok: true, error: null, exitCode: 0, commit: finalCommit, log: 'Candidate check passed.', environmentReceipt: receipt });
     }

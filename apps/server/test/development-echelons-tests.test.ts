@@ -7,6 +7,21 @@ import { BASE, HEAD } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
 
 describe('Tests verifies the final candidate without changing it', () => {
+  it.each([false, true])('verifies an exact candidate with individual suite parts and final checks=%s', async finalChecks => {
+    const f = await testsFixture();
+    const run = await f.run(f.finalCommit, 1, { suitesOnly: true, finalChecks });
+    expect(run.status).toBe('passed');
+    expect(run.environmentSnapshot!.description.manifest.execution).toBeUndefined();
+    const parts = await f.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(testParts.part);
+    expect(parts.map(part => part.environmentSelection!.selection)).toEqual([
+      { kind: 'suite', suiteId: 'vitest', files: ['web/test/a.test.ts'] },
+      ...(finalChecks ? [{ kind: 'final', suiteId: 'vitest', files: [] }] : []),
+    ]);
+    const moved = await report(f.ctx, f.tester.id, f.task.id, f.verified([run.id]));
+    expect(moved.task.assigneeAgentId).toBe(f.head.id);
+    expect((await f.detail()).echelons.phase).toBe('ready');
+  });
+
   it('keeps the candidate and makes it ready for the head after verified exact parts', async () => {
     const f = await testsFixture(true);
     const run = await f.run();
