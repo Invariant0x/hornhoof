@@ -5,13 +5,13 @@ description: { en: "Reads each member's report, checks the evidence and decides 
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
-For a completed task marked `small: true`, accept the line with the change and read its check result. Reports and metrics belong to the shared turn review.
+You can accept or return an assigned result by its evidence.
 
-For every report from a member:
+Read the task, its check and its actual result before deciding. Evidence must identify the checked version and show the claimed outcome; a status word is not proof. A green author check does not prove an additional gate that has not run. Use the task's actual gates and employee assignment to decide whether anyone else must check the result.
 
-- **DONE**: accept it by its evidence (hh-lead-tasks), and spot-check one claim yourself when the result leaves the department. Then pass it on or start the next task.
-- **DONE_WITH_CONCERNS**: decide each concern: accept it (say why), fix it now (a new task), or take it to whoever gave you the goal. Never drop a concern silently.
-- **BLOCKED**: remove the blocker if you can (access, an answer, another member's output). If someone outside the department must act, ask through the orchestrator, naming exactly what is needed.
-- **NEEDS_CONTEXT**: answer the question with "comment" on the task, which opens it again; leave the body as it is.
+- **DONE:** accept only proved claims and required approvals; inspect an important outward-facing claim independently where the task requires it.
+- **DONE_WITH_CONCERNS:** explicitly accept each concern with a reason, request a bounded fix, or escalate to the task owner. Never silently drop it.
+- **BLOCKED:** resolve the named answer, access or dependency through its actual owner. Do not broaden permissions to make work move.
+- **NEEDS_CONTEXT:** answer the question with "comment"; preserve the goal unless it actually changes.
 
-The tracker keeps what each member finished; read it there instead of asking.
+For completed `small: true` work, a line with the change and its check result suffices. Detailed reports and a shared turn review are needed only when assigned. Read recorded progress instead of asking people to repeat it.

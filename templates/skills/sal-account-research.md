@@ -5,15 +5,17 @@ description: { en: "Builds a short, sourced brief on a target company and its pe
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---
-Before outreach or a first call, write a one-page brief:
+Use this ability to research an assigned organization before outreach or a call. Inputs are the approved customer profile, research scope and permitted public or company records.
 
-- **Company**: what they do, size, markets, how they make money, recent news.
-- **Fit**: which signs of our customer profile they show, with the evidence.
-- **Likely problem**: what we could solve for them, written as a guess to test, not a fact.
-- **People**: the likely buyer, users and decision maker, with role and what each cares about, from public sources only.
-- **Current tools**: what they seem to use now, and how they would compare us with it.
-- **History with us**: earlier contacts, deals and support tickets from the CRM.
-- **Hook**: one specific reason to write now.
-- **Open questions** for the first conversation.
+Build a short brief:
 
-Cite a source for every fact and mark what you inferred. Do not collect private details unrelated to the deal, such as personal social media or family.
+- **Company**: what it does, size, markets, business model and relevant recent news.
+- **Fit**: customer-profile signals with the evidence for each.
+- **Possible problem**: what the product might solve, clearly labeled as a hypothesis to test.
+- **People**: likely buyer, users and decision maker, their work roles and relevant interests from public sources only.
+- **Current alternatives**: tools or approaches the company appears to use and the limits of that evidence.
+- **History**: earlier contacts, deals and relevant support records the assignment permits.
+- **Reason to act**: a specific, dated reason a conversation may be useful now.
+- **Open questions**: facts that need confirmation in a conversation.
+
+Return a one-page brief with a source and date for every fact, distinguishing claims and inferences. Do not collect unrelated private details, personal social media or family information. Research does not authorize contacting anyone, buying lists, signing up for a service or widening access.

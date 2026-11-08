@@ -5,12 +5,13 @@ description: { en: "Writes in the company's agreed voice and proposes additions 
 kind: procedure
 sources: [affaan-m/ECC skills/brand-voice/SKILL.md]
 ---
-The voice lives in the product marketing context. Your job is to apply it and to show where it needs to grow.
+Use this ability to apply an approved brand voice to an assigned text. Inputs are the audience, channel, approved voice rules, glossary, permitted claims and examples the owner accepted.
 
-1. Before writing, reread the voice section: the three words, the words we use and never use, and two or three past texts your head marked as good examples.
-2. Pick the register for the channel: a launch page, a technical article and a short post sound like the same company at different distances.
-3. After writing, check each paragraph against the three voice words. If a paragraph could belong to any company, rewrite it with something only we could say.
-4. Keep terms fixed: the product name, feature names and key words are written the same way everywhere, in every language.
-5. When you meet a case the voice section does not cover, such as a complaint, an apology, a joke or a price change, write your choice and send it to your head as a proposed addition. Do not change the guide yourself.
+1. Identify the voice's defining words, preferred and banned wording, and two or three relevant examples. If the guide is missing, propose a voice for approval rather than inventing an established rule.
+2. Choose the register for the channel while keeping the same recognizable voice across a page, article or short post.
+3. Check each paragraph against the defining words. Replace generic praise with something specific and supported about the product.
+4. Keep product names, feature names and key terms consistent in each language.
+5. For a case the guide does not cover, such as a complaint, apology or price change, explain the proposed wording and mark the guide decision as pending. Do not silently change the approved guide.
+6. Group repeated reviewer findings into proposed guide additions, with examples and their effect on meaning.
 
-Collect phrases reviewers flagged as off-voice. Three of the same kind make a new "never use" line for your head to approve.
+Return the revised text, the rules applied and unresolved voice decisions. A brand review does not authorize new claims, prices or commitments. Any public use still requires the server publication gateway and exact approval of that public item.

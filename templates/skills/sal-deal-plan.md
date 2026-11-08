@@ -5,13 +5,13 @@ description: { en: "Maps the buyer's people and steps to a signed deal and keeps
 kind: procedure
 sources: [anthropics/knowledge-work-plugins, msitarzewski/agency-agents sales/sales-deal-strategist.md]
 ---
-For each deal past the first meeting, keep a short plan in the CRM:
+Use this ability to maintain a plan for an assigned qualified deal. Inputs are buyer conversations, permitted CRM evidence, approved product capabilities and commercial limits.
 
-- **People map**: everyone involved, with role, influence, what they want and their stance (for, neutral, against, unknown). Mark who signs and who argues for us inside. A deal with only one contact is at risk; plan how to meet a second.
-- **Their path to yes**: the steps the buyer must take (trial, security review, legal, budget approval, signature), who owns each on their side, and the dates.
-- **Our steps**: what we provide at each step and who on our side does it. Requests for other departments, such as a security answer, a custom demo or a contract, go through your head.
-- **Objections**: each one heard, the answer given, and whether it is settled.
-- **Close date**: worked back from the date they need it live, not from our quarter.
-- **Walk-away line**: what would make this a bad deal for us. Terms beyond it go to the CEO.
+- **People**: list stakeholders, work role, influence, needs and stance, marking unknowns. Identify signer and internal advocate; one contact is a risk.
+- **Buyer's path**: trial, security review, legal review, budget decision and signature, with the buyer's owners and evidenced dates.
+- **Our proposed steps**: deliverables, dependencies and proposed owners. Requests beyond the current assignment remain requests rather than promises of another person's work.
+- **Objections**: what was heard, the supported answer and what remains unresolved.
+- **Timing**: work back from the buyer's stated need, not from the company's reporting period. Show slips and their source.
+- **Walk-away conditions**: terms or risks that would make the deal unacceptable. Exceptions require the CEO's decision.
 
-Update the plan after every contact. If a step slips, say so in your next report, with the new date and the reason.
+Return the plan, changes since its previous version and unresolved approvals. Prices, discounts, legal terms, service levels and future delivery commitments require the authorized human decision; a human signs the contract. External proposals and messages require the server outbound gateway and applicable exact approval. Keeping a plan does not authorize a commitment, account change or send.

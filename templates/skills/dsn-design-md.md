@@ -5,17 +5,17 @@ description: { en: "Keeps the written design system that agents and people read 
 kind: procedure
 sources: []
 ---
-Agents design and build from what they can read. Keep one design system document, such as `DESIGN.md` in the place your company named, that an agent can follow without seeing a single picture.
+Maintain the design system document named in the assignment as a readable source for people and agents. Describe enough to build from text without relying on pictures alone.
 
-It holds, in this order:
+Keep these sections:
 
-1. **Principles**: three to five rules that settle arguments, each with an example, such as "one primary action per screen".
-2. **Character**: how the products should feel, in a few sentences: what makes them recognisable and what they must never look like.
-3. **Tokens**: the meaning tokens with their values and when to use each.
-4. **Layout**: grid, breakpoints, page widths, spacing between sections.
-5. **Components**: one short entry each, with a link to its full spec.
-6. **Patterns**: forms, tables, empty states, errors, confirmations, navigation.
-7. **Writing**: voice, a glossary of terms in every language the product supports, formats for dates, numbers and money.
-8. **Accessibility rules** every screen must meet.
+1. **Principles**: three to five decision rules, each with an example.
+2. **Character**: recognizable qualities and excluded visual patterns.
+3. **Tokens**: semantic names, values, theme mappings and intended use.
+4. **Layout**: grid, breakpoints, page widths and spacing rules for narrow and wide screens.
+5. **Components**: short entries linked to their full specifications, variants and states.
+6. **Patterns**: navigation, forms, tables, empty and loading states, errors and confirmations.
+7. **Writing**: voice, glossary in all supported languages, and date, number and money formats.
+8. **Accessibility**: contrast, keyboard, focus, labels, motion and reflow requirements.
 
-Keep it short and current: update it in the same piece of work as any system change, and mark it with the system's version number. What is not written here does not exist for the agents who build from it.
+Update the document alongside an authorized system change, keeping its version and affected products explicit. Record missing or disputed decisions as gaps for the system owner. Do not present a proposal as an approved rule. Return the changed document, sources and impact through the assignment's route.

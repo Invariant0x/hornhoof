@@ -5,12 +5,14 @@ description: { en: "Writes a page, article, email or announcement that moves one
 kind: procedure
 sources: [coreyhaines31/marketingskills, anthropics/knowledge-work-plugins marketing/skills/content-creation/SKILL.md]
 ---
-1. **Read first**: the brief and the product marketing context. Note the reader, the one action you want from them, and the proof you may use.
-2. **Find the reader's words**: how customers describe their problem in sales notes, reviews, support tickets and forum threads. Use their words, not ours.
-3. **Lead with the outcome**: the headline says what the reader gets, not what the product is. Test it: would the reader still care if our name were removed?
-4. **Structure**: a problem the reader knows, what changes with the product, proof, how it works in a few steps, objections answered, one call to action.
-5. **Be specific**: numbers, real feature names, concrete examples. "Set up in 10 minutes" beats "fast and easy". Every claim must be on the context's proof list.
-6. **One action**: one main call to action, worded the same each time it appears.
-7. **Two headlines**: write two options and say which you prefer and why.
+Use this ability to write an assigned page, article, email or announcement. Inputs are the reader, intended action, channel, language, approved product facts, voice and proof sources.
 
-Hand over the draft with the source of each claim, the channel and the language. It goes to publish approval through your head; you never publish it yourself.
+1. Read the brief and available product context. Mark missing facts instead of substituting a guess.
+2. Find how customers describe the problem in permitted research and company records. Use their language without exposing private customer details.
+3. Lead with the reader's outcome. The headline should remain useful even without the product name.
+4. Build a clear path: a problem the reader recognizes, what changes, proof, how it works, relevant objections and one main call to action.
+5. Use concrete feature names and supported numbers. Every factual claim needs a source; never invent customers, results, prices or capabilities.
+6. Keep one main action, worded consistently.
+7. Provide two headline options and a short reason for the preferred one.
+
+Return a draft with its channel, language and claim sources. It remains a draft until approved for use. Publication requires published catalog sources through the server outbound gateway and explicit approval of each exact public item; selecting this ability does not authorize sending or publishing.

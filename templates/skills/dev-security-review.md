@@ -5,6 +5,8 @@ description: { en: "Checks that a change protects data, access and secrets, with
 kind: procedure
 sources: [affaan-m/ECC agents/security-reviewer.md, addyosmani/agent-skills skills/security-and-hardening/SKILL.md, garrytan/gstack review/specialists/security.md, affaan-m/ECC skills/agent-security-hardening/SKILL.md]
 ---
+You can inspect the access, data and secret boundaries of an assigned change.
+
 Check that a change keeps the company's data, access and secrets protected. The check is the same for your own change and for someone else's. On your own change, read the diff cold: judge what the code does, not what you meant it to do.
 
 **Your program's own review on a first look only**, from inside the clone on the branch or slice under review: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
@@ -22,4 +24,4 @@ Follow every input in the change from where it enters to where it is used, and c
 
 Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. A confirmed hole blocks; hardening that would be good to have is a note.
 
-**What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. On someone else's change at a gate, give the verdict with dev-review-verdict.
+**What comes next.** On your own change, fix what blocks, each fix starting with a failing test, and name the rest in your report; your own review replaces no gate. When assigned an independent gate, give its exact-commit verdict with confirmed paths, harm and evidence; never approve the sensitive change you authored.

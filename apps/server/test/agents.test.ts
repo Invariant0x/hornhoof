@@ -59,6 +59,21 @@ describe('hiring', () => {
 });
 
 describe('the employee card', () => {
+  it('stores an orchestrator assignment separately from its standing identity', async () => {
+    const { app, db, ceo } = await company();
+    const assignment = '\nCoordinate the named company goals.  \n';
+    const res = await patch(app, ceo, 'orchestrator', { base: assignment });
+    expect(res.statusCode).toBe(200);
+    const card = res.json();
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'base')).toMatchObject({ text: 'You are the Orchestrator who runs the company with its CEO.', overridden: false });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain(assignment);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect((await instructionsOf(app.ctx, orchestrator!)).text).toContain(assignment);
+    expect((await instructionsOf(app.ctx, orchestrator!, false)).text).toContain(assignment);
+    expect((await patch(app, ceo, 'orchestrator', { base: null })).statusCode).toBe(200);
+    expect((await open(app, ceo, 'orchestrator')).json().parts.find((p: { kind: string }) => p.kind === 'assignment').text).not.toContain(assignment);
+  });
+
   it("opens an employee's card with its skills, prompt parts and raw text", async () => {
     const { app, db, ceo, dev, teamKey, codex, brunoId, role } = await company();
     const res = await open(app, ceo, brunoId);
@@ -77,7 +92,7 @@ describe('the employee card', () => {
     });
     expect(card.skills.map((s: { id: string }) => s.id)).toEqual(role.skills.map(s => s.id));
     expect(card.skills.find((s: { id: string }) => s.id === 'hh-report-to-head')).toMatchObject({ on: true, locked: true, overridden: false, templateChanged: false });
-    expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', ...role.skills.filter(s => s.on).map(() => 'skill')]);
+    expect(card.parts.map((p: { kind: string }) => p.kind)).toEqual(['header', 'base', 'assignment', ...role.skills.filter(s => s.on).map(() => 'skill')]);
     expect(card.raw).toBe(card.parts.map((p: { text: string }) => p.text).join('\n\n'));
     const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
     expect(card.instructions).toEqual({ length: (await instructionsOf(app.ctx, bruno!)).text.length, max: MAX_INSTRUCTIONS });
@@ -186,7 +201,8 @@ describe('the employee card', () => {
     expect(rows.find(r => r.field === 'name')).toMatchObject({ before: 'Bruno', after: 'Bruna' });
     const card = (await open(app, ceo, brunoId)).json();
     expect(card.changes[0]).toMatchObject({ personName: 'Ivan', at: expect.any(String) });
-    expect(card.parts[1]).toMatchObject({ text: 'You own the billing API.', overridden: true });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment')).toMatchObject({ overridden: true });
+    expect(card.parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain('You own the billing API.');
   });
 
   it('keeps the instructions within what a turn carries, counting only what is not a skill file', async () => {
@@ -194,7 +210,7 @@ describe('the employee card', () => {
     const card = (await open(app, ceo, brunoId)).json();
     const told = async () => (await instructionsOf(app.ctx, (await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!)).text;
     const core = (id: string) => app.ctx.templates.skills.get(id)?.kind === 'core';
-    /* No field a person writes reaches the limit alone: the role's text is saved near it first. */
+    /* No field a person writes reaches the limit alone: an existing assignment is saved near it first. */
     await db.update(agents).set({ overrides: { base: '' } }).where(eq(agents.id, brunoId));
     await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS - (await told()).length - 100) } }).where(eq(agents.id, brunoId));
     /* A core skill goes whole into the instructions. Its part carries its markers and heading around the text it takes. */
@@ -255,12 +271,14 @@ describe('the employee card', () => {
     expect(renderInstructions(app.ctx.templates, bruno!, { company: 'Acme', department: 'Development', product: null }).whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
   });
 
-  it('resets an employee to its template', async () => {
+  it('resets template abilities while preserving the employee assignment', async () => {
     const { app, db, ceo, teamKey, brunoId, role } = await company();
     await patch(app, ceo, brunoId, { effort: 'max', base: 'Mine.', skills: { 'dev-debugging': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
     const res = await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(ceo) });
     expect(res.statusCode).toBe(200);
     expect(res.json().parts[1]).toMatchObject({ text: role.body, overridden: false });
+    expect(res.json().parts.find((p: { kind: string }) => p.kind === 'assignment').text).toContain('Mine.');
+    expect((await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!.overrides).toEqual({ base: 'Mine.' });
     expect(res.json().skills.filter((s: { on: boolean }) => s.on).map((s: { id: string }) => s.id)).toEqual(role.skills.filter(s => s.on).map(s => s.id));
     expect(res.json().effort).toBeNull();
     expect(res.json()).toMatchObject({ model: 'claude-sonnet-5-5', subscription: { id: teamKey } });

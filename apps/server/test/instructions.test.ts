@@ -76,6 +76,8 @@ const agent = (over: Partial<AgentRow> = {}): AgentRow => ({
 });
 
 const PLACE = { company: 'Acme', department: 'Development', product: 'Mascot' };
+const assignmentBlock = (body: string) => `<!-- hh:assignment -->\n## Assignment\n\n${body}\n<!-- /hh:assignment -->`;
+const INTEGRATION_ABILITIES = ['dev-gates', 'dev-task-flow', 'dev-lead', 'dev-work-pipeline', 'dev-ci-release', 'dev-implement', 'dev-worktrees'] as const;
 
 /* Check the delivered policy's obligations, rather than pinning its wording. */
 function preMergeSecurityProblems(text: string): string[] {
@@ -86,6 +88,7 @@ function preMergeSecurityProblems(text: string): string[] {
     ['independent-reviewer', /\bindependent Security engineer\b/i.test(riskRule) && /\b(?:must|requires?)\b[^.!?]*\bpass\b/i.test(riskRule)],
     ['before-shared-branch', /\bpass\b[^.!?]*\bbefore\b[^.!?]*\bshared\b[^.!?]*\bbranch\b/i.test(riskRule) && /\bturn(?:'s)? branch\b/i.test(riskRule)],
     ['urgent-small-named', ['urgent', 'small', 'named'].every(word => new RegExp(`\\b${word}\\b`, 'i').test(scope))],
+    ['review-fixes', /\breview fixes\b/i.test(scope)],
     ['self-review-not-a-gate', clauses.some(s => /\b(?:self-review|own review)\b[^.!?]*\b(?:does not|cannot|never) replace\b[^.!?]*\bgate\b/i.test(s))],
     ['no-merge-first-bypass', !/\b(?:urgent|small|named)\b[^.!?\n]*\b(?:merge first|skip Security)\b/i.test(text)],
   ];
@@ -99,25 +102,32 @@ describe('independent Security before integration', () => {
     return renderInstructions(shipped, agent({ roleKey, kind: role.kind === 'head' ? 'head' : 'worker', skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
   };
 
-  it.each(['DEV-GEN', 'DEV-HEAD'])('gives %s the independent pre-merge gate with no urgent, small or named-order bypass', roleKey => {
+  it.each(['DEV-ENG', 'DEV-HEAD'])('gives %s the independent pre-merge gate with no urgent, small or named-order bypass', roleKey => {
     const packet = delivered(roleKey);
     const gate = packet.skills.find(s => s.name === 'dev-gates');
     expect(gate, roleKey).toBeDefined();
     expect(preMergeSecurityProblems(gate!.body), roleKey).toEqual([]);
     expect(preMergeSecurityProblems(packet.whole), `${roleKey} whole`).toEqual([]);
-    expect(packet.whole.match(/independent Security engineer/gi), `${roleKey} single rule`).toHaveLength(1);
     expect(packet.text).toContain('dev-gates');
-    const entry = roleKey === 'DEV-GEN' ? packet.parts.find(p => p.kind === 'base')!.text : packet.skills.find(s => s.name === 'dev-lead')!.body;
-    expect(entry).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
-    if (roleKey === 'DEV-GEN') {
-      expect(packet.text).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
-      expect(packet.parts.find(p => p.id === 'dev-task-flow')!.text).toMatch(/before any merge[^.!?]*pass[^.!?]*required gates/i);
-      expect(packet.text).toMatch(/own review/);
-    }
+    const entry = roleKey === 'DEV-ENG' ? packet.parts.find(p => p.id === 'dev-task-flow')!.text : packet.skills.find(s => s.name === 'dev-lead')!.body;
+    expect(preMergeSecurityProblems(entry), `${roleKey} standalone entry`).toEqual([]);
+    expect(packet.parts.find(p => p.kind === 'base')?.text).toBe(shipped.roles.get(roleKey)!.body);
   });
 
-  it('rejects late review, author approval and fast-path bypasses even when the other security words remain', () => {
-    const rule = delivered('DEV-GEN').skills.find(s => s.name === 'dev-gates')!.body;
+  it.each(INTEGRATION_ABILITIES)('delivers the complete protected Security condition when only %s is selected', id => {
+    const savedSkills = [id];
+    const packet = renderInstructions(shipped, agent({ roleKey: 'DEV-ENG', skills: savedSkills, templateHashes: {} }), PLACE);
+    const selected = packet.parts.find(p => p.id === id);
+    expect(selected, id).toBeDefined();
+    expect(preMergeSecurityProblems(selected!.text), id).toEqual([]);
+    expect(preMergeSecurityProblems(packet.whole), `${id} whole`).toEqual([]);
+    expect(savedSkills).toEqual([id]);
+    if (shipped.skills.get(id)!.kind === 'core') expect(packet.text).toContain(selected!.text);
+    else expect(packet.skills.find(s => s.name === id)?.body).toContain(shipped.skills.get(id)!.body);
+  });
+
+  it.each(INTEGRATION_ABILITIES)('rejects late review, self-approval and fast-path mutations of %s without no-op mutations', id => {
+    const rule = shipped.skills.get(id)!.body;
     expect(preMergeSecurityProblems(rule)).toEqual([]);
     const mutations: [string, string][] = [
       [rule.replace(/before (it reaches|entering)/i, 'after $1'), 'before-shared-branch'],
@@ -125,11 +135,15 @@ describe('independent Security before integration', () => {
       [rule.replace(/\burgent\b/gi, 'ordinary'), 'urgent-small-named'],
       [rule.replace(/\bsmall\b/gi, 'large'), 'urgent-small-named'],
       [rule.replace(/\bnamed\b/gi, 'planned'), 'urgent-small-named'],
+      [rule.replace(/review fixes/gi, 'ordinary fixes'), 'review-fixes'],
       [rule.replace(/does not replace/gi, 'replaces'), 'self-review-not-a-gate'],
       [`${rule}\nUrgent tasks may merge first and get Security afterward.`, 'no-merge-first-bypass'],
       [`${rule}\nSmall tasks may skip Security.`, 'no-merge-first-bypass'],
     ];
-    for (const [changed, failure] of mutations) expect(preMergeSecurityProblems(changed), failure).toContain(failure);
+    for (const [changed, failure] of mutations) {
+      expect(changed, `${id} ${failure} mutation must change the rule`).not.toBe(rule);
+      expect(preMergeSecurityProblems(changed), `${id} ${failure}`).toContain(failure);
+    }
   });
 });
 
@@ -154,18 +168,63 @@ describe('what a node from before skill files takes', () => {
 });
 
 describe('renderInstructions', () => {
+  it('keeps role identity separate from an existing personal assignment', () => {
+    const assignment = '  Close assigned incident orders end to end.\nСохранить эту строку.\nLiteral \\n stays literal.  ';
+    const saved = agent({ overrides: { base: assignment } });
+    const packet = renderInstructions(T, saved, PLACE);
+    expect(packet.parts.find(p => p.kind === 'base')?.text).toBe(ROLE.body);
+    expect(packet.parts.find(p => p.kind === 'base')?.overridden).toBe(false);
+    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: assignmentBlock(assignment), overridden: true, templateChanged: false });
+    expect(packet.parts.slice(0, 3).map(p => p.kind)).toEqual(['header', 'base', 'assignment']);
+    expect(packet.text).toContain(ROLE.body);
+    expect(packet.text).toContain(assignment);
+    expect(packet.whole).toContain(assignment);
+    expect(packet.raw).toContain(assignmentBlock(assignment));
+    expect(packet.skills.map(s => s.name)).not.toContain('assignment');
+    expect(saved.overrides).toEqual({ base: assignment });
+  });
+
+  it.each([{ overrides: {}, overridden: false }, { overrides: { base: '' }, overridden: true }])('always includes an empty assignment part with overridden=$overridden', ({ overrides, overridden }) => {
+    const packet = renderInstructions(T, agent({ overrides }), PLACE);
+    expect(packet.parts[2]).toEqual({ kind: 'assignment', id: null, title: { en: 'Assignment', ru: 'Назначение' }, text: assignmentBlock(''), overridden, templateChanged: false });
+    for (const text of [packet.text, packet.raw, packet.whole]) expect(text).toContain(assignmentBlock(''));
+  });
+
+  it.each([null, 'RETIRED-ROLE'])('retains a saved assignment without a current role template: %s', roleKey => {
+    const assignment = '  Keep the roleless employee assignment.\n';
+    const packet = renderInstructions(T, agent({ roleKey, overrides: { base: assignment } }), PLACE);
+    expect(packet.parts.some(p => p.kind === 'base')).toBe(false);
+    expect(packet.parts[1]).toMatchObject({ kind: 'assignment', id: null, text: assignmentBlock(assignment), overridden: true, templateChanged: false });
+    for (const text of [packet.text, packet.raw, packet.whole]) expect(text).toContain(assignmentBlock(assignment));
+  });
+
+  it('changes the instruction hash when an assignment changes while retaining the canonical role identity', () => {
+    const before = renderInstructions(T, agent({ overrides: { base: 'Own the API.' } }), PLACE);
+    const after = renderInstructions(T, agent({ overrides: { base: 'Own the checkout API.' } }), PLACE);
+    expect(after.hash).not.toBe(before.hash);
+    expect(after.parts.find(p => p.kind === 'base')).toEqual(before.parts.find(p => p.kind === 'base'));
+  });
+
+  it('describes independent abilities without a missing-skill escape', () => {
+    const packet = renderInstructions(T, agent(), PLACE);
+    expect(packet.text).not.toContain('A skill may name another skill');
+    expect(packet.text).toMatch(/self-contained abilit/i);
+  });
+
   it('shows the header, the role and each enabled skill between markers on the card', () => {
     const { parts, raw } = renderInstructions(T, agent(), PLACE);
     expect(parts.map(p => [p.kind, p.id])).toEqual([
       ['header', null],
       ['base', 'DEV-BE'],
+      ['assignment', null],
       ['skill', 'hh-report-to-head'],
       ['skill', 'dev-tdd'],
     ]);
     /* Who it is is the one line that is no skill: working in Hornhoof and with tasks comes in skills, as all else does. */
     expect(parts[0]!.text).toBe('You are Bruno, the Backend engineer of the Development department at Acme, working on Mascot.');
     expect(parts[1]!.text).toBe('You own the server side.');
-    expect(parts[3]!.text).toBe('<!-- hh:skill dev-tdd -->\n## Test first\n\nWrite the test first.\n<!-- /hh:skill -->');
+    expect(parts[2]!.text).toBe(assignmentBlock(''));
+    expect(parts[4]!.text).toBe('<!-- hh:skill dev-tdd -->\n## Test first\n\nWrite the test first.\n<!-- /hh:skill -->');
     expect(raw).toBe(parts.map(p => p.text).join('\n\n'));
     expect(raw).not.toContain('Never edit a shipped migration.');
     expect(parts.every(p => !p.overridden && !p.templateChanged)).toBe(true);
@@ -173,7 +232,7 @@ describe('renderInstructions', () => {
 
   it('tells the program its role and core rules whole and its other skills as a list, which go to the node as files', () => {
     const { parts, text, hash, skills } = renderInstructions(T, agent(), PLACE);
-    expect(text.startsWith(`${parts[0]!.text}\n\nYou own the server side.\n\n${parts[2]!.text}\n\n## Skills`)).toBe(true);
+    expect(text.startsWith(`${parts.slice(0, 4).map(p => p.text).join('\n\n')}\n\n## Skills`)).toBe(true);
     expect(text).not.toContain('Write the test first.');
     expect(text).toContain('\n- dev-tdd: Test first. Writes the test before the code.');
     expect(text).toContain('.claude/skills/<name>/SKILL.md');
@@ -203,14 +262,16 @@ describe('renderInstructions', () => {
     expect(head).toBe(member);
     expect(orchestrator).toBe(member);
     expect(member).toContain('superpowers');
-    expect(member).toContain('is whoever gave you the task, or the person who wrote to you');
-    expect(member).toContain("the orchestrator's is the CEO in its window");
-    expect(member).toContain('A task given to you is already approved');
-    expect(member).toContain('What the orchestrator gives the departments is approved when it gives it');
-    expect(member).toContain('never by waiting for an answer in your terminal');
-    expect(member).toContain('the orchestrator brainstorms with the CEO when a goal is still unclear, one question at a time');
-    expect(member).toContain('Anyone else uses it only when a task asks for a design');
-    expect(member).toContain('A small task needs no written plan: do it, check it, submit. writing-plans and executing-plans are for new or large work only.');
+    expect(member).toMatch(/human partner is whoever gave you that task or the person who wrote to you/i);
+    expect(member).toMatch(/coordinator's partner is the person authorizing the work/i);
+    expect(member).toMatch(/task already given to you is approved for its stated scope/i);
+    expect(member).toMatch(/proceed without requesting approval for routine design or implementation/i);
+    expect(member).toMatch(/new spend, authority, scope or irreversible actions still need the relevant decision/i);
+    expect(member).toMatch(/company tools, never by waiting for terminal input/i);
+    expect(member).toMatch(/when asked to design[\s\S]*task owner in one concise message[\s\S]*independent work/i);
+    expect(member).toMatch(/do not restart a company interview for an already specified task/i);
+    expect(member).toMatch(/small, clear task[\s\S]*not a separate written plan/i);
+    expect(member).toMatch(/new or large work[\s\S]*concrete plan/i);
     /* A head of any department reads it, so it names no role of one department. */
     expect(member).not.toMatch(/architect|developer/i);
   });
@@ -228,7 +289,7 @@ describe('renderInstructions', () => {
     const { parts, whole } = renderInstructions(T, agent(), PLACE);
     expect(whole.startsWith('You are Bruno')).toBe(true);
     expect(whole).toContain('\n\nYou own the server side.\n\n');
-    expect(whole.endsWith(`${parts[2]!.text}\n\n${parts[3]!.text}`)).toBe(true);
+    expect(whole.endsWith(parts.filter(p => p.kind === 'skill').map(p => p.text).join('\n\n'))).toBe(true);
     /* Such a node has no superpowers and no files to list. */
     expect(whole).not.toContain('superpowers');
     expect(whole).not.toContain('## Skills');
@@ -241,17 +302,18 @@ describe('renderInstructions', () => {
     expect(whole).toContain(`${long}\n<!-- /hh:skill -->`);
   });
 
-  it("uses an override instead of the template's text and marks it", () => {
+  it('marks assignment and skill overrides without replacing or marking the role identity', () => {
     const { parts } = renderInstructions(T, agent({ overrides: { base: 'You own the API.', skills: { 'dev-tdd': 'Tests come first, always.' } } }), PLACE);
-    expect(parts[1]).toMatchObject({ text: 'You own the API.', overridden: true });
-    expect(parts[3]).toMatchObject({ overridden: true });
-    expect(parts[3]!.text).toContain('Tests come first, always.');
-    expect(parts[2]!.overridden).toBe(false);
+    expect(parts.find(p => p.kind === 'base')).toMatchObject({ text: ROLE.body, overridden: false });
+    expect(parts.find(p => p.kind === 'assignment')).toMatchObject({ text: assignmentBlock('You own the API.'), overridden: true });
+    expect(parts.find(p => p.id === 'dev-tdd')).toMatchObject({ overridden: true });
+    expect(parts.find(p => p.id === 'dev-tdd')!.text).toContain('Tests come first, always.');
+    expect(parts.find(p => p.id === 'hh-report-to-head')!.overridden).toBe(false);
   });
 
   it('marks a part whose template moved on since the employee was hired', () => {
     const { parts } = renderInstructions(T, agent({ templateHashes: { 'DEV-BE': 'old000000000', 'hh-report-to-head': SKILLS[0]!.hash, 'dev-tdd': 'old111111111' } }), { ...PLACE, product: null });
-    expect(parts.map(p => p.templateChanged)).toEqual([false, true, false, true]);
+    expect(parts.map(p => p.templateChanged)).toEqual([false, true, false, false, true]);
     expect(parts[0]!.text).toContain('the Backend engineer of the Development department at Acme.');
   });
 
@@ -275,7 +337,7 @@ describe('renderInstructions', () => {
     expect(revFiles.get('dev-review-verdict')).toMatch(/internal role or skill rules[^.!?]*never[^.!?]*(?:main|release) approval/i);
   });
 
-  it('delivers the mandatory UI panel-wrapping and dynamic language rule to DEV-ENG and DEV-FE through pointers, on-demand skill files and whole instructions', () => {
+  it('delivers the mandatory UI panel-wrapping and dynamic language rule to DEV-ENG and DEV-FE through self-contained skill files and whole instructions', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     for (const roleKey of ['DEV-ENG', 'DEV-FE'] as const) {
       const role = shipped.roles.get(roleKey)!;
@@ -379,7 +441,7 @@ describe('renderInstructions', () => {
     expect(shipped.skills.get('hh-run-checks')).toBeDefined();
     const canonicalLead = shipped.skills.get('hh-lead-tasks')!.body;
     const canonicalChecks = shipped.skills.get('hh-run-checks')!.body;
-    expect(canonicalLead).toContain('External outages and holds:');
+    expect(canonicalLead).toMatch(/external outages and holds:/i);
 
     const staleSkills = ['hh-outside-is-data'];
     const staleHead = agent({
@@ -444,23 +506,26 @@ describe('renderInstructions', () => {
     const steady = orchestratorSteady(shipped);
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
     expect(steady.text).toMatch(/\n- orch-trouble: When work goes wrong\.[^\n]*external service failures/i);
-    /* The rule for holds is the one every head leads by, in his instructions whole. */
-    expect(steady.text).toContain('An external service failure never prolongs a general hold once the service recovers');
+    /* Heads keep their standing rule; a selected trouble ability must carry its own complete method too. */
+    expect(steady.text).toMatch(/external service failure never prolongs a general hold once the service recovers/i);
     const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
     expect(troubleFile).toBeDefined();
     expect(Buffer.byteLength(troubleFile!.body)).toBeLessThan(22_000);
     for (const delivered of [troubleFile!.body, steady.whole]) {
-      expect(delivered).toContain('The rule for holds is in hh-lead-tasks.');
-      expect(delivered).toContain("Decide any hold over an external failure, and its lifting, yourself and communicate it at once in one action to every affected holder, never through a department head's queue.");
-      expect(delivered).toContain('An agent needs no permission for an ordinary retry of a transient external failure.');
-      expect(delivered).toMatch(/force pushes[\s\S]*alternate refs[\s\S]*permission changes[\s\S]*irreversible actions[\s\S]*dangerous or non-idempotent actions/);
+      expect(delivered).toMatch(/external service failure (?:never prolongs|does not keep) a general hold[^.!?]*(?:recovers|recovery)/i);
+      expect(delivered).toMatch(/communicate (?:a lifted hold|[^.!?]*lifting)[^.!?]*at once in one action[^.!?]*every affected holder/i);
+      expect(delivered).toMatch(/authorized company coordinator[\s\S]*decide any general hold[\s\S]*lifting yourself/i);
+      expect(delivered).toMatch(/(?:not through a head's serial queue|never through a department head's queue)/i);
+      expect(delivered).toMatch(/ordinary (?:safe )?retry[^.!?]*transient external failure[^.!?]*needs no (?:extra )?permission|needs no permission[^.!?]*ordinary retry[^.!?]*transient external failure/i);
+      expect(delivered).toMatch(/force pushes[\s\S]*alternate refs[\s\S]*permission changes[\s\S]*irreversible actions[\s\S]*dangerous or non-idempotent (?:actions|retries)/i);
+      expect(delivered).not.toContain('The rule for holds is in hh-lead-tasks.');
     }
 
     const canonicalLead = shipped.skills.get('hh-lead-tasks')!.body;
     const headMarker = '<!-- hh:skill hh-lead-tasks -->';
     for (const role of [...shipped.roles.values()].filter(r => r.kind === 'head')) {
       const freshHead = renderInstructions(shipped, agent({ kind: 'head', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
-      expect(freshHead.text, role.id).toContain('An external service failure never prolongs a general hold once the service recovers');
+      expect(freshHead.text, role.id).toMatch(/external service failure never prolongs a general hold once the service recovers/i);
       expect(freshHead.text.split(headMarker).length - 1, role.id).toBe(1);
       const legacySavedSkills = ['hh-outside-is-data', 'hh-ask-dont-guess'];
       const legacyHead = renderInstructions(
@@ -484,12 +549,12 @@ describe('renderInstructions', () => {
 
   it('delivers department-load, independentPart/independentNone and urgentOnly rules to heads and idle-fault rules to the watchdog across fresh and legacy saved skill lists', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
-    const headPhrases = [
-      'whoever gives out the work answers for keeping the department loaded, not only for ordering tasks',
-      'Members standing free while work in the department can run are a fault, not a normal wait',
-      '`independentPart`',
-      '`independentNone`',
-      'Never assign ordinary or non-urgent work to members of an urgent-only team (`urgentOnly`): Hornhoof refuses the assignment and names free members in the same role.',
+    const headRules = [
+      /whoever gives out the work answers for keeping the department loaded, not only for ordering tasks/i,
+      /members standing free while work in the department can run are a fault, not a normal wait/i,
+      /`independentPart`/,
+      /`independentNone`/,
+      /never assign ordinary or non-urgent work to members of an urgent-only team \(`urgentOnly`\)[^.!?]*Hornhoof refuses the assignment and names free members in the same role/i,
     ];
 
     const savedHeadList = ['hh-outside-is-data'];
@@ -510,15 +575,17 @@ describe('renderInstructions', () => {
     for (const candidate of headVariants) {
       const packet = renderInstructions(shipped, candidate, PLACE);
       expect(Buffer.byteLength(packet.text), candidate.roleKey ?? 'roleless').toBeLessThan(24_000);
-      for (const phrase of headPhrases) {
-        expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toContain(phrase);
-        expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toContain(phrase);
+      for (const rule of headRules) {
+        expect(packet.text, `${candidate.roleKey ?? 'roleless'} text`).toMatch(rule);
+        expect(packet.whole, `${candidate.roleKey ?? 'roleless'} whole`).toMatch(rule);
       }
       expect(packet.text).not.toContain('Only order tasks and wait while people stand free.');
       const breakDownFile = packet.skills.find(s => s.name === 'hh-break-down');
       expect(breakDownFile, candidate.roleKey ?? 'roleless').toBeDefined();
-      /* The rule is one, in the head's own skill, and breaking down points to it. */
-      expect(breakDownFile!.body).toContain('hh-lead-tasks');
+      expect(breakDownFile!.body).not.toContain('hh-lead-tasks');
+      expect(breakDownFile!.body).toMatch(/keep(?:ing)? the department loaded|standing free[\s\S]*fault/i);
+      expect(breakDownFile!.body).toMatch(/urgentOnly/);
+      expect(breakDownFile!.body).toMatch(/never assign ordinary or non-urgent work[\s\S]*urgent-only/i);
       for (const field of ['`independentPart`', '`independentNone`', '`urgentOnly`']) expect(packet.text, field).toContain(field);
     }
     expect(savedHeadList).toEqual(['hh-outside-is-data']);
@@ -529,7 +596,7 @@ describe('renderInstructions', () => {
       agent({ kind: 'worker', roleKey: 'OPS-WATCH', skills: savedWatchList, templateHashes: {} }),
     ]) {
       const watchPacket = renderInstructions(shipped, watchAgent, PLACE);
-      expect(watchPacket.text).toContain('no one stands free while work waits');
+      expect(watchPacket.text).toContain('\n- ops-task-watch:');
       const watchSkill = watchPacket.skills.find(s => s.name === 'ops-task-watch');
       expect(watchSkill?.body).toContain('People who stand free while work waits are a fault, not a normal wait');
       expect(watchPacket.whole).toContain('People who stand free while work waits are a fault, not a normal wait');
@@ -537,7 +604,7 @@ describe('renderInstructions', () => {
     expect(savedWatchList).toEqual(['ops-task-watch']);
   });
 
-  it('delivers T2 impact-selection, explicit scripts/test selector commands, bidirectional migration and no-auto-wiring rules in loaded development role packets', () => {
+  it('delivers explicit T2 impact selection, migration directions and honest collection-versus-execution evidence in development role packets', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     for (const roleKey of ['DEV-ENG', 'DEV-BE', 'DEV-FE'] as const) {
       const role = shipped.roles.get(roleKey)!;
@@ -548,10 +615,17 @@ describe('renderInstructions', () => {
       const policy = files.get('dev-testing-policy')!;
       expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
       expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
-      expect(impl, roleKey).toMatch(/T2 in dev-testing-policy/);
+      expect(impl, roleKey).toMatch(/affected checks through run_tests on the exact candidate/i);
+      expect(impl, roleKey).toMatch(/project's explicit selector[\s\S]*new tests and callers/i);
+      expect(impl, roleKey).toMatch(/complete affected package[\s\S]*unavailable graph cannot bound the impact/i);
+      expect(impl, roleKey).toMatch(/dependency preparation and every heavy check remain remote/i);
       expect(policy, roleKey).toContain('NOT_RUN');
-      expect(policy, roleKey).toMatch(/up and down/i);
-      expect(policy, roleKey).toMatch(/never assume `run_tests` selects by itself/);
+      expect(policy, roleKey).toMatch(/fresh and upgraded data[\s\S]*both up\/down when supported[\s\S]*report unsupported down explicitly/i);
+      expect(policy, roleKey).toMatch(/never assume `?run_tests`? selects by itself/i);
+      expect(policy, roleKey).toMatch(/a new test file always runs/i);
+      expect(policy, roleKey).toMatch(/unavailable adapter[\s\S]*complete affected package rather than an empty selection/i);
+      expect(policy, roleKey).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
+      expect(policy, roleKey).toMatch(/unavailable rather than zero for an absent full-suite comparator/i);
       expect(rendered.whole, roleKey).toContain('NOT_RUN');
     }
 
@@ -564,9 +638,9 @@ describe('renderInstructions', () => {
     expect(Buffer.byteLength(headRendered.text)).toBeLessThan(24_000);
     const headPolicy = headRendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
     expect(Buffer.byteLength(headPolicy)).toBeLessThan(22_000);
-    expect(headPolicy).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
-    expect(headPolicy).toMatch(/unavailable[^.!?]*not zero misses/i);
-    expect(headRendered.whole).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+    expect(headPolicy).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
+    expect(headPolicy).toMatch(/unavailable rather than zero for an absent full-suite comparator/i);
+    expect(headRendered.whole).toMatch(/collection is not execution[\s\S]*completed exact-version receipts for executed tests/i);
 
     for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
       const role = shipped.roles.get(roleKey)!;

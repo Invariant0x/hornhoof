@@ -5,11 +5,11 @@ description: { en: "Sends failed work back with the findings, and escalates afte
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
-When a check or a gate finds problems:
+You can resolve a failed check without lowering its standard or repeating unrelated work.
 
-1. Send the work back to the member who did it with every finding that blocks, at once: what failed, where, and the evidence. Not "make it better". What does not block goes as a note under a pass.
-2. At a gate of one task, the same gate checks again after the fix, and checks only the fixes. After the review of a turn nobody checks again. A fix is proved by the check that failed now passing, not by a new opinion.
-3. Count the rounds. After three rounds on the same task, give it to a stronger tier or another member with the full history.
-4. After five rounds, or when two members disagree about what is right, stop and take it to whoever gave you the goal with both positions and your recommendation.
+1. Return every blocking finding to the responsible author at once: exact place, failed behavior and evidence. Keep nonblocking observations as notes.
+2. Reproduce the finding, then prove the fix with the affected check on the corrected version. Read existing valid evidence rather than repeating checks already proved on that exact candidate.
+3. Use the task's gates and assignment to decide who accepts the fix. A scoped repeat checks the original findings and new breakage in the changed range; it does not reopen an entire review by default. Independent approvals for sensitive or protected actions still apply before those actions, including urgent or small fixes.
+4. After three ineffective rounds, involve a stronger or different owner with the full history. After five, or a substantive disagreement, give the task owner both positions, the evidence and your recommendation.
 
-Do not lower the bar to end a loop. A finding you decide not to fix is a decision; write down why and what it costs if you are wrong.
+A finding not fixed is an explicit decision with a reason and cost if wrong. Never weaken a test, check or threshold to end the loop.

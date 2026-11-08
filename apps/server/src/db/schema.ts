@@ -388,6 +388,7 @@ export const agents = pgTable(
   ],
 );
 
+/* base keeps its stored key for compatibility; it is the assignment, separate from role identity. */
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
 export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch', 'team'] as const;

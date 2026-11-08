@@ -5,38 +5,15 @@ description: { en: "Where sales checks item by item, in a batch, by sample and b
 kind: procedure
 sources: []
 ---
-How work moves through sales. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
+Use this ability to choose a verification plan for an assigned commercial output or channel. Inputs are the recipient scope, account, language, approved approach, risk, channel policy and available evidence. Task gates and employee assignment determine who performs each check.
 
-## Item by item
+1. Describe the channel, audience, sending account, limits, approved template and segment, owner policy and measures such as replies, bounces and complaints. Keep one assigned writer for shared account state to avoid collisions; this grants no credentials.
+2. Require every external message to use the server outbound gateway and published catalog sources. Consent, suppression, unsubscribe, approved claims, links, prices and daily account/domain limits must be checked. Sending credentials stay server-side.
+3. Apply the authorized human approval scope: exact item or exact approach only where server policy permits it. New channels require each message reviewed in a fresh context by an independent provider. Custom prices, discounts, contract or legal terms require the authorized owner's decision. Public items always retain exact per-item approval; a human signs contracts.
+4. Group internal deal review and record inspection when a shared snapshot makes them comparable. Batches or schedules for external sends require an approved approach, assignment and server policy, never this plan alone.
+5. Use the owner's sampling policy only for checks eligible for sampling. Include initial messages of a new segment or sender; failed samples or rising bounces/complaints stop channel dispatch for a decision. Sampling cannot waive protected approvals.
+6. Require deterministic checks to have fast tests including rejected cases. For model checks, require versioned examples labeled independently, an owner-set threshold, separate false-accept/reject counts, and new examples from real misses. Revalidate on check, prompt, list or model change. Keep company examples private; unvalidated or unavailable checks prove no pass and need authorized human assessment.
 
-- Every message to someone outside the company passes the outbound gate (sal-outbound-approval). A message sent cannot be taken back, and risk adds up message by message.
-- While a channel is new, each message is checked once, in a fresh context, on another provider than its author's.
-- The department owner approves each approach, meaning a template and a segment.
-- A reply about price, contract or legal terms goes to the department owner.
-- An account is held by one member at a time.
+For outbound review, use the company and product scoped private example set `model-check-set:outbound_review`; never copy its examples into a template or repository.
 
-## In a batch
-
-- Where the department owner has lifted message by message approval for a channel, an approved template and segment go out in batches, on timers.
-- Deals are reviewed together (sal-pipeline-review), and the customer records are cleaned as a whole (sal-crm-hygiene).
-
-## By sample
-
-- Past a channel's start, check a sample under the owner's policy: the first messages of each new segment or member, and a share of the rest. A failed sample or a rise in bounces or complaints stops the channel.
-
-## By code
-
-- The rules of the outbound gate: the price list, approved links and claims, do-not-contact flags and consent, unsubscribe, and daily limits per sending account and per domain.
-- Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
-
-## By a model
-
-- Reviewing a message is a model check with its set: `model-check-set:outbound_review`.
-- A link like this means the set of this department and product. The set itself is private to the company and goes into no template or repository.
-- A model check has a versioned set of examples with known answers, labelled by someone other than its author, and a threshold the department owner sets. Run the set when the check, its prompt, its lists or the provider model changes, not on every item, and count false accepts and false rejects apart. Every miss found in real work becomes a new example. Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass. An action that cannot be undone keeps its approval item by item, whatever a set shows.
-
-## Descriptions and measures
-
-- SAL-HEAD writes a short description of each channel on its first turn: who it reaches, from which account, its limits, its approach and the sample its owner set. Keep it in the department notebook.
-- Name the department's own measures, such as reply rate, bounces and complaints, in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
-- A new company has these rules from its start and writes its descriptions on its first turn.
+Return checks, evidence, gaps and approval requirements. The plan imposes no turn cadence, downstream reviewer or permission to send.

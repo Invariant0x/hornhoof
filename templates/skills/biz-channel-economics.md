@@ -5,12 +5,12 @@ description: { en: "Works out what a partner or channel earns and costs per cust
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills]
 ---
-Work out the economics of a channel before anyone talks about terms.
+Use this ability to estimate the economics of an assigned distribution or partnership channel. Inputs are sourced product prices, customer volumes, conversion, churn, partner fees, discounts and cost to onboard and serve.
 
-1. Gather the inputs, each with its source: prices and plan mix, expected customers per month through the channel, conversion from referral to paid, churn, the partner's share or fee, discounts the channel needs, and our cost to onboard and support those customers.
-2. Compute per customer: revenue over 12 months after the partner's share, cost to acquire through the channel (fees, joint marketing spend, team time), gross margin, and payback in months.
-3. Compare with the company's direct channels if Finance or Sales have those numbers. A channel that costs more per customer than direct sales needs another reason to exist, such as reach into a market the company cannot enter alone.
-4. Run three cases: low, expected, high. Change one input at a time and say which input moves the result most.
-5. Propose a share or fee range that keeps a positive margin in the low case, and name the walk-away point.
+1. Record each input, unit, period, source and confidence. Missing costs remain unknown until the authorized data owner supplies them.
+2. Compute per customer: 12-month revenue after the partner's share, acquisition cost including fees, joint marketing and team time, gross margin and payback in months.
+3. Compare the channel with available direct-channel evidence. Higher acquisition cost needs an evidenced reason, such as access to an otherwise unavailable market.
+4. Model low, expected and high cases. Vary one input at a time to identify the assumptions that move the result most.
+5. Propose a share or fee range that retains positive margin in the low case, and a walk-away point. If none is defensible, say so.
 
-Show the table and the formulas so your head or Finance can recompute them. Ask Finance through your head for any cost you would otherwise guess. Do not round in the company's favour. These numbers inform the terms; they are not an offer.
+Return a table with formulas, source dates, sensitivity and uncertainty so another assigned checker can recompute it. Do not round in the company's favor. These figures inform a decision and are not an offer: prices, discounts and terms require the authorized human approval, partner messages require the approved outbound gateway, and a human signs contracts.

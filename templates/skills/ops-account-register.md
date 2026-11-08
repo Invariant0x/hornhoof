@@ -5,19 +5,15 @@ description: { en: "Keeps one current list of the company's accounts and subscri
 kind: procedure
 sources: []
 ---
-Keep one register where your company named. One row per account or subscription:
+Maintain the account and subscription register named in the assignment. Keep one row per account or subscription:
 
-- Service, plan, what it is used for, the departments that use it.
-- Owner: the company or a named person. Personal AI subscriptions stay their owner's and serve wherever the owner works.
-- Cost per month, currency, billing date, renewal date, whether it renews on its own.
-- Its secret store entries, by name.
-- Limits that matter: seats, quotas, usage caps.
-- Date added, date last checked, state: active, paused, to cancel.
+- Service, plan, purpose and the departments that use it.
+- Owner: the company or a named person. Personal subscriptions remain their owner's wherever that person works.
+- Cost per month, currency, billing date, renewal date and automatic renewal setting.
+- Secret store entries by name, never their values.
+- Seats, quotas and usage caps that matter.
+- Date added, date last checked and state: active, paused or proposed for cancellation.
 
-Once per turn:
+For an assigned audit, compare renewals in the review period with actual use. Flag unused accounts and charges without a matching row. Use billing records only when their owner has shared them, and keep the evidence with each finding.
 
-1. Check renewals that fall before the next review and tell your head which ones still earn their cost.
-2. Flag accounts nobody used since the previous check as candidates to cancel.
-3. If the CEO shares billing, compare it with the register; a charge without a row is a finding.
-
-Cancelling, like signing up, needs the CEO's approval. Never change a plan or a payment method yourself.
+Report corrections and proposed cancellations with their source. Signing up, cancelling, changing a paid plan or changing payment details needs the CEO's approval; maintaining this register grants none of those actions.

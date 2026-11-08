@@ -670,6 +670,125 @@ describe('migration 0085', () => {
   });
 });
 
+describe('migration 0086 composable skills', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('preserves sole and mixed pending staffing cards when retiring the developer role', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Proposal upgrade')`);
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${C}, 'orchestrator', 'Coordinator', '') returning id`)).rows[0]!.id;
+    const legacy = { role: 'DEV-GEN', name: 'Mira', model: 'saved-model', checked: true, skills: { on: ['dev-tdd'], off: [] } };
+    const other = { role: 'DEV-BE', name: 'Backend', checked: false };
+    for (const [brief, items] of [['01 sole', [legacy]], ['02 mixed', [other, legacy]]] as const) {
+      await db.execute(sql`insert into proposals (company_id, agent_id, kind, brief, items) values (${C}, ${agent}, 'staff', ${brief}, ${JSON.stringify(items)}::jsonb)`);
+    }
+    const read = async () => (await db.execute<{ fields: unknown; items: unknown }>(sql`select to_jsonb(p) - 'items' as fields, items from proposals p order by brief`)).rows;
+    const before = await read();
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const after = await read();
+    expect(after.map(row => row.fields)).toEqual(before.map(row => row.fields));
+    expect(after.map(row => row.items)).toEqual([[{ ...legacy, role: 'DEV-ENG' }], [other, { ...legacy, role: 'DEV-ENG' }]]);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect(await read()).toEqual(after);
+  });
+
+  it('retires only the saved DEV-GEN role key without changing card text, skill choices or run settings', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner)
+      values (${C}, 'Owner', 'owner@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
+    const codex = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status)
+      values (${C}, 'codex', 'personal', 'Codex plan', ${person}, 'ready') returning id`)).rows[0]!.id;
+    const claude = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status)
+      values (${C}, 'claude', 'personal', 'Claude plan', ${person}, 'needs_login') returning id`)).rows[0]!.id;
+    const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code)
+      values (${C}, 'development', 'DEV') returning id`)).rows[0]!.id;
+    const product = (await db.execute<{ id: string }>(sql`insert into departments (company_id, parent_id, name, role_code)
+      values (${C}, ${dept}, 'Checkout', 'DEV') returning id`)).rows[0]!.id;
+    const team = (await db.execute<{ id: string }>(sql`insert into teams (company_id, department_id, name)
+      values (${C}, ${dept}, 'Matrix') returning id`)).rows[0]!.id;
+    const base = '  Keep my exact assignment.\nСохранить пробелы и строки.\nLiteral \\n stays literal.  ';
+    const skills = ['retired-kept', 'dev-tdd', 'dev-review-diff', 'dev-tdd'];
+    const overrides = { base, skills: { 'retired-kept': 'My retired procedure.\n', 'dev-tdd': '  Custom tests.  ' } };
+    const hashes = { 'DEV-GEN': 'old-role-hash', 'DEV-ENG': 'already-saved-role-hash', 'retired-kept': 'retired-hash', 'dev-tdd': 'custom-hash' };
+    await db.execute(sql`insert into agents (company_id, kind, name, role_key, model, department_id, product_id, team_id, subscription_id,
+      skills, overrides, template_hashes, effort, timer_minutes, timer_order, timer_at, timer_for_work, switched_off_at, context_used, created_by)
+      values (${C}, 'worker', 'Custom legacy', 'DEV-GEN', 'gpt-6.1-sol', ${dept}, ${product}, ${team}, ${codex},
+      ${JSON.stringify(skills)}::jsonb, ${JSON.stringify(overrides)}::jsonb, ${JSON.stringify(hashes)}::jsonb, 'xhigh', 17,
+      '  Keep this timer order.\nDo not rewrite it.  ', '2026-11-06T12:34:56.123Z', true, '2026-11-06T13:00:00.456Z', 0.37, ${person})`);
+    await db.execute(sql`insert into agents (company_id, kind, name, role_key, model, subscription_id, skills, overrides, template_hashes, removed_at) values
+      (${C}, 'worker', 'Trimmed legacy', 'DEV-GEN', '', ${claude}, '[]', '{"base":""}', '{}', null),
+      (${C}, 'worker', 'Removed legacy', 'DEV-GEN', 'claude-sonnet-5-5', ${claude}, '["unknown-skill"]', '{"base":"Archived assignment."}', '{"DEV-GEN":"archived-hash"}', '2026-11-05T12:00:00Z'),
+      (${C}, 'worker', 'Existing developer', 'DEV-ENG', '', null, '["dev-tdd"]', '{"base":"Existing assignment."}', '{"DEV-ENG":"existing-hash"}', null),
+      (${C}, 'worker', 'Other role', 'DEV-BE', '', null, '["dev-tdd"]', '{}', '{}', null),
+      (${C}, 'worker', 'No role', null, '', null, '["retired-kept"]', '{"base":"Roleless assignment."}', '{}', null)`);
+    const cards = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'role_key')::text as data from agents a order by name`)).rows;
+    const plans = async () => (await db.execute<{ data: string }>(sql`select to_jsonb(s)::text as data from subscriptions s order by id`)).rows;
+    const before = { cards: await cards(), plans: await plans() };
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect({ cards: await cards(), plans: await plans() }).toEqual(before);
+    expect((await db.execute<{ name: string; role_key: string | null }>(sql`select name, role_key from agents order by name`)).rows).toEqual([
+      { name: 'Custom legacy', role_key: 'DEV-ENG' },
+      { name: 'Existing developer', role_key: 'DEV-ENG' },
+      { name: 'No role', role_key: null },
+      { name: 'Other role', role_key: 'DEV-BE' },
+      { name: 'Removed legacy', role_key: 'DEV-ENG' },
+      { name: 'Trimmed legacy', role_key: 'DEV-ENG' },
+    ]);
+    expect((await db.execute<{ base: string }>(sql`select overrides ->> 'base' as base from agents where name = 'Custom legacy'`)).rows).toEqual([{ base }]);
+  });
+
+  it('appends only missing split company abilities to saved selections and preserves custom bodies, hashes and list order', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0085_work_fast_cards') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const cards = [
+      { name: 'All missing', kind: 'worker', skills: ['retired-kept', 'orch-company', 'hh-work-fast'], after: ['retired-kept', 'orch-company', 'hh-work-fast', 'orch-staff', 'orch-people', 'orch-resources'] },
+      { name: 'Partly selected', kind: 'head', skills: ['orch-resources', 'orch-company', 'orch-staff'], after: ['orch-resources', 'orch-company', 'orch-staff', 'orch-people'] },
+      { name: 'Already selected', kind: 'worker', skills: ['orch-people', 'orch-company', 'orch-resources', 'orch-staff', 'orch-staff'], after: ['orch-people', 'orch-company', 'orch-resources', 'orch-staff', 'orch-staff'] },
+      { name: 'Saved orchestrator', kind: 'orchestrator', skills: ['orch-company'], after: ['orch-company', 'orch-staff', 'orch-people', 'orch-resources'] },
+      { name: 'Not selected', kind: 'worker', skills: ['orch-staff', 'retired-kept'], after: ['orch-staff', 'retired-kept'] },
+      { name: 'Empty selection', kind: 'worker', skills: [], after: [] },
+    ];
+    const overrides = {
+      base: '  Preserve this assignment.\n',
+      skills: {
+        'orch-company': 'Original custom company method.',
+        'orch-staff': 'Do not replace this saved staff method.',
+        'orch-people': '  Preserve this people method.  ',
+        'orch-resources': 'Resources custom method.\n',
+        'retired-kept': 'A saved retired ability.',
+      },
+    };
+    const hashes = { 'orch-company': 'company-hash', 'orch-staff': 'staff-hash', 'orch-people': 'people-hash', 'orch-resources': 'resources-hash', 'retired-kept': 'retired-hash' };
+    for (const card of cards) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, skills, overrides, template_hashes, effort, timer_minutes, timer_order, timer_at, timer_for_work)
+        values (${C}, ${card.kind}, ${card.name}, 'custom-model', ${JSON.stringify(card.skills)}::jsonb, ${JSON.stringify(overrides)}::jsonb,
+        ${JSON.stringify(hashes)}::jsonb, 'high', 23, 'Keep the custom timer.', '2026-11-06T10:00:00Z', true)`);
+    }
+    const unchanged = async () => (await db.execute<{ name: string; data: string }>(sql`select name, (to_jsonb(a) - 'skills')::text as data from agents a order by name`)).rows;
+    const before = await unchanged();
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect(await unchanged()).toEqual(before);
+    const selected = (await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents order by name`)).rows;
+    expect(Object.fromEntries(selected.map(row => [row.name, row.skills]))).toEqual(Object.fromEntries(cards.map(card => [card.name, card.after])));
+  });
+});
+
 describe('migration 0023', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const D = '00000000-0000-4000-8000-0000000000d1';

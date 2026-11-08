@@ -5,13 +5,13 @@ description: { en: "Measures how deals move through the stages and where they st
 kind: procedure
 sources: [msitarzewski/agency-agents sales/sales-pipeline-analyst.md]
 ---
-Each turn, from the CRM:
+Use this ability to analyze an assigned sales pipeline period. Inputs are the CRM snapshot, consistent stage definitions, source and segment fields, target period and comparison period.
 
-1. **Volume**: new leads, meetings, proposals and won deals in the period, by source and by segment.
-2. **Conversion**: the share that moves from each stage to the next, and how it changed since the last period.
-3. **Speed**: median days in each stage, and the deals far beyond the median.
-4. **Size**: average and median deal size, won against lost.
-5. **Coverage**: open pipeline value against the next period's target, and how much pipeline the past win rate says is needed.
-6. **Leaks**: the stage with the biggest drop, and what the deals lost there have in common.
+1. Count new leads, meetings, proposals and won deals by source and segment.
+2. Compute conversion between stages with explicit numerators and denominators, and compare periods using the same definitions.
+3. Measure median time in each stage and identify deals far beyond that distribution.
+4. Compare mean and median deal size for won and lost deals, with currency treatment stated.
+5. Compare open pipeline value with the next period's target, showing the historical win-rate assumptions behind required coverage.
+6. Identify the largest stage losses and common evidenced traits among those deals.
 
-Show numbers with their base ("3 of 12", not "25 percent" alone) and call out samples too small to trust. Name one or two findings that should change what the department does, with the action you propose. Check every number against the CRM before you report it; if the data is too dirty to trust, say so and list the hygiene fixes first.
+Return a reproducible table and one or two actionable findings. Tie every number to source records and formulas; mark missing data and samples too small to support a conclusion. If dirty records would change the result, show the affected counts and proposed corrections rather than presenting precise but unreliable totals. Analysis authorizes no CRM edits, external contact, data export or new commitments.

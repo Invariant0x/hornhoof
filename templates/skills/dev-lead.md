@@ -1,16 +1,17 @@
 ---
 id: dev-lead
 title: { en: "Lead development", ru: "Руководство разработкой" }
-description: { en: "What leading adds when the work is code: whole blocks for generalist developers, branches, tests, the gates of a change and a release on the exact commit.", ru: "Что добавляет руководство, когда работа это код: целые блоки разработчикам-универсалам, ветки, тесты, ворота правки и выпуск по точному коммиту." }
+description: { en: "Coordinates connected software blocks within the assigned goal, with clear ownership and required checks.", ru: "Согласует связанные блоки разработки в пределах порученной цели, с одним ответственным и нужными проверками." }
 kind: procedure
 ---
-How hh-lead-tasks goes when the work is code. The four gates of a turn are in dev-gates; who runs which check is in dev-testing-policy.
+You can coordinate an assigned software goal with clear ownership, checks and integration.
 
-- **One developer for a block.** Each connected block of code goes to one generalist developer end to end, with its plan, code, tests and docs on one branch; no chains or `after` between developers when one can do it.
-- **Areas are files.** The area of a code task is the files it changes. Hot files are one area, and it keeps its owner until that task merges; same-file dependencies stay one batch with that owner.
-- **Small code tasks.** Apply the admission and test choice from hh-lead-tasks. Otherwise the check of a small task is a failing test, the change and only affected tests, then a merge into the turn's branch. The executor keeps it in a separate small commit on the turn's branch, submits a line with what changed and the commit SHA, and goes back to its own work.
-- **Bodies.** Each code task names its acceptance, risk class and task kind.
-- **Gates.** Apply dev-gates before any merge. Its pre-merge Security rule takes precedence over the defaults: code under the department's turn task (parent) without gates, and [] for research, reports, plans and docs. Name any other gate only where a change must not reach the turn's branch unchecked.
-- **Quality checks.** On the first turn on a new project and when a new repository arrives in the department, check whether the project has everything its quality checks need and create one task that adds everything missing to the project itself.
-- **The review of a turn.** When all member tasks close, a repository first opens the review of the turn, and you get its verdicts.
-- **Release.** Set the version and notes and run the project's release check. Then ask the CEO with "ask_person" to approve the exact 40-character commit; merge that commit and nothing else. Your report names the commits.
+Give each connected block to one developer end to end, with its code, tests and relevant documentation, rather than splitting a dependency chain between developers. The area's files keep one writer until its work is integrated; different independent blocks may proceed together. For new or large work settle the data model and interfaces before irreversible implementation, using independent proposals only when that design step is assigned.
+
+Write each task's acceptance, risk class, inputs, deliverable, check, branch and integration route. The employee assignment determines whether one owner closes the whole order or hands it to a named checker. Do not add a shared chain just because this ability is enabled.
+
+A turn is a sprint without a rule of days or hours; preserve real waiting deadlines. Pass a small addition to the contextual owner when it fits before the final gate starts, without an extra CEO-now instruction or an urgency flag. If it would reset a gate already running, place it in the next turn. A simple visual change may use the check the head chooses, including a shared check when that is the assigned route. Required independent approvals still apply.
+
+Any change affecting access, root, permissions or secrets must pass review by an independent Security engineer before it reaches any shared branch, including the turn's branch. This applies to urgent work, small tasks, direct named orders and review fixes. Self-review does not replace this gate.
+
+Check whether a newly received project has the tools its required checks need. Assign missing project configuration explicitly rather than installing tools in employees' terminals. Read exact-version evidence and required verdicts before accepting a result. When responsible for a release, prepare its version and notes, obtain the authorized human's exact-commit approval and integrate only that commit by the assigned route.

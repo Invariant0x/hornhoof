@@ -191,6 +191,6 @@ describe('skills as files', () => {
     expect(placedText).toMatch(/whole group|together as one group/i);
     expect(placedText).toMatch(/non-visual[\s\S]*in parallel/i);
     expect(placedText).toContain('scrollbar space');
-    expect(placedText).toContain('dev-browser-check');
+    expect(placedText).toMatch(/Verify an affected web view[\s\S]*Chromium, Firefox and WebKit[\s\S]*screenshots and geometry evidence/);
   });
 });

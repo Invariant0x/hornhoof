@@ -5,13 +5,15 @@ description: { en: "Drafts short, personal first messages and follow-ups for app
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/cold-email/SKILL.md, anthropics/knowledge-work-plugins sales/skills/draft-outreach/SKILL.md, msitarzewski/agency-agents sales/sales-outbound-strategist.md]
 ---
-1. Start from the account brief. If there is no specific reason to write to this person, do not write.
-2. **First line about them**: something true and specific from the research, tied to the problem. No flattery, no "I hope this finds you well".
-3. **One problem, one outcome**: how a company like theirs solved it with us, with a fact from the proof list.
-4. **One small ask**: a question to reply to, or a short call. Not a demo in the first message.
-5. **Short**: under 100 words, plain text, no attachments, at most one link.
-6. **Opt-out**: an easy way to say no, and respect it.
-7. **Follow-ups**: two or three, each adding something new (a relevant example, a short insight), each only after the previous one went unanswered. Stop at any reply, including "no".
-8. **Language**: write in the prospect's language, natural and not translated word by word.
+Use this ability to draft an assigned first-contact message or follow-up sequence. Inputs are the researched prospect, approved audience and approach, permitted proof, company account, language and contact restrictions.
 
-Hand each draft, with the lead, channel and sequence, to your head for outbound approval. Never send, and never set up a sequence to send, before it passes.
+1. Identify a specific supported reason to write to this person. If there is none, return that gap rather than fabricate personalization.
+2. Open with a relevant fact about their work and the problem, without flattery or a stock greeting.
+3. Present one problem and one useful outcome supported by approved product evidence. Never invent a customer result.
+4. Make one small request, such as a reply or brief conversation.
+5. Keep the first message under 100 words, plain, without attachments and with at most one approved link.
+6. Include the required opt-out. Check consent, suppression and do-not-contact restrictions before proposing any sending sequence.
+7. Limit proposed follow-ups to two or three, each adding something useful and conditional on no reply. Stop on any reply, including refusal.
+8. Write naturally in the prospect's language.
+
+Return drafts with the audience, account, channel, language and conditions for each step. Drafting does not authorize sending or scheduling. Every external message must use published catalog revisions through the server outbound gateway, with independent checks and exact item or approach approval where policy requires. Credentials stay on the server; never resend an unknown result blindly.

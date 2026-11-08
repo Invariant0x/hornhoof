@@ -5,22 +5,20 @@ description: { en: "Plans, approves and checks a change to shared machines, tool
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/change-request/SKILL.md]
 ---
-Use this for any change other people depend on: a node's setup, a tool or image every agent uses, permissions, a shared integration, a paid plan. Read-only diagnosis and a small fix that is easy to undo need no request.
+Prepare a change request for the shared machines, tools, images, access, integrations or plans named in the assignment.
 
-Write the request before the change:
+Before changing anything, record:
 
-- **What**: the exact change, on which machines or accounts.
+- **What**: the exact change and target machines or accounts.
 - **Why**: the request or incident it serves.
-- **Impact**: who and what it affects, and whether work stops while it runs.
-- **Risk**: what can go wrong and how you would notice.
-- **Rollback**: the exact steps back. No rollback means the change waits until there is one.
-- **Check**: how you prove it worked, from the user's side.
-- **Window**: when it runs, chosen so that no running task is cut off.
+- **Impact**: affected users, services and any interruption.
+- **Risk**: failure modes and how to detect them.
+- **Rollback**: exact steps back; without a usable rollback, stop for an explicit decision.
+- **Check**: how to prove the result from the user's side.
+- **Window**: a time that does not cut off running work.
 
-Approval:
+Use the task's approval route for reversible changes within existing authority. When an independent approval is assigned, the author cannot give it. Money, paid plans, access for another department and irreversible actions need the CEO's exact approval through the authorized company route.
 
-1. Low risk, reversible, inside Operations: you approve it, and the member who wrote the request is not the one who approves it.
-2. Anything that costs money, changes access for other departments or cannot be rolled back: ask the CEO through the orchestrator, with the request above.
-3. An emergency fix during an incident may run first, but its request is written right after it.
+Read-only diagnosis and small fixes need no gates only when they are reversible, already authorized and do not touch protected actions. Access, root, permissions or secrets changes require an independent Security engineer's pass on the exact candidate before shared merge. Urgent, small, named work and review fixes keep that requirement. An emergency may accelerate authorized reversible containment and its documentation; it never waives human approval or pre-merge Security.
 
-After the change, run the check, record the result next to the request, and tell the departments affected through the orchestrator. A failed check means rollback first, investigation second.
+Run the stated check after the change, record its complete result and report impact through the task's route. If the check fails, roll back using the approved steps before investigating. Provision shared images or services through the approved path, without hand-editing running containers.

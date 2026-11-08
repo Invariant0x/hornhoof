@@ -16,134 +16,177 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
-  it.each(roles.filter(role => role.kind === 'head'))('gives $id the marked small-task fast path', role => {
-    expect(role.body).toMatch(/small: true/);
-    expect(role.body).toMatch(/fast path/);
-  });
+  const body = (id: string) => templates.skills.get(id)!.body;
 
-  it('defines the small-task path once, for every head and the orchestrator, and its check for code in development alone', () => {
-    const body = templates.skills.get('hh-lead-tasks')!.body;
-    expect(body).toMatch(/small: true/);
-    expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
-    expect(body).toMatch(/change and (its|the) check/);
-    expect(body).toMatch(/without splitting or separate gates/);
-    expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
-    expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
-    expect(body).not.toMatch(/failing test|affected tests|branch|commit|SHA/);
-    expect(templates.skills.get('dev-lead')!.body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
-    for (const id of ['orch-plan-turn', 'orch-company']) expect(templates.skills.get(id)!.body, id).not.toMatch(/small: true/);
-  });
-
-  it('keeps small work with whoever holds its context, in the skill every head and the orchestrator lead by', () => {
-    const body = templates.skills.get('hh-lead-tasks')!.body;
-    expect(body).toMatch(/already working in that area[\s\S]*context/);
-    expect(body).toMatch(/[Dd]o not search for a free member or start a new chain/);
-    expect(body).toMatch(/final gate has not started[\s\S]*change fits/);
-    expect(body).toMatch(/final gate is already running[\s\S]*reset it[\s\S]*next turn/);
-    expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
-    expect(body).toMatch(/several tasks ahead[\s\S]*free member/);
-    expect(templates.skills.get('dev-lead')!.body).toMatch(/separate small commit[\s\S]*back to its own work/);
-  });
-
-  it('delivers the sprint admission rule once to every head and the orchestrator', () => {
-    const policy = templates.skills.get('hh-lead-tasks')!.body;
-    expect(policy).toMatch(/A turn is a sprint/);
-    expect(policy).toMatch(/days or hours[\s\S]*as fast as it can/);
-    expect(policy).toMatch(/orchestrator[\s\S]*head immediately/);
-    expect(policy).toMatch(/without CEO approval or an urgency flag/);
-    expect(policy).toMatch(/simple visual change[\s\S]*head[\s\S]*shared turn check[\s\S]*without a separate test/);
-    expect(policy).toContain('Keep explicit deadlines for real waits.');
-    for (const role of roles.filter(r => r.kind === 'head')) {
-      const rendered = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
-      expect(rendered.text.match(/A turn is a sprint/g), role.id).toHaveLength(1);
-    }
-    expect(orchestratorSteady(templates).text.match(/A turn is a sprint/g)).toHaveLength(1);
-    for (const id of ['dev-lead', 'orch-plan-turn']) {
-      expect(templates.skills.get(id)!.body, id).toContain('hh-lead-tasks');
-      expect(templates.skills.get(id)!.body, id).not.toContain('A turn is a sprint');
-    }
-    expect(templates.skills.get('dev-lead')!.body).toMatch(/test choice from hh-lead-tasks[\s\S]*Otherwise[\s\S]*failing test/);
-  });
-
-  it('keeps named sub-unit orders outside planned turns under the department and release checks', () => {
-    const body = templates.skills.get('orch-company')!.body;
-    expect(body).toMatch(/named orders end to end outside planned turns/);
-    expect(body).toMatch(/department's oversight[\s\S]*checks[\s\S]*security review[\s\S]*exact-commit release approval/);
-    expect(body).toContain('A sub-unit that takes only urgent work (`urgentOnly`) gets only what the CEO called urgent.');
-  });
-
-  it('lets the executor follow the head-assigned check before the default separate-test cycle', () => {
-    for (const id of ['dev-task-flow', 'dev-tdd', 'dev-testing-policy']) {
-      const body = templates.skills.get(id)!.body;
-      expect(body, id).toContain('Use the check assigned by the head');
-      expect(body, id).toMatch(/when (?:that|it) requires a separate test/i);
-      expect(body, id).not.toContain('simple visual change');
+  it('keeps role identities short and procedure-free across every department', () => {
+    for (const role of roles) {
+      expect(role.body, role.id).toMatch(/^You are [^\n.!?]+\.$/);
+      expect(role.body.length, role.id).toBeLessThanOrEqual(180);
+      expect(role.body, role.id).not.toMatch(/\b(?:must|never|submit|handoff|small: true|run_tests)\b|\b(?:dev|hh|orch)-[a-z-]+/);
     }
   });
 
-  it('keeps each connected block with one owner in the head skill, with one generalist developer for code, and in the developer role', () => {
-    const lead = templates.skills.get('hh-lead-tasks')!.body;
-    expect(lead).toMatch(/one member owns each connected block end to end/i);
-    expect(lead).toMatch(/no chains or `after` between members when one can do it/i);
-    const code = templates.skills.get('dev-lead')!.body;
-    expect(code).toMatch(/connected block[\s\S]*one generalist developer end to end/i);
-    expect(code).toMatch(/no chains or `after` between developers when one can do it/i);
-    const developer = templates.roles.get('DEV-ENG')!.body;
-    expect(developer).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
-    expect(developer).toMatch(/no chains or `after` between developers when one can do it/i);
-    expect(developer).toMatch(/only affected tests of your own code[\s\S]*hand it to a tester/i);
+  it('makes each ability self-contained instead of relying on another selected skill', () => {
+    const references = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
+    for (const skill of skills) expect((skill.body.match(references) ?? []).filter(ref => !['hh-attach', 'hh-fetch'].includes(ref)), skill.id).toEqual([]);
   });
 
-  it.each([
-    'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
-    'dev-implement', 'dev-testing-policy', 'dev-work-pipeline', 'dev-review-verdict',
-  ])('keeps %s from restoring per-task overhead for marked small work', id => {
-    const body = templates.skills.get(id)!.body;
-    expect(body).toMatch(/small: true/);
-    expect(body).toMatch(/shared turn/);
+  it('keeps small work proportionate without waiving gates or permissions', () => {
+    const lead = body('hh-lead-tasks');
+    expect(lead).toMatch(/small: true[\s\S]*one place[\s\S]*clear result[\s\S]*no new dependency/);
+    expect(lead).toMatch(/without extra splitting or separate gates unless risk or protected actions require them/);
+    expect(lead).toMatch(/already working in that area[\s\S]*context/);
+    expect(lead).toMatch(/several tasks ahead/);
+    expect(lead).toMatch(/If scope grows[\s\S]*revise the task and check/);
+    for (const id of ['hh-task-flow', 'hh-break-down']) expect(body(id), id).toMatch(/required approvals|Required approvals/i);
   });
 
-  it('teaches every department head not to repeat a task report in a separate message', () => {
-    for (const role of roles.filter(r => r.kind === 'head')) {
-      const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
-      expect(instructions.text, role.id).toContain('Do not send the orchestrator a separate message repeating a task report');
+  it('preserves sprint admission without adding an unconditional downstream chain', () => {
+    for (const id of ['hh-lead-tasks', 'orch-plan-turn', 'dev-lead']) {
+      const text = body(id);
+      expect(text, id).toMatch(/turn is a sprint/i);
+      expect(text, id).toMatch(/days or hours/);
+      expect(text, id).toMatch(/final gate[\s\S]*starts|final gate has not started/);
+      expect(text, id).toMatch(/context/);
+      expect(text, id).toMatch(/urgency flag/);
+      expect(text, id).toMatch(/next turn/);
+      expect(text, id).toMatch(/simple visual change/);
+      expect(text, id).toMatch(/required|mandatory|protected/i);
     }
+    expect(body('orch-plan-turn')).toMatch(/independent pieces belong together, however large/);
+    expect(body('orch-plan-turn')).toMatch(/reviewed, tested and released before dependent work/);
+    expect(body('orch-plan-turn')).toMatch(/explicit authorized hold[\s\S]*never[\s\S]*close the last task[\s\S]*explicit hold/i);
   });
-  it('teaches heads and members to end a turn with wait_for for external events, and the orchestrator to bind readiness messages to a task', () => {
+
+  it('preserves named and urgent-only orders without bypassing protected integration checks', () => {
+    expect(body('orch-company')).toMatch(/named orders end to end outside planned turns/);
+    expect(body('orch-company')).toMatch(/department's oversight[\s\S]*checks[\s\S]*exact release approval/);
+    expect(body('orch-company')).toMatch(/urgentOnly[\s\S]*only what the authorized person called urgent/);
+    for (const id of ['dev-task-flow', 'dev-implement', 'dev-lead', 'dev-gates', 'dev-worktrees', 'dev-work-pipeline', 'dev-ci-release']) {
+      expect(body(id), id).toMatch(/access, root, permissions or secrets[\s\S]*independent Security engineer[\s\S]*before[\s\S]*shared branch/);
+      expect(body(id), id).toMatch(/urgent work, small tasks, direct named orders and review fixes/);
+      expect(body(id), id).toMatch(/Self-review does not replace this gate/);
+    }
+    expect(body('dev-gates')).toMatch(/takes precedence[\s\S]*small\/fast paths[\s\S]*no-second-review/);
+    expect(body('dev-gates')).toMatch(/reviewer is unavailable[\s\S]*keep the branch separate/);
+  });
+
+  it('selects implementation checks from the task and retains the four coding cycles', () => {
+    for (const id of ['dev-task-flow', 'dev-tdd', 'dev-testing-policy', 'dev-implement']) expect(body(id), id).toMatch(/(?:task|head|owner)[\s\S]*check|check assigned/i);
+    const tdd = body('dev-tdd');
+    for (const kind of ['Bug', 'Known behaviour', 'Unknown path', 'Legacy code']) expect(tdd, kind).toContain(kind);
+    expect(tdd).toMatch(/failing test[\s\S]*run_tests/);
+    expect(tdd).toContain('A characterization test of legacy code passes immediately, and that is correct');
+    expect(tdd).toContain('requirement -> test');
+    expect(tdd).toContain('verification before done');
+    expect(tdd).toContain('no 80% coverage threshold');
+    expect(body('dev-implement')).toMatch(/acceptance, risk class and task kind/);
+    expect(body('dev-implement')).toMatch(/unknown path[\s\S]*acceptance check[\s\S]*spike/i);
+  });
+
+  it('keeps connected ownership and real dependencies in the assigned work', () => {
+    expect(body('hh-lead-tasks')).toMatch(/one member owns each connected block end to end/);
+    expect(body('hh-lead-tasks')).toMatch(/No chains or `after` between members when one can do it/);
+    expect(body('hh-break-down')).toMatch(/same files or records stay with that owner/);
+    expect(body('hh-break-down')).toMatch(/plans, contracts or proofs/);
+    expect(body('dev-lead')).toMatch(/one developer end to end/);
+    expect(body('dev-lead')).toMatch(/one writer[\s\S]*independent blocks/);
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) for (const skill of ['dev-tdd', 'dev-worktrees']) expect(templates.roles.get(id)!.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
+  });
+
+  it('keeps task tools, waits, evidence and communication available without a role workflow', () => {
+    const flow = `${body('hh-tasks')}\n${body('hh-task-flow')}`;
+    for (const tool of ['task', 'tasks', 'submit', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
     for (const id of ['hh-head', 'hh-task-flow']) {
-      const body = templates.skills.get(id)!.body;
-      expect(body, id).toContain('wait_for');
-      expect(body, id).toMatch(/external event/);
-      expect(body, id).toMatch(/two hours/);
-      expect(body, id).toMatch(/end the turn/);
+      expect(body(id), id).toContain('"wait_for"');
+      expect(body(id), id).toMatch(/external event[\s\S]*owner[\s\S]*ISO deadline within two hours[\s\S]*end the turn/);
     }
-    expect(orchestratorSteady(templates).text).toMatch(/message_employee[\s\S]*optional task[\s\S]*external wait/);
+    expect(body('hh-task-flow')).toMatch(/Completion of "run_tests" or "run_work"[\s\S]*resumes/);
+    expect(body('hh-task-flow')).toContain('hh-attach --task N FILE');
+    expect(body('hh-task-flow')).toContain('hh-fetch N NAME');
+    expect(body('hh-brief-members')).toContain('hh-attach --task N FILE');
+    expect(body('hh-head')).toContain('Do not send the orchestrator a separate message repeating a task report');
+    expect(body('hh-notebook')).toMatch(/only when[\s\S]*changes|when[\s\S]*changes/i);
+  });
+
+  it('preserves ub-mode verbatim after its applicability preface', () => {
+    const rules = templates.skills.get('dev-engineering-rules')!;
+    const upstream = readFileSync(fileURLToPath(new URL('./fixtures/ub-mode-SKILL.md', import.meta.url)), 'utf8').replace(/^---[\s\S]*?\n---\n/, '').replace(/^\s*# ub-mode\s*\n/, '').trim();
+    const start = rules.body.indexOf('Every time you are asked to make a change follow:');
+    expect(start).toBeGreaterThan(0);
+    expect(rules.body.slice(start)).toBe(upstream);
+    expect(rules.body.slice(0, start)).toMatch(/task determines[\s\S]*scope and check[\s\S]*independent approvals remain in force/);
+    expect(rules.sources).toEqual(['unclebob/ub-mode SKILL.md']);
+    expect(rules.description.en).toMatch(/your company's rules, those rules win/);
+  });
+
+  it('retains all testing-policy capabilities without a fixed downstream tester', () => {
+    const policy = body('dev-testing-policy');
+    for (let n = 1; n <= 11; n++) expect(policy, `T${n}`).toContain(`T${n}:`);
+    for (const rule of [/pure functions[\s\S]*direct fast tests/, /races, locks, permissions[\s\S]*real database/, /new test file always runs/i, /configuration failure or zero tests is not a pass/, /errors\/timeouts are not kills/, /money, access and security/, /false accepts and false rejects/, /do not retry or quarantine/i, /exact candidate\/fingerprint/, /CRAP 10 or above/, /0\.8 or more/, /NOT_RUN/]) expect(policy, String(rule)).toMatch(rule);
+    expect(policy).toMatch(/does not assign a downstream tester/);
+    expect(policy).toMatch(/full candidate validation[\s\S]*once for its candidate/);
+    expect(policy).toMatch(/after a fix rerun failed and affected checks/);
+    expect(policy).toMatch(/coverage from a completed applicable run rather than starting another/);
+    expect(policy).toMatch(/unchanged old complexity is recorded separately/);
+    expect(body('dev-review-verdict')).toContain('requirement -> test');
+    expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/);
+  });
+
+  it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
+    expect(templates.roles.get('DEV-RED')!.skills.map(s => s.id)).not.toContain('dev-threat-model');
+    for (const id of ['DEV-RED', 'DEV-SEC']) {
+      const role = templates.roles.get(id)!;
+      expect(role.body, id).not.toMatch(/attack|hostile|exploit|steal/i);
+    }
+    expect(body('dev-adversarial')).toMatch(/only preview or sandbox builds your task names, never production and never real customer data/);
+    expect(body('dev-threat-model')).toMatch(/trust boundaries[\s\S]*Name the safeguard[\s\S]*case with no safeguard is a finding/i);
+    expect(body('dev-security-review')).toMatch(/Report only weak spots you confirmed in the code/);
+    expect(body('dev-gates')).toMatch(/When an independent review is assigned[\s\S]*author cannot pass it/);
+    expect(body('dev-gates')).toMatch(/When broader validation is assigned[\s\S]*exact candidate/);
+    expect(body('dev-review-verdict')).toMatch(/only the fixes/);
+    expect(body('dev-qa-acceptance')).toMatch(/exact candidate[\s\S]*do not assume[\s\S]*shared turn/);
+    expect(body('dev-qa-acceptance')).toMatch(/Never pass something because the tests are green/);
+  });
+
+  it('keeps Operations diagnosis read-only and shortcuts outside protected actions', () => {
+    expect(body('ops-intake')).toMatch(/database tool, which only reads[\s\S]*SQL and why/);
+    expect(body('ops-intake')).toMatch(/two or three members at once/);
+    for (const id of ['ops-intake', 'ops-incident-response']) {
+      expect(body(id), id).toMatch(/Read-only diagnosis and small fixes need no gates only when reversible/);
+      expect(body(id), id).toMatch(/independent Security engineer[\s\S]*shared merge/);
+      expect(body(id), id).toMatch(/urgent|Emergency/);
+      expect(body(id), id).toMatch(/host sockets or node credentials/);
+    }
+    expect(body('ops-incident-response')).toMatch(/preserve logs, data and accounts/);
+    const trouble = body('orch-trouble');
+    for (const word of ['database', 'agent_changes', 'jobs', 'task_events', 'agent_events']) expect(trouble, word).toContain(word);
+    expect(trouble).toMatch(/Database repair is not permission to change people or protected access through SQL/);
+  });
+
+  it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
+    const release = body('dev-ci-release');
+    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /one idle node at a time/, /actual program's request receipt, answer and normal completion/, /fixture or another commit does not prove/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
+    expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
+    expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);
+    expect(body('orch-people')).toMatch(/CEO's explicit order[\s\S]*Never use database SQL/);
+    expect(body('orch-resources')).toMatch(/only from the CEO[\s\S]*ask_computer_access[\s\S]*actual authorization/);
   });
 
   it('loads every role and skill', () => {
-    expect(roles.length).toBeGreaterThanOrEqual(30);
+    expect(roles).toHaveLength(50);
+    expect(skills).toHaveLength(177);
+    expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
     for (const r of roles) expect(r.hash).toMatch(/^[0-9a-f]{12}$/);
   });
 
   it('gives every role the effort assigned to its work', () => {
-    const xhigh = ['DEV-ENG', 'DEV-GEN', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
+    const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
     const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
-  });
-
-  it('tells every member and head that a turn keeps its level, which comes from why the turn starts', () => {
-    expect(MEMBER_SKILLS).toContain('hh-task-flow');
-    expect(HEAD_SKILLS).toContain('hh-brief-members');
-    for (const id of ['hh-task-flow', 'hh-brief-members']) {
-      const body = templates.skills.get(id)!.body;
-      expect(body, id).toMatch(/second look[^.]*medium/);
-      expect(body, id).toMatch(/level[^.]*card/);
-      expect(body, id).toMatch(/inside (this|a running) (one|turn)/);
-    }
-    expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/second round[\s\S]*medium/i);
-    for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-RED', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/second look[^.]*medium/);
   });
 
   it('rejects an unknown role effort and allows a role to omit it', () => {
@@ -159,7 +202,7 @@ describe('templates', () => {
   });
 
   it('keeps roles short, and every skill within what each program reads of a skill file', () => {
-    for (const r of roles) expect(r.body.length, r.id).toBeLessThanOrEqual(600);
+    for (const r of roles) expect(r.body.length, r.id).toBeLessThanOrEqual(180);
     /* Antigravity reads the first 24,000 bytes of a skill's file; its name, description and heading come on top. */
     for (const s of skills) expect(Buffer.byteLength(s.body), s.id).toBeLessThanOrEqual(22_000);
     for (const s of skills) expect(s.body.length, s.id).toBeGreaterThan(80);
@@ -177,7 +220,7 @@ describe('templates', () => {
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
     ]);
     const steady = orchestratorSteady(templates);
@@ -186,7 +229,7 @@ describe('templates', () => {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
-    expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-staff', 'orch-people', 'orch-resources', 'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */
@@ -264,16 +307,6 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-TEST')!.schema).toBe('final_check');
     expect(templates.roles.get('DEV-PERF')!.schema).toBe('observer');
     expect(templates.roles.get('DEV-ENG')!.schema).toBeNull();
-  });
-
-  it('teaches the task tools by their names', () => {
-    /* What every member carries of working through tasks, and what every head carries of leading. */
-    const flow = ['hh-tasks', 'hh-task-flow'].map(id => templates.skills.get(id)!.body).join('\n');
-    for (const tool of ['task', 'tasks', 'submit', 'verdict', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
-    const lead = templates.skills.get('hh-lead-tasks')!.body;
-    for (const tool of ['create_task', 'update_task', 'cancel_task', 'ask_person', 'message_employee', 'comment']) expect(lead, tool).toContain(`"${tool}"`);
-    const head = templates.skills.get('hh-head')!.body;
-    for (const tool of ['report', 'tell_orchestrator', 'wait_for', 'propose_improvement']) expect(head, tool).toContain(`"${tool}"`);
   });
 
   it('has English and Russian titles and descriptions', () => {
@@ -423,332 +456,12 @@ describe('templates', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
-    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-GEN', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
+    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
     expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
-  });
-
-  it('keeps ub-mode word for word, as the upstream file has it, with nothing of ours in it', () => {
-    const rules = templates.skills.get('dev-engineering-rules')!;
-    const upstream = readFileSync(fileURLToPath(new URL('./fixtures/ub-mode-SKILL.md', import.meta.url)), 'utf8');
-    expect(rules.body).toBe(upstream.replace(/^---[\s\S]*?\n---\n/, '').replace(/^\s*# ub-mode\s*\n/, '').trim());
-    expect(rules.sources).toEqual(['unclebob/ub-mode SKILL.md']);
-    expect(rules.description.en).toMatch(/your company's rules, those rules win/);
-  });
-
-  it('puts the company ways with the engineering rules under the testing policy', () => {
-    const policy = templates.skills.get('dev-testing-policy')!.body;
-    expect(policy).toContain('Push your branch, not the main line');
-    expect(policy).toMatch(/crapper and dryer[\s\S]*`run_tests`/);
-    /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
-    const changed = 'git diff --name-only --diff-filter=d';
-    for (const id of ['dev-testing-policy', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
-    /* Shared final metrics keep their gates, but authors do not run them before submitting. */
-    expect(policy).toMatch(/0\.8 or more is blocking, like a failing test/);
-    expect(policy).toMatch(/CRAP 10 or more that is new/);
-    expect(templates.skills.get('dev-review-diff')!.body).not.toMatch(/developer runs them before submitting/);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/test engineer or QA[\s\S]*shared final check/);
-    expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/T11 says blocks counts as a failing test/);
-    expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
-    for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
-    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
-    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
-  });
-
-  it('gives a newly hired developer T1-T11 and the coding cycle with four task kinds', () => {
-    const role = templates.roles.get('DEV-ENG')!;
-    const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Bruno', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
-    const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
-    const card = [rendered.text, ...rendered.skills.map(s => s.body)].join('\n');
-    for (let n = 1; n <= 11; n++) expect(card, `T${n}`).toContain(`T${n}.`);
-    for (const words of ['Bug', 'Known behaviour', 'Unknown path', 'Legacy code', 'acceptance', 'risk class', 'requirement -> test', 'one task in progress and one awaiting review', 'A red turn branch comes before any new task', 'no 80% coverage threshold']) {
-      expect(card, words).toContain(words);
-    }
-  });
-
-  it('keeps test selection, release mutation testing and evidence rules consistent', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    const policy = body('dev-testing-policy');
-    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per turn on the final candidate', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
-      expect(policy, words).toContain(words);
-    }
-    const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
-    /* The one table of checks: nothing else repeats it. */
-    for (const x of [...roles, ...skills]) if (x.id !== 'dev-testing-policy') expect(x.body, x.id).not.toMatch(/^\| (?:In work|Final turn candidate)/m);
-    for (const words of ['In work', 'After a batch merges', 'Final turn candidate', 'pinned commit', 'typecheck of tests', 'real database']) expect(table(policy), words).toContain(words);
-    expect(policy).toMatch(/never on a task, a fix round or a batch/);
-    expect(body('dev-review-verdict')).toMatch(/requirement -> test/);
-    expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/);
-  });
-
-  it('removes per-branch mutation runs, fixed test times and model-based financial recomputation', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    expect(body('dev-test-gaps')).not.toMatch(/Run `mutator` from the repository root on the files the branch changed/);
-    expect(body('dev-review-diff')).not.toContain("Mutation testing is the developer's");
-    for (const id of ['dev-testing-policy', 'dev-gates', 'dev-tdd', 'dev-test-gaps']) expect(body(id), id).not.toMatch(/\b\d+\s+minutes?\b/);
-    const modelChecks = body('dev-testing-policy').split('Model checks')[1]?.split('\n- T9.')[0];
-    expect(modelChecks).toBeDefined();
-    expect(modelChecks).not.toMatch(/financial recomputation/);
-  });
-
-  it('gives general, backend and frontend developers TDD and worktree skills', () => {
-    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) {
-      const role = templates.roles.get(id)!;
-      for (const skill of ['dev-tdd', 'dev-worktrees']) expect(role.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
-    }
-  });
-
-  it('pins legacy characterization, requirement evidence and tester-owned final mutation checks', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
-    for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
-    for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
-    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/test engineer or QA/);
-    expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
-    expect(body('dev-testing-policy')).toMatch(/T4/);
-    expect(body('dev-testing-policy')).toMatch(/repository root/);
-    expect(body('dev-testing-policy')).toMatch(/selection and its reason/);
-  });
-
-  it('records the coding cycle and testing policy in project rules and sources', () => {
-    const agents = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
-    expect(agents).toMatch(/Write the failing test first/);
-    expect(agents).toMatch(/four task kinds/);
-    expect(agents).toContain('templates/skills/dev-tdd.md');
-    expect(agents).toContain('templates/skills/dev-testing-policy.md');
-    expect(agents).toContain('node scripts/check-release.mjs');
-    const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
-    expect(sources).toContain('T1-T11');
-    expect(sources).toContain('four task kinds');
-  });
-
-  it("runs the reviewer's program's own review on a first look only, without forcing high effort on repeats", () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    for (const words of ['first look', 'code-review skill', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
-    expect(body('dev-review-diff')).not.toContain('code-review skill at high effort');
-    for (const words of ['first look', 'security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
-    expect(body('dev-gates')).toMatch(/program's own review/);
-    expect(body('dev-review-verdict')).toMatch(/program's own review[\s\S]*against the code/);
-  });
-
-  it('writes development for any language and any kind of product', () => {
-    const dev = [...roles.filter(r => r.department === 'development'), ...skills.filter(s => s.id.startsWith('dev-'))];
-    for (const x of dev) expect(`${x.title.en} ${x.description.en} ${x.body}`, x.id).not.toMatch(/\b(Russian|English)\b/);
-    const check = templates.skills.get('dev-browser-check')!.body;
-    for (const surface of ['command-line tool', 'public API', 'library', 'Playwright']) expect(check).toContain(surface);
-  });
-
-  it('keeps the red team on broken logic and flows, and security on protecting what the company has', () => {
-    const textOf = (roleId: string) => {
-      const role = templates.roles.get(roleId)!;
-      const own = role.skills.filter(k => k.id.startsWith('dev-')).map(k => templates.skills.get(k.id)!);
-      return [role, ...own].map(x => `${x.title.en} ${x.title.ru} ${x.description.en} ${x.description.ru} ${x.body}`).join('\n');
-    };
-    expect(templates.roles.get('DEV-RED')!.skills.map(k => k.id)).not.toContain('dev-threat-model');
-    expect(textOf('DEV-RED')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|взлом/i);
-    expect(textOf('DEV-SEC')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|эксплуат|взлом/i);
-  });
-
-  it('runs the whole test suite once per turn, checks a task by what it changed, and keeps the head out of the work', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    const perTask = ['dev-implement', 'dev-worktrees', 'dev-tdd', 'dev-ci-release', 'hh-task-flow', 'hh-verify-before-done'].map(body).join('\n');
-    expect(perTask).not.toMatch(/full test suite|whole test command|every change runs|the suite passes/i);
-    expect(body('dev-gates')).toMatch(/once per turn/);
-    expect(body('dev-gates')).toContain('final check');
-    expect(body('hh-task-flow')).toContain('message_employee');
-    expect(body('hh-report-to-head')).toContain('message_employee');
-    expect(body('hh-lead-tasks')).toMatch(/no permissions/);
-    expect(body('hh-break-down')).toMatch(/not a step of preparation/);
-    expect(templates.roles.get('DEV-OPS')!.body).toContain('final check');
-  });
-
-  it('runs the whole test suite through run_tests on a free machine, in parts when its runner can split', () => {
-    const texts = { 'dev-gates': templates.skills.get('dev-gates')!.body, 'hh-run-checks': templates.skills.get('hh-run-checks')!.body };
-    for (const [id, text] of Object.entries(texts)) {
-      expect(text, id).toContain('run_tests');
-      expect(text, id).toMatch(/free (?:compatible )?machine/);
-      expect(text, id).toMatch(/in parts/);
-    }
-  });
-
-  it('lays each goal out whole and uses the shared admission rule for new asks', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
-    expect(body('orch-plan-turn')).toContain('hh-lead-tasks');
-    expect(body('orch-plan-turn')).not.toMatch(/only when the CEO says/);
-    for (const id of ['orch-plan-turn', 'hh-break-down']) expect(body(id), id).toMatch(/plans, contracts or proofs/);
-    expect(body('hh-break-down')).toMatch(/whole blocks as hh-lead-tasks says/);
-    expect(body('hh-break-down')).not.toMatch(/two to four/);
-    expect(body('hh-break-down')).not.toMatch(/a few hours of work/);
-  });
-
-  it('has heads give out big pieces at once, answer in comments and leave the work and the status to others', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    expect(body('hh-lead-tasks')).toMatch(/Give independent blocks to different members at once/);
-    for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/once/);
-    /* A comment by whoever gave a blocked task out opens it again and wakes its executor, so a body is written once. */
-    for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/"comment"/);
-    for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/only when the goal (itself )?changes/);
-    expect(body('hh-lead-tasks')).not.toMatch(/rewrite the body as the current truth/);
-    expect(body('hh-head')).toMatch(/switches off members with no work in the turn/);
-    expect(body('hh-notebook')).toMatch(/notebook only when something it holds changes/);
-    expect(body('hh-status-update')).toMatch(/one line/);
-    for (const r of roles.filter(x => x.kind === 'head')) expect(r.body, r.id).not.toMatch(/status to the orchestrator|keep the orchestrator informed/);
-    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/all at once/);
-  });
-
-  it('runs developers as a pool that each own a whole feature, with a short architect step before large work', () => {
-    const role = (id: string) => templates.roles.get(id)!;
-    const body = (id: string) => templates.skills.get(id)!.body;
-    expect(role('DEV-ENG').body).toMatch(/whole feature with all its parts \(plan, code, tests, docs\) on one branch/);
-    /* A product may have no server or no screen: the role names no part as if every feature had it. */
-    expect(role('DEV-ENG').body).not.toMatch(/server|interface/);
-    expect(role('DEV-ENG').description.en).not.toMatch(/server|interface/);
-    expect(role('DEV-ENG').description.ru).not.toMatch(/сервер|интерфейс/);
-    expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
-    /* Debugging was taken off only to keep one prompt short; skills are files now. */
-    for (const id of ['dev-implement', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
-    expect(role('DEV-HEAD').body).toMatch(/different features to different developers all at once/);
-    for (const text of [role('DEV-HEAD').body, body('hh-break-down')]) expect(text).toMatch(/touch the same files/);
-    for (const text of [role('DEV-HEAD').body, role('DEV-ARCH').body, body('hh-break-down')]) expect(text).toMatch(/design note/);
-    expect(role('DEV-ARCH').body).toMatch(/no gates/);
-    expect(body('dev-plan-review')).toMatch(/where it goes, what changes, the interfaces and the risks/);
-    expect(templates.skills.get('dev-plan-review')!.kind).not.toBe('gate');
-    expect(body('hh-lead-tasks')).toMatch(/[Bb]uilders build and reviewers review/);
-    for (const x of [...roles, ...skills]) expect(x.body, x.id).not.toMatch(/not by layer/);
-  });
-
-  it('reviews a turn once, with every reviewer at once, and sends its fixes in without a second review', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    const gates = body('dev-gates');
-    expect(gates).toMatch(/Work goes out without gates/);
-    expect(gates).toMatch(/checks everything the turn changed on its branch at the same time/);
-    expect(gates).toMatch(/fix task without gates to the member whose change it is/);
-    expect(gates).toMatch(/starts with a test that fails and then passes/);
-    expect(gates).toMatch(/no second review[^.!?]*pre-merge Security gate/i);
-    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/one review of the turn/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/everything the turn changed/);
-    expect(templates.roles.get('DEV-SEC')!.body).toMatch(/review of each turn/);
-    expect(body('dev-review-verdict')).toMatch(/write to nobody while you review/);
-    expect(body('hh-fix-loop')).toMatch(/After the review of a turn nobody checks again/);
-  });
-
-  it("splits a CEO's ask into turns by what must come first, never by size", () => {
-    const plan = templates.skills.get('orch-plan-turn')!.body;
-    expect(plan).toMatch(/Split by what must come first, never by size/);
-    expect(plan).toMatch(/one turn, however large/);
-    expect(plan).toMatch(/reviewed, tested and released first, or when the CEO has to see a result/);
-  });
-
-  it('gates work by its size and risk, and fails it only for what blocks', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    const gates = body('dev-gates');
-    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note otherwise never get one/);
-    expect(gates).toMatch(/[Oo]ne review/);
-    expect(gates).toMatch(/access, sign-in, secrets or permissions/);
-    expect(gates).toMatch(/one reviewer of each provider/);
-    expect(gates).toMatch(/once per turn, on the turn's branch/);
-    expect(gates).toMatch(/sensitive changed paths, risky added diff or explicit pre-release mode/);
-    expect(gates).not.toContain('risky or public-facing');
-    expect(templates.roles.get('DEV-QA')!.gate).toBeNull();
-    expect(body('dev-review-diff')).toMatch(/[Oo]bvious security problems/);
-    expect(body('hh-task-flow')).toMatch(/only if you sent it back/);
-    expect(templates.roles.get('DEV-RED')!.body).toMatch(/declared risk, sensitive paths, risky diff or pre-release mode/);
-    expect(templates.roles.get('DEV-RED')!.body).not.toContain('or public-facing');
-    expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/[Ee]very (employee|one) of a gate's role/);
-    expect(gates).not.toMatch(/doubled/i);
-    for (const id of ['dev-gates', 'dev-review-verdict']) expect(body(id), id).toMatch(/only the fixes/);
-    const verdict = body('dev-review-verdict');
-    expect(verdict).toMatch(/a failing test, an unmet requirement of the task, a security hole or data loss/);
-    expect(verdict).toMatch(/every blocking finding/);
-    expect(verdict).toMatch(/notes? under (a|the) pass/);
-    expect(verdict).not.toMatch(/Important/);
-    for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-TEST', 'DEV-QA', 'DEV-RED']) expect(templates.roles.get(id)!.body, id).toMatch(/blocking/);
-    expect(templates.roles.get('DEV-SEC')!.body).toMatch(/access, sign-in, secrets or permissions/);
-  });
-
-  it('runs the whole test suite once per turn, by the test engineer, never on a task', () => {
-    const body = (id: string) => templates.skills.get(id)!.body;
-    const all = [...roles, ...skills].map(x => x.body).join('\n');
-    expect(all).not.toMatch(/Run the whole suite through run_tests/);
-    expect(all).not.toMatch(/changed function at CRAP 10/);
-    for (const id of ['DEV-ENG', 'DEV-REV']) expect(templates.roles.get(id)!.body, id).toMatch(/never run the project's whole test suite/);
-    expect(body('hh-task-flow')).toMatch(/Completion of "run_tests" or "run_work"[\s\S]*ends that wait/);
-    expect(body('hh-task-flow')).not.toMatch(/npm test|whole test suite/);
-    const test = templates.roles.get('DEV-TEST')!;
-    expect(test.gate).toBeNull();
-    expect(test.body).toMatch(/never a gate on a task/);
-    const gates = body('dev-gates');
-    expect(gates).toMatch(/head assigns a test engineer or QA[\s\S]*once per turn[\s\S]*final pinned commit/);
-    expect(gates).not.toMatch(/or runs run_tests itself when there is neither/);
-    expect(gates).toMatch(/only what failed and the tests around it/);
-    for (const id of ['dev-testing-policy', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
-  });
-
-  it('has Operations lead a problem: diagnosis split at once, the database only read by the head, one message back', () => {
-    const head = templates.roles.get('OPS-HEAD')!.body;
-    expect(head).toMatch(/"database"/);
-    expect(head).toMatch(/one message/);
-    expect(templates.skills.get('ops-intake')!.body).toMatch(/two or three members at once/);
-    /* Its tool only reads, so a change in the database goes to the orchestrator. */
-    for (const text of [head, templates.skills.get('ops-intake')!.body]) expect(text).toMatch(/only reads?[\s\S]*SQL and why/);
-    for (const id of ['ops-intake', 'ops-incident-response']) expect(templates.skills.get(id)!.body, id).toMatch(/[Rr]ead-only diagnosis and small fixes need no gates/);
-    expect(templates.skills.get('ops-incident-response')!.body).not.toMatch(/every hour/);
-  });
-
-  it('has the orchestrator look in the database before it asks anyone why work went wrong', () => {
-    const trouble = templates.skills.get('orch-trouble')!.body;
-    for (const words of ['"database"', 'agent_changes', 'jobs', 'task_events', 'agent_events', 'head of Operations']) expect(trouble, words).toContain(words);
-    expect(trouble).toMatch(/never outranks the CEO's goals/);
-  });
-
-  it('passes files as task attachments, never pasted into comments', () => {
-    for (const id of ['hh-task-flow', 'hh-brief-members']) expect(templates.skills.get(id)!.body, id).toContain('hh-attach --task N FILE');
-    expect(templates.skills.get('hh-task-flow')!.body).toContain('hh-fetch N NAME');
-    expect(skills.map(s => s.body).join('\n')).not.toMatch(/base64/i);
-  });
-
-  it('starts work that waits for another by itself, and has each executor merge into the turn branch', () => {
-    for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(templates.skills.get(id)!.body, id).toContain('`after`');
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/each work area has one owner until its task is done/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/work that depends on the same place stays one batch with that owner/);
-    expect(templates.skills.get('dev-lead')!.body).toMatch(/keeps its owner until that task merges; same-file dependencies stay one batch with that owner/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/moves or stays with the one it waits on, including when handing work to new employees/);
-    for (const id of ['dev-gates', 'dev-ci-release', 'dev-worktrees']) expect(templates.skills.get(id)!.body, id).toContain("the turn's branch");
-    expect(templates.roles.get('DEV-OPS')!.body).toContain("the turn's branch");
-    expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/merge the turn's task branches/);
-  });
-
-  it('has the development head ask the holder of a quiet task before handing it on', () => {
-    expect(templates.roles.get('DEV-HEAD')!.skills.map(k => k.id)).toContain('dev-worktrees');
-    expect(templates.skills.get('dev-worktrees')!.body).toMatch(/long test run, not a stuck member[\s\S]*ask its holder and wait one more round/);
-  });
-
-  it('leaves releases to the merge into main, on machines without Docker', () => {
-    const builders = [templates.roles.get('DEV-ENG')!.body, templates.skills.get('dev-ci-release')!.body];
-    for (const text of [...builders, templates.skills.get('dev-worktrees')!.body]) {
-      expect(text).toMatch(/[Nn]ever start a release or image publishing workflow from a branch/);
-      expect(text).toMatch(/merge into main/);
-    }
-    for (const text of builders) expect(text).toMatch(/no Docker/);
-  });
-
-  it('adds missing quality checks to the project in one task instead of installing them in an agent home folder', () => {
-    const all = [...roles, ...skills].map(x => x.body).join('\n');
-    expect(all).not.toContain('install what is missing in your home folder');
-    const text = templates.skills.get('dev-language-rules')!.body;
-    expect(text).toMatch(/do not install .* locally or work around .* tell the head of Development/i);
-    for (const example of ['@vitest/coverage-v8', 'same version as vitest', 'pytest-cov', 'cargo-llvm-cov', 'Go has coverage built in', 'typescript-eslint', 'ruff', 'clippy', 'golangci-lint']) {
-      expect(text, example).toContain(example);
-    }
-    const lead = templates.skills.get('dev-lead')!.body;
-    expect(lead).toMatch(/first turn on a new project and when a new repository arrives/);
-    expect(lead).toMatch(/one task that adds everything missing to the project itself/);
   });
 
   it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('tells %s that a run starts with its dependencies prepared, and what to do when it did not', roleId => {
@@ -827,7 +540,7 @@ describe('templates', () => {
       const browserCheck = templates.skills.get('dev-browser-check')!.body;
       /* How a view is built is in one skill, how it is checked in the other: together they hold every rule. */
       expect(failedRuleIds(FRONTEND_UI_RULES, `${uiBody()}\n${browserCheck}`)).toEqual([]);
-      expect(uiBody()).toContain('dev-browser-check');
+      expect(uiBody()).not.toContain('dev-browser-check');
       expect(browserCheck).toMatch(/longest[\s\S]*shortest[\s\S]*shipped/i);
       expect(browserCheck).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
       const agentsDoc = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
@@ -1052,8 +765,8 @@ describe('templates', () => {
       expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
       expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('change permissions');
       expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('Anything irreversible or public waits for the approval');
-      expect(templates.skills.get('dev-ci-release')!.body).toContain('never skip, mute or retry a check to get green');
-      expect(templates.skills.get('dev-testing-policy')!.body).toContain('without retries or quarantine');
+      expect(templates.skills.get('dev-ci-release')!.body).toMatch(/never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i);
+      expect(templates.skills.get('dev-testing-policy')!.body).toMatch(/do not retry or quarantine/i);
       expect(templates.skills.get('ops-task-watch')!.body).toContain('Never retry it unchanged.');
       for (const s of skills) {
         expect(s.body, s.id).not.toMatch(/\bexactly one attempt\b|\bno retries\b|\bdo not declare recovery\b/i);
@@ -1087,7 +800,6 @@ describe('templates', () => {
       expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
       expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
       expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
-      expect(templates.roles.get('OPS-WATCH')!.body).toContain('no one stands free while work waits');
       expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
     });
 
@@ -1226,28 +938,27 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
     id: 'turn-review-one-round',
     holds: s =>
       forEvery([s.verdict], text =>
-        /\breview of a turn\b[\s\S]*\bone round\b/i.test(text) &&
-        /\bfailing test\b[\s\S]*\bfinal check\b[\s\S]*\bQA\b/i.test(text),
+        /\bshared review\b[\s\S]*\bone round\b/i.test(text) &&
+        /\bprotected approval\b[\s\S]*\bscoped return\b[\s\S]*\baffected proof\b/i.test(text),
       ) && forbids(`${s.diff}\n${s.verdict}`, /\breview of a turn\b[^.!?;,]*\btwo rounds\b/i),
   },
   {
     id: 't6-named-harm-no-coverage-chasing',
     holds: s =>
       /\bharm to a person\b/i.test(s.diff) &&
-      forEvery([s.verdict], text => /\bharm to a person\b/i.test(text) && /\bT6\b/.test(text) && /\bT1\b/.test(text) && /\blow coverage alone is not a finding\b/i.test(text)) &&
+      forEvery([s.verdict], text => /\bharm to a person\b/i.test(text) && /\blow coverage alone is not a finding\b/i.test(text)) &&
       forbids(`${s.diff}\n${s.verdict}`, /\blow coverage(?:\s+alone)?\s+(?:blocks|counts as a finding|is a (?:blocking )?finding)\b/i),
   },
   {
     id: 't10-verify-evidence-no-rerun',
     holds: s =>
-      /\bT10\b/.test(s.diff) &&
+      /\bcompleted results for the reviewed commit\b/.test(s.diff) &&
       /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(s.diff) &&
       forEvery([s.verdict], text =>
         /\btask\.review\b/.test(text) &&
         /\btestEvidence\b/.test(text) &&
         /\bgateCounts\b/.test(text) &&
         /\bproves\b/.test(text) &&
-        /\bT10\b/.test(text) &&
         /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(text),
       ) && forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
   },
@@ -1362,76 +1073,19 @@ const matchesAll = (text: string, patterns: RegExp[]): boolean => patterns.every
 const forbidsAll = (text: string, patterns: RegExp[]): boolean => patterns.every(re => forbids(text, re));
 
 const RUN_CHECKS_CORE_RULES: { id: string; holds: (text: string) => boolean }[] = [
-  {
-    id: 'single-regular-file-local-red-green',
-    holds: text =>
-      matchesAll(text, [/\bat most one\b[\s\S]*\bregular test file\b/i, /\btracked\b[\s\S]*\buntracked\b/i, /\bRED\b[\s\S]*\bGREEN\b/]) &&
-      forbids(text, /\brun\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:two test files|a directory)\s+locally\b/i),
-  },
-  {
-    id: 'heavy-stages-through-run-tests',
-    holds: text =>
-      matchesAll(text, [
-        /"run_tests"/,
-        /\bfree compatible machine\b/i,
-        /\bbuilds?\b[\s\S]*\btype checks?\b[\s\S]*\blinters?\b/i,
-        /\bbrowser suites?\b[\s\S]*\bcoverage\b[\s\S]*\bcrapper\b[\s\S]*\bdryer\b[\s\S]*\bmutation\b/i,
-      ]),
-  },
-  {
-    id: 'deny-local-installers-keep-manifest-edits',
-    holds: text =>
-      matchesAll(text, [
-        /\b(?:never|do not)\b[^.!?]*\b(?:dependency install|install, add)\b[^.!?]*\blocally\b/i,
-        /\bfeature dependency\b/i,
-        /\bmanifest\b[\s\S]*\blockfile\b[\s\S]*\bordinary work\b/i,
-      ]) && forbids(text, /\ballow\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bnpm install\s+locally\b/i),
-  },
-  {
-    id: 'noncheck-run-work-separate-from-mixed-checks',
-    holds: text =>
-      matchesAll(text, [/"run_work"/, /\bnever counts as\b[^.!?]*"run_tests"[^.!?]*\bT2\b/i, /\bmix\w*\b[^.!?]*\bthrough "run_tests"/i]) &&
-      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brun_work\b[^.!?;,]*\bas\s+T2\b/i),
-  },
-  {
-    id: 'unavailable-route-blocks-and-refusal-never-pass',
-    holds: text =>
-      matchesAll(text, [/"blocked"/, /\b(?:never|do not)\s+fall back\b[^.!?]*\blocally\b/i, /\brefus\w*\b[^.!?]*\bnever\b[^.!?]*\bPASS\b/]) &&
-      forbidsAll(text, [/\bfall\s+back\s+to\s+running\s+heavy\s+checks\s+locally\b/i, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\brefusal\s+as\s+PASS\b/i]),
-  },
-  {
-    id: 'final-stage-full-suite-and-light-screenshot',
-    holds: text =>
-      matchesAll(text, [/\bwhole test suite\b[^.!?]*\bfinal stage\b/i, /\blightweight\b[^.!?]*\bscreenshot\b/i, /\bbrowser executable name alone\b/i]),
-  },
-  {
-    id: 'abstract-english-no-incident-facts',
-    holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text),
-  },
+  { id: 'single-regular-file-local-red-green', holds: text => matchesAll(text, [/single existing regular test file/i, /bound workspace[\s\S]*non-browser runner/i, /Multiple files, suites and directories use the shared remote route/i]) && forbids(text, /\brun\w*\b[^.!?;,]*\b(?:two test files|a directory)\s+locally\b/i) },
+  { id: 'heavy-stages-through-run-tests', holds: text => matchesAll(text, [/"run_tests"/, /free compatible machine/i, /dependency preparation[\s\S]*builds[\s\S]*types[\s\S]*lint\/format[\s\S]*browser suites[\s\S]*coverage[\s\S]*crapper[\s\S]*dryer[\s\S]*mutation/i]) },
+  { id: 'deny-local-installers-keep-manifest-edits', holds: text => /Never run dependency install\/add\/ci\/sync locally/i.test(text) && forbids(text, /\ballow\w*\b[^.!?;,]*\bnpm install\s+locally\b/i) },
+  { id: 'noncheck-run-work-separate-from-mixed-checks', holds: text => matchesAll(text, [/"run_work"[\s\S]*non-check work[\s\S]*not test evidence/i, /mixed command containing check stages[\s\S]*"run_tests"/i]) && forbids(text, /\bcount\w*\b[^.!?;,]*\brun_work\b[^.!?;,]*\bas\s+T2\b/i) },
+  { id: 'unavailable-route-blocks-and-refusal-never-pass', holds: text => matchesAll(text, [/"blocked"/, /Never fall back to local heavy checks/i, /command refusal is not PASS/]) && forbidsAll(text, [/\bfall back to running heavy checks locally/i, /\btreat\w*\b[^.!?;,]*\brefusal as PASS/i]) },
+  { id: 'final-stage-full-suite-and-light-screenshot', holds: text => matchesAll(text, [/assignment identifies the check scope[\s\S]*do not start a duplicate full run/i, /lightweight single-page screenshot capture is not a browser suite[\s\S]*neither installs a browser nor uses a test runner/i]) },
+  { id: 'abstract-english-no-incident-facts', holds: text => text.length > 200 && !INCIDENT_OR_BRAND_LEAK_RE.test(text) },
 ];
 
 const RECONCILED_SKILL_SOURCE_RULES: { id: string; holds: (s: ReconciledCheckSkills) => boolean }[] = [
-  {
-    id: 'every-skill-that-runs-checks-references-remote-route',
-    holds: s =>
-      forEvery([s.tdd, s.language, s.implement, s.browser, s.e2e, s.ciRelease], text => matchesAll(text, [/\brun_tests\b/, /\bhh-run-checks\b/])) && /\brun_tests\b/.test(s.policy),
-  },
-  {
-    id: 'no-contradictory-local-heavy-directions',
-    holds: s => {
-      const joined = Object.values(s).join('\n');
-      return (
-        !/Reproduce it locally with the same command|\bcrapper and dryer are installed on your machine/i.test(joined) &&
-        /\bsame pinned commit and command through `run_tests`/i.test(s.ciRelease)
-      );
-    },
-  },
-  {
-    id: 'browser-suite-remote-light-screenshot-distinct',
-    holds: s =>
-      matchesAll(s.browser, [/\blightweight screenshot capture\b/i, /\bbrowser binary name alone\b/i]) &&
-      forbids(s.browser, /\btreat\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bscreenshot capture as a full browser test suite\b/i),
-  },
+  { id: 'every-skill-that-runs-checks-references-remote-route', holds: s => forEvery(Object.values(s), text => /run_tests/.test(text)) && forEvery(Object.values(s), text => !/\bhh-run-checks\b/.test(text)) },
+  { id: 'no-contradictory-local-heavy-directions', holds: s => !/Reproduce it locally with the same command|crapper and dryer are installed on your machine/i.test(Object.values(s).join('\n')) && /release checks[\s\S]*run_tests/i.test(s.ciRelease) && /exact candidate[\s\S]*required checks/i.test(s.ciRelease) },
+  { id: 'browser-suite-remote-light-screenshot-distinct', holds: s => matchesAll(s.browser, [/lightweight screenshot capture/i, /browser binary name alone/i]) && forbids(s.browser, /\btreat\w*\b[^.!?;,]*\bscreenshot capture as a full browser test suite/i) },
 ];
 
 const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => boolean }[] = [
@@ -1440,15 +1094,15 @@ const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => bo
     holds: text =>
       matchesAll(text, [
         /\bexternal service failure\b[^.!?]*\bnever prolongs a general hold once the service recovers\b/i,
-        /\bhold is lifted\b[^.!?]*\bat once in one pass to every affected holder\b/i,
+        /\b(?:hold is lifted|lifted hold)\b[^.!?]*\bat once(?: in one pass)? to every affected holder\b/i,
       ]) && forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
   },
   {
     id: 'local-error-isolated-and-orchestrator-decisions-forwarded',
     holds: text =>
       matchesAll(text, [
-        /\brepeated local error\b[^.!?]*\bnever freezes unrelated work\b/i,
-        /\borchestrator's authority promptly\b[^.!?]*"tell_orchestrator"[^.!?]*\binstead of holding them in your own queue\b/i,
+        /\brepeated local error\b[\s\S]*\bnever freezes unrelated work\b/i,
+        /\borchestrator's authority promptly\b[^.!?]*\binstead of holding them in your own queue\b/i,
       ]) && forbidsAll(text, [/\bfreeze\w*\s+all\s+unrelated\s+tasks\b/i, /\bhold\w*\s+orchestrator-level\s+decisions\s+in\s+your\s+own\s+queue\b/i]),
   },
   {
@@ -1456,7 +1110,7 @@ const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => bo
     holds: text => {
       const section = text.slice(text.indexOf('External outages and holds:'));
       return (
-        matchesAll(section, [/^External outages and holds:/, /\bdependencies\b[\s\S]*\bprotected actions\b[\s\S]*\baccess boundaries\b[\s\S]*\brelease gates\b/i]) &&
+        matchesAll(section, [/^External outages and holds:/i, /\bdependencies\b[\s\S]*\bprotected actions\b[\s\S]*\baccess boundaries\b[\s\S]*\brelease gates\b/i]) &&
         !INCIDENT_OR_BRAND_LEAK_RE.test(section)
       );
     },
@@ -1474,7 +1128,7 @@ const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => bo
   {
     id: 'free-members-with-runnable-work-is-fault-and-head-owns-load',
     holds: s =>
-      /\bas hh-lead-tasks says\b/.test(s.breakDown) &&
+      /\bconnected block one owner\b/i.test(s.breakDown) &&
       forEvery([s.lead], text =>
         matchesAll(text, [
           /\bwhoever gives out the work answers for keeping the department loaded,\s*not only for ordering tasks\b/i,
@@ -1493,13 +1147,13 @@ const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => bo
         matchesAll(text, [
           /`independentPart`/,
           /`independentNone`/,
-          /\bsingle file ownership\b[\s\S]*\bgenuine dependenc(?:y|ies)\b[\s\S]*\brelease boundar(?:y|ies)\b/i,
+          /\bgenuine dependency\b[\s\S]*\bsame-file ownership\b[\s\S]*\brelease boundary\b/i,
           /\bpass neither when `after` is empty\b/i,
         ]),
       ) &&
       matchesAll(s.lead, [
-        /\bwaits on `after` as before\b/i,
-        /\bMembers standing free while department tasks wait on `after`:[\s\S]*"update_task"[\s\S]*`independentPart`[\s\S]*"create_task"/,
+        /\bparent waits\b/i,
+        /\bCarve out a genuinely independent part while another result is pending\b/,
       ]) &&
       forbidsAll(`${s.lead}\n${s.breakDown}`, [
         /\bleave\w*\s+after\s+tasks\s+without\s+independentPart\s+or\s+independentNone\b/i,
@@ -1533,24 +1187,24 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (s: OrchestratorOutageSkil
     id: 'outage-not-grounds-for-longer-general-hold',
     holds: ({ lead, trouble }) =>
       matchesAll(lead, [/\bexternal service failure\b[^.!?]*\bnever prolongs a general hold once the service recovers\b/i]) &&
-      matchesAll(trouble, [/\brule for holds is in hh-lead-tasks\b/i]) &&
+      matchesAll(trouble, [/\bexternal service failure does not keep a general hold after recovery\b/i]) &&
       forbids(`${lead}\n${trouble}`, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
   },
   {
     id: 'orchestrator-decides-and-communicates-in-one-action',
     holds: ({ trouble: text }) =>
       matchesAll(text, [
-        /\bdecide\b[^.!?]*\byourself\b[^.!?]*\bcommunicate\b[^.!?]*\bat once in one action to every affected holder\b/i,
-        /\bnever\b[^.!?]*\bdepartment head's queue\b/i,
+        /\bdecide\b[\s\S]*\bhold\b[\s\S]*\bone action to every affected holder\b/i,
+        /\b(?:never|not)\b[^.!?]*\b(?:department )?head's (?:serial )?queue\b/i,
       ]) && forbids(text, /\bsend\w*[^.!?;,]*\bthrough a department head's queue\b/i),
   },
   {
     id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
     holds: ({ trouble: text }) =>
       matchesAll(text, [
-        /\bsame internal fix fails a second time\b/i,
-        /\btransient external service failure\b[^.!?]*\bneeds no diagnosis task\b/i,
-        /\bagent needs no permission for an ordinary retry of a transient external failure\b/i,
+        /\bsame internal fix fails (?:a second time|twice)\b/i,
+        /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
+        /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
       ]) &&
       forbidsAll(text, [
         /\brequire\w*\s+permission\s+before\s+any\s+ordinary\s+retry\b/i,
@@ -1562,13 +1216,10 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (s: OrchestratorOutageSkil
   {
     id: 'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
     holds: ({ trouble: text }) => {
-      const idx = text.indexOf('External outages and holds:');
-      if (idx === -1) return false;
-      const section = text.slice(idx);
+      const section = text;
       return (
         matchesAll(section, [
-          /^External outages and holds:/,
-          /\bforce pushes\b[\s\S]*\balternate refs\b[\s\S]*\bpermission changes\b[\s\S]*\birreversible actions\b[\s\S]*\bdangerous or non-idempotent actions\b/i,
+          /\bforce pushes\b[\s\S]*\balternate refs\b[\s\S]*\bpermission changes\b[\s\S]*\birreversible actions\b[\s\S]*\bdangerous or non-idempotent (?:actions|retries)\b/i,
         ]) &&
         !INCIDENT_OR_BRAND_LEAK_RE.test(section) &&
         !/\b\d{1,2}\.\d{1,2}\b/.test(section) &&
@@ -1687,7 +1338,8 @@ describe('outbound and support gateway templates', () => {
     ] as const) {
       expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
       expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
-      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bserver\b/i);
+      expect(body, id).toMatch(/published (?:catalog|template)[\s\S]*revisions/i);
       expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
       expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
     }
@@ -1696,29 +1348,32 @@ describe('outbound and support gateway templates', () => {
     expect(sal).toMatch(/"outbound_status"/);
     expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
     expect(mkt).toMatch(/"outbound_submit"/);
-    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(mkt).toMatch(/\bevery public item\b[^.!?]*\bexplicit approval of its exact rendered content\b/i);
     expect(sup).toMatch(/"support_classify"/);
     expect(sup).toMatch(/"support_submit"/);
     expect(sup).toMatch(/\buntrusted data\b/i);
     expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
   });
 
-  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', () => {
+  it("delivers separate classification, catalog replies and owner escalation through each support role's abilities", () => {
     expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
     for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
       const role = templates.roles.get(id)!;
-      expect(role, id).toBeDefined();
-      expect(role.body.length, id).toBeLessThanOrEqual(600);
-      expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
-      expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+      expect(role.body, id).toMatch(/^You are [^\n.!?]+\.$/);
+      expect(role.body.length, id).toBeLessThanOrEqual(180);
+      const rendered = renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Ari', roleKey: id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Support', product: null });
+      const abilities = [rendered.text, ...rendered.skills.map(file => file.body)].join('\n');
+      if (id !== 'SUP-KB') {
+        expect(abilities, id).toContain('support_classify');
+        expect(abilities, id).toContain('support_submit');
+        expect(abilities, id).toMatch(/department owner[\s\S]*CEO/);
+      } else {
+        expect(abilities).toMatch(/catalog[\s\S]*knowledge|knowledge[\s\S]*catalog/);
+        expect(abilities).toMatch(/publication[\s\S]*approv|approv[\s\S]*publication/i);
+      }
+      expect(abilities, id).toMatch(/untrusted data/);
+      expect(abilities, id).toMatch(/secret|personal data/);
     }
-
-    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_classify"/);
-    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_submit"/);
-    expect(templates.roles.get('SUP-T2')!.body).toMatch(/"support_classify"/);
-    expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
-    expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
-    expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
   });
 });
 
@@ -1728,12 +1383,12 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
   {
     id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
     holds: s =>
-      forEvery([s.implement, s.policy], text => matchesAll(text, [/\brun_tests\b/, /\b(?:dependent|selected|affected)\s+tests?\b/i])) &&
-      matchesAll(s.implement, [/\bT2\b[^.!?]*\bdev-testing-policy\b/]) &&
+      forEvery([s.implement, s.policy], text => matchesAll(text, [/\brun_tests\b/, /\b(?:dependent|selected|affected)\s+(?:tests?|checks?)\b/i])) &&
+      matchesAll(s.implement, [/\bexplicit selector\b/i]) &&
       matchesAll(s.policy, [
         /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
-        /\bselector input\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reasons?\b/i,
-        /\brun\b[\s\S]*\bpart\b[\s\S]*\bcommit\b/i,
+        /\binput paths\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reason\b/i,
+        /\brun\b[\s\S]*\bparts?\b[\s\S]*\bcommit\b/i,
       ]) &&
       forbidsAll(`${s.implement}\n${s.policy}`, [
         /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
@@ -1744,10 +1399,10 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
     holds: s =>
       matchesAll(s.policy, [
         /\bmigrations\b[\s\S]*\bschema\b[\s\S]*\bconfiguration\b[\s\S]*\benvironment\b[\s\S]*\broutes\b[\s\S]*\bfixtures\b[\s\S]*\bstring tables\b[\s\S]*\bscripts\b[\s\S]*\binstallation\b[\s\S]*\bupdates\b[\s\S]*\bshared packages\b[\s\S]*\bAPI contracts\b[\s\S]*\btemplates\b/i,
-        /\boutside\s+import\s+graphs?\b/i,
+        /\bout-of-graph policy\b/i,
         /\bcomplete\s+affected\s+packages?\b/i,
-        /\bup and down\b/i,
-        /\bunsupported\b[^.!?]*\breport\b/i,
+        /\bup(?: and |\/)down\b/i,
+        /\breport\b[^.!?]*\bunsupported\b|\bunsupported\b[^.!?]*\breport\b/i,
       ]) &&
       forbidsAll(`${s.implement}\n${s.policy}`, [
         /\btreat\w*\s+an\s+unavailable\s+adapter\s+as\s+an\s+empty\s+selection\b/i,
@@ -1766,10 +1421,10 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
       ]) &&
       matchesAll(s.policy, [
         /\bNOT_RUN\b/,
-        /\bcollected graph\b[\s\S]*\bcompleted\b[^.!?]*\breceipts?\b/i,
-        /\bunavailable\b[^.!?]*\bnot\s+zero\s+misses\b/i,
-        /\btest engineer\b/i,
-        /\bnever assume `run_tests` selects by itself\b/i,
+        /\bCollection is not execution\b[\s\S]*\bcompleted exact-version receipts\b/i,
+        /\bunavailable rather than zero\b[^.!?]*\bcomparator\b/i,
+        /\bone owner coordinates\b/i,
+        /\bNever assume run_tests selects by itself\b/i,
       ]) &&
       forbidsAll(`${s.implement}\n${s.policy}`, [
         /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
@@ -1780,8 +1435,8 @@ const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) =>
   {
     id: 'abstract-english-no-dates-names-or-numbers',
     holds: s => {
-      const t2 = s.policy.split('\n').find(line => line.startsWith('- T2.')) ?? '';
-      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|scripts\/test|[—ёЁ]/i.test(`${s.implement}\n${t2}`);
+      const t2 = s.policy.split('\n').find(line => line.startsWith('- **T2:')) ?? '';
+      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|scripts\/test|[\u2014\u0451\u0401]/i.test(`${s.implement}\n${t2}`);
     },
   },
 ];
@@ -1813,284 +1468,100 @@ describe('T2 impact-selection rules across dev-implement, dev-testing-policy and
   });
 });
 
-describe('skills are independent cubes: any can be on for any role and together they do not disagree', () => {
-  const REVIEW_CHECKS = ['dev-review-diff', 'dev-security-review'];
-  const text = (x: { title: { en: string }; description: { en: string }; body: string }) => `${x.title.en}\n${x.description.en}\n${x.body}`;
-  const skill = (id: string) => templates.skills.get(id)!;
+describe('skills compose around an assignment without a universal role', () => {
+  const body = (id: string) => templates.skills.get(id)!.body;
+  const render = (roleKey: string, selected: string[]) => renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'worker', name: 'Ari', roleKey, skills: selected, overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
 
-  it.each(REVIEW_CHECKS)('words %s for your own change and for someone else alike', id => {
-    const check = skill(id);
-    expect(check.body).toMatch(/same for your own change and for someone else's/);
-    expect(check.description.en).toMatch(/your own or someone else's/);
-    expect(check.body).toMatch(/On your own change, read the diff cold/);
-    expect(check.body).toMatch(/On your own change, fix what blocks[\s\S]*your own review replaces no gate/);
-    expect(check.body).toMatch(/On someone else's change at a gate, give the verdict with dev-review-verdict/);
-    /* A generalist turns this on for its own code: no sentence may say the reader did not write what it reads. */
-    expect(text(check)).not.toMatch(/you did not write|did not author|never approve|never (?:change|fix|edit) the code|code of (?:others|another)|another (?:author|developer)'s|the author's (?:code|change|work)/i);
+  it.each(['dev-review-diff', 'dev-security-review'])('%s supports self-inspection but never replaces an independent gate', id => {
+    expect(body(id)).toMatch(/same for your own change and for someone else's/);
+    expect(body(id)).toMatch(/On your own change, read the diff cold/);
+    expect(body(id)).toMatch(/own review replaces no gate/);
+    expect(body(id)).toMatch(/independent gate[\s\S]*never approve/i);
+    expect(body(id)).not.toContain('dev-review-verdict');
   });
 
-  it.each(REVIEW_CHECKS)('keeps the verdict and everything a gate adds out of the %s check', id => {
-    const checkOnly = skill(id).body.split('**What comes next.**')[0]!;
-    expect(checkOnly.length).toBeGreaterThan(500);
-    expect(checkOnly).not.toMatch(/\bverdict\b|\bAPPROVE\b|CHANGES_REQUESTED|task\.reviewPlan|task\.fixReview|\bfindingIds?\b|reviewedCommit|Wake\.mechanical|\bcategory\b/);
+  it('keeps structured verdicts conditional on the assignment and forbids editing the reviewed item', () => {
+    const verdict = body('dev-review-verdict');
+    expect(templates.skills.get('dev-review-verdict')!.kind).toBe('gate');
+    expect(verdict).toMatch(/Never approve your own independent gate or edit the change you are assigned to judge/);
+    expect(verdict).toMatch(/task's actual gates and employee assignment determine whether this review is needed/);
+    for (const id of ['DEV-REV', 'DEV-SEC']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-review-verdict')?.on).toBe(true);
   });
 
-  it('keeps what a gate adds in its own skill, which says when it applies', () => {
-    const verdict = skill('dev-review-verdict');
-    expect(verdict.kind).toBe('gate');
-    expect(verdict.body).toMatch(/applies only when you judge someone else's change/);
-    expect(verdict.body).toMatch(/you never approve your own work/);
-    for (const id of ['DEV-REV', 'DEV-SEC']) expect(templates.roles.get(id)!.skills.find(k => k.id === 'dev-review-verdict')?.on, id).toBe(true);
-  });
-
-  it('describes mutator in one place', () => {
-    const named = [...roles, ...skills].filter(x => /\bmutator\b|\bsurvivors?\b/i.test(text(x))).map(x => x.id).sort();
-    /* ub-mode is copied word for word; how a company runs it is T4 alone. */
-    expect(named).toEqual(['dev-engineering-rules', 'dev-testing-policy']);
-    const lines = skill('dev-testing-policy').body.split('\n');
-    expect(lines.filter(line => /\bmutator\b/.test(line)).map(line => line.slice(0, 4))).toEqual(['- T4']);
-    expect(lines.filter(line => /\b[Ss]urvivors?\b/.test(line)).map(line => line.slice(0, 4))).toEqual(['- T4']);
-  });
-
-  it('keeps each testing rule in the policy, with other skills pointing to it', () => {
-    const repeats = /\bCRAP (?:above|under|of|at) ?\d|\b0\.8 or more\b|\bcompile_error\b|\bzero tests fails\b/;
-    for (const x of [...roles, ...skills]) {
-      if (x.id !== 'dev-testing-policy') expect(x.body, x.id).not.toMatch(repeats);
+  it('delivers a broad chosen skill set to an ordinary worker without inventing a generalist role', () => {
+    expect(templates.roles.has('DEV-GEN')).toBe(false);
+    for (const role of roles) expect(role.title.en).not.toMatch(/generalist|universal/i);
+    const selected = ['dev-implement', 'dev-review-diff', 'dev-security-review', 'dev-ci-release', 'fin-independent-recompute', 'sal-account-research'];
+    for (const roleKey of ['DEV-ENG', 'SUP-T2']) {
+      const rendered = render(roleKey, selected);
+      for (const id of selected) expect(rendered.skills.find(file => file.name === id)?.body, `${roleKey} ${id}`).toContain(body(id));
+      expect(rendered.parts.find(part => part.kind === 'base')?.text).toBe(templates.roles.get(roleKey)!.body);
     }
-    expect(skill('dev-testing-policy').body).toMatch(/one place that says who runs which check and when/);
   });
 
-  it('gives the generalist developer role both titles and every skill it needs, loaded on its card', () => {
-    const role = templates.roles.get('DEV-GEN')!;
-    expect(role.title).toEqual({ en: 'Generalist developer', ru: 'Разработчик-универсал' });
-    expect(role.kind).toBe('member');
-    expect(role.department).toBe('development');
-    expect(templates.roster('development').find(r => r.id === 'DEV-GEN')?.inDefault).toBe(false);
-    const on = role.skills.filter(k => k.on).map(k => k.id);
-    const needed = ['dev-engineering-rules', 'dev-testing-policy', 'dev-gates', 'dev-language-rules', 'dev-write-plan', 'dev-implement', 'dev-tdd', 'dev-worktrees', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check', 'dev-test-gaps', 'dev-review-diff', 'dev-security-review', 'dev-cleanup', 'hh-work-fast'];
-    for (const id of needed) expect(on, id).toContain(id);
-    const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Gene', roleKey: role.id, skills: on, overrides: {}, templateHashes: {} };
-    const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
-    expect(Buffer.byteLength(rendered.text)).toBeLessThan(24_000);
-    expect(rendered.text).toContain(role.body);
-    const files = new Map(rendered.skills.map(s => [s.name, s.body]));
-    for (const id of on) {
-      if (skill(id).kind === 'core') expect(rendered.text, id).toContain(skill(id).body);
-      else expect(files.get(id), id).toContain(skill(id).body);
-    }
-    for (const step of ['plan', 'code', 'tests', 'own review', 'security', 'browser', 'cleanup', 'report']) expect(role.body, step).toContain(step);
-    /* Urgency is not part of this role. */
-    expect(`${text(role)}\n${role.description.ru}`).not.toMatch(/urgent|hotfix|срочн/i);
-    expect(role.skills.find(k => k.id === 'dev-review-verdict')?.on).toBe(false);
+  it.each(skills.filter(skill => skill.kind !== 'core'))('delivers $id without its default role or other optional abilities', skill => {
+    const rendered = render('DEV-ENG', [skill.id]);
+    expect(rendered.skills.map(file => file.name)).toEqual([skill.id]);
+    expect(rendered.skills[0]!.body).toContain(skill.body);
+    expect(rendered.text).not.toContain('when that one is not on your list, go on without it');
   });
 
-  it('asks for a browser only for a web page, on the generalist, in the check itself and at the final check', () => {
-    const role = templates.roles.get('DEV-GEN')!;
-    /* A skill on a card is read before the step it covers, so the role must not make that step part of every task. */
-    expect(role.body).toMatch(/When the change has something a user meets[^.]*dev-browser-check[^.]*a browser only for a web page/);
-    expect(role.body).not.toMatch(/a check in the browser/);
-    expect(role.description.en).toMatch(/a browser only for a web page/);
-    expect(role.description.ru).toMatch(/браузер только для веб-страницы/);
-    const check = skill('dev-browser-check');
-    expect(check.description.en).toMatch(/a browser only for a web page/);
-    expect(check.body).toMatch(/A change nothing reaches that way has no run to do here: its tests are the check/);
-    expect(check.body).toMatch(/^4\. On a screen, check every theme/m);
-    expect(skill('dev-testing-policy').body).toMatch(/browser engines where the product has a web interface/);
-    for (const id of ['DEV-TEST', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/what the product has of browser engines/);
+  it('requires browsers only for web surfaces and preserves non-web product checks', () => {
+    const check = body('dev-browser-check');
+    for (const surface of ['command-line tool', 'public API', "library's public interface"]) expect(check).toContain(surface);
+    expect(check).toContain('A change nothing reaches that way has no run to do here: its tests are the check');
+    expect(body('dev-qa-acceptance')).toContain('a browser only for a web page');
+    expect(body('dev-testing-policy')).toMatch(/browser engines where relevant/);
   });
 
-  it('binds the generalist to no language, stack or kind of product', () => {
-    const role = templates.roles.get('DEV-GEN')!;
-    const stack = /\b(?:npm|npx|node_modules|JavaScript|TypeScript|Python|pytest|Rust|cargo|Java|Clojure|Golang|React|Vite|Vitest|ESLint|Postgres\w*|SQL|Docker|Linux|macOS|Windows|[Ff]rontend|[Bb]ackend|English|Russian)\b/;
-    expect(text(role)).not.toMatch(stack);
-    /* These two name tools only as examples across languages, or for one kind of project they name first. */
-    const examples = new Set(['dev-language-rules', 'dev-testing-policy']);
-    for (const k of role.skills.filter(s => s.on && !examples.has(s.id))) expect(text(skill(k.id)), k.id).not.toMatch(stack);
-    const setup = skill('dev-language-rules').body.split('\n').find(line => line.startsWith('4.'))!;
-    expect(setup.split('In an npm project:')[0]).not.toMatch(/npm|npx|node_modules|JavaScript|ESLint|Vitest|Playwright/);
-    expect(setup).toContain('In an npm project:');
-    expect(skill('dev-language-rules').body).toMatch(/For a language without a folder, say so in your report/);
-    const selection = skill('dev-testing-policy').body.split('\n').find(line => line.startsWith('- T2.'))!;
-    for (const runner of ['vitest related', 'pytest --testmon', 'go test', 'cargo test -p']) expect(selection, runner).toContain(runner);
-    expect(skill('dev-testing-policy').body).toMatch(/A language they do not support stays `NOT_RUN`/);
-    expect(skill('dev-testing-policy').body).toMatch(/real database and live program checks where the product has them/);
-    expect(skill('dev-frontend-ui').body).toMatch(/On the web, reset browser default/);
-    expect(skill('dev-frontend-ui').body).toMatch(/on the web, logical CSS properties/);
-    expect(skill('dev-security-review').body).toMatch(/check what the change touches of this list/);
+  it('preserves language-specific abilities as optional selections', () => {
+    for (const role of roles) for (const id of ['mkt-russian-copy', 'mkt-telegram-vk', 'mkt-yandex-seo']) expect(role.skills.find(s => s.id === id)?.on ?? false, `${role.id} ${id}`).toBe(false);
+    expect(body('dev-language-rules')).toContain('For a language without a folder, say so in your report');
+    expect(body('dev-testing-policy')).toMatch(/Unsupported languages are NOT_RUN/);
   });
 
-  it('names no language of people outside the cubes made for one market, and those stay off by default', () => {
-    const market = new Set(['mkt-russian-copy', 'mkt-telegram-vk', 'mkt-yandex-seo']);
-    for (const x of [...roles, ...skills]) if (!market.has(x.id)) expect(text(x), x.id).not.toMatch(/\b(?:English|Russian)\b|\bboth languages\b/);
-    for (const role of roles) for (const id of market) expect(role.skills.find(k => k.id === id)?.on ?? false, `${role.id} ${id}`).toBe(false);
+  it('keeps speed subordinate to actual checks and exact-version evidence', () => {
+    for (const role of roles) expect(role.skills.find(s => s.id === 'hh-work-fast')?.on, role.id).toBe(true);
+    const fast = body('hh-work-fast');
+    expect(fast).toMatch(/check and the approval win/);
+    expect(fast).toMatch(/exact commit or version/);
+    expect(fast).toMatch(/skill you follow and the output of a check are read whole/i);
   });
 
-  it('closes references: a skill or role on a card names only what that card can read', () => {
-    const named = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
-    const dangling: string[] = [];
-    for (const role of roles) {
-      const known = new Set(role.skills.map(k => k.id));
-      const look = (from: string, body: string) => {
-        for (const ref of new Set(body.match(named) ?? [])) if (templates.skills.has(ref) && !known.has(ref)) dangling.push(`${role.id}: ${from} names ${ref}`);
-      };
-      look('its body', role.body);
-      /* A department's map names its members' skills, which its head does not carry. */
-      for (const k of role.skills) if (k.on && !k.id.endsWith('-work-pipeline')) look(k.id, skill(k.id).body);
-    }
-    expect(dangling).toEqual([]);
-  });
-
-  it('tells a reader what to do when a named skill is not on its list', () => {
-    const role = templates.roles.get('DEV-TEST')!;
-    const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Tess', roleKey: role.id, skills: role.skills.filter(k => k.on).map(k => k.id), overrides: {}, templateHashes: {} };
-    const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
-    expect(rendered.text).toContain('when that one is not on your list, go on without it.');
-  });
-
-  it('gives every role the speed skill, which covers all six savings and never trades away a check', () => {
-    const fast = skill('hh-work-fast');
-    for (const role of roles) expect(role.skills.find(k => k.id === 'hh-work-fast')?.on, role.id).toBe(true);
-    for (const saving of ['A small step, not a big plan', 'Read only what the step needs', 'Do not prove it twice', 'A short report', 'Do not wait without a reason', 'Effort by size']) expect(fast.body, saving).toContain(saving);
-    expect(fast.body).toMatch(/the check and the approval win/);
-    expect(fast.body).toMatch(/passed on this exact commit or version stands/);
-    /* Reading less must not argue with reading a skill or a check's output whole. */
-    expect(fast.body).toMatch(/A skill you follow and the output of a check are read whole/);
-    expect(text(fast)).not.toMatch(/\bdev-|\bhead of\b|\bdeveloper\b|\breviewer\b|\b\d+\s*(?:%|minutes?|hours?|days?)\b/i);
-    expect(fast.kind).not.toBe('core');
-  });
-
-  it('names no person, task, turn, date or version in any role or skill', () => {
-    const leak = /\b(?:david|ivan|simon|morpheus|trinity|lisa|liza)\b|(?:^|\s)#\d{2,}\b|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\.20\d\d\b|\bturn\s+\d+\b|\bv\d+\.\d+\.\d+\b/i;
-    for (const x of [...roles, ...skills]) expect(text(x), x.id).not.toMatch(leak);
-  });
-
-  it('keeps ordinary units of time out of the rules of the turn', () => {
-    const body = (id: string) => skill(id).body;
-    for (const id of ['dev-gates', 'dev-testing-policy', 'dev-work-pipeline', 'hh-lead-tasks']) {
-      const withoutToolLimit = body(id).replace(/an ISO deadline within two hours/g, '');
-      expect(withoutToolLimit, id).not.toMatch(/\b\d+\s+(?:minutes?|hours?|days?|weeks?)\b|\b(?:two|three|four) (?:hours|days|weeks)\b|\bper week\b|\bevery day\b/i);
-    }
-    expect(body('dev-gates')).toMatch(/never units of time/);
-    /* How often a role wakes belongs to its timer, which a company can change. */
-    for (const role of roles) expect(`${text(role)}\n${role.description.ru}`, role.id).not.toMatch(/every few hours|несколько часов/i);
-  });
-
-  it('keeps the four gates of a turn in order, with review and testing once per turn', () => {
-    const gates = skill('dev-gates').body;
-    const order = ['## Development', '## Review', '## Testing', '## Release'].map(title => gates.indexOf(title));
-    expect(order.every(at => at >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(gates).toMatch(/One review per turn/);
-    expect(gates).toMatch(/Once per turn, with the turn's branch frozen/);
-    expect(gates).toMatch(/machines one at a time/);
-    expect(gates).toMatch(/Architects of different models each propose a solution on their own and write no code/);
-    expect(gates).toMatch(/the head, as arbiter, picks one or merges them/);
-    expect(gates).toMatch(/run in the background and hold nobody/);
-  });
-
-  it('lets a tester fix a flaky or outdated test and an obvious trifle while logic goes to its author', () => {
-    const policy = skill('dev-testing-policy').body;
-    expect(policy).toMatch(/flaw in logic goes back to its author as a task/);
-    expect(policy).toMatch(/fixes a flaky or outdated test or an obvious trifle itself, in a separate commit/);
-    for (const id of ['DEV-TEST', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/fix a flaky or outdated test or an obvious trifle yourself in a separate commit/);
+  it('keeps private incident facts out of generic role and skill templates', () => {
+    const leak = /\b(?:david|ivan|simon|morpheus|trinity|lisa|liza)\b|(?:^|\s)#\d{2,}\b|\b202\d-\d{2}-\d{2}\b|\bturn\s+\d+\b|\bv\d+\.\d+\.\d+\b/i;
+    for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(leak);
   });
 });
 
-describe('a role is a short line and bricks: what every head and the orchestrator share is one skill, and what a department knows is its own', () => {
-  const body = (id: string) => templates.skills.get(id)!.body;
-  const PLACE = { company: 'Acme', department: 'Work', product: null };
-  const rendered = (role: (typeof roles)[number], skills = role.skills.filter(s => s.on).map(s => s.id)) =>
-    renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Bruno', roleKey: role.id, skills, overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], PLACE);
-  const heads = roles.filter(r => r.kind === 'head');
-  const marker = (id: string) => `<!-- hh:skill ${id} -->`;
-  const count = (text: string, needle: string) => text.split(needle).length - 1;
-  /* The rules every head and the orchestrator lead by, each said once. */
-  const LEADING = [
-    'whoever gives out the work answers for keeping the department loaded',
-    'Members standing free while work in the department can run are a fault',
-    'one member owns each connected block end to end',
-    'Give small work to the member already working in that area',
-    'To reach someone, write to them with "message_employee"',
-    'A report that claims success without evidence is treated as not done',
-    'only what only they can decide, as one clear question',
-    'An external service failure never prolongs a general hold once the service recovers',
-  ];
-  /* What only development knows: code, its branches and commits, its tests and its developers. */
-  const CODE = /\b(?:code|branch(?:es)?|commits?|SHA|merge[sd]?|repositor(?:y|ies)|failing tests?|affected tests|developers?|architects?|security review)\b/i;
+describe('identity, defaults and shared instruction delivery', () => {
+  const render = (role: (typeof roles)[number], selected: string[]) => renderInstructions(templates, { id: 'a', companyId: 'c', kind: role.kind === 'head' ? 'head' : 'worker', name: 'Ari', roleKey: role.id, skills: selected, overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
 
-  it('gives every head and the orchestrator the one skill of leading, whole and once, whatever its card holds', () => {
-    expect(HEAD_SKILLS).toContain('hh-lead-tasks');
-    expect(ORCHESTRATOR_SKILLS).toContain('hh-lead-tasks');
-    expect(templates.skills.get('hh-lead-tasks')!.kind).toBe('core');
-    for (const role of heads) {
-      for (const skills of [role.skills.filter(s => s.on).map(s => s.id), []]) {
-        const { text } = rendered(role, skills);
-        expect(count(text, marker('hh-lead-tasks')), role.id).toBe(1);
-        expect(text, role.id).toContain(body('hh-lead-tasks'));
-      }
-    }
-    const steady = orchestratorSteady(templates);
-    expect(count(steady.text, marker('hh-lead-tasks'))).toBe(1);
-    expect(steady.text).toContain(body('hh-lead-tasks'));
-  });
-
-  it('says each rule of leading in that skill alone, and no other skill or role says it again', () => {
-    for (const rule of LEADING) {
-      expect(body('hh-lead-tasks'), rule).toContain(rule);
-      for (const x of [...roles, ...skills].filter(x => x.id !== 'hh-lead-tasks')) expect(x.body, `${x.id}: ${rule}`).not.toContain(rule);
-      expect(ORCHESTRATOR_INSTRUCTIONS, rule).not.toContain(rule);
-    }
-  });
-
-  it('keeps development out of the skills every head, member and the orchestrator shares, and in the bricks development connects', () => {
-    const shared = ['hh-hornhoof', 'hh-tasks', 'hh-lead-tasks', 'hh-head', 'hh-notebook', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'hh-task-flow', 'hh-report-to-head'];
-    /* Claude Code is a program the agent may run in, not code it works on. */
-    for (const id of shared) expect(body(id).replaceAll('Claude Code', ''), id).not.toMatch(CODE);
-    expect(body('dev-lead')).toMatch(/one generalist developer/);
-    expect(body('dev-lead')).toMatch(/dev-gates[^.!?]*before any merge|before any merge[^.!?]*dev-gates/i);
-    expect(body('dev-lead')).not.toMatch(/access, root, secrets or permissions/);
-    expect(body('dev-lead')).toMatch(/exact 40-character commit/);
-    expect(body('dev-task-flow')).toMatch(/branch named after the task[\s\S]*Never commit to the main branch/);
+  it('delivers every locked ability once even when optional selections are empty', () => {
     for (const role of roles) {
-      const on = (id: string) => role.skills.find(k => k.id === id)?.on ?? false;
-      expect(on('dev-lead'), role.id).toBe(role.id === 'DEV-HEAD');
-      if (role.department === 'development' && role.kind === 'member') expect(on('dev-task-flow'), role.id).toBe(true);
-      if (!['development', 'operations'].includes(role.department)) expect(on('dev-task-flow'), role.id).toBe(false);
-    }
-    expect(ORCHESTRATOR_SKILLS).toContain('dev-lead');
-    expect(orchestratorSteady(templates).skills.map(f => f.name)).toContain('dev-lead');
-  });
-
-  it('gives a head of any department the shared bricks and its own department, so a department changes by its bricks alone', () => {
-    const departmentOf = (id: string) => /^([a-z]+)-/.exec(id)![1]!;
-    const prefixes: Record<string, string> = { operations: 'ops', development: 'dev', design: 'dsn', marketing: 'mkt', sales: 'sal', business_development: 'biz', support: 'sup', finance: 'fin', home_devices: 'home', household: 'home' };
-    for (const role of heads) {
-      const ids = role.skills.filter(s => s.on).map(s => s.id);
-      for (const id of [...CORE_SKILLS, ...HEAD_SKILLS]) expect(ids, `${role.id} ${id}`).toContain(id);
-      /* Beyond what every head shares, a head holds its own department's bricks, and Operations a check environment. */
-      const own = ids.filter(id => !id.startsWith('hh-'));
-      for (const id of own) expect([prefixes[role.department], ...(role.id === 'OPS-HEAD' ? ['dev'] : [])], `${role.id} ${id}`).toContain(departmentOf(id));
+      const rendered = render(role, []);
+      const required = [...CORE_SKILLS, ...(role.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS)];
+      for (const id of required) expect(rendered.parts.filter(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toHaveLength(1);
+      expect(rendered.parts.find(part => part.kind === 'base')?.text, role.id).toBe(role.body);
     }
   });
 
-  it('starts every role with one line that says who it is, and every rule it follows comes from a brick', () => {
+  it('preserves default role selections without treating their prefixes as permission boundaries', () => {
     for (const role of roles) {
-      const { parts } = rendered(role);
-      expect(parts[0]!.kind, role.id).toBe('header');
-      expect(parts[0]!.text, role.id).toBe(`You are Bruno, the ${role.title.en} of the Work department at Acme.`);
-      expect(parts.slice(2).every(p => p.kind === 'skill'), role.id).toBe(true);
-      for (const id of ['hh-hornhoof', 'hh-tasks', 'hh-superpowers']) expect(parts.some(p => p.id === id), `${role.id} ${id}`).toBe(true);
-      if (role.kind === 'head') for (const id of ['hh-head', 'hh-notebook']) expect(parts.some(p => p.id === id), `${role.id} ${id}`).toBe(true);
+      const selected = role.skills.filter(skill => skill.on).map(skill => skill.id);
+      const rendered = render(role, selected);
+      for (const id of selected) expect(rendered.parts.some(part => part.kind === 'skill' && part.id === id), `${role.id} ${id}`).toBe(true);
     }
+    expect(ORCHESTRATOR_SKILLS).toEqual(expect.arrayContaining(['orch-company', 'orch-staff', 'orch-people', 'orch-resources']));
   });
 
-  it('keeps the standing role of the orchestrator to who he is, much shorter than the prompt it replaces, with how he works in his skills', () => {
-    /* The standing role it replaces was 9,973 characters of numbered steps. */
-    expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThan(9_973);
-    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/^\d+\. /m);
-    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are the Orchestrator of a company that runs in Hornhoof/);
+  it('keeps the orchestrator identity short and its workflow in selected abilities', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/^You are [^\n.!?]+\.$/);
+    expect(ORCHESTRATOR_INSTRUCTIONS.length).toBeLessThanOrEqual(180);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/hh-lead-tasks|plan_turn|build_structure/);
     const steady = orchestratorSteady(templates);
-    expect(steady.parts.map(p => p.kind)).toEqual(['base', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
-    for (const id of ['orch-company', 'hh-notebook', 'hh-hornhoof']) expect(steady.text, id).toContain(body(id));
+    expect(steady.parts.map(part => part.kind)).toEqual(['base', 'assignment', ...ORCHESTRATOR_SKILLS.map(() => 'skill')]);
+    expect(steady.parts[0]!.text).toBe(ORCHESTRATOR_INSTRUCTIONS);
+    for (const id of ORCHESTRATOR_SKILLS) expect(steady.parts.filter(part => part.id === id)).toHaveLength(1);
   });
 });

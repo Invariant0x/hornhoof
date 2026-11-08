@@ -5,15 +5,15 @@ description: { en: "Finds missing, stale and duplicate records in the CRM and pr
 kind: checklist
 sources: [anthropics/knowledge-work-plugins sales/skills/crm-hygiene-check/SKILL.md]
 ---
-Run it weekly, before the pipeline review, and report counts and lists.
+Use this ability to inspect and, where authorized, correct an assigned CRM scope. Inputs are the record set, review period, required fields, stage rules, contact policy and permitted edits.
 
-- [ ] **No next step**: open deals without one, or with one in the past.
-- [ ] **Past close dates** on open deals.
-- [ ] **Stale deals**: no recorded activity since the last hygiene run, in an active stage.
-- [ ] **Missing fields**: amount, stage, owner, source, main contact, close date.
-- [ ] **Stage without evidence**: a late stage with no recorded meeting or proposal.
-- [ ] **Duplicates**: companies and contacts entered twice; propose which record wins and what merges into it.
-- [ ] **Contacts**: bounced addresses, people who left, opt-outs and do-not-contact flags respected everywhere.
-- [ ] **Leads** past the follow-up target with no action.
+Find:
 
-For each item give the record link and the suggested fix. Fix data yourself only where your task allows it and the fix is clear from the record, such as a typo or a duplicate contact; changes to stage, amount and date go to the deal's owner through your head. Log every change you make with the old and the new value.
+- Open deals with no next action or one whose date passed.
+- Past close dates, stale activity and leads beyond their follow-up target.
+- Missing amount, stage, owner, source, main contact or close date.
+- Stages without evidence of the buyer's progress.
+- Duplicate companies, contacts or deals, with a proposed surviving record.
+- Bounced addresses, departed contacts and opt-out or do-not-contact flags that are not respected consistently.
+
+Return counts and record links with evidence and the proposed correction for each. Fix only fields the assignment permits and whose correct value is established by a source. Stage, amount, date, merge or deletion decisions outside that authority stay proposals for the record's owner. Log every applied change with old value, new value and source; never improve numbers by hiding stale deals or changing dates without evidence. Reading CRM data does not authorize outreach, data export or access changes.

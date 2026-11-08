@@ -5,13 +5,13 @@ description: { en: "Turns call notes or a transcript into facts, commitments and
 kind: procedure
 sources: [anthropics/knowledge-work-plugins]
 ---
-From the transcript or the notes of the person who held the call:
+Use this ability to summarize an assigned sales conversation from an authorized transcript or the human caller's notes.
 
-1. **Facts learned**, in the customer's words where possible: problem, impact, current tools, decision process, budget, timing, people involved.
-2. **Commitments**: what each side promised, who and by when. Keep what the customer said apart from what we inferred.
-3. **Objections and open questions**, and whether each was answered.
-4. **Next step**: the dated action agreed. If none was agreed, say so.
-5. **Deal update**: what changes in the CRM record (stage, amount, date, contacts), with the reason.
-6. **Follow-up draft**: a short message that recaps the agreement and the next step. It goes to outbound approval like any other message.
+1. Record the facts learned: problem, impact, current alternatives, decision process, budget, timing and people involved. Keep direct customer statements distinct from inferences.
+2. List commitments by each side, with who said what and by when. Recording an unauthorized promise does not approve it; flag it for the commercial decision owner.
+3. List objections and open questions, including whether the conversation answered them.
+4. Record the agreed next action and date. If none was agreed, say so.
+5. Propose CRM changes to stage, amount, date or contacts, with the supporting source. Apply only changes the assignment authorizes, preserving old and new values where the system permits.
+6. If requested, draft a short follow-up reflecting only confirmed agreements and approved terms.
 
-Update only the CRM fields this changes, and note the source of each change. Leave out personal remarks and sensitive details that do not belong to the deal.
+Return the summary, evidence references, proposed record changes and any follow-up draft. Omit personal remarks and sensitive details unrelated to the deal. A follow-up is an external message: it requires published catalog sources, the server outbound gateway and any exact human approval required by policy. An unknown delivery result must be verified before resending.

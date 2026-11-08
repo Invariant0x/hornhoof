@@ -54,6 +54,7 @@ Minimize a window and it waits as a strip at the edge of the screen, with the ag
 - where the employee runs, and on which model;
 - every subscription and key that may serve its department;
 - its skills, as a checklist;
+- its assignment, separately from its role identity, saying why it exists and which work it owns;
 - its prompt, by skill or as the raw text it receives.
 
 Any change applies from the employee's next turn. The card keeps who made it and when.
@@ -156,7 +157,7 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | --- | --- | --- | --- |
 | Business development | - | Business analyst | Head of business development, Partnerships manager |
 | Design | - | Design system designer, Product UI designer | Design QA, Head of design |
-| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Generalist developer, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
+| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
 | Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller |
 | Home devices | - | Home network helper | Head of home devices, Smart home helper |
 | Household | - | - | Bills helper, Calendar helper, Head of household, Supplies helper |

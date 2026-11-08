@@ -5,13 +5,16 @@ description: { en: "Compares built screens with the approved mockups and the des
 kind: procedure
 sources: []
 ---
-Check the built product, not the mockup, as a batch of the screens development reports done for a product.
+Compare the built screens named in the assignment with approved mockups and the current design system. Record the exact build and scope; do not treat a mockup as proof of the implementation.
 
-1. Open the screen in a browser at phone, tablet and desktop widths, in every language the product supports and in each theme it has. Screenshot each.
-2. Put each screenshot next to the approved mockup. List the differences in layout, spacing, type, colour, icons and text.
-3. Check the system: inspect a few elements; they should use the system's tokens and components, not one-off values.
-4. Check the states you can reach: empty, loading, error, long text, many items. Trigger them with test data, never with real customer data.
-5. Check the interactions: hover, focus, disabled, and what happens after each main action.
-6. Sort findings by impact: broken (the task cannot be done), wrong (differs from the approved design), polish (small drift).
+1. Open the product at phone, tablet and desktop widths, in every supported language and theme in scope. Capture screenshots with their width, locale and state.
+2. Compare each with its approved reference for layout, spacing, type, colour, icons and text.
+3. Inspect representative elements for approved tokens and components rather than one-off values.
+4. Exercise empty, loading, error, partial-data, long-text and many-item states using test data, never real customer data.
+5. Check hover, focus, active and disabled states and the visible result of each main action.
+6. Check complete wrapping of long content and action groups at narrow and wide widths. Nothing should be hidden, clipped or truncated to conceal overflow.
+7. Classify findings as broken (the task fails), wrong (differs from the approved reference) or polish (minor drift). Record missing evidence and untested states separately.
 
-Report each finding with its screenshot, width and language, what was expected and what you saw. Pass only when nothing broken or wrong is left. You check; you do not fix the code.
+Return a verdict and findings with screenshot, build, width, language, expected result and observation. Pass this check only when no broken or wrong finding remains and required checks were actually performed. Use the approved route for browser test suites.
+
+When assigned an independent check, use a checker other than the author and do not edit the screens or code under review. This review scope does not prevent implementing a different assigned change. Follow the task's recipients and gates.

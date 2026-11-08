@@ -5,14 +5,13 @@ description: { en: "Prepares the company's pages for Yandex search for the Russi
 kind: procedure
 sources: []
 ---
-Use this when the company sells to Russian-speaking users, where Yandex is the main search engine.
+Use this ability to audit assigned pages for discovery through Yandex. Inputs are the target market, Russian-language queries where relevant, permitted site reports and the company's indexing and analytics policy.
 
-- **Yandex Webmaster**: operations connects the site with the CEO's approval; you read its reports on indexing, errors, search queries and site quality. Do not add accounts yourself.
-- **Region**: the site's region in Webmaster matches the market. Regional ranking matters more in Yandex than in Google.
-- **User behaviour**: Yandex weighs how people act on a page. It must answer the query quickly, without pop-ups in the way, and work well on phones.
-- **Russian queries**: research them in Yandex Wordstat. Russian has many word forms and synonyms, so group queries by meaning and write for the group, not for one exact form.
-- **Trust on commercial pages**: prices, contacts, support terms, company details and reviews.
-- **Technical**: a sitemap, a clean robots.txt (Yandex reads the Clean-param rule for tracking parameters), correct hreflang between the Russian and other versions.
-- **Yandex Metrica**: set up by development with the CEO's approval, within personal data rules.
+1. Inspect authorized Webmaster reports for indexing, queries, errors and site quality. Creating accounts or adding a site needs the CEO's approval and the actual access required by the tool.
+2. Compare configured region and commercial page information with the market the site really serves. Do not invent local presence, prices or reviews.
+3. Check whether pages answer the query clearly and work on phones without obstructive overlays. Separate measured behavior from guesses about ranking.
+4. Research query groups with the permitted keyword sources, accounting for Russian word forms and synonyms. Group by meaning rather than one literal form.
+5. Inspect sitemap, robots directives, tracking-parameter handling and language annotations against current official documentation and the intended indexing policy.
+6. Inspect analytics only within approved personal-data boundaries. Adding tracking or changing data collection is a separate authorized action, not part of reading a report.
 
-Report findings the same way as a search audit: page, evidence, fix, owner.
+Return page-level findings, source evidence, proposed fixes and uncertainty. Account, tracking, code and public text changes require their assigned authorization and checks; public content needs the server publication gateway and exact human approval.

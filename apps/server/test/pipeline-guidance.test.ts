@@ -6,12 +6,12 @@ const templates = loadTemplates(fileURLToPath(new URL('../../../templates', impo
 const body = (id: string) => templates.skills.get(id)!.body;
 
 describe('pipeline guidance', () => {
-  it('separates author checks, shared turn checks and nonblocking improvements', () => {
-    expect(body('dev-gates')).toMatch(/Who runs which check is in dev-testing-policy/);
-    expect(body('dev-testing-policy')).toMatch(/- T2\. Developers run only affected tests through run_tests[^\n]*green result and commit SHA/);
-    expect(body('dev-gates')).toMatch(/final check once per turn on the final pinned commit/);
-    expect(body('dev-gates')).toMatch(/Improvement lanes[\s\S]*ordinary next-turn tasks/i);
-    expect(body('dev-implement')).toMatch(/next independent piece of work/i);
+  it('chooses author and broader checks from the task without imposing a shared chain', () => {
+    expect(body('dev-gates')).toMatch(/assignment, task acceptance, declared risk and actual gates/);
+    expect(body('dev-testing-policy')).toMatch(/T2: Select impact explicitly[\s\S]*affected tests through run_tests[\s\S]*exact commit/);
+    expect(body('dev-gates')).toMatch(/When broader validation is assigned, one owner freezes the exact candidate/);
+    expect(body('dev-implement')).toMatch(/separate branch\/workspace for independent work while a check is pending/);
+    expect(body('dev-release-improvements')).toMatch(/assigned|assignment/i);
   });
 
   it('hands submission to the existing author check and review to its run evidence', () => {
@@ -31,10 +31,9 @@ describe('pipeline guidance', () => {
     }
   });
 
-  it('assigns each area to one owner and refuses a second task until it is done, in code until it merges', () => {
-    /* The rule is one, in the skill every head and the orchestrator lead by; a brief points to it, and code adds what an area is. */
-    expect(body('hh-lead-tasks')).toMatch(/each work area has one owner until its task is done, a second task on it is never given out before that/);
-    expect(body('hh-brief-members')).toMatch(/area this member owns until the task is done[\s\S]*hh-lead-tasks/);
-    expect(body('dev-lead')).toMatch(/[Hh]ot files are one area, and it keeps its owner until that task merges/);
+  it('defines ownership locally in each coordinating ability until completion or integration', () => {
+    expect(body('hh-lead-tasks')).toMatch(/one owner keeps each work area until its task is done/);
+    expect(body('hh-brief-members')).toMatch(/executor owns until its task is done; resolve collisions before assigning another writer/);
+    expect(body('dev-lead')).toMatch(/files keep one writer until its work is integrated/);
   });
 });

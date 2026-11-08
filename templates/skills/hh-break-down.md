@@ -5,14 +5,14 @@ description: { en: "Splits a goal into large pieces with independent parts start
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md, wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md, addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md]
 ---
-For `small: true`, use the fast path in hh-lead-tasks; planning and reports belong to the shared turn review. What follows is for other work.
+You can divide an assigned goal into independently checkable pieces.
 
-When a goal reaches your department:
+1. Restate the goal and what "done" means in plain words. Ask the task owner when an unresolved choice changes the result, cost or promise.
+2. Give each connected block one owner and one check. Pieces touching the same files or records stay with that owner until complete. Planning is part of the work, not a chain of separate tasks for plans, contracts or proofs. An independently needed design or external input may be a dependency.
+3. Agree interfaces directly between owners and start independent pieces together. For a real dependency use `after`; when work can start while waiting, describe its `independentPart`, otherwise record `independentNone` with the actual boundary. Never invent work merely to fill a slot.
+4. Write what each piece receives, returns, checks and must leave alone. Select checks and gates from the task's risk and assignment, not from the presence of this ability. The author cannot approve its own independent gate.
+5. For `small: true`, a few lines describing the change, owner and check are enough. Omit extra planning overhead, not required approvals or protected-action checks. Keep work with whoever holds its context when practical.
 
-1. Restate the goal and what "done" means in one or two sentences a person could check. If you cannot, ask before you give anything out.
-2. Cut it into whole blocks as hh-lead-tasks says, each with one check that shows it is done; pieces that touch the same files or records go to one member. A small goal is one piece. Each piece is a whole result, not a step of preparation: planning is part of doing, so no tasks for plans, contracts or proofs before the real work. The one exception is a short step your department's rules name for a new or large piece, such as a design note: give it at the same time, with the piece waiting on it in `after`.
-3. When two pieces must fit together, their owners agree how they fit directly, in the task's comments or by message, and both start at once: no separate task for that.
-4. For each piece write: the owner, what it receives, what it hands back and how the result is checked. A piece that truly needs another's result names that task in `after` as hh-lead-tasks says, and all other pieces start at once.
-5. Give each piece only the gates it needs (hh-lead-tasks): one review for other normal work, more only where your department's rules ask for them. The one who did the work never passes its own gate.
+Whoever gives out the work answers for keeping the department loaded. Members standing free while work in the department can run are a fault, not a normal wait. Never assign ordinary or non-urgent work to members of an urgent-only team (`urgentOnly`); use an eligible owner instead.
 
-Show the plan to whoever gave you the goal only when it changes scope, cost or dates; otherwise start.
+Change the plan when evidence changes its assumptions. Obtain a decision only when scope, spend, access or promises need an authority the assignment does not provide.

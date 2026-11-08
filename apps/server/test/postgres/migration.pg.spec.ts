@@ -1,6 +1,46 @@
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { expect, it } from 'vitest';
+import { applyMissingMigrations } from '../../src/db/client.js';
+import { migrationsBefore } from '../migrations-before.js';
 import { migrateCandidate, privatePostgres } from './helpers.js';
 import { candidateHistory, migrationHistory, prepareUpgrade, savedRows, UPGRADE_PART, UPGRADE_RUN } from './migration-fixture.js';
+
+it('keeps retired developer lines in pending staffing proposals without changing their other choices or history', async () => {
+  const fixture = await privatePostgres({ migrate: false });
+  const migrationsFolder = await migrationsBefore('composable_skills');
+  await migrate(fixture.db, { migrationsFolder });
+  await applyMissingMigrations(fixture.db, { migrationsFolder });
+  const company = (await fixture.admin.query<{ id: string }>("INSERT INTO companies (name) VALUES ('Proposal upgrade') RETURNING id")).rows[0]!.id;
+  const agent = (await fixture.admin.query<{ id: string }>("INSERT INTO agents (company_id, kind, name, model) VALUES ($1, 'orchestrator', 'Coordinator', '') RETURNING id", [company])).rows[0]!.id;
+  const legacy = {
+    role: 'DEV-GEN', name: 'Mira', model: 'saved-model', subscription: '10000000-0000-4000-8000-000000000001',
+    product: '10000000-0000-4000-8000-000000000002', team: '10000000-0000-4000-8000-000000000003',
+    checked: true, skills: { on: ['dev-tdd'], off: ['dev-api-design'] }, note: 'Keep literal DEV-GEN text.',
+  };
+  const other = { role: 'DEV-BE', name: 'Backend', checked: true };
+  const unchecked = { ...legacy, name: 'Later', checked: false };
+  const cases = [
+    { brief: '01 sole', kind: 'staff', status: 'pending', items: [legacy], expected: [{ ...legacy, role: 'DEV-ENG' }] },
+    { brief: '02 mixed', kind: 'staff', status: 'pending', items: [other, unchecked, legacy], expected: [other, { ...unchecked, role: 'DEV-ENG' }, { ...legacy, role: 'DEV-ENG' }] },
+    { brief: '03 current', kind: 'staff', status: 'pending', items: [{ ...legacy, role: 'DEV-ENG' }], expected: [{ ...legacy, role: 'DEV-ENG' }] },
+    { brief: '04 applied', kind: 'staff', status: 'applied', items: [legacy], expected: [legacy] },
+    { brief: '05 dismissed', kind: 'staff', status: 'dismissed', items: [legacy], expected: [legacy] },
+    { brief: '06 structure', kind: 'structure', status: 'pending', items: [legacy], expected: [legacy] },
+    { brief: '07 empty', kind: 'staff', status: 'pending', items: [], expected: [] },
+    { brief: '08 legacy shape', kind: 'staff', status: 'pending', items: { role: 'DEV-GEN' }, expected: { role: 'DEV-GEN' } },
+  ];
+  for (const row of cases) {
+    await fixture.admin.query('INSERT INTO proposals (company_id, agent_id, brief, kind, status, items) VALUES ($1, $2, $3, $4, $5, $6::jsonb)', [company, agent, row.brief, row.kind, row.status, JSON.stringify(row.items)]);
+  }
+  const rows = async () => (await fixture.admin.query<{ fields: Record<string, unknown>; items: unknown }>("SELECT to_jsonb(p) - 'items' AS fields, items FROM proposals p ORDER BY brief")).rows;
+  const before = await rows();
+  await migrateCandidate(fixture.db);
+  const after = await rows();
+  expect(after.map(row => row.fields)).toEqual(before.map(row => row.fields));
+  expect(after.map(row => row.items)).toEqual(cases.map(row => row.expected));
+  await migrateCandidate(fixture.db);
+  expect(await rows()).toEqual(after);
+});
 
 it('upgrades nonempty 0059 rows through candidate migrations and preserves data and history on rerun', async () => {
   const fixture = await privatePostgres({ migrate: false });
@@ -14,9 +54,14 @@ it('upgrades nonempty 0059 rows through candidate migrations and preserves data 
   expect(before.rows.test_parts).toHaveLength(1);
   expect(before.rows.subscriptions![0]).not.toHaveProperty('limits_updated_at');
   expect(before.rows.test_runs![0]).not.toHaveProperty('commit_sha');
+  expect(before.rows.agents).toMatchObject([{ kind: 'worker', role_key: 'DEV-BE', skills: [] }]);
   await migrateCandidate(fixture.db);
   const after = await savedRows(fixture);
-  for (const [table, rows] of Object.entries(before.rows)) expect(after[table], `preserved ${table}`).toMatchObject(rows);
+  for (const [table, rows] of Object.entries(before.rows)) {
+    // Migrations 0084 and 0085 add these abilities to the existing developer.
+    const expected = table === 'agents' ? rows.map(row => ({ ...row, skills: ['dev-task-flow', 'hh-work-fast'] })) : rows;
+    expect(after[table], `preserved ${table}`).toMatchObject(expected);
+  }
   expect(after.subscriptions!.map(row => row.limits_updated_at)).toEqual([null, null]);
   expect(after.test_runs![0]).toMatchObject({ id: UPGRADE_RUN, number: 9, commit_sha: null });
   expect(after.test_parts![0]).toMatchObject({ id: UPGRADE_PART, run_id: UPGRADE_RUN, part: 1, status: 'passed' });

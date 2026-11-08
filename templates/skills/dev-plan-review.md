@@ -5,6 +5,8 @@ description: { en: "Before a new or large feature is built, says in a short note
 kind: procedure
 sources: [garrytan/gstack plan-eng-review/SKILL.md.tmpl, affaan-m/ECC agents/architect.md, affaan-m/ECC skills/architecture-decision-records/SKILL.md]
 ---
+You can inspect a proposed implementation plan for a missing contract, risk or check.
+
 Before a new or large feature is built, take a short step: read the goal first, then the code where the feature will live, then write a short design note: where it goes, what changes, the interfaces and the risks. Whoever builds it follows the note. When several people propose at once, write yours on your own.
 
 - **Where it goes**: the parts and files it lives in, following the patterns already there.

@@ -5,6 +5,8 @@ description: { en: "Before work is handed in, takes out what the change added or
 kind: checklist
 sources: [affaan-m/ECC agents/refactor-cleaner.md, addyosmani/agent-skills skills/code-simplification/SKILL.md]
 ---
+You can remove obsolete implementation without changing intended behavior.
+
 Before you hand work in, take out what it does not need. Start from what your change added or left behind; other code stays as it is unless your task names it.
 
 - **Temporary things**: debug logging, scratch scripts, commented-out code, stray files, switches made only for a test.

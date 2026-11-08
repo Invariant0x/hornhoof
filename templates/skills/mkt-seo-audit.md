@@ -5,23 +5,22 @@ description: { en: "Checks the company's site for the technical, content and lin
 kind: checklist
 sources: [coreyhaines31/marketingskills, anthropics/knowledge-work-plugins]
 ---
-Audit a site or a set of pages and rank what you find by its effect on traffic.
+Use this ability to audit an assigned site or page set and rank findings by likely effect on discovery. Inputs are the target audience, markets, page scope, permitted inspection tools and available analytics.
 
 **Technical**
-- [ ] Pages return 200; no broken internal links or redirect chains; one canonical URL per page.
-- [ ] robots.txt and the sitemap let in the pages that should rank and keep out the ones that should not.
-- [ ] Main content, the title and the meta description are in the HTML, not only added by scripts.
-- [ ] Core Web Vitals are in the good range on phones: Largest Contentful Paint under 2.5 s, layout shift under 0.1, interaction under 200 ms.
-- [ ] Language versions are marked with hreflang and point to each other.
+- Check response codes, broken internal links, redirect chains and one canonical URL per page.
+- Compare robots.txt and sitemap settings with the intended indexing policy; do not open excluded content by assumption.
+- Check whether main content, title and description are present in HTML.
+- Measure phone performance, including Largest Contentful Paint, layout shift and interaction latency, against the current criteria named in the assignment. Record the measured values and source of the thresholds.
+- Check reciprocal language annotations for supported versions.
 
 **Content**
-- [ ] Each page serves one search intent with one main phrase; no two pages compete for the same one.
-- [ ] Title under about 60 characters with the phrase near the start; one H1; headings that describe their sections.
-- [ ] The page answers the query better than the current top results: compare it with them.
-- [ ] Thin, duplicate or outdated pages are listed to merge, update or remove.
+- Identify the intent and main phrase for each page, and overlapping pages serving the same intent.
+- Check a useful title, one main heading and descriptive section headings against actual search presentation.
+- Compare the answer with relevant current results; identify thin, duplicate and outdated content.
 
 **Links**
-- [ ] Important pages get internal links with descriptive text.
-- [ ] List the sites that link to competitors but not to us.
+- Check descriptive internal links to important pages.
+- Identify relevant sites linking to alternatives but not to the assigned site, without contacting them.
 
-For each finding give the page, the evidence (tool output or a screenshot), the fix, and who makes it: marketing for text, development for code, both through your head.
+Return each page, evidence, impact, proposed fix and required capability, marking uncertainty. An audit authorizes no publication, deletion or account creation. Text and code changes follow their assigned task gates; public content needs exact human approval and the server publication gateway.

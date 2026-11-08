@@ -5,17 +5,18 @@ description: { en: "Gives development HTML mockups and a spec complete enough to
 kind: procedure
 sources: [anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md]
 ---
-Development builds what you hand over, so hand over everything a builder would otherwise guess.
+Prepare the design package named in the assignment so a builder can implement it without inventing decisions.
 
-1. **Mockup**: a static HTML page per screen, built with the system's tokens and components, that opens in a browser. Show each state (empty, loading, error, full) at phone and desktop widths, with real text in every language the product supports.
-2. **Spec**, per screen:
-   - The user task it serves and where it sits in the flow.
-   - Components used, by system name and variant.
-   - Anything not in the system, marked as such, with your head's approval.
-   - Behaviour: what each control does, validation rules, what happens on errors and slow responses.
-   - The interface texts in every language the product supports.
-   - Accessibility notes: focus order, labels, what a screen reader announces.
-3. **Open questions**: anything you could not decide, each with your proposal.
-4. **Check**: open each mockup at phone and desktop widths, in every language the product supports and in every theme it has. Attach the screenshots.
+1. **Mockups**: static HTML pages using approved system tokens and components, with realistic text in every supported language. Show empty, loading, error and full states at phone and desktop widths, in each theme.
+2. **Specification**, per screen:
+   - User task and position in the flow.
+   - System component names and variants.
+   - Proposed system additions or exceptions, their owner and approval state.
+   - Control behavior, validation, slow responses and errors.
+   - Interface text in each language, with string keys when used.
+   - Focus order, accessible names and screen-reader announcements.
+   - Long content, wrapping, grouped actions and layout at narrow and wide widths.
+3. **Open decisions**: unresolved questions, each with a proposal and the decision maker required by the task.
+4. **Evidence**: open the mockups at phone and desktop widths in supported languages and themes; attach screenshots and list unverified states. Use the approved route for any browser test suite.
 
-Send the package to your head. Development receives it through the orchestrator, and you answer their questions the same way, never by writing to their agents directly.
+Return the package to the task's recipient with its system version, scope and known gaps. Follow the company's authorized cross-department route for questions. Any independent check is assigned by task gates; author inspection does not replace it when required.

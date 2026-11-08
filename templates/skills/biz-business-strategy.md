@@ -5,14 +5,14 @@ description: { en: "Turns the company's goal into a short growth plan: the bets,
 kind: procedure
 sources: [msitarzewski/agency-agents specialized/business-strategist.md]
 ---
-Use this when the CEO asks where the company should grow, or when the opportunity list needs a direction.
+Use this ability to propose a direction for an assigned growth decision. Inputs are the owner's goal, product facts, customer evidence, available resources and commercial constraints.
 
-1. Restate the goal with a number and a date, for example the first 50 paying customers by a given month. If the goal has no number, ask.
-2. Describe where the company stands: product, customers, revenue, team, cash runway (ask Finance through your head and the orchestrator). Cite numbers; mark guesses as guesses.
-3. List the options: a new segment, channel, partner, region or product line. For each, write who the customer is, why they would pay, and what the company must build or change.
-4. Compare the options on value, cost, time to first result and risk. Reuse the scores from biz-opportunity-scoring where they exist.
-5. Pick two or three bets. For each, write the first phase: milestones, owner departments, budget asked, and the leading signal that shows it works (signed pilots, qualified leads per week).
-6. Write what the company will not do and why, so the choice is visible.
-7. Give each bet a kill condition: the number or date that ends it.
+1. State the desired outcome, its measure and decision date. Ask for missing values that would change the choice rather than inventing them.
+2. Describe the current position: products, customers, revenue, people and cash runway. Cite the source and date of each figure and mark unknowns.
+3. List options such as a segment, channel, partner, region or product line. For each, identify the customer, reason to pay and required changes.
+4. Compare value, cost, effort, time to evidence, risk and confidence using the same criteria. Existing opportunity scores are inputs only if their meaning and evidence are supplied.
+5. Recommend two or three bets with proposed phases, dependencies, owner capabilities, requested budget and leading indicators.
+6. State the options not recommended and why.
+7. Give each bet a kill condition: an observable result or date that triggers reconsideration.
 
-Deliver a one-page plan to the CEO. Work that needs other departments goes as requests through your head and the orchestrator, not to them directly. The plan is a proposal until the CEO approves it.
+Return a short strategy proposal with sources, assumptions, alternatives and approval needs. The CEO decides the strategic commitment; proposing a plan does not assign other departments or spend money. External promises require approval of their exact message through the authorized outbound gateway, and a human signs any contract.

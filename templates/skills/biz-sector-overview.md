@@ -5,14 +5,14 @@ description: { en: "Explains how an industry works, who earns the money and what
 kind: procedure
 sources: [anthropics/financial-services plugins/agent-plugins/market-researcher]
 ---
-Use this before the company enters a sector it does not know.
+Use this ability to orient an assigned decision in an unfamiliar sector. Inputs are the sector boundary, target region, product problem, decision question and permitted research sources.
 
-1. **Shape**: what the sector sells, to whom, its main segments, and its size and growth with dated sources.
-2. **Value chain**: who does what between supplier and end customer, where the margins sit, and where a product like ours would fit.
-3. **Players**: leaders, challengers, and how concentrated the sector is. Note recent mergers, funding rounds and exits.
-4. **How buying works**: who decides, who owns the budget, typical deal size, length of the sales cycle, contract habits and seasons.
-5. **Rules**: regulation, licences, data and privacy rules and standards a supplier must meet, by region. Mark anything a lawyer must confirm.
-6. **Change**: the three to five trends moving the sector (technology, rules, prices, customer habits) and what each means for the company.
-7. **Entry points**: where a newcomer could start, the first kinds of customers to talk to, and the main risks.
+- **Shape**: offerings, customer groups, segments, size and growth, with dated evidence.
+- **Value chain**: who provides what, where margins sit and a possible product position.
+- **Players**: leaders, challengers, concentration and relevant mergers, financing or exits.
+- **Buying**: decision maker, budget owner, typical deal range, purchasing process, contract patterns and seasonality.
+- **Rules**: applicable regulation, licenses, privacy requirements and standards by region, based on current authoritative sources. Mark legal conclusions for a qualified adviser.
+- **Change**: three to five supported trends and their possible consequences.
+- **Entry hypotheses**: plausible initial customers and routes, requirements and risks, explicitly distinguished from established facts.
 
-Keep it to two pages plus a source list. Separate facts from your reading of them. If the evidence is thin, say so and list the research that would settle it.
+Return a concise overview, usually two pages plus sources, with source dates and confidence. State when evidence is thin and what research would settle it. The overview does not authorize market entry, contact, legal assurances, spending or public claims.
