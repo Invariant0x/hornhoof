@@ -253,6 +253,13 @@ export const CandidateMutation = z.strictObject({ delta: MutationDelta, selectio
   return value.selection.selected.every(fn => value.delta.changes.some(change => change.path === fn.file && change.ranges.some(([start, count]) => start <= fn.endLine && start + count > fn.startLine)));
 }, 'Mutation selection must belong to the same changed candidate lines.').refine(value => byteLength(JSON.stringify(value)) <= 512 * 1024, 'Mutation evidence exceeds its limit.');
 export type CandidateMutation = z.infer<typeof CandidateMutation>;
+/* A part proves just its assigned sources; the same candidate's other sources stay with their own parts. */
+export function mutationSelectionMatches(expected: MutationSelection, actual: MutationSelection, files: string[]): boolean {
+  if (expected.status !== 'ready' || actual.status !== 'ready' || expected.baseCommit !== actual.baseCommit || expected.commit !== actual.commit) return false;
+  const selected = new Set(files), ordered = (values: unknown[]) => JSON.stringify(values.map(value => JSON.stringify(value)).sort());
+  return ordered(expected.selected.filter(fn => selected.has(fn.file))) === ordered(actual.selected)
+    && ordered(expected.excluded.filter(fn => selected.has(fn.file))) === ordered(actual.excluded);
+}
 function boundMutation(value: CandidateMutation | undefined, description: EnvironmentDescription, base: string | undefined, ctx: z.RefinementCtx): void {
   if (!value) return;
   const { mutation } = description.manifest;
@@ -348,6 +355,7 @@ const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.
 const Duration = z.number().finite().nonnegative();
 const ReceiptFields = {
   commitSha: ProductCommitSha, manifestHash: EnvironmentDigest,
+  mutations: z.array(z.strictObject({ suiteId: Id, selection: MutationSelection })).max(1000).optional(),
   runtimes: z.array(RuntimeCapability).max(64), dependencies: CacheReceipt,
   environments: z.array(CacheReceipt.safeExtend({ unitId: Id })).max(1000),
   phases: z.strictObject({ checkoutMs: Duration, dependenciesMs: Duration, environmentMs: Duration, servicesMs: Duration, commandMs: Duration, cleanupMs: Duration }),

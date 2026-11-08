@@ -5,6 +5,7 @@ import { closeSync, constants, fstatSync, mkdirSync, mkdtempSync, openSync, read
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
 import { trackedIn } from '../test/tracked-files.mjs';
 import { parseHunks, parseNameStatus } from '../author-check/plan.mjs';
 import { parseVitestJson } from '../author-check/judge.mjs';

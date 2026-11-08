@@ -102,7 +102,8 @@ it.each(['base', 'head', 'function-lines', 'empty', 'duplicate'] as const)('refu
 
 it('refuses a noncanonical legacy receipt even when its unlisted files match the assignment', async () => {
   const f = await fixture(), selection = { kind: 'suite' as const, suiteId: 'vitest', files: ['web/test/not-in-inventory.test.ts'] };
-  const { profile: _profile, selection: _selection, outcomes: _outcomes, ...identity } = f.receipt as Extract<TestEnvironmentReceipt, { version: 2 }>;
-  const receipt = TestEnvironmentReceipt.parse({ ...identity, version: 1, ...selection });
+  const value = { ...f.receipt, version: 1, ...selection };
+  for (const key of ['profile', 'selection', 'outcomes']) Reflect.deleteProperty(value, key);
+  const receipt = TestEnvironmentReceipt.parse(value);
   expect(productReceipt(f.snapshot, { selection, after: [] }, { ...f.message, environmentReceipt: receipt }, f.runtimes)).toBeNull();
 });
