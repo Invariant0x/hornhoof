@@ -1,3 +1,4 @@
+import { turnCleanupDefault } from './echelons-update.js';
 import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons';
 import { and, eq, inArray } from 'drizzle-orm';
 import { taskRoutes } from '../../db/schema.js';
@@ -9,6 +10,7 @@ export type Route = typeof taskRoutes.$inferSelect;
 export type RouteInput = { resultKind?: EchelonsSnapshot['resultKind']; reviewerAgentId?: string; securityAgentId?: string; testsAgentId?: string; cleanup?: boolean; paths?: string[] };
 
 export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promise<void> {
+  const cleanup = input.cleanup ?? await turnCleanupDefault(tx, task);
   const resultKind = input.resultKind ?? (task.executorAgentId ? 'code' : 'coordination');
   if (resultKind === 'coordination') {
     await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: [], state: {
@@ -28,7 +30,7 @@ export async function createRoute(tx: Tx, task: Task, input: RouteInput): Promis
   if (!required) Object.assign(security, { status: 'skipped', reason: 'no_declared_risk' });
   await tx.insert(taskRoutes).values({ taskId: task.id, companyId: task.companyId, paths: input.paths ?? [], state: {
     kind: 'development_echelons', version: 1, resultKind, stage, phase: 'active', candidateId: null, assignment: null,
-    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), ...(input.cleanup ? [step('cleanup')] : []), security, step('tests', input.testsAgentId ?? null)],
+    stages: [architecture, step('development', task.executorAgentId ?? task.assigneeAgentId), step('review', input.reviewerAgentId ?? null), ...(cleanup ? [step('cleanup')] : []), security, step('tests', input.testsAgentId ?? null)],
     security: { required, reason: required ? task.riskClass : null, addedBy: required ? task.createdByAgentId : null },
   } });
 }
@@ -53,8 +55,8 @@ export async function routeSnapshots(db: Db, rows: Pick<Task, 'id' | 'companyId'
 }
 
 /* The task version and route revision are changed in the same transaction. */
-export async function changeRoute(tx: Tx, before: Route, state: Route['state']): Promise<void> {
-  const [changed] = await tx.update(taskRoutes).set({ state, revision: before.revision + 1 })
+export async function changeRoute(tx: Tx, before: Route, state: Route['state'], paths = before.paths): Promise<void> {
+  const [changed] = await tx.update(taskRoutes).set({ state, paths, revision: before.revision + 1 })
     .where(and(eq(taskRoutes.taskId, before.taskId), eq(taskRoutes.companyId, before.companyId), eq(taskRoutes.revision, before.revision))).returning({ id: taskRoutes.taskId });
   if (!changed) throw new ApiError(409, 'conflict', 'The route changed meanwhile. Read the task again.', 'task_changed');
 }

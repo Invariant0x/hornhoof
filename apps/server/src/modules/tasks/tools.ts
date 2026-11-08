@@ -7,8 +7,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
-import { requireBlockingGate } from './gate-triggers.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
@@ -211,19 +210,6 @@ class TaskTools {
     return agent;
   }
 
-  /* Gates by role id or employee id; left out, the first hired gate role. */
-  private async gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
-    if (given === undefined) return (await gateLeads(this.db, this.ctx.templates, head.departmentId!, executor)).slice(0, 1);
-    const staff = await this.db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
-    return given.map(g => {
-      const role = (a: Agent) => a.roleKey === g && a.id !== executor;
-      const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
-      if (!found) throw refuse(400, 'task_invalid', `No one in your department can be the gate ${g}.`);
-      requireBlockingGate(this.ctx.templates, found.roleKey);
-      return found.id;
-    });
-  }
-
   /* A file goes on the task itself; tool text stays plain. */
   private plain(task: Task, ...texts: string[]): void {
     if (texts.some(carriesFile)) throw refuse(400, 'task_invalid', encodedHint(task.number));
@@ -277,20 +263,6 @@ class TaskTools {
 
   private async createdTaskText(task: Task, executor: Agent, gates: string[]): Promise<string> {
     return `Created #${task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await this.waiting(task)}`;
-  }
-
-  /* The orchestrator hands a task on within the task's own department, as its head would. */
-  private updateHead(agent: Agent, task: Task): Agent {
-    if (!this.boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
-    return this.boss ? { ...agent, departmentId: task.departmentId } : agent;
-  }
-
-  private async updatedAssignment(head: Agent, task: Task, executor: string | undefined, gates: string[] | undefined, independentPart: { executor: string } | undefined): Promise<{ next: string | undefined; gateIds: string[] | undefined }> {
-    if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
-    const next = executor !== undefined ? (await this.member(head, executor)).id : undefined;
-    if (independentPart) await this.member(head, independentPart.executor);
-    const gateIds = gates !== undefined ? await this.gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
-    return { next, gateIds };
   }
 
   private registerTasks(): void {
@@ -563,25 +535,14 @@ class TaskTools {
   }
 
   private registerUpdateTask(): void {
-    this.server.registerTool(
-      'update_task',
-      {
-        description: this.boss
-          ? 'Rewrites any task that is not closed so it reads as the current truth, or hands a member task to another executor or gates of its department (only while it is with its executor). ' +
-            'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
-          : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
-            'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
-      },
-      async ({ task: ref, executor, gates, after, afterPlans, ...text }) =>
-        this.run(async () => {
-          const { agent, task } = await this.find(ref);
-          const head = this.updateHead(agent, task);
-          const { next, gateIds } = await this.updatedAssignment(head, task, executor, gates, text.independentPart);
-          const moved = await updateTask(this.ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
-          return { text: `Updated. ${await this.where(moved.task)}`, moved };
-        }),
-    );
+    this.server.registerTool('update_task', {
+      description: 'The department head revises the current task or checking owner without returning it to the author. An eligible owner resumes a waiting stage on its current candidate. Optional Cleanup is decided before Review hands forward; cleanupForTurn applies the same explicit choice to this department in the turn, including new tasks.',
+      inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), ownerAgentId: z.uuid().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), cleanup: z.boolean().optional(), cleanupForTurn: z.boolean().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+    }, async ({ task: ref, after, afterPlans, ...changes }) => this.run(async () => {
+      const { agent, task } = await this.find(ref);
+      const moved = await updateTask(this.ctx, agent.id, task.id, { ...changes, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
+      return { text: `Updated. ${await this.where(moved.task)}`, moved };
+    }));
   }
 
   private registerReport(): void {

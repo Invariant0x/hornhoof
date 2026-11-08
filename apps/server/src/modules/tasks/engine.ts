@@ -1,3 +1,4 @@
+import { applyTurnCleanup, prepareRouteChange, publishRouteChanges, requireTaskHead } from './echelons-update.js';
 import { testsReport, type Verification } from './echelons-tests.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
@@ -410,6 +411,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
        is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
+    if (n.data?.turnCleanup) await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
     if (set.after?.length) {
       await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
       await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, set.after)).orderBy(asc(tasks.id)).for('share');
@@ -1193,7 +1195,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
+export type TaskChange = { ownerAgentId?: string; cleanup?: boolean; cleanupForTurn?: boolean; paths?: string[]; title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1346,199 +1348,55 @@ export async function regateWaiting(ctx: Live, actor: Actor, agent: Leaver, text
   return { wakes, closed };
 }
 
-/* A task waits at a gate with nobody on to check it: the gates from there on are the given ones, and the first of them
-   starts at once. None left finishes the task. */
-async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Promise<Moved> {
-  const given = c.gates!;
-  await checkGates(ctx.db, task.companyId, task.executorAgentId!, given, ctx.templates);
-  const gates = [...task.gates.slice(0, task.stage - 1), ...given];
-  const text = rewrite(task, c);
-  const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
-  /* No gates left passes it: merged first in a repository, else done, and whoever gave it hears so unless they did it. */
-  if (!given.length) {
-    const passed = await passedGates(ctx.db, task, doneFor(task, agentId));
-    return { task: await move(ctx, task, { ...text.set, gates, ...passed.set }, n, undefined, passed.wakes), wakes: passed.wakes };
-  }
-  const gate = await atGate(ctx.db, { ...task, gates }, task.stage);
-  return { task: await move(ctx, task, { ...text.set, gates, ...gate.set }, n, undefined, gate.wakes), wakes: gate.wakes };
-}
-
-/* The title, brief, body and labels a change rewrites. */
-function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: string[] } {
-  const set: Partial<Task> = {};
-  const fields: string[] = [];
-  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) {
-    if (c[key] !== undefined && c[key] !== task[key]) {
-      Object.assign(set, { [key]: c[key] });
-      fields.push(key);
-    }
-  }
-  return { set, fields };
-}
-
-const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
-const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
-
-/* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
-   still come. Nothing else changes with them, so no move that read the task loses its place. */
-async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task>, fields: string[]): Promise<Moved> {
-  if (!fields.length) return { task, wakes: [] };
-  const row = await ctx.db.transaction(async tx => {
-    const [changed] = await tx.update(tasks).set({ ...set, updatedAt: new Date() }).where(eq(tasks.id, task.id)).returning();
-    await note(tx, changed!, { kind: 'updated', actor: { agentId }, data: { fields } });
-    return changed!;
-  });
-  published(ctx, row);
-  return { task: row, wakes: [] };
-}
-
-/* Who takes work from a change of a task for the first time: what someone holds already stays theirs. */
-const newHolders = (task: Task, executor: string | null, declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): string[] => [
-  ...(executor && executor !== task.executorAgentId ? [executor] : []),
-  ...(declaration?.kind === 'part' && existing?.kind !== 'part' ? [declaration.part.executor] : []),
-];
-
-/* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-async function checkRewriteHolders(ctx: Ctx, task: Task, c: TaskChange, executor: string | null, gates: string[]): Promise<void> {
-  if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
-  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates, ctx.templates);
-}
-
-async function rewriteTaskHolders(ctx: Ctx, task: Task, c: TaskChange) {
-  const executor = c.executor ?? task.executorAgentId;
-  const gates = c.gates ?? task.gates;
-  await checkRewriteHolders(ctx, task, c, executor, gates);
-  const { set, fields } = rewrite(task, c);
-  /* Handing it to its executor again gives it back after it waited with the head. */
-  if (executor !== task.executorAgentId || (c.executor !== undefined && task.assigneeAgentId !== executor)) {
-    set.executorAgentId = executor;
-    set.assigneeAgentId = executor;
-    fields.push('executor');
-  }
-  if (c.gates !== undefined && JSON.stringify(gates) !== JSON.stringify(task.gates)) {
-    set.gates = gates;
-    fields.push('gates');
-  }
-  return { set, fields, executor };
-}
-
-async function independentForRewrite(ctx: Ctx, task: Task, c: TaskChange) {
-  const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
-  const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
-  const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
-  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  return { existing, declaration };
-}
-
-async function rewriteDependencies(ctx: Ctx, task: Task, c: TaskChange, set: Partial<Task>, fields: string[]) {
-  if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
+/* Head revisions preserve the current stage and its immutable candidate. */
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+  const task = await loadTask(ctx.db, taskId);
+  stillOpen(task);
+  await requireTaskHead(ctx, task, agentId);
+  if (c.gates !== undefined) throw refuse(400, 'task_invalid', 'Numeric gates were replaced by the required route.');
+  if (c.cleanupForTurn && (c.cleanup === undefined || !task.turnId)) throw refuse(400, 'task_invalid', 'A turn Cleanup decision needs an open turn and an explicit option.');
+  const route = await routeOf(ctx.db, task);
+  const revised = await prepareRouteChange(ctx, task, route, agentId, c);
+  const set = revised.set;
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (c[key] !== undefined) Object.assign(set, { [key]: c[key] });
+  if (c.after !== undefined) {
+    if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
+    checkAfterPlans(c.after, c.afterPlans);
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
     await refuseBelow(ctx.db, task, c.after);
     set.after = c.after;
-    fields.push('after');
   }
-}
-
-async function resumeRewrittenTask(ctx: Ctx, task: Task, set: Partial<Task>) {
-  /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
-  if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
-  /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
-  const handedOn = !!set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId;
-  if (handedOn) {
-    set.silent = 0;
-    if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
-  }
-  return handedOn;
-}
-
-async function stopQueuedRewrite(tx: Tx, taskId: string, holder: string | null, error: 'waiting' | 'handed_on'): Promise<void> {
-  if (holder) await tx.update(jobs).set({ status: 'failed', error, finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, taskId), eq(jobs.status, 'queued')));
-}
-
-async function handOverRewrite(tx: Tx, task: Task, unstuck: ReturnType<typeof stuckGoes>): Promise<void> {
-  await unstuck.also(tx);
-  await stopQueuedRewrite(tx, task.id, task.assigneeAgentId, 'handed_on');
-}
-
-async function rewrittenPart(tx: Tx, row: Task, declaration: IndependentDeclaration | null, creates: boolean, agentId: string, review: boolean) {
-  if (!creates) return null;
-  return insertIndependent(tx, row, (declaration as Extract<IndependentDeclaration, { kind: 'part' }>).part, { agentId }, review);
-}
-
-function rewriteWake(taskId: string, assignee: string | null | undefined, holder: string | null, agentId: string, waited: boolean): Wake[] {
-  if (assignee || (waited && holder)) return [{ agentId: (assignee ?? holder)!, taskId, why: 'assigned' }];
-  if (holder && holder !== agentId) return [{ agentId: holder, taskId, why: 'updated' }];
-  return [];
-}
-
-async function wakeAfterRewrite(tx: Tx, task: Task, set: Partial<Task>, holder: string | null, waited: boolean, agentId: string, wakes: Wake[]): Promise<void> {
-  if ((await openAfter(tx, { after: set.after ?? task.after })).length) return stopQueuedRewrite(tx, task.id, holder, 'waiting');
-  wakes.push(...rewriteWake(task.id, set.assigneeAgentId, holder, agentId, waited));
-}
-
-type TaskRewrite = { set: Partial<Task>; fields: string[]; waited: boolean; declaration: IndependentDeclaration | null; createsIndependent: boolean; reviewIndependent: boolean };
-
-async function applyTaskRewrite(ctx: Ctx, agentId: string, task: Task, c: TaskChange, change: TaskRewrite): Promise<Moved> {
-  const { set, fields, waited, declaration, createsIndependent, reviewIndependent } = change;
+  const changesIndependent = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
+  const existing = changesIndependent ? await currentIndependent(ctx.db, task.id) : null;
+  const declaration = changesIndependent ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const partOwner = createsIndependent && declaration?.kind === 'part' ? declaration.part.executor : null;
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, [revised.set.assigneeAgentId, partOwner].filter((id): id is string => Boolean(id)));
   let independent: Task | null = null;
-  const handedOn = await resumeRewrittenTask(ctx, task, set);
-  const unstuck = stuckGoes(ctx, task);
+  let changed: Task[] = [];
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
   const wakes: Wake[] = [];
-  const also = async (tx: Tx, row: Task) => {
-    if (handedOn) await handOverRewrite(tx, task, unstuck);
+  const policy = c.cleanupForTurn ? { turnId: task.turnId, departmentId: task.departmentId, enabled: c.cleanup } : undefined;
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields: Object.keys(c), ...independentData(declaration), ...(policy ? { turnCleanup: policy } : {}) } }, async (tx, row) => {
+    if (c.cleanupForTurn) changed = await applyTurnCleanup(tx, task, agentId, c.cleanup!, wakes);
+    await changeRoute(tx, route, revised.state, revised.paths);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
-    const made = await rewrittenPart(tx, row, declaration, createsIndependent, agentId, reviewIndependent);
-    if (made) {
+    if (createsIndependent && declaration?.kind === 'part') {
+      const made = await insertIndependent(tx, row, declaration.part, { agentId });
       independent = made.child;
       wakes.push(made.wake);
     }
-    /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts.
-       Seen inside the move, where what it comes after is held. */
-    await wakeAfterRewrite(tx, task, set, holder, waited, agentId, wakes);
-  };
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: {
-    fields,
-    ...independentData(declaration),
-  } }, also, wakes);
+    if (!(await openAfter(tx, row)).length && holder) wakes.push({ agentId: holder, taskId: task.id, why: set.assigneeAgentId ? (row.status === 'review' ? 'review' : 'assigned') : 'updated' });
+    if (set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId) {
+      await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.taskId, task.id), eq(jobs.agentId, task.assigneeAgentId!), eq(jobs.status, 'queued')));
+      await letStuckGo(tx, task.id);
+    }
+  }, wakes);
   if (independent) published(ctx, independent);
-  unstuck.tell();
-  if (independent) await handOff(ctx, { agentId }, independent);
+  publishRouteChanges(ctx, changed);
   return { task: row, wakes };
-}
-
-function refuseMissingExecutor(task: Task, c: TaskChange): void {
-  if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
-}
-
-function emptyGateRewrite(task: Task, c: TaskChange): boolean {
-  return c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length;
-}
-
-function refuseGateRewrite(task: Task, c: TaskChange): void {
-  if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
-  /* The merge hands in what its gates passed: gates given now would never check it. */
-  if (c.gates !== undefined && task.merging) throw refuse(409, 'task_invalid', `#${task.number} passed its gates and is being merged, so its gates no longer change. Give more checks as a task of their own.`);
-  if (c.after !== undefined && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate already, so it waits for nothing any more.`);
-}
-
-export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
-  stillOpen(task);
-  refuseMissingExecutor(task, c);
-  if (emptyGateRewrite(task, c)) return regate(ctx, agentId, task, c);
-  refuseGateRewrite(task, c);
-  const { set, fields, executor } = await rewriteTaskHolders(ctx, task, c);
-  const waited = (await openAfter(ctx.db, task)).length > 0;
-  checkAfterPlans(c.after ?? task.after, c.afterPlans);
-  const { existing, declaration } = await independentForRewrite(ctx, task, c);
-  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
-  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
-  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
-  await rewriteDependencies(ctx, task, c, set, fields);
-  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
-  return applyTaskRewrite(ctx, agentId, task, c, { set, fields, waited, declaration, createsIndependent, reviewIndependent });
 }
 
 /* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
