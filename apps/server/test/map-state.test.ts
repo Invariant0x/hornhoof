@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, mapReturns, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -16,6 +16,8 @@ import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan, ownDatabases } from './helpers.js';
 import { rowsRead } from './rows-read.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 
 ownDatabases();
 
@@ -32,15 +34,20 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
   const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL', position: 1 }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId = dev!.id, extra: Partial<typeof agents.$inferInsert> = {}) =>
-    (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id, ...extra }).returning())[0]!;
+    (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [], ...extra }).returning())[0]!;
   const hana = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const felix = await hire('Felix', 'worker', 'DEV-FE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const ctx = app.ctx;
+  await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev!.id));
+  let commit = HEAD;
+  const atCommit = (sha: string) => { commit = sha; };
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: commit });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const top = (await createTask(ctx, { agentId: orchestrator!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: hana.id })).task;
-  const member = async (title: string, agentId: string, gates: string[] = []) =>
-    (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, gates })).task;
+  const member = async (title: string, agentId: string, reviewerAgentId = rita.id) =>
+    (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
   /* A turn of the agent on the task goes out, as the queue takes it: running, with the new cycle of its lines in the same
      write, and then its task at work. */
   const run = async (agentId: string, taskId: string | null, at = new Date()) => {
@@ -57,7 +64,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   };
   const end = (jobId: string, status: 'done' | 'failed' = 'done') => db.update(jobs).set({ status, finishedAt: new Date() }).where(eq(jobs.id, jobId));
   const org = async (token = ceo, on: FastifyInstance = app): Promise<Org> => (await on.inject({ url: '/api/org', ...as(token) })).json();
-  return { app, db, config, ctx, ceo, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, sales: sales!, hire, hana, bruno, felix, rita, top, member, run, end, org };
+  return { app, db, config, ctx, ceo, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, sales: sales!, hire, hana, bruno, felix, rita, top, member, run, end, org, atCommit };
 }
 
 const allLines = (org: Org) => [...org.workLines, ...org.departments.flatMap(d => d.workLines)];
@@ -72,44 +79,47 @@ function stateOf(org: Org, up: { id: string }, down: { id: string }): string {
 
 describe('lines between a head and its employees', () => {
   it('reports no rework when work has not been returned, including after a hand-in', async () => {
-    const { ctx, bruno, rita, member, org, dev } = await company();
-    const task = await member('Checkout API', bruno.id, [rita.id]);
+    const { ctx, bruno, member, org, dev } = await company();
+    const task = await member('Checkout API', bruno.id);
     expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
-    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass', review: { baseCommit: BASE } });
     expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
   });
 
   it('reports the actual rework event time only in its department, and drops it after ten minutes', async () => {
-    const { app, ceo, ctx, db, bruno, rita, member, org, dev, sales } = await company();
-    const task = await member('Checkout API', bruno.id, [rita.id]);
-    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
-    await verdict(ctx, rita.id, task.id, { pass: false, comment: 'Handle retries.' });
-    const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict')));
+    const { app, ceo, ctx, db, bruno, rita, member, org, dev, sales, atCommit, run, hana } = await company();
+    const task = await member('Checkout API', bruno.id, rita.id);
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass', review: { baseCommit: BASE } });
+    await run(rita.id, task.id);
+    await verdict(ctx, rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: 'Handle retries.' });
+    expect(stateOf(await org(), hana, rita)).toBe('blue');
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+    atCommit('c'.repeat(40));
+    await submit(ctx, rita.id, task.id, { summary: 'Handle retries in the same branch.', evidence: 'Changed retry tests.', review: { baseCommit: BASE } });
+    const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->'candidate'->>'parentId' IS NOT NULL`));
     const snapshot = await org();
+    expect(stateOf(snapshot, hana, rita)).toBe('yellow');
     expect(snapshot.departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
     expect(snapshot.departments.find(d => d.id === sales.id)!.reworkAt).toBeNull();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     expect((await org(maria)).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
-    /* A log written before the explicit rework marker still has its completed review round. */
-    await db.update(taskEvents).set({ data: { pass: false, stage: 1, round: 0 } }).where(eq(taskEvents.id, event!.id));
-    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
     await db.update(taskEvents).set({ createdAt: new Date(Date.parse(snapshot.serverNow) - 600_000) }).where(eq(taskEvents.id, event!.id));
     expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
   });
 
-  it('starts the rework clock when the panel finishes, even if its last reviewer leaves', async () => {
-    const { ctx, db, acme, hana, bruno, rita, hire, member, org, dev } = await company();
-    const [ceo] = await db.select().from(people);
-    const [codex] = await db.insert(subscriptions).values({ companyId: acme.id, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' }).returning();
-    const rex = await hire('Rex', 'worker', 'DEV-REV', dev.id, { subscriptionId: codex!.id });
-    const task = await member('Checkout API', bruno.id, [rita.id]);
-    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
-    await verdict(ctx, rita.id, task.id, { pass: false, comment: 'Handle retries.' });
-    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+  it('does not invent a repair when the current checker leaves after a finding', async () => {
+    const { ctx, db, hana, bruno, rita, member, org, dev } = await company();
+    const task = await member('Checkout API', bruno.id);
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass', review: { baseCommit: BASE } });
+    await verdict(ctx, rita.id, task.id, { pass: false, reviewedCommit: HEAD, comment: 'Handle retries.' });
+    const before = routeSnapshot(await routeOf(db, await loadTask(db, task.id)), rita.id);
     await db.update(taskEvents).set({ createdAt: new Date(Date.now() - 900_000) }).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict')));
-    await leaveWork(ctx, { agentId: hana.id }, rex);
-    const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'updated')));
-    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
+    await leaveWork(ctx, { agentId: hana.id }, rita);
+    const current = await loadTask(db, task.id);
+    const route = routeSnapshot(await routeOf(db, current), current.assigneeAgentId);
+    expect(current).toMatchObject({ status: 'waiting', assigneeAgentId: null });
+    expect(route).toMatchObject({ stage: 'review', phase: 'waiting', candidateId: before.candidateId });
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
   });
 
   it('run blue while an employee works on its task, and yellow once it hands the work in', async () => {
@@ -118,7 +128,7 @@ describe('lines between a head and its employees', () => {
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');
     const job = await run(bruno.id, api.id);
     expect(stateOf(await org(), hana, bruno)).toBe('blue');
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     /* Its turn still writes its last words: the work it handed in is no longer at work. */
     const after = await org();
     expect(stateOf(after, hana, bruno)).toBe('yellow');
@@ -131,31 +141,29 @@ describe('lines between a head and its employees', () => {
 
   it('count a hand-in as given back to the head even when a reviewer takes the task next', async () => {
     const { ctx, bruno, rita, hana, member, run, org } = await company();
-    const page = await member('Checkout page', bruno.id, [rita.id]);
+    const page = await member('Checkout page', bruno.id, rita.id);
     await run(bruno.id, page.id);
-    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     expect(stateOf(await org(), hana, bruno)).toBe('yellow');
     expect(stateOf(await org(), hana, rita)).toBe('quiet');
     await run(rita.id, page.id);
     expect(stateOf(await org(), hana, rita)).toBe('blue');
-    await verdict(ctx, rita.id, page.id, { pass: true, comment: 'Fine.' });
+    await verdict(ctx, rita.id, page.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' });
     expect(stateOf(await org(), hana, rita)).toBe('yellow');
   });
 
-  it("count one reviewer's verdict while another at the same gate still checks", async () => {
-    const { ctx, db, acme, bruno, rita, hana, hire, member, run, org } = await company();
-    /* Rex reviews on Codex, so both check the work at once. */
-    const [ceoPerson] = await db.select().from(people);
-    const [codex] = await db.insert(subscriptions).values({ companyId: acme.id, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceoPerson!.id, status: 'ready' }).returning();
-    const rex = await hire('Rex', 'worker', 'DEV-REV', undefined, { subscriptionId: codex!.id });
-    const page = await member('Checkout page', bruno.id, [rita.id]);
-    await run(bruno.id, page.id);
-    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test' });
-    const panel = (await loadTask(db, page.id)).panel;
-    expect(panel).toEqual(expect.arrayContaining([rita.id, rex.id]));
+  it('returns one review line while another checker works on an independent candidate', async () => {
+    const { ctx, db, bruno, felix, rita, hana, hire, member, run, org } = await company();
+    const rex = await hire('Rex', 'worker', 'DEV-REV');
+    const page = await member('Checkout page', bruno.id, rita.id);
+    const api = await member('Checkout API', felix.id, rex.id);
+    await submit(ctx, bruno.id, page.id, { summary: 'Page candidate', evidence: 'Changed page tests.', review: { baseCommit: BASE } });
+    await submit(ctx, felix.id, api.id, { summary: 'API candidate', evidence: 'Changed API tests.', review: { baseCommit: BASE } });
+    expect((await loadTask(db, page.id)).assigneeAgentId).toBe(rita.id);
+    expect((await loadTask(db, api.id)).assigneeAgentId).toBe(rex.id);
     await run(rita.id, page.id);
-    await run(rex.id, page.id);
-    await verdict(ctx, rex.id, page.id, { pass: true, comment: 'Fine.' });
+    await run(rex.id, api.id);
+    await verdict(ctx, rex.id, api.id, { pass: true, reviewedCommit: HEAD, comment: 'Fine.' });
     const now = await org();
     expect(stateOf(now, hana, rex)).toBe('yellow');
     expect(stateOf(now, hana, rita)).toBe('blue');
@@ -247,7 +255,7 @@ describe('lines between the orchestrator and a department', () => {
 
 describe('lines to an employee whose turn a message started', () => {
   /* The head or a colleague wrote to it, so its turn carries no task: it acts on the one its card shows. */
-  it('run blue while it acts on its open task before any gate, and so does its department', async () => {
+  it('run blue while it acts on its open task in Development, and so does its department', async () => {
     const { orchestrator, hana, bruno, member, run, org } = await company();
     await member('Checkout API', bruno.id);
     await run(bruno.id, null);
@@ -280,15 +288,15 @@ describe('lines to an employee whose turn a message started', () => {
     await member('Docs', bruno.id);
     await run(bruno.id, api.id);
     expect(stateOf(await org(), hana, bruno)).toBe('blue');
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     expect(stateOf(await org(), hana, bruno)).toBe('yellow');
   });
 
-  it('run blue for a reviewer at its gate', async () => {
+  it('run blue for the current Review owner', async () => {
     const { ctx, hana, bruno, rita, member, run, end, org } = await company();
-    const page = await member('Checkout page', bruno.id, [rita.id]);
+    const page = await member('Checkout page', bruno.id, rita.id);
     const built = await run(bruno.id, page.id);
-    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     await end(built.id);
     await run(rita.id, null);
     expect(stateOf(await org(), hana, rita)).toBe('blue');
@@ -300,7 +308,7 @@ describe('the cycles of a line', () => {
     const { db, config, ctx, bruno, hana, member, run, end, org } = await company();
     const api = await member('Checkout API', bruno.id);
     const first = await run(bruno.id, api.id);
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     await end(first.id);
     expect(stateOf(await org(), hana, bruno)).toBe('yellow');
     const page = await member('Checkout page', bruno.id);
@@ -321,10 +329,10 @@ describe('the cycles of a line', () => {
     const { ctx, bruno, hana, member, run, end, org } = await company();
     const api = await member('Checkout API', bruno.id);
     await end((await run(bruno.id, api.id)).id);
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     const page = await member('Checkout page', bruno.id);
     await run(bruno.id, page.id);
-    await submit(ctx, bruno.id, page.id, { summary: 'Done too', evidence: 'npm test' });
+    await submit(ctx, bruno.id, page.id, { summary: 'Done too', evidence: 'npm test', review: { baseCommit: BASE } });
     const now = await org();
     expect(stateOf(now, hana, bruno)).toBe('yellow');
     const line = lineOf(now, hana.id, bruno.id)!;
@@ -335,7 +343,7 @@ describe('the cycles of a line', () => {
     const { db, config, ctx, bruno, hana, member, run, end, org } = await company();
     const api = await member('Checkout API', bruno.id);
     await end((await run(bruno.id, api.id)).id);
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     /* The return came two minutes ago. */
     await db.update(mapReturns).set({ returnedAt: sql`now() - interval '2 minutes'` }).where(eq(mapReturns.downstreamAgentId, bruno.id));
     const again = await buildApp({ db, config });
@@ -392,7 +400,7 @@ describe('who sees the lines', () => {
     const { app, ctx, ceo, dev, sales, orchestrator, bruno, hana, member, run, org } = await company();
     const api = await member('Checkout API', bruno.id);
     await run(bruno.id, api.id);
-    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     const hers = await org(maria);
     expect(lineOf(hers, hana.id, bruno.id)).toBeUndefined();
@@ -516,7 +524,7 @@ describe('a turn the queue takes', () => {
     if (level === 'member') {
       const api = await member('Checkout API', bruno.id);
       const first = await run(bruno.id, api.id);
-      await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+      await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
       await end(first.id);
       return { ...c, up: hana, down: bruno, next: await member('Checkout page', bruno.id) };
     }
