@@ -233,14 +233,40 @@ export async function validateEnvironmentDescription(value: unknown): Promise<En
   if (await hashTestEnvironment(description.manifestSource) !== description.manifestHash) throw new Error('The original manifest hash differs from its description.');
   return description;
 }
+/* A node derives this from pinned Git objects and a conservative pure-function proof. */
+export const MutationDelta = z.strictObject({ baseCommit: ProductCommitSha, commit: ProductCommitSha,
+  changes: z.array(z.strictObject({ path: RepositoryPath, ranges: z.array(z.tuple([z.number().int().positive(), z.number().int().positive()])).max(10_000) })).max(10_000),
+}).refine(value => new Set(value.changes.map(change => change.path)).size === value.changes.length, 'Changed mutation paths must be distinct.');
+export type MutationDelta = z.infer<typeof MutationDelta>;
+export const MutationFunction = z.strictObject({ file: RepositoryPath, name: Text.max(1000), startLine: z.number().int().positive(), endLine: z.number().int().positive(),
+  lines: z.array(z.number().int().positive()).min(1).max(10_000), tests: z.array(RepositoryPath).min(1).max(1000), reason: z.literal('changed_pure_function'),
+}).refine(value => value.endLine - value.startLine + 1 === value.lines.length && value.lines.every((line, index) => line === value.startLine + index), 'Mutation lines must cover exactly the selected function.');
+export type MutationFunction = z.infer<typeof MutationFunction>;
+export const MutationSelection = z.strictObject({ version: z.literal(1), status: z.enum(['ready', 'blocked']), baseCommit: ProductCommitSha, commit: ProductCommitSha,
+  selected: z.array(MutationFunction).max(2000), excluded: z.array(z.strictObject({ file: RepositoryPath, name: Text.max(1000).optional(), reason: Text.max(1000) })).max(10_000),
+  problems: z.array(z.strictObject({ file: RepositoryPath.optional(), code: Text.max(1000) })).max(10_000),
+}).refine(value => (value.status === 'ready') === (value.problems.length === 0), 'Blocked mutation scope must retain its problems.');
+export type MutationSelection = z.infer<typeof MutationSelection>;
+export const CandidateMutation = z.strictObject({ delta: MutationDelta, selection: MutationSelection }).refine(value => {
+  if (value.delta.commit !== value.selection.commit || value.delta.baseCommit !== value.selection.baseCommit) return false;
+  return value.selection.selected.every(fn => value.delta.changes.some(change => change.path === fn.file && change.ranges.some(([start, count]) => start <= fn.endLine && start + count > fn.startLine)));
+}, 'Mutation selection must belong to the same changed candidate lines.').refine(value => byteLength(JSON.stringify(value)) <= 512 * 1024, 'Mutation evidence exceeds its limit.');
+export type CandidateMutation = z.infer<typeof CandidateMutation>;
+function boundMutation(value: CandidateMutation | undefined, description: EnvironmentDescription, base: string | undefined, ctx: z.RefinementCtx): void {
+  if (!value) return;
+  const { mutation } = description.manifest;
+  if (!base || value.delta.baseCommit !== base || value.delta.commit !== description.commitSha || mutation.status !== 'supported'
+    || value.selection.selected.some(fn => !mutation.sourcePaths.includes(fn.file))) ctx.addIssue({ code: 'custom', message: 'Mutation evidence differs from the pinned candidate or declared sources.' });
+}
 /* One test file's digest of what its result depends on, at the pinned commit. */
 export const UnitFingerprint = z.strictObject({ suiteId: Id, file: RepositoryPath, fingerprint: EnvironmentDigest });
 export type UnitFingerprint = z.infer<typeof UnitFingerprint>;
 /* With a description at its own limit, they still fit one frame between a node and the server. */
 export const UnitFingerprints = z.array(UnitFingerprint).max(10_001).refine(prints => byteLength(JSON.stringify(prints)) <= 960 * 1024, 'The fingerprints exceed their limit.');
-const CandidateTestScope = z.strictObject({ baseCommit: ProductCommitSha, baseFingerprints: UnitFingerprints, fingerprints: UnitFingerprints });
+const CandidateTestScope = z.strictObject({ baseCommit: ProductCommitSha, baseFingerprints: UnitFingerprints, fingerprints: UnitFingerprints, mutation: CandidateMutation.optional() });
 export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id, candidate: CandidateTestScope.optional() })
-  .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.');
+  .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.')
+  .superRefine((value, ctx) => boundMutation(value.candidate?.mutation, value.description, value.candidate?.baseCommit, ctx)).superRefine(descriptionSize);
 export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
 
 const fingerprintKey = (unit: Pick<TestUnit, 'suiteId' | 'file'>): string => `${unit.suiteId}\0${unit.file}`;
@@ -356,10 +382,11 @@ export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;
 export const TestsDescribed = z.strictObject({
   type: z.literal('tests.described'), requestId: z.uuid(), commitSha: ProductCommitSha,
   result: z.discriminatedUnion('status', [
-    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional(), baseFingerprints: z.strictObject({ commitSha: ProductCommitSha, fingerprints: UnitFingerprints }).optional() }),
+    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional(), baseFingerprints: z.strictObject({ commitSha: ProductCommitSha, fingerprints: UnitFingerprints }).optional(), mutation: CandidateMutation.optional() }),
     z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
   ]),
-}).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.');
+}).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.')
+  .superRefine((value, ctx) => { if (value.result.status === 'ready') boundMutation(value.result.mutation, value.result.description, value.result.baseFingerprints?.commitSha, ctx); }).superRefine(descriptionSize);
 export type TestsDescribed = z.infer<typeof TestsDescribed>;
 
 export function runtimeVersionMatches(requested: string, actual: string): boolean {

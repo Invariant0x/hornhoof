@@ -1,14 +1,9 @@
 import { posix } from 'node:path';
 import ts from 'typescript';
-import { RepositoryPath, type TestEnvironmentV1 } from '@hornhoof/protocol';
+import { RepositoryPath, type TestEnvironmentV1, type MutationDelta, type MutationSelection } from '@hornhoof/protocol';
 import type { FingerprintInput } from './test-fingerprint.js';
 
-export interface MutationDelta { baseCommit: string; commit: string; changes: { path: string; ranges: [number, number][] }[] }
-export interface MutationFunction { file: string; name: string; startLine: number; endLine: number; lines: number[]; tests: string[]; reason: 'changed_pure_function' }
-export interface MutationSelection {
-  version: 1; status: 'ready' | 'blocked'; baseCommit: string; commit: string;
-  selected: MutationFunction[]; excluded: { file: string; name?: string; reason: string }[]; problems: { file?: string; code: string }[];
-}
+export type { MutationDelta, MutationFunction, MutationSelection } from '@hornhoof/protocol';
 type Supported = Extract<TestEnvironmentV1['mutation'], { status: 'supported' }>;
 type FunctionNode = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression;
 type Functions = Map<string, FunctionNode>;

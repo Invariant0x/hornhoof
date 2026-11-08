@@ -193,7 +193,7 @@ describe('Department view', () => {
     await act(async () => {
       stream.send({ type: 'working', working: 2 });
     });
-    expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API');
+    expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, AnthropicDevelopment #12 Checkout API');
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });

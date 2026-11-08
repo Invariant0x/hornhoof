@@ -1002,7 +1002,7 @@ export const ru: Messages = {
   },
   tasks: {
     echelons: {
-      coordination: 'Проверенный отчёт по дочерним результатам',
+      coordination: 'Проверенный отчет по дочерним результатам',
       findings: { heading: 'Находки по этапам', unique: n => `Уникальных находок: ${n}`, reported: n => `Найдено: ${n}`, confirmed: n => `Подтверждено: ${n}` },
       heading: 'Маршрут задачи',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },

@@ -115,3 +115,49 @@ describe('candidate scope from the authenticated metadata response', () => {
     expect((await f.parts()).map(part => part.environmentSelection!.selection)).toEqual([{ kind: 'final', suiteId: 'vitest', files: [] }]);
   });
 });
+
+async function mutationScopeFixture() {
+  const f = await fixture(), description = f.reply.result.description;
+  const sources = ['logic/totals.ts', 'logic/process.ts', 'logic/unchanged.ts'];
+  const command = { program: 'node', args: ['scripts/mutation/run.mjs'], cwd: '.' };
+  description.manifest.mutation = { status: 'supported', language: 'typescript', tool: 'mutator', command, sourcePaths: sources,
+    fastTestPaths: ['web/test/b.test.ts'], coverageCommands: [command], coverageFiles: ['coverage.json'] };
+  description.manifest.suites.push({ id: 'mutation', root: '.', files: sources, run: command, split: { kind: 'json-file' }, profiles: ['fast', 'final'] });
+  for (const profile of description.manifest.profiles) profile.requiredSuiteIds.push('mutation');
+  sources.forEach((file, index) => {
+    description.inventory.push({ suiteId: 'mutation', file, selectionUnit: file });
+    f.reply.result.fingerprints.push({ suiteId: 'mutation', file, fingerprint: String(index + 5).repeat(64) });
+    f.reply.result.baseFingerprints.fingerprints.push({ suiteId: 'mutation', file, fingerprint: String(index + 1).repeat(64) });
+  });
+  description.manifestSource = JSON.stringify(description.manifest);
+  description.manifestHash = await hashTestEnvironment(description.manifestSource);
+  const mutation = {
+    delta: { baseCommit: BASE, commit: f.finalCommit, changes: [{ path: sources[0]!, ranges: [[1, 1]] }, { path: sources[1]!, ranges: [[1, 1]] }] },
+    selection: { version: 1 as const, status: 'ready' as const, baseCommit: BASE, commit: f.finalCommit,
+      selected: [{ file: sources[0]!, name: 'total', startLine: 1, endLine: 1, lines: [1], tests: ['web/test/b.test.ts'], reason: 'changed_pure_function' as const }],
+      excluded: [{ file: sources[1]!, name: 'process', reason: 'purity_unproven' }], problems: [] },
+  };
+  return { ...f, mutation, reply: { ...f.reply, result: { ...f.reply.result, mutation } } };
+}
+
+it('persists authenticated mutation scope and selects changed pure sources without process or unchanged functions', async () => {
+  const f = await mutationScopeFixture();
+  await acceptDescription(f.ctx, BUILTIN, f.reply);
+  const run = await f.stored();
+  expect(run.environmentRequest?.problem).toBeNull();
+  expect(run.environmentSnapshot?.candidate?.mutation).toEqual(f.mutation);
+  const files = (await f.parts()).flatMap(part => part.environmentSelection!.selection.kind === 'batch' ? part.environmentSelection!.selection.selections.filter(suite => suite.suiteId === 'mutation').flatMap(suite => suite.files) : []);
+  expect(files).toEqual(['logic/totals.ts']);
+});
+
+it.each(['missing', 'blocked', 'wrong-base', 'wrong-head'] as const)('refuses %s mutation applicability before creating candidate parts', async problem => {
+  const f = await mutationScopeFixture();
+  if (problem === 'missing') Reflect.deleteProperty(f.reply.result, 'mutation');
+  if (problem === 'blocked') Object.assign(f.mutation.selection, { status: 'blocked', problems: [{ file: 'logic/totals.ts', code: 'no_safe_fast_tests' }] });
+  if (problem === 'wrong-base') f.mutation.delta.baseCommit = 'f'.repeat(40);
+  if (problem === 'wrong-head') f.mutation.selection.commit = 'f'.repeat(40);
+  await acceptDescription(f.ctx, BUILTIN, f.reply);
+  expect((await f.stored()).environmentSnapshot).toBeNull();
+  expect((await f.stored()).environmentRequest?.problem?.code).toBe('description_mismatch');
+  expect(await f.parts()).toEqual([]);
+});
