@@ -33,6 +33,7 @@ function parsedComparison(body: unknown): CompareResult {
   const parsed = Comparison.safeParse(body);
   if (!parsed.success || !completeInventory(parsed.data)) return { complete: false, reason: 'incomplete-comparison' };
   const data = parsed.data;
+  if (data.status !== 'ahead' && data.status !== 'identical') return { complete: false, reason: 'not-an-ancestor' };
   const headSha = data.commits.at(-1)?.sha ?? (data.status === 'identical' ? data.base_commit.sha : null);
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
   return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(f => f.previous_filename ? [f.filename, f.previous_filename] : [f.filename]), diff: data.files.map(f => f.patch).join('\n') };
