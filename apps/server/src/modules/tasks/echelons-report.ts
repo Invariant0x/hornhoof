@@ -71,7 +71,7 @@ export async function coordinationReport(ctx: Reader, task: Task, route: Route, 
   if (route.state.candidateId) throw refuse(409, 'task_invalid', 'This task produced code and needs the executable route.');
   const wakes = giver(task, 'reported', agentId, summary.trim());
   const row = await move(ctx, task, { status: 'done', closedAt: new Date(), assigneeAgentId: null, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true },
+    kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true }, returned: true,
   }, async tx => {
     const acceptedChildren = await acceptedUnder(tx, task);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });

@@ -592,7 +592,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
-    kind: 'submitted', actor: { agentId }, text: r.summary,
+    kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
   }, async tx => {
     if (inputCandidate) await checkingIdentity({ db: tx }, task, route, inputCandidate);

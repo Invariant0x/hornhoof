@@ -43,6 +43,6 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     return { task: row, wakes: [] };
   }
   const next = await forwardHandoff(ctx, task, { ...route, state }, candidate);
-  const row = await move(ctx, task, next.set, n, tx => changeRoute(tx, route, next.state), next.wakes);
+  const row = await move(ctx, task, next.set, { ...n, returned: true }, tx => changeRoute(tx, route, next.state), next.wakes);
   return { task: row, wakes: next.wakes };
 }
