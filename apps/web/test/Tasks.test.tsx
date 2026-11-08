@@ -6,10 +6,12 @@ import { Shell } from '../src/screens/Shell';
 import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
 import { CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { taskRoute } from './task-route';
 
 const ALL = '/api/tasks?status=all';
 const PLANNED = { ...TASKS[1]!, id: 't14', number: 14, title: 'Refund button', brief: '', status: 'planned' as const, assignee: null, turn: 4 };
 const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief: '', status: 'open' as const, parentId: 't12' };
+const CHECKING_CART = { ...TASKS[1]!, status: 'review' as const, assignee: TASKS[0]!.assignee, echelons: taskRoute('review', TASKS[0]!.assignee!.id) };
 
 function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({
@@ -241,8 +243,8 @@ describe('the tracker', () => {
     await openTasks(user);
     const review = screen.getByRole('button', { name: /#12/ });
     expect(review).toHaveTextContent('Checkout API');
-    expect(review).toHaveTextContent('Gate 2 of 3');
-    expect(review).toHaveTextContent('Tom');
+    expect(review).toHaveTextContent('Review');
+    expect(review).toHaveTextContent('Owner: Rita');
     expect(review).toHaveTextContent('Development');
     await user.selectOptions(screen.getByLabelText('Department'), 'd2');
     await waitFor(() => expect(screen.queryByRole('button', { name: /#11/ })).not.toBeInTheDocument());
@@ -253,12 +255,13 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     let moved = false;
-    shell({ [`GET ${ALL}`]: () => [200, { tasks: moved ? [{ ...TASKS[1]!, status: 'review', stage: 1, gateCount: 3 }] : TASKS }] });
+    shell({ [`GET ${ALL}`]: () => [200, { tasks: moved ? [CHECKING_CART] : TASKS }] });
     await openTasks(user);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita'));
     expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('In review');
+    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Review');
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -269,7 +272,7 @@ describe('the tracker', () => {
     let late = () => {};
     shell({
       [`GET ${ALL}`]: () => {
-        const reply: [number, unknown] = [200, { tasks: moved ? [{ ...TASKS[1]!, status: 'review', stage: 1, gateCount: 3 }] : TASKS }];
+        const reply: [number, unknown] = [200, { tasks: moved ? [CHECKING_CART] : TASKS }];
         if (!hold) return reply;
         hold = false;
         return new Promise(resolve => (late = () => resolve(reply)));
@@ -280,12 +283,13 @@ describe('the tracker', () => {
     stream.send({ type: 'task', id: 't11' });
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita'));
     await act(async () => {
       late();
       await new Promise(r => setTimeout(r, 50));
     });
-    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3');
+    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita');
+    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Review');
   });
 });
 
