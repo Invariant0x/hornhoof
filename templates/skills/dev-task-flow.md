@@ -16,4 +16,4 @@ Cleanup is absent by default. Only the head enables this optional stage for a ta
 
 Tests checks the final candidate including every repair with applicable delta checks and reusable matching fingerprints. Mutations cover only changed pure functions with direct fast tests. Report finished run and part evidence for that exact candidate. A coordination-only parent reports accepted current child results without an invented code SHA; unfinished, unaccepted or stale child work blocks it. A parent with executable output follows mandatory Review.
 
-After Tests, follow the task's authorized integration route. A generic wake naming a branch cannot override the task's explicit restriction. Main receives only an exact commit approved by the authorized human owner. Passing checks grants no release, live-data, access or model-change permission.
+After Tests, follow the task's authorized integration route. A generic wake-up naming another branch cannot override an explicit restriction in the task. Main receives only an exact commit approved by the authorized human owner. Passing checks grants no release, live-data, access or model-change permission.

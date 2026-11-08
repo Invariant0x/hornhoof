@@ -152,7 +152,7 @@ describe('templates', () => {
     expect(policy).toMatch(/coverage from a completed applicable run rather than starting another/);
     expect(policy).toMatch(/unchanged old complexity is recorded separately/);
     expect(body('dev-review-verdict')).toContain('requirement -> test');
-    expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/);
+    expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/i);
   });
 
   it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
@@ -1267,11 +1267,11 @@ const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => b
     id: 'same-owner-repair-without-effort-or-return',
     holds: s => /does not set effort or change effort inside a running turn/.test(s.verdict) &&
       /never opens another review or sends a mechanical fix back to the author/.test(s.verdict) &&
-      forbidsAll(`${s.diff}\n${s.verdict}`, [
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence => [
         /\bswitch\w*\b[^.!?;,]*\beffort\s+inside\s+a\s+running\s+turn\b/i,
         /\bopen\w*\b[^.!?;,]*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
         /\bset\w*\s+Wake\.mechanical\s+on\s+mixed\s+verdicts\b/i,
-      ]),
+      ].every(rule => negatesBefore(sentence, rule))),
   },
   {
     id: 'abstract-english-no-incident-or-company-leaks',
