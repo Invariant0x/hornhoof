@@ -15,6 +15,8 @@ const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
 const WORKFLOW = readFileSync(join(ROOT, '.github/workflows/images.yml'), 'utf8');
 /* The runners the repository variable names, GitHub's machines without it. */
 const TESTS_RUNS_ON = "${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}";
+const BUILD_RUNS_ON = "${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}";
+const BUILDER = { driver: "${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}", endpoint: '${{ vars.BUILDKIT_ENDPOINT }}' };
 const run = promisify(execFile);
 const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...IDENTITY } }).trim();
@@ -261,7 +263,7 @@ describe('whether a mark spares this commit the tests', () => {
   });
 });
 
-type Job = { needs?: string | string[]; if?: string; 'runs-on': string; permissions?: Record<string, string>; outputs?: Record<string, string>; strategy?: { matrix: { part?: number[] } }; steps: { uses?: string; with?: Record<string, unknown>; id?: string; run?: string; env?: Record<string, string> }[] };
+type Job = { needs?: string | string[]; if?: string; 'runs-on': string; permissions?: Record<string, string>; outputs?: Record<string, string>; strategy?: { matrix: { part?: number[] } }; steps: { uses?: string; if?: string; with?: Record<string, unknown>; id?: string; run?: string; env?: Record<string, string> }[] };
 const JOBS = (parse(WORKFLOW) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job) => [job.needs ?? []].flat();
 
@@ -346,10 +348,18 @@ describe('.github/workflows/images.yml', () => {
     expect(JOBS.test!.strategy!.matrix.part).toEqual([1, 2, 3, 4]);
   });
 
-  it('lets the variable move only the first job and the tests; images, publishing and the release stay on GitHub’s machines', () => {
+  it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
     expect(JOBS.mark!['runs-on']).toBe(TESTS_RUNS_ON);
-    for (const [name, job] of Object.entries(JOBS)) if (name !== 'mark' && name !== 'test') expect(job['runs-on']).toBe('ubuntu-latest');
-    expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host/);
+    for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
+    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'publish', 'release', 'test']);
+    expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
+  });
+
+  it('builds with the BuildKit the repository variable names, and with GitHub’s own and its emulator without one', () => {
+    const buildx = (job: Job) => job.steps.filter(step => step.uses?.startsWith('docker/setup-buildx-action@'));
+    for (const name of ['images', 'publish']) expect(buildx(JOBS[name]!).map(step => step.with)).toEqual([BUILDER]);
+    const qemu = JOBS.images!.steps.filter(step => step.uses?.startsWith('docker/setup-qemu-action@'));
+    expect(qemu.map(step => step.if)).toEqual(['${{ !vars.BUILDKIT_ENDPOINT }}']);
   });
 
   it('gives the first job a checkout deep enough for a merge, the token, and only the rights to read', () => {

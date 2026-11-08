@@ -18,7 +18,8 @@ jobs:
   publish:
     # What counts as a proof is decided by main's copy of the door, not by a branch's.
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    # BUILD_RUNS_ON and BUILDKIT_ENDPOINT as in images.yml: our own runner while the repository is private.
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -47,6 +48,9 @@ jobs:
           node apps/server/dist/live-check-gate.js --commit "$commit" --proof "$RUNNER_TEMP/proof/proof.json"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
+          endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io

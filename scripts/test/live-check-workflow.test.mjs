@@ -57,6 +57,11 @@ test('a proof is published only from main, and only after the same door said yes
   assert.ok(judged > 0 && pushed > judged, `${judged} ${pushed}`);
 });
 
+test('a proof is published on the runner and with the BuildKit the build variables name, as the images are', () => {
+  assert.match(proofs.publish, /runs-on: \$\{\{ vars\.BUILD_RUNS_ON && fromJSON\(vars\.BUILD_RUNS_ON\) \|\| 'ubuntu-latest' \}\}\n/);
+  assert.match(proofs.publish, /driver: \$\{\{ vars\.BUILDKIT_ENDPOINT && 'remote' \|\| 'docker-container' \}\}\n\s+endpoint: \$\{\{ vars\.BUILDKIT_ENDPOINT \}\}\n/);
+});
+
 test('the words of a proof never become part of a command', () => {
   assert.match(proofs.publish, /PROOF: \$\{\{ inputs\.proof \}\}/);
   assert.doesNotMatch(proofs.publish.replace(/PROOF: \$\{\{ inputs\.proof \}\}/, ''), /inputs\.proof/);
