@@ -22,7 +22,7 @@ import { AgentState } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { arrowD, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
 
 export { employeeGroups };
