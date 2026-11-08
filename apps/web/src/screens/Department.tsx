@@ -36,6 +36,20 @@ function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru
   return role.description[language] ?? '';
 }
 
+function FrameHeading({ frame: f, language, canGive }: { frame: Frame; language: 'en' | 'ru'; canGive: boolean }) {
+  const t = useT();
+  return (
+    <Edge cut={14} corner>
+      <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
+        <span className="fn">{frameTitle(f, language, t)}</span>
+        {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
+        {f.status && <span className="fc">{t.tasks.echelons.statuses[f.status]}</span>}
+        <span className="fc">{t.dept.agents(f.members.length)}</span>
+      </span>
+    </Edge>
+  );
+}
+
 type Props = {
   me: Me;
   department: Department;
@@ -246,8 +260,8 @@ function useDepartmentSpace(language: string, panel: Props['panel']) {
   return { root, actions, style, tickerHidden: space.tickerHidden };
 }
 
-/* Inside a department: its schema as in the prototype. The head on top, a frame per role in stages left to right through
-   the gates, and the way back from them. Tasks, the repository, products and people open in a drawer at the left. */
+/* Inside a department: the head above the current task stages and their owners. Tasks, the repository, products and
+   people open in a drawer at the left. */
 export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -444,14 +458,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
             <div key={f.key || 'others'} className="frame" role={f.echelon ? 'group' : undefined} aria-label={f.echelon ? t.tasks.echelons.stages[f.echelon] : undefined} data-echelon={f.echelon} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
-              <Edge cut={14} corner>
-                <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
-                  <span className="fn">{frameTitle(f, language, t)}</span>
-                  {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
-                  {f.status && <span className="fc">{t.tasks.echelons.statuses[f.status]}</span>}
-                  <span className="fc">{t.dept.agents(f.members.length)}</span>
-                </span>
-              </Edge>
+              <FrameHeading frame={f} language={language} canGive={canGive} />
               {f.role && canGive && (
                 <input
                   type="checkbox"

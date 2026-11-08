@@ -77,6 +77,10 @@ function LaneRole({ employee, language }: { employee: Department['employees'][nu
   return role && role !== employee?.name ? <p className="say">{role}</p> : null;
 }
 
+function workflowOwner(id: string, department: Department, tree: DepartmentTree): string {
+  return department.employees.find(agent => agent.id === id)?.name ?? tree.activity?.find(activity => activity.agent.id === id)?.agent.name ?? id;
+}
+
 function LaneCard({ tree, department, pick, onOpenTask, onClose }: Props) {
   const L = useT().dept.tree, { language } = useLanguage(), openAgent = useOpenAgent();
   const row = lanesOf(tree).find(r => r.agent?.id === pick.agentId);
@@ -92,7 +96,7 @@ function LaneCard({ tree, department, pick, onOpenTask, onClose }: Props) {
       <LaneRole employee={employee} language={language} />
       <Details pairs={pairs} />
       {row.line && <>
-        <WorkflowStages workflow={row.line.echelons} resolveOwner={id => department.employees.find(agent => agent.id === id)?.name ?? tree.activity?.find(activity => activity.agent.id === id)?.agent.name ?? id} />
+        <WorkflowStages workflow={row.line.echelons} resolveOwner={id => workflowOwner(id, department, tree)} />
         <TaskFindings workflow={row.line.echelons} findings={row.line.echelonFindings} />
       </>}
     </>
