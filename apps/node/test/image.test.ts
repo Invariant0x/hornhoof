@@ -124,8 +124,12 @@ describe('the node image', () => {
   it('installs full Playwright Chromium at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {
     const browserStage = dockerfile.slice(dockerfile.indexOf('AS browser\n'), dockerfile.indexOf('AS quality\n'));
     expect(browserStage).not.toContain('ARG PLAYWRIGHT_VERSION=');
-    expect(browserStage).toContain('COPY package-lock.json /tmp/package-lock.json');
-    expect(browserStage).toContain("packages['node_modules/@playwright/test'].version");
+    /* Only the version: a release, which moves the lockfile's own versions, downloads no browser again. */
+    expect(browserStage).not.toContain('package-lock.json');
+    expect(browserStage).toContain('COPY --from=manifests /playwright-version /tmp/playwright-version');
+    expect(browserStage).toContain('npm install -g "playwright@$(cat /tmp/playwright-version)"');
+    const manifestsStage = dockerfile.slice(dockerfile.indexOf('AS manifests\n'), dockerfile.indexOf('AS build\n'));
+    expect(manifestsStage).toContain("packages['node_modules/@playwright/test'].version\" > /playwright-version");
     expect(browserStage).not.toContain('--only-shell');
     expect(browserStage).toContain('PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium');
     expect(browserStage).toContain('chmod -R a+rX /opt/ms-playwright');

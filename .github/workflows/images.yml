@@ -231,9 +231,11 @@ jobs:
           provenance: ${{ matrix.name != 'hornhoof-node' }}
           # Every company updates to latest, so this job never moves it: the publish job does, once the tests passed on main.
           tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}
-          # Our own BuildKit keeps its cache itself: sending it to GitHub from there took longer than the build.
-          cache-from: ${{ !vars.BUILDKIT_ENDPOINT && format('type=gha,scope={0}', matrix.name) || '' }}
-          cache-to: ${{ !vars.BUILDKIT_ENDPOINT && format('type=gha,mode=max,scope={0}', matrix.name) || '' }}
+          # The cache beside each image, whatever BuildKit builds it: one drops what it built once its store is full, and
+          # a new one starts empty. The registry takes only the layers it lacks; GitHub's own cache took longer than the
+          # build to take them all. A cache that cannot be written fails no build.
+          cache-from: type=registry,ref=ghcr.io/invariant0x/${{ matrix.name }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/invariant0x/${{ matrix.name }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
   # The one way a build reaches machines. It takes the images built for this commit, as they are, by the digests their commit's
   # tag points at: a build made again would have other digests. A commit with no images stops here, the tags stay where they

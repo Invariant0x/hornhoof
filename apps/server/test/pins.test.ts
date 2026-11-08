@@ -22,7 +22,7 @@ describe('what the build runs', () => {
   /* A tag can point at another image tomorrow; a digest is the one image the build was checked with. */
   it('builds every image from a base image pinned by digest', () => {
     const from = ['Dockerfile', 'apps/node/Dockerfile', 'apps/updater/Dockerfile'].flatMap(f => read(f).split('\n').filter(l => l.startsWith('FROM ')));
-    expect(from).toHaveLength(9);
+    expect(from).toHaveLength(11);
     for (const line of from) expect(line).toMatch(/ [\w.-]+:[\w.-]+@sha256:[0-9a-f]{64}( AS \w+)?$/);
   });
 

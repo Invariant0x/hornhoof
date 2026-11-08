@@ -2,14 +2,24 @@
 # The node: runs the agent programs (Claude Code, Codex, Kimi Code, Antigravity CLI) for one subscription, or for the company's API keys with --builtin.
 # Build steps that prepare JavaScript or browser downloads run on the builder's own platform. The final PostgreSQL
 # smoke runs in the target image so an unsupported runtime cannot pass the image build.
-FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
+# Our package files with our own versions set aside, which each release moves and nothing installed reads, and the
+# lockfile's Playwright version: the stages that install take only these, so a release reuses the layers they made.
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS manifests
 WORKDIR /app
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/server/package.json apps/server/
 COPY apps/node/package.json apps/node/
 COPY apps/web/package.json apps/web/
+COPY scripts/release/workspace-versions.mjs /tmp/workspace-versions.mjs
+RUN node --input-type=module -e "(await import('/tmp/workspace-versions.mjs')).setAside('.')" \
+  && node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version" > /playwright-version
+
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
+WORKDIR /app
+COPY --from=manifests /app/ ./
 RUN npm ci
+COPY tsconfig.base.json ./
 COPY packages/protocol packages/protocol
 COPY apps/node apps/node
 RUN npm run build -w @hornhoof/protocol && npm run build -w @hornhoof/node
@@ -17,11 +27,7 @@ RUN npm run build -w @hornhoof/protocol && npm run build -w @hornhoof/node
 # The node's production modules: no native code among them.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-COPY packages/protocol/package.json packages/protocol/
-COPY apps/server/package.json apps/server/
-COPY apps/node/package.json apps/node/
-COPY apps/web/package.json apps/web/
+COPY --from=manifests /app/ ./
 RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force \
   && rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web
 
@@ -30,10 +36,9 @@ RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS browser
 ARG TARGETARCH
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-COPY package-lock.json /tmp/package-lock.json
-RUN version="$(node -p "JSON.parse(require('node:fs').readFileSync('/tmp/package-lock.json', 'utf8')).packages['node_modules/@playwright/test'].version")" \
-  && npm install -g "playwright@$version" \
-  && rm -f /tmp/package-lock.json \
+COPY --from=manifests /playwright-version /tmp/playwright-version
+RUN npm install -g "playwright@$(cat /tmp/playwright-version)" \
+  && rm -f /tmp/playwright-version \
   && npm cache clean --force
 COPY apps/node/browser-packages.cjs /opt/browser-packages.cjs
 RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGETARCH" ;; esac)" \

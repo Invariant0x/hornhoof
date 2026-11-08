@@ -31,6 +31,12 @@ someone waits for them.
   check, its proof, the live check stand, `install.sh check-node` and `install.sh back-node` are gone.
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
   change that reaches everything, such as one of the lockfile, still runs every test.
+- A release no longer runs every test on GitHub because it moves the version in the package files and the lockfile:
+  where only our own versions moved, the file counts as unchanged. Any other change of them still runs every test.
+- A release builds its images faster. A new version alone no longer installs the dependencies or downloads the browser
+  of an image again, and each image keeps its build cache next to it on GitHub, so a builder that dropped its own, or a
+  new one, does not build the heavy parts again. GitHub's own cache, which took longer to fill than the build, is no
+  longer used.
 
 ### Fixed
 
@@ -41,6 +47,9 @@ someone waits for them.
 - An employee can no longer wait for itself by writing its own id in capitals, and is never told that it waits for itself.
 - A push to main whose version is out already no longer shows as a failed run on GitHub: the publish job sees the
   version's tag and moves nothing.
+- Two node tests that failed now and then on a busy GitHub runner pass every time. In the shared harness test the other
+  machine now holds its claim while it builds, so the waiting machine cannot take the build in between, and the Kimi Code
+  test waits for the input line to come back after the new program redraws it.
 
 ## [0.8.3] - 2026-11-08
 

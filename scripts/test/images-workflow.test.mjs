@@ -84,9 +84,13 @@ test('the job that may move tags does not keep the checkout token', () => {
   assert.match(images.publish, /actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+persist-credentials: false\n/);
 });
 
-test('images built with our own BuildKit keep their cache in it, and send none to GitHub', () => {
-  assert.match(images.images, /cache-from: \$\{\{ !vars\.BUILDKIT_ENDPOINT && format\('type=gha,scope=\{0\}', matrix\.name\) \|\| '' \}\}\n/);
-  assert.match(images.images, /cache-to: \$\{\{ !vars\.BUILDKIT_ENDPOINT && format\('type=gha,mode=max,scope=\{0\}', matrix\.name\) \|\| '' \}\}\n/);
+/* A BuildKit drops what it built once its store is full, and a new one starts empty: the cache beside each image brings
+   back what a build made before, the layers the emulated platform takes long to make among them. */
+test('images keep their build cache in the registry beside them, whatever BuildKit builds them, send none to GitHub, and fail no build that cannot write it', () => {
+  const ref = 'type=registry,ref=ghcr.io/invariant0x/${{ matrix.name }}:buildcache';
+  assert.ok(images.images.includes(`\n          cache-from: ${ref}\n`), 'cache-from');
+  assert.ok(images.images.includes(`\n          cache-to: ${ref},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true\n`), 'cache-to');
+  assert.doesNotMatch(images.images, /type=gha/);
 });
 
 test('tests GitHub passed leave the mark on their commit, naming the passed commit they stood on when the change chose them', () => {
