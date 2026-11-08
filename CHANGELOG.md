@@ -5,12 +5,21 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
-## [Unreleased]
+## [0.8.4] - 2026-11-08
+
+Let the nodes on every computer follow the server to a new build by themselves, and let GitHub test each commit once and
+only where its change reaches.
+
+### Before you update
+
+- On every computer other than the server's own, run the install line once more after the update. It starts the updater
+  of that computer's nodes; from then on they follow the server by themselves.
 
 ### Added
 
 - Nodes on every computer move to the server's build by themselves, each once its work ends: the install line starts a
-  small updater next to them. A computer set up before 0.8.4 needs the install line once to get it.
+  small updater next to them. It reads what the server serves only as data and runs only Hornhoof's own images, each by
+  its digest.
 
 ### Changed
 
