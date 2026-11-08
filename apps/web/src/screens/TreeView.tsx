@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { Department, DepartmentTree, Employee } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, reviewsOf, statePriority,
+  idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, statePriority,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody } from './TreeCard';
@@ -19,24 +19,9 @@ type Props = {
 };
 type Selection = { pick: TreePick; x: number; y: number };
 
-function VerdictSymbol({ m }: { m: TreeMark }) {
-  const { x, y, verdict } = m;
-  if (verdict?.findings) return <text className="mk a" x={x} y={y}>{verdict.findings}</text>;
-  if (verdict?.pass) return <path className="ic-ok" d={`M${x - 3} ${y}l2 2.2 4-4.4`} />;
-  return null;
-}
-
 function Mark({ m }: { m: TreeMark }) {
   const { x, y, kind } = m;
   if (kind === 'done' || m.move?.kind === 'report') return <rect className="sq" x={x - 4.5} y={y - 4.5} width="9" height="9" />;
-  if (kind === 'verdict') {
-    return (
-      <>
-        <circle className={`ring ${m.cls}`} cx={x} cy={y} r="8.5" />
-        <VerdictSymbol m={m} />
-      </>
-    );
-  }
   if (kind === 'head') {
     return (
       <>
@@ -61,7 +46,7 @@ function Mark({ m }: { m: TreeMark }) {
       </>
     );
   }
-  const r = { start: 3.4, fork: 2.8, merge: 4.4, review: 5, move: 3.6 };
+  const r = { start: 3.4, fork: 2.8, merge: 4.4, move: 3.6 };
   return <circle className={m.cls} cx={x} cy={y} r={r[kind]} />;
 }
 
@@ -156,17 +141,9 @@ function Legend({ tree }: { tree: DepartmentTree }) {
   );
 }
 
-function reviewLabel(pick: TreePick, review: NonNullable<DepartmentTree['review']>, tree: DepartmentTree, department: Department, L: ReturnType<typeof useT>['dept']['tree']): string {
-  const who = department.employees.find(e => e.id === pick.agentId)?.name ?? review.reviewers.find(r => r.agent.id === pick.agentId)?.agent.name;
-  const label = `#${review.number} ${L.reviewH(tree.turn!.number)}`;
-  return who ? `${who}, ${label}` : label;
-}
-
-function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department, L: ReturnType<typeof useT>['dept']['tree']): string {
+function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department): string {
   const row = tree.lines.find(l => l.taskId === pick.taskId);
   if (row) return `${department.employees.find(e => e.id === row.agent.id)?.name ?? row.agent.name}, #${row.number} ${row.title}`;
-  const review = reviewsOf(tree).find(r => r.taskId === pick.taskId);
-  if (review) return reviewLabel(pick, review, tree, department, L);
   if (pick.agentId) return department.employees.find(e => e.id === pick.agentId)?.name ?? '';
   if (pick.kind === 'main') return trunkBranch(department);
   return tree.turn!.branch;
@@ -203,9 +180,9 @@ function graphPaths(layout: TreeLayout, kind: string) {
 }
 
 function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { hit: TreeTarget }) {
-  const t = useT(), L = t.dept.tree;
+  const t = useT();
   const on = samePick(selected, hit.pick);
-  const label = hit.segment ? `${pickLabel(hit.pick, tree, department, L)}: ${segmentText(t, hit.segment, tree.now)}` : pickLabel(hit.pick, tree, department, L);
+  const label = hit.segment ? `${pickLabel(hit.pick, tree, department)}: ${segmentText(t, hit.segment, tree.now)}` : pickLabel(hit.pick, tree, department);
   const props = {
     className: `${hit.round ? 'hit' : 'rowhit'}${on ? ' on' : ''}`,
     'data-row': hit.row,
@@ -384,7 +361,7 @@ function FloatingCard({ selection, card, box, tree, department, onOpenTask, onCl
       ref={card}
       style={style}
       role="dialog"
-      aria-label={pickLabel(selection.pick, tree, department, t.dept.tree)}
+      aria-label={pickLabel(selection.pick, tree, department)}
     >
       <div className="tv-card-edge">
         <div className="tv-card-in">

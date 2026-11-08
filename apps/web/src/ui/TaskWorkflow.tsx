@@ -11,6 +11,10 @@ function ownerName(id: string, task: TaskDetail, org: Org | null): string {
 
 /* Stage order and ownership are server facts, independent of an employee's role. */
 export function TaskWorkflow({ workflow, task, org }: { workflow: EchelonsSnapshot; task: TaskDetail; org: Org | null }) {
+  return <WorkflowStages workflow={workflow} resolveOwner={id => ownerName(id, task, org)} />;
+}
+
+export function WorkflowStages({ workflow, resolveOwner }: { workflow: EchelonsSnapshot; resolveOwner(id: string): string }) {
   const labels = useT().tasks.echelons;
   const reason = (value: string) => labels.reasons[value as keyof typeof labels.reasons] ?? value;
   return <section className="fit">
@@ -22,7 +26,7 @@ export function TaskWorkflow({ workflow, task, org }: { workflow: EchelonsSnapsh
         const owner = current ? workflow.ownerAgentId : stage.ownerAgentId;
         return <li key={stage.stage} className={STAGE_CLASS[stage.status]} aria-current={current ? 'step' : undefined}>
           <b>{labels.stages[stage.stage]}</b>{' '}<span>{labels.statuses[stage.status]}</span>
-          {owner && <p>{labels.owner(ownerName(owner, task, org))}</p>}
+          {owner && <p>{labels.owner(resolveOwner(owner))}</p>}
           {stage.reason && <p className="muted">{reason(stage.reason)}</p>}
         </li>;
       })}

@@ -1,11 +1,10 @@
 import type {
-  Department, DepartmentTree, SegmentKind, TreeActivity, TreeAgent, TreeLine, TreeMove, TreeReview, TreeReviewer, TreeSegment, TreeVerdict,
+  Department, DepartmentTree, SegmentKind, TreeActivity, TreeAgent, TreeLine, TreeMove, TreeSegment,
 } from '../types';
 import type { Point } from '../ui/wires';
 import { CH, CW } from './schema';
 
 export const SEGMENT_CLASS: Record<SegmentKind, string> = { work: 'w', after: 'af', person: 'ps', stall: 'st', lost: 'ls', alarm: 'al', queued: 'q', unknown: 'u' };
-export const reviewsOf = (tree: DepartmentTree): TreeReview[] => tree.reviews ?? (tree.review ? [tree.review] : []);
 export const trunkBranch = (department: Department) => department.repository?.branch ?? 'main';
 export const treeClock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 export const secondsBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 1000);
@@ -22,7 +21,7 @@ const IDLE_CLASS = { stall: 'm', person: 'p', after: 'm', lost: 'bad', alarm: 'b
 export const idleClass = (kind: Exclude<SegmentKind, 'work'>): string => IDLE_CLASS[kind];
 
 export type TreePick = {
-  kind: 'activity' | 'line' | 'reviewer' | 'move' | 'merge' | 'main' | 'turn' | 'review';
+  kind: 'activity' | 'line' | 'move' | 'merge' | 'main' | 'turn';
   agentId?: string;
   taskId?: string;
   moveIndex?: number;
@@ -35,10 +34,7 @@ export type TreeRow = {
   h: number;
   agent?: TreeAgent;
   line?: TreeLine;
-  reviewer?: TreeReviewer;
-  review?: TreeReview;
   lines?: TreeLine[];
-  reviews?: { review: TreeReview; reviewer: TreeReviewer }[];
   current?: boolean;
   activities?: TreeActivity[];
   activity?: TreeActivity;
@@ -53,13 +49,12 @@ export type TreePath = {
   segmentKind?: SegmentKind;
 };
 export type TreeMark = {
-  kind: 'start' | 'fork' | 'merge' | 'done' | 'move' | 'head' | 'verdict' | 'review';
+  kind: 'start' | 'fork' | 'merge' | 'done' | 'move' | 'head';
   x: number;
   y: number;
   cls: string;
   dim?: boolean;
   move?: TreeMove;
-  verdict?: TreeVerdict;
   pick: TreePick;
 };
 export type TreeBadge = {
@@ -129,7 +124,6 @@ function activityPick(item: ActivityItem): TreePick {
 
 export function agentSegments(tree: DepartmentTree, agentId: string): TreeSegment[] {
   return [...tree.lines.filter(l => l.agent.id === agentId).flatMap(l => l.segments),
-    ...reviewsOf(tree).flatMap(r => r.reviewers.filter(p => p.agent.id === agentId).flatMap(p => p.segments)),
     ...(tree.activity ?? []).filter(a => a.agent.id === agentId).flatMap(a => a.segments),
     ...tree.idle.filter(i => i.agent.id === agentId && i.waitsForAgent),
   ].sort((a, b) => statePriority(a.kind) - statePriority(b.kind));
@@ -138,24 +132,15 @@ export function agentSegments(tree: DepartmentTree, agentId: string): TreeSegmen
 type Lane = Omit<TreeRow, 'y' | 'h'>;
 
 function laneFor(lanes: Map<string, Lane>, agent: TreeAgent): Lane {
-  const row = lanes.get(agent.id) ?? { type: 'lane', agent, lines: [], reviews: [], activities: [] };
+  const row = lanes.get(agent.id) ?? { type: 'lane', agent, lines: [], activities: [] };
   lanes.set(agent.id, row);
   return row;
-}
-
-function reviewIsCurrent(line: TreeLine | undefined, last: { review: TreeReview; reviewer: TreeReviewer }): boolean {
-  if (last.reviewer.live) return true;
-  if (line?.live) return false;
-  return !line || last.review.openedAt >= line.createdAt;
 }
 
 function labelledLane(row: Lane, now: string): Lane {
   const observed = activityItem(row.activities!, now), activity = observed?.activity;
   row.lines!.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const line = row.lines!.findLast(l => l.live) ?? row.lines!.at(-1), last = row.reviews!.findLast(r => r.reviewer.live) ?? row.reviews!.at(-1);
-  if (last && reviewIsCurrent(line, last)) {
-    return { ...row, activity, reviewer: last.reviewer, review: last.review, pick: { kind: 'reviewer', taskId: last.review.taskId, agentId: row.agent!.id } };
-  }
+  const line = row.lines!.findLast(l => l.live) ?? row.lines!.at(-1);
   if (!line) return { ...row, activity, pick: activityPick(observed!) };
   return { ...row, activity, line, pick: { kind: 'line', taskId: line.taskId, agentId: row.agent!.id } };
 }
@@ -167,15 +152,12 @@ function addActivityLanes(lanes: Map<string, Lane>, activities: TreeActivity[] =
 export function lanesOf(tree: DepartmentTree): Lane[] {
   const lanes = new Map<string, Lane>();
   for (const line of tree.lines) laneFor(lanes, line.agent).lines!.push(line);
-  for (const review of reviewsOf(tree)) {
-    for (const reviewer of review.reviewers) laneFor(lanes, reviewer.agent).reviews!.push({ review, reviewer });
-  }
   addActivityLanes(lanes, tree.activity);
   return [...lanes.values()].map(row => labelledLane(row, tree.now));
 }
 
-export function rowTaskNumber(row: Pick<TreeRow, 'line' | 'review' | 'activity'>): number | undefined {
-  return (row.line ?? row.review ?? row.activity?.task)?.number;
+export function rowTaskNumber(row: Pick<TreeRow, 'line' | 'activity'>): number | undefined {
+  return (row.line ?? row.activity?.task)?.number;
 }
 
 export function currentTaskNumber(tree: DepartmentTree, agentId: string): number | undefined {
@@ -332,28 +314,6 @@ function workLane(d: Drawing, row: TreeRow) {
   if (!done) currentHead(d, row, line.segments, line.waitsFor);
 }
 
-function reviewLane(d: Drawing, row: TreeRow, openedAt: string) {
-  const reviewer = row.reviewer!, verdict = reviewer.verdict, y = center(row), x = d.layout.x(openedAt);
-  if (d.tree.repository) path(d, 'fork', 'cn c', [[x, d.turnY], [x, y - R], [x + R, y]], row.agent!.id, !!verdict);
-  else mark(d, { kind: 'start', x, y, cls: 'ring m', dim: !!verdict, pick: row.pick! });
-  segments(
-    d, row, reviewer.segments, verdict?.at ?? d.tree.now, !!verdict, reviewer.live,
-    d.tree.repository ? openedAt : null, !d.tree.repository,
-  );
-  if (verdict) {
-    mark(d, {
-      kind: 'verdict',
-      x: d.layout.x(verdict.at),
-      y,
-      cls: verdict.pass && !verdict.findings ? 'ok' : 'a',
-      verdict,
-      pick: row.pick!,
-    });
-  } else {
-    currentHead(d, row, reviewer.segments);
-  }
-}
-
 function drawWait(d: Drawing, row: TreeRow) {
   const list: TreeSegment[] = d.tree.idle.filter(i => i.agent.id === row.agent?.id && i.waitsForAgent && (i.kind === 'stall' || i.kind === 'after'));
   if (!list.length) return;
@@ -361,7 +321,7 @@ function drawWait(d: Drawing, row: TreeRow) {
   if (currentSegment(list, d.tree.now)) head(d, row, list);
 }
 
-/* lanesOf supplies both arrays for every lane, including review-only agents. */
+/* lanesOf supplies both arrays for every lane, including agents with only observed history. */
 function drawActivityHead(d: Drawing, row: TreeRow, item: ActivityItem | undefined) {
   if (!item || !containsNow(item.segment, d.tree.now)) return;
   const strongest = strongestCurrent(agentSegments(d.tree, row.agent!.id), d.tree.now);
@@ -381,15 +341,8 @@ function drawLane(d: Drawing, row: TreeRow) {
   for (const line of row.lines!) {
     workLane(d, { ...row, line, current: row.pick?.taskId === line.taskId, pick: { kind: 'line', agentId: line.agent.id, taskId: line.taskId } });
   }
-  for (const { review, reviewer } of row.reviews!) {
-    reviewLane(d, { ...row, reviewer, current: row.pick?.taskId === review.taskId && !review.closedAt, pick: { kind: 'reviewer', agentId: reviewer.agent.id, taskId: review.taskId } }, review.openedAt);
-  }
   drawWait(d, row);
   drawActivity(d, row);
-}
-
-function reviewMark(d: Drawing, review: TreeReview) {
-  if (d.tree.repository) mark(d, { kind: 'review', x: d.layout.x(review.openedAt), y: d.turnY, cls: 'via okf', pick: { kind: 'review', taskId: review.taskId } });
 }
 
 function gridLines(d: Drawing) {
@@ -433,7 +386,6 @@ export function treeLayout(tree: DepartmentTree, box: { width: number; phone: bo
   gridLines(d);
   trunks(d);
   rows.filter(r => r.agent).forEach(r => drawLane(d, r));
-  reviewsOf(tree).forEach(r => reviewMark(d, r));
   rowTargets(layout);
   return layout;
 }

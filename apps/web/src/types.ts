@@ -623,6 +623,9 @@ export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; 
 export type TreeMove = { kind: string; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
 export type TreeLine = {
+  echelons: EchelonsSnapshot;
+  echelonFindings: EchelonFindingsView;
+  ownerSince: string;
   taskId: string;
   number: number;
   title: string;
@@ -640,9 +643,6 @@ export type TreeLine = {
   live: boolean;
   externalWait?: ExternalWait | null;
 };
-export type TreeVerdict = { at: string; pass: boolean; findings: number | null };
-export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
-export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
 export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost?: number; alarm?: number; queued?: number; unknown?: number };
 export type IdleStretch = { agent: TreeAgent; taskId: string; number: number; title: string; kind: Exclude<SegmentKind, 'work'>; from: string; to: string | null; waitsFor: number[]; question: string | null; program?: TreeSegment['program']; alarm?: TurnAlarm; waitsForAgent?: TreeAgent; externalWait?: ExternalWait };
 export type TreeActivity = { jobId: string; agent: TreeAgent; task: { id: string; number: number; title: string } | null; segments: TreeSegment[] };
@@ -650,10 +650,7 @@ export type DepartmentTree = {
   now: string;
   turn: { id: string; number: number; branch: string; startedAt: string } | null;
   repository: boolean;
-  stage: 'work' | 'review';
   lines: TreeLine[];
-  review: TreeReview | null;
-  reviews?: TreeReview[];
   activity?: TreeActivity[];
   waiting?: { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string }[];
   time: AgentTime[];
