@@ -54,7 +54,7 @@ export async function aclCompanyOn(app: FastifyInstance, db: Db, url: string) {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* Work of one agent, given by the head of Development. */
   const work = async (title: string, agent: { id: string }, departmentId = dev!.id) =>
-    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, assigneeAgentId: agent.id, executor: true, gates: [] })).task;
+    (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, assigneeAgentId: agent.id, executor: true })).task;
   const get = (url: string, token: string) => app.inject({ url, ...as(token) });
   return { app, db, url, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, work, get };
 }

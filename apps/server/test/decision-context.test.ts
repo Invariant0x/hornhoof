@@ -46,7 +46,7 @@ async function company() {
     .insert(jobs)
     .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) })
     .returning();
-  const { task } = await createTask(ctx, { agentId: hana.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+  const { task } = await createTask(ctx, { agentId: hana.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true });
   /* Words into the orchestrator's turn, kept as the window keeps them. */
   const wrote = async (personId: string | null, text = 'Go on.', extra: Record<string, unknown> = {}) =>
     (await appendEvent(ctx, { companyId: acme!.id, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text, ...extra }, personId })).seq;

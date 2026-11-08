@@ -41,7 +41,7 @@ async function fixture(env?: NodeJS.ProcessEnv) {
     clients.set(agentId, client);
     return client;
   };
-  const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true, gates: [] })).task;
+  const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const wait = async (ref: number | string, reason: string, until: string, agentId = worker!.id) => {
     const client = await tools(agentId);
@@ -421,7 +421,7 @@ describe('external task wait', () => {
   it('clears external waits in children when the parent task is cancelled', async () => {
     const c = await fixture();
     const parent = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Publish', brief: '', body: '', departmentId: c.department.id, assigneeAgentId: c.head.id })).task;
-    const child = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Images', brief: '', body: '', departmentId: c.department.id, parentId: parent.id, assigneeAgentId: c.worker.id, executor: true, gates: [] })).task;
+    const child = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Images', brief: '', body: '', departmentId: c.department.id, parentId: parent.id, assigneeAgentId: c.worker.id, executor: true })).task;
     const deadline = new Date(Date.now() + 3_600_000).toISOString();
     expect((await c.wait(parent.number, 'Registry', deadline, c.head.id)).isError).toBeFalsy();
     expect((await c.wait(child.number, 'Images', deadline)).isError).toBeFalsy();
@@ -662,7 +662,6 @@ describe('external task wait', () => {
         departmentId: c.department.id,
         assigneeAgentId: simon!.id,
         executor: true,
-        gates: [],
       })
     ).task;
     await c.wait(laidOut.number, 'Build check', new Date(Date.now() + 3_600_000).toISOString(), simon!.id);

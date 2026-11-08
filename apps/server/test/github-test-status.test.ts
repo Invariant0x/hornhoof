@@ -37,7 +37,7 @@ async function company({ full = FULL as string | null, env = {} as NodeJS.Proces
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+  const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
   const marks: { url: string; token: string; commit: string; mark: TestsMark }[] = [];
   let answer: Awaited<ReturnType<typeof ctx.markCommit>> = { ok: true };
   ctx.markCommit = async (repo, commit, mark) => {

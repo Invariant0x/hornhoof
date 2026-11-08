@@ -35,7 +35,7 @@ async function fixture() {
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dev!.id, subscriptionId: sub!.id, name, kind, roleKey, model: '' }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const worker = await hire('Bruno', 'worker', 'DEV-BE');
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Full text', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Full text', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker.id, executor: true })).task;
   let count = 0;
   const client = async (agent: { id: string }) => {
     const token = `long-text-fixture-${++count}-0123456789abcdef`;

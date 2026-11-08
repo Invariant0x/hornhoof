@@ -27,7 +27,7 @@ async function company() {
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const parent = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true })).task;
   let n = 0;
   const turn = async (agent: { id: string }) => {
     const token = `tool-token-${++n}-0123456789abcdef0123456789`;

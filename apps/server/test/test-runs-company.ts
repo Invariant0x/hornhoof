@@ -39,7 +39,7 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
   let n = 0;
   /* A running turn of the agent on a task, and its tools. */
   const turn = async (agent: { id: string }, taskId: string | null = task.id) => {

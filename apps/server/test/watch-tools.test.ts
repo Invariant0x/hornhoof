@@ -39,7 +39,7 @@ async function company(skills: string[]) {
   /* The node says hello before Wendy's turn starts, so it does not end a turn it never ran. */
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
-  const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
   return { app, db, ceo, dev: dev!, ops: ops!, acme: acme!, sub: sub!, wendy, hana, bruno, task, hire };
 }
 

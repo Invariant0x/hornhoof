@@ -43,7 +43,7 @@ async function company() {
   await db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, over: object = {}) =>
-    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates: [], inTurnReview: true, ...over })).task;
+    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, inTurnReview: true, ...over })).task;
   const task = await member('Checkout');
   let tokens = 0;
   const turn = async (agent: { id: string }, taskId: string | null = task.id) => {

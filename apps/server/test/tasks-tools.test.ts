@@ -52,7 +52,7 @@ describe('task tools', () => {
     const c = await company();
     const words = 'Report: права доступа и полный текст.\n'.repeat(500).slice(0, 11999) + '!';
     const owner = kind === 'report' ? c.head : c.bruno;
-    const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report', gates: [] })).task;
+    const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report' })).task;
     const client = await c.tools(owner);
     const args = kind === 'comment' ? { text: words } : kind === 'submit' ? { summary: words, evidence: words } : { done: true, summary: words };
     const result = await call(client, kind, { task: task.number, ...args });
@@ -139,7 +139,7 @@ describe('task tools', () => {
 
   it("refuses a member's move on another member's task with a readable error", async () => {
     const { ctx, db, head, bruno, tess, dev, tools } = await company();
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     const res = await call(await tools(tess), 'submit', { task: task.number, summary: 'Done.', evidence: 'npm test' });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain('#1');
@@ -184,7 +184,7 @@ describe('task tools', () => {
 describe('asking a person', () => {
   it('keeps the question as an outgoing message to its responsible person', async () => {
     const { ctx, db, dev, head, bruno, ceo, tools } = await company();
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     const asked = await call(await tools(bruno), 'ask_person', { task: task.number, question: 'Which cards do we take?' });
     expect(asked.isError).toBeFalsy();
     const outgoing = (await listEvents(db, bruno.id, 0)).find(e => e.message?.direction === 'out');
@@ -193,7 +193,7 @@ describe('asking a person', () => {
 
   it('keeps what the question is about, and takes no topic it does not know', async () => {
     const { ctx, db, dev, head, bruno, tools } = await company();
-    const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true })).task;
     const client = await tools(bruno);
     expect((await call(client, 'ask_person', { task: task.number, question: 'Which cards do we take?', topic: 'task' })).isError).toBeFalsy();
     expect((await call(client, 'ask_person', { task: task.number, question: 'Who pays for the card fees?', topic: 'money' })).isError).toBe(true);
@@ -331,7 +331,7 @@ describe('dates through the tools', () => {
     const c = await company();
     await strict(c);
     const client = await c.tools(c.head);
-    const first = JSON.parse(text(await call(client, 'task', { task: (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task.number })));
+    const first = JSON.parse(text(await call(client, 'task', { task: (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true })).task.number })));
     const without = await call(client, 'create_task', piece('Follow', c.rita.id, { after: [first.number], independentNone: 'One piece.' }));
     expect(without.isError).toBe(true);
     expect(text(without)).toContain('sets dates for its waits');
@@ -347,8 +347,8 @@ describe('dates through the tools', () => {
     const c = await company();
     await strict(c);
     const client = await c.tools(c.head);
-    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
-    const later = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Later', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.rita.id, executor: true, gates: [] })).task;
+    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true })).task;
+    const later = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Later', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.rita.id, executor: true })).task;
     const updated = await call(client, 'update_task', { task: later.number, after: [first.number], independentNone: 'One piece.', afterPlans: [{ task: first.number, plan: promise(c) }] });
     expect(updated.isError, text(updated)).toBeFalsy();
     expect(await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, later.id))).toMatchObject([{ state: 'active' }]);
@@ -358,7 +358,7 @@ describe('dates through the tools', () => {
     const c = await company();
     await strict(c);
     const client = await c.tools(c.bruno);
-    const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
+    const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true })).task;
     const plain = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
     expect(plain.isError, text(plain)).toBeFalsy();
     const asked = await call(client, 'ask_person', { task: work.number, question: 'And which?', topic: 'task', plan: promise(c) });
@@ -374,7 +374,7 @@ describe('dates over HTTP', () => {
   it('takes a promise for an edge in POST /api/tasks, and refuses without one where dates are set, with the same words', async () => {
     const c = await company();
     await c.db.insert(waitPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: c.ceo.id });
-    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
+    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true })).task;
     const post = (payload: object) => c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Follow', department: c.dev.id, after: [first.number], independentNone: 'One piece.', ...payload }, ...as(c.ceoToken) });
     const refused = await post({});
     expect(refused.statusCode).toBe(400);

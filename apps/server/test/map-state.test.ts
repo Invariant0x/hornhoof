@@ -172,7 +172,7 @@ describe('lines between a head and its employees', () => {
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');
     await end(job.id, 'failed');
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');
-    const page = await createTask(ctx, { agentId: hana.id }, { title: 'Page', brief: '', body: '', departmentId: (await loadTask(db, api.id)).departmentId, assigneeAgentId: bruno.id, executor: true, gates: [] });
+    const page = await createTask(ctx, { agentId: hana.id }, { title: 'Page', brief: '', body: '', departmentId: (await loadTask(db, api.id)).departmentId, assigneeAgentId: bruno.id, executor: true });
     await run(bruno.id, page.task.id);
     await brokeDown(ctx, bruno.id, await loadTask(db, page.task.id), 'Its turns keep breaking.');
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');

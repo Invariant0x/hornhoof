@@ -19,7 +19,7 @@ const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, r
 const MIN = 60_000;
 async function atWork() {
   const c = await failureCompany();
-  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] });
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
   await wakeAll(c.ctx, [{ agentId: c.agent.id, taskId: task.id, why: 'assigned' }]);
   return { ...c, task, first: (await c.turnsOf())[0]! };
 }
@@ -40,7 +40,7 @@ describe('named turn failures', () => {
 
   it('keeps a person and their one message when a legacy task continuation uses the shared repeat path', async () => {
     const c = await failureCompany();
-    const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] });
+    const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
     const text = 'Keep my task message and its author.';
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task.id, prompt: text, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text, taskWake: taskWakeOf(task, { why: 'message' as Parameters<typeof taskWakeOf>[1]['why'] }) } });
     await c.fail(id);

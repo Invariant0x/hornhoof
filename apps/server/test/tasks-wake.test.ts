@@ -297,7 +297,7 @@ describe('the turns a task move needs', () => {
     const c = await company();
     const task = await c.memberTask();
     const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
-    await createTask(c.ctx, { agentId: c.head.id }, { title: 'Refunds', brief: '', body: '', departmentId: c.dev.id, parentId: task.id, assigneeAgentId: kai!.id, executor: true, gates: [] });
+    await createTask(c.ctx, { agentId: c.head.id }, { title: 'Refunds', brief: '', body: '', departmentId: c.dev.id, parentId: task.id, assigneeAgentId: kai!.id, executor: true });
     await cancel(c.ctx, { agentId: c.head.id }, task.id, 'Not needed.');
     expect(await wakeLeftBehind(c.ctx, later())).toBe(0);
     expect(await c.turnsOf(kai!.id)).toEqual([]);

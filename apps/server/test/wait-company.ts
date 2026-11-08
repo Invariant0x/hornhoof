@@ -21,7 +21,7 @@ export async function waitCompany() {
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', taskId, startedAt: new Date(), timeoutMs: 1000, toolTokenHash: hashToken(token) }).returning();
     return { job: job!, client: await mcp(c.app, token) };
   };
-  const task = async (agentId = c.agent.id) => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: agentId, executor: true, gates: [] })).task;
+  const task = async (agentId = c.agent.id) => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: agentId, executor: true })).task;
   const messages = async (agentId: string) => (await listEvents(c.db, agentId, 0)).filter(e => e.kind === 'message' && e.message?.direction === 'in');
   return { ...c, orchestrator: orchestrator!, run, task, messages };
 }

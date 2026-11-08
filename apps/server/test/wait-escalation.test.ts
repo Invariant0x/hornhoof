@@ -23,7 +23,7 @@ async function company() {
   });
   const first = async () => c.task(c.agent.id);
   /* A task of the head's that comes after Bruno's: Bruno answers for the wait, on the department's dates from now. */
-  const follow = async (before: Task) => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Follow', brief: '', body: 'Private words of the work.', departmentId: c.dev.id, assigneeAgentId: c.head.id, executor: true, gates: [], after: [before.id], independentNone: 'One piece.' })).task;
+  const follow = async (before: Task) => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Follow', brief: '', body: 'Private words of the work.', departmentId: c.dev.id, assigneeAgentId: c.head.id, executor: true, after: [before.id], independentNone: 'One piece.' })).task;
   const waiting = async () => {
     await policy();
     const before = await first();

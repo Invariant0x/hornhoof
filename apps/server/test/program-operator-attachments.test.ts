@@ -197,7 +197,7 @@ describe('to everyone else the picture does not exist', () => {
 
 it('cannot rebind a target worker case picture as an ordinary request picture or choice', async () => {
   const c = await fixture();
-  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
   for (const question of [{ kind: 'question' as const, text: 'Look?', images: [c.picture.id] }, { kind: 'choice' as const, text: 'Pick?', options: [{ label: 'One', image: c.picture.id }, { label: 'Two', image: null }] }]) {
     await expect(ask(c.ctx, c.agent.id, task.id, question)).rejects.toMatchObject({ status: 400 });
     const [picture] = await c.db.select().from(attachments).where(eq(attachments.id, c.picture.id));
@@ -207,7 +207,7 @@ it('cannot rebind a target worker case picture as an ordinary request picture or
 
 it('excludes case pictures from ordinary file downloads and request/file listings even with accidental task/request links', async () => {
   const c = await fixture();
-  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
   const [request] = await c.db.insert(requests).values({ companyId: c.companyId, taskId: task.id, agentId: c.agent.id, kind: 'question', text: 'Look?' }).returning();
   await c.db.update(attachments).set({ taskId: task.id, name: 'program-question.png', requestId: request!.id }).where(eq(attachments.id, c.picture.id));
   for (const file of [c.picture.id, 'program-question.png']) expect((await c.fetchPicture((await c.turn(c.watcher.id)).token, file, String(task.number))).statusCode).toBe(404);
@@ -219,7 +219,7 @@ it('excludes case pictures from ordinary file downloads and request/file listing
 
 it('keeps case pictures out of node work-file downloads even with an accidental task link', async () => {
   const c = await fixture();
-  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+  const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Check picture', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
   const token = randomUUID();
   await c.db.update(nodes).set({ keyHash: hashToken(token) }).where(eq(nodes.id, c.identity.nodeId));
   const name = 'program-question.png';

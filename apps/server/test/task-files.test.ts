@@ -27,7 +27,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Build', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Build', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
   let n = 0;
   /* A running turn of the agent and its token. */
   const turn = async (agent: { id: string }) => {
@@ -119,7 +119,7 @@ describe('the room for task files', () => {
   it("holds the company's setting across its tasks, 2 GB unless TASK_FILES_MB says otherwise", async () => {
     const { app, bruno, head, dev, task, turn, attach, counted } = await company({ TASK_FILES_MB: '3' });
     expect(app.ctx.config.taskFilesBytes).toBe(3 * 1024 * 1024);
-    const other = (await createTask(app.ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const other = (await createTask(app.ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true })).task;
     await counted(other.id, 3 * 1024 * 1024 - 10);
     const token = await turn(bruno);
     expect((await attach(token, `task=${task.number}&name=a.txt`, Buffer.alloc(10))).statusCode).toBe(201);

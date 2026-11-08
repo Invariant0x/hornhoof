@@ -279,7 +279,7 @@ describe('telling the CEO when goals are missed', () => {
     const [approval] = await openRequests(c);
     await answer(c, approval!.id, true);
     const heads = await c.tools(c.head);
-    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, gates: [] });
+    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id });
     const res = await call(heads, 'escalate_missed_goal', { task: task.number, goal: 'Release 1.0 by Friday', why: 'Two weeks late.' });
     expect(res.isError).toBeFalsy();
     const ceo = (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(c.ceoToken) })).json();

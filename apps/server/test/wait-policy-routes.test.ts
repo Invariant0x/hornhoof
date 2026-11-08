@@ -27,7 +27,7 @@ describe('how long a department gives its waits', () => {
     const c = await aclCompany();
     await put(c, c.tokens.olga, 'after', dates);
     const first = await c.work('First', c.crew.mine);
-    const follow = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, gates: [], after: [first.id], independentNone: 'One piece.' })).task;
+    const follow = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, after: [first.id], independentNone: 'One piece.' })).task;
     const [bound] = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, follow.id));
     const res = await put(c, c.tokens.olga, 'after', { ...dates, ownerMs: HOUR / 2 });
     expect(res.json().policies).toMatchObject([{ kind: 'after', version: 2, ownerMs: HOUR / 2 }]);
@@ -47,7 +47,7 @@ describe('how long a department gives its waits', () => {
   it('makes a department strict with the first one, as the record of who set it says', async () => {
     const c = await aclCompany();
     const first = await c.work('First', c.crew.mine);
-    const follow = () => createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, gates: [], after: [first.id], independentNone: 'One piece.' });
+    const follow = () => createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, after: [first.id], independentNone: 'One piece.' });
     await expect(follow()).resolves.toBeDefined();
     await put(c, c.tokens.olga, 'review', dates);
     await expect(follow()).rejects.toThrow('sets dates for its waits');
@@ -78,8 +78,8 @@ describe('through the orchestrator', () => {
   it('gives a wait new dates for who answers for it, and for nobody else', async () => {
     const c = await company();
     const plan = { version: 1, ownerDueAt: new Date(Date.now() + HOUR).toISOString(), headDueAt: new Date(Date.now() + 2 * HOUR).toISOString(), decisionDueAt: new Date(Date.now() + 3 * HOUR).toISOString(), provenance: { kind: 'explicit_promise', actor: { agentId: c.head.id }, ref: 'promise-1', revision: 1, origin: 'tool' }, finalReview: { headAgentId: c.head.id, anchorAt: new Date(Date.now() + 4 * HOUR).toISOString(), intervalMs: HOUR } };
-    const first = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.worker.id, executor: true, gates: [] })).task;
-    const follow = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.worker.id, executor: true, gates: [], after: [first.id], independentNone: 'One piece.' })).task;
+    const first = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.worker.id, executor: true })).task;
+    const follow = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.worker.id, executor: true, after: [first.id], independentNone: 'One piece.' })).task;
     const [wait] = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, follow.id));
     const args = { wait: wait!.id, expectedGeneration: wait!.generation, plan, reason: 'The head promised.' };
     expect((await call(await c.tools(c.salesHead), 'replan_wait', args)).isError).toBe(true);
@@ -97,7 +97,7 @@ describe('giving a wait new dates', () => {
   const plan = (c: AclCompany) => ({ version: 1, ownerDueAt: later(1), headDueAt: later(2), decisionDueAt: later(3), provenance: { kind: 'explicit_promise', actor: { personId: c.ids.olga }, ref: 'promise-1', revision: 1, origin: 'screen' }, finalReview: { headAgentId: c.crew.head.id, anchorAt: later(4), intervalMs: HOUR } });
   const legacy = async (c: AclCompany) => {
     const first = await c.work('First', c.crew.mine);
-    const follow = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, gates: [], after: [first.id], independentNone: 'One piece.' })).task;
+    const follow = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Follow', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, after: [first.id], independentNone: 'One piece.' })).task;
     return { follow, wait: (await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, follow.id)))[0]! };
   };
   const replan = (c: AclCompany, token: string, id: string, payload: object) => c.app.inject({ method: 'POST', url: `/api/waits/${id}/replan`, payload, ...as(token) });

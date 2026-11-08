@@ -13,7 +13,7 @@ const policy = (c: AclCompany, kind: 'after' | 'person' = 'after') => c.db.inser
 });
 
 const comesAfter = async (c: AclCompany, title: string, holder: { id: string }, after: Task[]) =>
-  (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title, brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: holder.id, executor: true, gates: [], after: after.map(t => t.id), independentNone: 'One piece.' })).task;
+  (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title, brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: holder.id, executor: true, after: after.map(t => t.id), independentNone: 'One piece.' })).task;
 
 type View = TaskWaitView;
 const waitsOn = async (c: AclCompany, task: Pick<Task, 'id'>, token: string): Promise<View[]> => (await c.get(`/api/tasks/${task.id}`, token)).json().task.waits as View[];

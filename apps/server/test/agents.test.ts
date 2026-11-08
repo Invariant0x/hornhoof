@@ -442,7 +442,7 @@ describe('the employee card', () => {
     await submit(app.ctx, brunoId, task.id, { summary: 'Done', evidence: 'Targeted tests' });
     const first = await ask(app.ctx, rita!.id, task.id, { kind: 'question', text: 'Which version?' });
     const second = otherAsks ? await ask(app.ctx, rob!.id, task.id, { kind: 'question', text: 'Which deployment?' }) : null;
-    const { task: work } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Review tooling', brief: '', body: '', departmentId: dev.id, assigneeAgentId: rita!.id, executor: true, gates: [] });
+    const { task: work } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Review tooling', brief: '', body: '', departmentId: dev.id, assigneeAgentId: rita!.id, executor: true });
     const ownQuestion = await ask(app.ctx, rita!.id, work.id, { kind: 'question', text: 'Which tool version?' });
     const [history] = await db.insert(requests).values({ companyId: dev.companyId, taskId: task.id, agentId: rita!.id, kind: 'question', text: 'Settled scope', status: 'answered', answer: 'Checkout only', answeredAt: new Date() }).returning();
 
@@ -461,7 +461,7 @@ describe('the employee card', () => {
     const { app, db, ceo, dev, teamKey, brunoId } = await company();
     const [head] = await db.insert(agents).values({ companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey }).returning();
     const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
-    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [] });
+    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true });
     const question = await ask(app.ctx, brunoId, task.id, { kind: 'question', text: 'Which checkout version?' });
 
     expect((await patch(app, ceo, brunoId, { team: team!.id })).statusCode).toBe(200);

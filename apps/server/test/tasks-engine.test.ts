@@ -244,7 +244,7 @@ describe('the task engine', () => {
   it('takes no work in while work under it is open, and tells its executor once that work is done', async () => {
     const { ctx, db, dev, head, bruno, tess, memberTask, read } = await company();
     const task = await memberTask([]);
-    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, executor: true, gates: [] });
+    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, executor: true });
     expect(await reason(submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' }))).toBe('task_invalid');
     expect((await read(task.id)).status).toBe('open');
     const finished = await submit(ctx, tess.id, under.id, { summary: 'Done.', evidence: 'npm test: 3 passed' });
@@ -261,7 +261,7 @@ describe('the task engine', () => {
     const { ctx, dev, head, bruno, tess, memberTask } = await company();
     const task = await memberTask([tess.id]);
     await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
-    const made = createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, parentId: task.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+    const made = createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, parentId: task.id, assigneeAgentId: bruno.id, executor: true });
     expect(await reason(made)).toBe('task_invalid');
   });
 

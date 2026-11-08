@@ -59,7 +59,7 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
       await createTask(
         ctx,
         { agentId: head.id },
-        { title, brief: '', body, departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, gates: [], inTurnReview: true },
+        { title, brief: '', body, departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, inTurnReview: true },
       )
     ).task;
 

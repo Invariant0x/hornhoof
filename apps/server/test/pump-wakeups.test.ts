@@ -19,7 +19,7 @@ async function line(plan: 'limit' | 'spent' | 'free' = 'limit') {
   const resetsAt = new Date(Date.now() + HOUR).toISOString();
   if (plan === 'limit') await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
   if (plan === 'spent') await c.db.update(subscriptions).set({ budget: 50, limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.8, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
-  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] });
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
   const waiting = async (at: Date, options: { task?: boolean; prompt?: string; report?: boolean } = {}) => {
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, kind: 'conversation', prompt: options.prompt ?? 'Go on.', taskId: options.task ? task.id : null, timeoutMs: 1000, status: 'queued', notBefore: at }).returning();
     /* A report waits out its short window without holding the agent's line, unlike a delayed retry. */

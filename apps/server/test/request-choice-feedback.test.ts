@@ -18,7 +18,7 @@ async function company() {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [worker] = await db.insert(agents).values({ companyId: acme!.id, departmentId: dev!.id, subscriptionId: sub!.id, kind: 'worker', name: 'Fran', roleKey: 'DEV-FE', model: '' }).returning();
-  const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Choose a preview', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Choose a preview', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true })).task;
   const request = (await ask(app.ctx, worker!.id, task.id, { kind: 'choice', topic: 'task', text: 'Which shape?', options: [{ label: 'Round', image: null }, { label: 'Square', image: null }] })).request;
   const saved = async () => (await db.select().from(requests).where(eq(requests.id, request.id)))[0]!;
   const answered = () => db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));

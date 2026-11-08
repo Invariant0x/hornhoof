@@ -207,7 +207,7 @@ describe('sending what is due', () => {
     const w = await ready();
     for (let i = 0; i < 3; i += 1) await w.submit();
     const other = await anAccountOf(w.c, w.channel.id, w.c.head.id, 'Other');
-    const hers = (await createTask(w.ctx, { agentId: w.c.head.id }, { title: 'Hers', brief: '', body: '', departmentId: w.c.dev.id, assigneeAgentId: w.c.head.id, executor: true, gates: [] })).task;
+    const hers = (await createTask(w.ctx, { agentId: w.c.head.id }, { title: 'Hers', brief: '', body: '', departmentId: w.c.dev.id, assigneeAgentId: w.c.head.id, executor: true })).task;
     const last = await submitOutbound(w.ctx, { ...w.authority, agentId: w.c.head.id }, w.input({ task: hers.id, accountId: other.account.id, bindingGeneration: other.binding.generation }));
     const due = await dueMessages(w.ctx, new Date(), 1);
     expect(due).toHaveLength(2);

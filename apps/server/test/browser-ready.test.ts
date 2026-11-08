@@ -31,7 +31,7 @@ describe('browser launch readiness before handing out work', () => {
 
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-ENG', departmentId: dev!.id, model: '', subscriptionId }).returning();
     const [head] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '', subscriptionId }).returning();
-    const task = (await createTask(app.ctx, { agentId: head!.id }, { title: 'Browser E2E', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno!.id, executor: true, gates: [] })).task;
+    const task = (await createTask(app.ctx, { agentId: head!.id }, { title: 'Browser E2E', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno!.id, executor: true })).task;
 
     /* Before hello, waitsFor and placement follow node readiness (needs_login, node_outdated, machine_offline), never browser_failed. */
     expect(await orchestratorState(app.ctx, '00000000-0000-0000-0000-000000000000')).toEqual({
@@ -137,7 +137,7 @@ describe('browser launch readiness before handing out work', () => {
     /* An agent already placed on broken-host keeps getting turns there, while runs skip broken-host for healthy-host. */
     const [vera] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Vera', roleKey: 'DEV-ENG', departmentId: dev!.id, model: '', subscriptionId, nodeId: brokenId }).returning();
     const [head] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '', subscriptionId }).returning();
-    const task = (await createTask(app.ctx, { agentId: head!.id }, { title: 'Check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: vera!.id, executor: true, gates: [] })).task;
+    const task = (await createTask(app.ctx, { agentId: head!.id }, { title: 'Check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: vera!.id, executor: true })).task;
     expect(await agentState(app.ctx, vera!.id)).toMatchObject({ ready: true, reason: null, browserError: 'libnss3.so missing' });
     const veraTurn = await enqueueTurn(app.ctx, { companyId, agentId: vera!.id, taskId: task.id, prompt: 'Check', createdBy: null });
     await until(async () => (await db.select().from(jobs).where(and(eq(jobs.id, veraTurn), eq(jobs.status, 'running')))).length === 1);

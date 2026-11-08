@@ -27,8 +27,8 @@ export async function company(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
   const samToken = await invitePerson(app, ceoToken, { name: 'Sam', email: 'sam@acme.com', access: { departments: [salesDept!.id] } });
   const wholeToken = await invitePerson(app, ceoToken, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
   const idOf = async (email: string) => (await db.select({ id: people.id }).from(people).where(eq(people.email, email)))[0]!.id;
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: devDept!.id, assigneeAgentId: worker.id, executor: true, gates: [] })).task;
-  const salesTask = (await createTask(app.ctx, { agentId: salesHead.id }, { title: 'Deal', brief: '', body: '', departmentId: salesDept!.id, assigneeAgentId: seller.id, executor: true, gates: [] })).task;
+  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: devDept!.id, assigneeAgentId: worker.id, executor: true })).task;
+  const salesTask = (await createTask(app.ctx, { agentId: salesHead.id }, { title: 'Deal', brief: '', body: '', departmentId: salesDept!.id, assigneeAgentId: seller.id, executor: true })).task;
   const setOwner = (token: string, departmentId: string, personId: string | null) => app.inject({ method: 'PUT', url: `/api/departments/${departmentId}/owner`, payload: { personId }, ...as(token) });
   const setRule = (token: string, departmentId: string, channel: string, rule: object) => app.inject({ method: 'PUT', url: `/api/departments/${departmentId}/approval-policy/${channel}`, payload: rule, ...as(token) });
   const policy = (token: string, departmentId: string) => app.inject({ method: 'GET', url: `/api/departments/${departmentId}/approval-policy`, ...as(token) });

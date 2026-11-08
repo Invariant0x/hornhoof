@@ -38,7 +38,7 @@ async function company() {
   const bruno = await hire('Bruno', 'worker', 'DEV-BE', dev!.id);
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   const [round] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(TOKEN) }).returning();
-  await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+  await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true });
   const waitForUpdate = async () => (await app.inject({ method: 'POST', url: '/api/nodes/update', headers, payload: {} })).json() as { drain: { state: string } };
   return { app, db, builtin, acme: acme!, sub: sub!, wendy, odin, bruno, round: round!, waitForUpdate };
 }

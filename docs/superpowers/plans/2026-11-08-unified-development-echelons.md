@@ -51,7 +51,7 @@
 - [x] Write real engine/view tests: small work starts at Development with Review pending, including the existing Development template; omitted gates cannot bypass Review.
 - [x] Push, print `check:author --sha HEAD --base e54dd0e5...`, execute its exact plan through `run_tests`; expect missing-route/mandatory-Review assertions, not import/setup errors.
 - [ ] Add required protocol/schema/store and task creation/read projection. Delete old gate/panel/stage/bounce/merge fields and their replaced consumers; update relevant fixture contracts.
-- [ ] Generate schema through the project Drizzle tool remotely. Schema DDL only, no old-row updates or route backfill.
+- [x] Generate schema through the project Drizzle tool remotely. Runs 1480/1537 generated 0087/0088; no old-row updates or route backfill. Fresh schema checks passed in 1539.
 - [ ] Run affected acceptance/schema/type checks remotely; commit the proved increment.
 
 ## Increment 2: Assignment, forward transitions and fixes
@@ -60,8 +60,8 @@
 
 **Interfaces:** `reviewEligibility(producer, checker)` compares trusted capability bands and normalized providers; no pair whitelist, provider barrier or strictly-greater requirement. `moveEchelon(ctx, actor, task, command)` consumes expected task version, route revision, candidate ID and idempotency key, and owns the sole transactional completion path.
 
-- [ ] Write RED tests for equal-capability acceptance on the same provider/subscription/tariff; prefer an eligible different provider without waiting for one. Refuse weaker or unknown capability. Test direct Review-to-Tests or Review-to-Security handoff.
-- [ ] Write RED tests for Review/Security retaining their own fixes, final candidate parent/producer provenance, wrong-goal escalation, optional Security insertion, and no author wake.
+- [x] Write RED tests for equal-capability acceptance on the same provider/subscription/tariff; prefer an eligible different provider without waiting for one. Refuse weaker or unknown capability. Test direct Review-to-Tests or Review-to-Security handoff. Handoff cases passed in 1538; assignment hardening remains below.
+- [x] Write RED tests for Review/Security retaining their own fixes, final candidate parent/producer provenance, wrong-goal escalation, optional Security insertion, and no author wake. Focused cases passed in 1538; full stale-source guards remain below.
 - [ ] Implement trusted capability resolution, capability-based stage selection, path leases, immutable candidates and CAS/idempotent handoff.
 - [ ] Remove panel fan-out, author-return, old turn review/fix loops and unused entities/tests. Preserve unrelated task comments, dependencies and requests through the new engine. Implement checked report aggregation for coordination results, with no fictional own code SHA or repeated group code review; executable parent results still require Review.
 - [ ] Prove stale owner/model, cross-company/path and duplicate-completion cases; prove independent A/Review and B/Development overlap. Run affected checks and commit.
@@ -84,10 +84,10 @@
 
 **Interfaces:** Task/detail/list/org all carry the same required route snapshot; `EchelonFindingsView` is derived from visible events. Stage labels are literally Architecture, Development, Review, Security and Tests in every locale. Any capable assigned agent can check/fix; no new special role exists.
 
-- [ ] Prove the default snapshot/map has no Cleanup; a head can insert it after Review for a task or turn; the existing dev-cleanup skill is offered off by default.
+- [x] Prove the default snapshot/map has no Cleanup; a head can insert it after Review for a task or turn; the existing dev-cleanup skill is offered off by default. Server 1538 and web 1534 cover these boundaries.
 - [ ] Adapt material tests into RED for actual stage owners, skips/added Security, live refresh, finding provenance and no old author-return display. Remove cancelled null/disabled cases and invalid test helper options.
 - [ ] Implement UI on the existing design system; integrate only the useful portions of the saved material. Resolve the known empty-coverage seam and fixture 404 causes.
-- [ ] Adapt standalone Review/Security check-and-fix skills and short roles for the sole new route. Remove cancelled old-path text and inventory assumptions.
+- [x] Adapt standalone Review/Security repair abilities, required-route instructions and short roles. Remove cancelled return/fanout text and inventory assumptions in those contracts. 1532: 254 template checks passed; remaining generic guide wording still needs the final audit.
 - [ ] Run affected unit/type/language/browser checks remotely. Verify longest/shortest shipped locales, narrow/desktop, light/dark and applicable browser engines. Missing readiness is not PASS.
 - [ ] Commit the proved increment.
 

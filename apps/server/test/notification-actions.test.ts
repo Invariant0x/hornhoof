@@ -41,8 +41,8 @@ function attributed(event: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>
 describe('recorded action authors', () => {
   it('attributes a submitted task and its parent notification to the submitter after outbox recovery', async () => {
     const c = await fixture();
-    const parent = (await createTask(c.app.ctx, { personId: c.ceo.id }, { title: 'Whole feature', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
-    const child = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Child', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.worker.id, executor: true, gates: [], parentId: parent.id })).task;
+    const parent = (await createTask(c.app.ctx, { personId: c.ceo.id }, { title: 'Whole feature', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
+    const child = (await createTask(c.app.ctx, { agentId: c.head.id }, { title: 'Child', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.worker.id, executor: true, parentId: parent.id })).task;
     await submit(c.app.ctx, c.worker.id, child.id, { summary: 'Ivan pretends to be the author.', evidence: 'Checks passed.' });
     await comment(c.app.ctx, { personId: c.ceo.id }, child.id, 'A newer comment by somebody else.');
     await wakeLeftBehind(c.app.ctx, new Date(Date.now() + 60_000));
@@ -87,7 +87,7 @@ describe('recorded action authors', () => {
   it('attributes a department report to its head', async () => {
     const c = await fixture();
     const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
     const moved = await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.' });
     await wakeAll(c.app.ctx, moved.wakes);
     attributed((await c.notices(orchestrator.id))[0]!, 'Hana', 'reported work done');
@@ -99,7 +99,7 @@ describe('one report per recipient', () => {
   it('combines reports for two tasks and a direct copy, with one report body and all senders', async () => {
     const c = await fixture();
     const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-    const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+    const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
     const first = await make();
     const second = await make();
     for (const task of [first, second]) await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
@@ -121,7 +121,7 @@ describe('one report per recipient', () => {
     const c = await fixture();
     const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
     for (const summary of ['Release verified.', 'A second report.']) {
-      const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+      const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
       await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary })).wakes);
     }
     expect(await c.notices(orchestrator.id)).toHaveLength(2);
@@ -139,7 +139,7 @@ describe('report window boundaries', () => {
       if (message.type === 'agent.say') queueMicrotask(() => said(c.app.ctx, BUILTIN, message.ref, true));
       return true;
     });
-    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
     await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Shipped.' })).wakes);
     expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id)))[0]!.notBefore!.getTime()).toBeGreaterThan(Date.now());
     const delivered = await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, prompt: 'New instruction.', createdBy: c.ceo.id, message: { personId: c.ceo.id, text: 'New instruction.' } });
@@ -153,7 +153,7 @@ describe('report window boundaries', () => {
 it('does not describe a blocked department report as done', async () => {
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: false, summary: 'Waiting for access.' })).wakes);
   const text = (await c.notices(orchestrator.id))[0]!.data as { text: string };
   expect(text.text).toContain('Hana reported blocked work');
@@ -165,7 +165,7 @@ it('combines a queued direct copy that arrived before the service report', async
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: 'Release verified.', message: { personId: null, from: 'agent', by: c.head.id, text: 'Release verified.' } });
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
   const notices = await c.notices(orchestrator.id);
   expect(notices).toHaveLength(1);
@@ -192,7 +192,7 @@ it('delivers an employee copy into the live turn immediately, combining the queu
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
   await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run!.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
   expect((await decisionPrincipal(c.db, run!.id))!.personId).toBe(c.ceo.id);
@@ -217,7 +217,7 @@ it('keeps the same report separate after its ten second window', async () => {
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
   for (const index of [0, 1]) {
-    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+    const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
     await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
     if (index === 0) await c.db.update(agentEvents).set({ createdAt: new Date(Date.now() - 11_000) }).where(eq(agentEvents.agentId, orchestrator.id));
   }
@@ -240,7 +240,7 @@ it('names the wait timer, its recorded setter and deadline without inventing an 
 it('retains two different reports on the same task while combining a repeated one', async () => {
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   for (const summary of ['Waiting for access.', 'Waiting for a machine.', 'Waiting for access.']) {
     await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: false, summary })).wakes);
   }
@@ -255,7 +255,7 @@ it('retains two different reports on the same task while combining a repeated on
 it('preserves different pending reports across recovery and acknowledges only the delivered action', async () => {
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   const first = await report(c.app.ctx, c.head.id, task.id, { done: false, summary: 'Waiting for access.' });
   await report(c.app.ctx, c.head.id, task.id, { done: false, summary: 'Waiting for a machine.' });
   const before = new Date(Date.now() + 60_000);
@@ -276,7 +276,7 @@ it('keeps other queued words when a direct report is combined and delivered live
   const id = await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: 'Hana wrote:\n\n> Release verified.', message: { personId: null, from: 'agent', by: c.head.id, text: 'Release verified.' } });
   await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: id, kind: 'message', personId: c.ceo.id, data: { text: 'Keep the separate instruction.' } });
   await c.db.update(jobs).set({ prompt: 'Hana wrote:\n\n> Release verified.\n\nIvan commented: Keep the separate instruction.' }).where(eq(jobs.id, id));
-  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
   expect((await c.db.select().from(jobs).where(eq(jobs.id, id)))[0]!.prompt).toContain('Keep the separate instruction.');
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
@@ -297,7 +297,7 @@ it('keeps other queued words when a direct report is combined and delivered live
 async function deliveredReport() {
   const c = await fixture();
   const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
-  const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id })).task;
   const first = await make();
   const second = await make();
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000, startedAt: new Date() }).returning();

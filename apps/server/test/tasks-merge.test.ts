@@ -104,7 +104,7 @@ describe('a task that passed its last gate', () => {
 
   it('goes to its executor to merge too when it has no gates, or nobody is on at any of them', async () => {
     const { ctx, db, head, bruno, rita, task } = await company();
-    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true })).task;
     const handed = await submit(ctx, bruno.id, loose.id, { summary: 'Written.', evidence: 'docs/checkout.md' });
     expect(handed.task).toMatchObject({ status: 'open', merging: true, assigneeAgentId: bruno.id });
     expect(woken(handed)).toEqual([[bruno.id, 'merge']]);
@@ -130,14 +130,14 @@ describe('a task that passed its last gate', () => {
 describe('the head', () => {
   it('hears once that every task under its department task is closed, not each time one is done', async () => {
     const { ctx, head, bruno, task, passed } = await company(false);
-    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true })).task;
     expect(woken(await passed())).toEqual([]);
     expect(woken(await submit(ctx, bruno.id, docs.id, { summary: 'Written.', evidence: 'docs/checkout.md' }))).toEqual([[head.id, 'subtasks']]);
   });
 
   it('takes the department task first when work under it closes, so the last two closing at once still tell it', async () => {
     const { ctx, bruno, task } = await company(false);
-    const docs = (await createTask(ctx, { agentId: task.createdByAgentId! }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const docs = (await createTask(ctx, { agentId: task.createdByAgentId! }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true })).task;
     const seen = statements();
     await submit(ctx, bruno.id, docs.id, { summary: 'Written.', evidence: 'docs/checkout.md' });
     const at = (test: (s: { sql: string; params: unknown[] }) => boolean) => seen.findIndex(test);
@@ -157,7 +157,7 @@ describe('the head', () => {
 
   it('still hears when a task it gave out on its own, under no department task, is done', async () => {
     const { ctx, head, bruno, task } = await company(false);
-    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Loose end', brief: '', body: '', departmentId: task.departmentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Loose end', brief: '', body: '', departmentId: task.departmentId, assigneeAgentId: bruno.id, executor: true })).task;
     expect(woken(await submit(ctx, bruno.id, loose.id, { summary: 'Done.', evidence: 'npm test' }))).toEqual([[head.id, 'done']]);
   });
 });

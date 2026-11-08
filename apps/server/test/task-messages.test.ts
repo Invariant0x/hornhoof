@@ -27,7 +27,7 @@ async function messaging() {
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', taskId, startedAt: new Date(), timeoutMs: 1000, toolTokenHash: hashToken(token) }).returning();
     return { job: job!, client: await mcp(c.app, token) };
   };
-  const task = async () => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+  const task = async () => (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
   const messages = async (agentId: string) => (await listEvents(c.db, agentId, 0)).filter(e => e.kind === 'message');
   return { ...c, run, task, messages };
 }
@@ -61,7 +61,7 @@ describe('task messages reach their recipient', () => {
     const c = await messaging();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const parent = (await createTask(c.ctx, { agentId: orchestrator!.id }, { title: 'Release', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
-    const child = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Images', brief: '', body: '', departmentId: c.dev.id, parentId: parent.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+    const child = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Images', brief: '', body: '', departmentId: c.dev.id, parentId: parent.id, assigneeAgentId: c.agent.id, executor: true })).task;
     await waitFor(c.ctx, c.agent.id, child.id, { reason: 'Registry', until: new Date(Date.now() + 60_000).toISOString() });
     const head = await c.run(c.head.id, parent.id);
     const sender = await c.run(orchestrator!.id);
@@ -229,7 +229,7 @@ describe('task messages reach their recipient', () => {
         if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, true));
         return true;
       });
-      task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+      task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true })).task;
       const [running] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', taskId: task.id, startedAt: new Date(), timeoutMs: 1000 }).returning();
       job = running!;
     });

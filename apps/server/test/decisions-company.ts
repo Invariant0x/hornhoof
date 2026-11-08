@@ -48,7 +48,7 @@ export async function company() {
   /* Each question on a task of its own, held by the asking employee. */
   const asking = async (where: keyof typeof workers, q: Parameters<typeof ask>[3]) => {
     const deptId = { dev: dev.id, sales: sales.id, mkt: mkt.id }[where];
-    const { task } = await createTask(ctx, { agentId: heads[where].id }, { title: `About ${q.text}`, brief: '', body: '', departmentId: deptId, assigneeAgentId: workers[where].id, executor: true, gates: [] });
+    const { task } = await createTask(ctx, { agentId: heads[where].id }, { title: `About ${q.text}`, brief: '', body: '', departmentId: deptId, assigneeAgentId: workers[where].id, executor: true });
     return { task, request: (await ask(ctx, workers[where].id, task.id, q)).request };
   };
   const view = async (token: string, query = ''): Promise<View> => (await app.inject({ url: `/api/requests${query}`, ...as(token) })).json();
