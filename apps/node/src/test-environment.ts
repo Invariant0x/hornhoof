@@ -15,7 +15,7 @@ import { matchesPattern as match } from './test-impact.js';
 
 type Source = Parameters<typeof readCommit>[0];
 type DescriptionContext = CacheContext & { runtimes?: RuntimeCapability[] };
-const MANIFEST = '.hornhoof/test-environment.json';
+export const MANIFEST = '.hornhoof/test-environment.json';
 const INPUT_BYTES = 16 * 1024 * 1024;
 const LFS = 'version https://git-lfs.github.com/spec/v1\n';
 const lfsPointer = (bytes: Buffer): boolean => bytes.subarray(0, LFS.length).toString('ascii') === LFS;
@@ -386,7 +386,8 @@ async function runPreparation(commands: Command[], builder: Pick<PreparationBuil
   try { for (const command of commands) await builder.run(command); }
   finally { await builder.quiesce(); }
 }
-export async function prepareDependencies(description: EnvironmentDescription, context: PreparationContext): Promise<PreparedDependencies> {
+/* own: the checkout gets copies of its own, which its user may change, even of what runs share by read-only links. */
+export async function prepareDependencies(description: EnvironmentDescription, context: PreparationContext, { own = false }: { own?: boolean } = {}): Promise<PreparedDependencies> {
   const dependencies = description.manifest.dependencies;
   if (dependencies.cache === 'none') {
     const env = setupEnv(builderSetup(description), context.checkout, context.env.PATH);
@@ -401,7 +402,7 @@ export async function prepareDependencies(description: EnvironmentDescription, c
       await runPreparation(dependencies.install, builder);
       return { root: builder.root, paths: dependencies.paths };
     }, context.share?.('dependencies', description));
-    await restoreCache(entry, context.checkout, context, { link: dependencies.cache === 'link', owner: context.jobUser });
+    await restoreCache(entry, context.checkout, context, { link: !own && dependencies.cache === 'link', owner: context.jobUser });
     return { entry, receipt: { key, hit: entry.hit, ...fetchedField(entry) } };
   } finally { await builder?.close(); }
 }

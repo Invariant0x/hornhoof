@@ -26,7 +26,7 @@ import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState
 import { waitUpdate } from './wait-update.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
 import { harnessRemote } from './test-harness.js';
-import { partFiles, removeOldParts, runTests, syncHarness } from './tests.js';
+import { partFiles, removeOldParts, runTests, syncHarness, worktreeHarness, type Worktree } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
@@ -534,6 +534,12 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return withCheckSlot(granted => partUser.run(granted, () => syncHarness(m, { dir, user: testUser, hidden: [...known], signal: granted, harness, runtimes: testCapabilities.testRuntimes }), () => {}), { signal, label: 'Get a product test harness ready' });
   }
 
+  /* An agent's worktree gets its commit's dependencies from the company's harness, on a node that builds apart from its agents.
+     A build takes the machine's turn for heavy work, as the agent's own install would. */
+  const worktreeDependencies = testUser && testCapabilities.testHarness
+    ? (tree: Worktree, signal?: AbortSignal) => worktreeHarness(tree, { dir, hidden: [...known], signal, harness, runtimes: testCapabilities.testRuntimes, slot: (granted, run) => withCheckSlot(run, { signal: granted, label: "Put a worktree's dependencies in place" }) })
+    : undefined;
+
   async function runOne(m: JobRun, signal: AbortSignal) {
     emit({ type: 'job.started', jobId: m.jobId });
     let done: Awaited<ReturnType<typeof runJob>>;
@@ -563,7 +569,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key) });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key), ...(worktreeDependencies ? { dependencies: worktreeDependencies } : {}) });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }

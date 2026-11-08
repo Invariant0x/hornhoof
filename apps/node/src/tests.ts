@@ -3,14 +3,15 @@ import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { KeptFiles, TestExecution, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RuntimeCapability, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser, playwrightVersionIn } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
-import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
-import { privateCacheRoot, pruneCache, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { chown as fsChown, copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, rmdir as fsRmdir, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
+import type { AgentFs } from './agent-fs.js';
+import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
+import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
 import { collectKept, parseFileReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
@@ -532,11 +533,87 @@ async function manualHarness(msg: TestRun, options: Options, part: { root: strin
   }
 }
 
+/* An agent's worktree gets the prepared dependencies of its commit before its program starts, so the agent's first check finds
+   them there: the same unit a test run of that commit takes, from whichever machine built it, or built here once for all of
+   them. The program may still install them itself, so what goes wrong here only costs it the head start, and at most this long. */
+const WORKTREE_HARNESS_MS = MANUAL_HARNESS_MS;
+/* Builds for worktrees run one at a time as a user of their own, so one never stops a part's build or another worktree's. */
+const WORKTREE_BUILDER = 'worktree-builder';
+const worktreeBuilds = new CheckSlotQueue(() => 1);
+/* The agent's clone or worktree its program checks its change in, at the commit it stands at. fs: file work there as its owner. */
+export type Worktree = {
+  id: string; checkout: string; commitSha: string; repo: { url: string; token: string }; repositoryScope: RepositoryScope; owner: JobUser;
+  fs: Pick<AgentFs, 'read' | 'kind' | 'mkdir' | 'move' | 'remove'>;
+};
+/* slot: the machine's turn for heavy work, which a build waits for. limitMs: how long all of it may take. */
+export type WorktreeOptions = Pick<Options, 'dir' | 'hidden' | 'signal' | 'proc' | 'harness' | 'runtimes'> & {
+  slot?: <T>(signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>) => Promise<T>; limitMs?: number;
+};
+
+/* Whether the worktree holds any of them already: they may be the agent's own install, so they stay as they are. */
+async function holdsAny(tree: Worktree, paths: string[]): Promise<boolean> {
+  for (const path of paths) if (await tree.fs.kind(join(tree.checkout, path))) return true;
+  return false;
+}
+/* What the worktree's own manifest names, read as its owner, so a worktree that holds its dependencies costs no fetch. */
+async function ownManifest(tree: Worktree): Promise<TestEnvironmentV1 | null> {
+  try { return parseTestEnvironment((await tree.fs.read(join(tree.checkout, MANIFEST))) ?? ''); } catch { return null; }
+}
+
+/* It says in one line what it put in place, or nothing when the worktree holds them already or the repository shares none. */
+export async function worktreeHarness(tree: Worktree, options: WorktreeOptions): Promise<string | null> {
+  const own = await ownManifest(tree);
+  if (own && (own.dependencies.cache === 'none' || await holdsAny(tree, own.dependencies.paths))) return null;
+  const started = performance.now(), deadline = Date.now() + (options.limitMs ?? WORKTREE_HARNESS_MS), signal = productSignal(options.signal, deadline);
+  const description = await readTestEnvironment(tree.repo, tree.repositoryScope, tree.commitSha, { cacheRoot: join(options.dir, 'cache'), deadline, signal, log: () => {}, ...(options.runtimes ? { runtimes: options.runtimes } : {}) });
+  const { dependencies } = description.manifest;
+  if (dependencies.cache === 'none' || await holdsAny(tree, dependencies.paths)) return null;
+  const slot = options.slot ?? ((granted, run) => run(granted));
+  await slot(signal, granted => worktreeBuilds.withSlot(() => placeInWorktree(description, tree, options, deadline, granted), { signal: granted }));
+  return `Dependencies in place from the shared harness after ${within(performance.now() - started)}.`;
+}
+
+/* They are built or taken in a folder of the node's own, which goes to the worktree's owner only once they are all there, and
+   the owner moves each into the worktree: the node writes nothing where an agent's program could change what it writes into. */
+async function placeInWorktree(description: EnvironmentDescription, tree: Worktree, options: WorktreeOptions, deadline: number, signal: AbortSignal): Promise<void> {
+  const root = join(partsFolder(options.dir), `worktree-${tree.id}`), staging = join(root, 'tree'), hidden = productSecrets({ repo: tree.repo }, options.hidden);
+  const state: PreparationState = { ...productUser(tree.owner), root, repo: join(root, 'repo'), out: new Output(), deadline, signal, options: { ...options, user: tree.owner }, builder: WORKTREE_BUILDER, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+  let handed: string[] | null = null;
+  try {
+    await privateCacheRoot(join(options.dir, 'cache')); remove(root); prepareFolder(root, null); chmodSync(root, 0o755);
+    const base = preparationContext(state, '', hidden);
+    /* Its owner's programs keep running meanwhile, so nothing here runs or stops anything as that user. A build takes the
+       commit's own files, never the worktree's. */
+    const context: PreparationContext = {
+      ...base, checkout: staging, run: async () => { throw new Error('Nothing runs in a worktree for its dependencies.'); }, quiesce: async () => {},
+      builder: async (...args) => { await checkoutCommit(tree.repo, tree.repositoryScope, tree.commitSha, state.repo, base); return base.builder(...args); },
+    };
+    const { entry } = await prepareDependencies(description, context, { own: true });
+    const roots = entry ? (entry.ready ?? await readReady(entry, context)).roots : [];
+    await fsChown(staging, tree.owner.uid, tree.owner.gid); handed = roots;
+    for (const path of roots) {
+      await tree.fs.mkdir(dirname(join(tree.checkout, path)));
+      await tree.fs.move(join(staging, path), join(tree.checkout, path));
+    }
+  } finally { await leaveWorktreeFolder(root, staging, handed && { tree, roots: handed }); }
+}
+
+/* The node takes away only what no agent's program could reach. What it handed to the worktree's owner, the owner takes away;
+   anything else it left there stays until the node starts again. */
+async function leaveWorktreeFolder(root: string, staging: string, handed: { tree: Worktree; roots: string[] } | null): Promise<void> {
+  if (handed) {
+    for (const top of new Set(handed.roots.map(path => path.split('/')[0]!))) await handed.tree.fs.remove(join(staging, top)).catch(() => {});
+    try { await fsRmdir(staging); } catch { remove(join(root, 'repo')); return; }
+  }
+  remove(root);
+}
+
 const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
 type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean };
+/* builder: the user its builds run as, when not the one of test runs. */
 type PreparationState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
-  base: Record<string, string>; options: Options;
+  base: Record<string, string>; options: Options; builder?: string;
 };
 type ProductState = PreparationState & { receipt: TestEnvironmentReceipt; exitCode: number | null; reports: SuiteReport[]; files: FileOutcome[]; kept: KeptFiles };
 type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
@@ -584,7 +661,7 @@ async function builderInputs(inputs: InputDigest[], source: string, target: stri
   }
 }
 async function productBuilder(state: PreparationState, inputs: InputDigest[], dependencies: CacheEntry | null, setup: BuilderSetup, context: CacheContext): Promise<PreparationBuilder> {
-  const user = userFor(state.options.dir, 'product-test-builder');
+  const user = userFor(state.options.dir, state.builder ?? 'product-test-builder');
   if (!user || user.uid === state.user.uid || user.uid === state.nodeOwner.uid || user.uid === 0) environmentError('isolation_missing', 'A distinct preparation builder user is unavailable.');
   const builders = join(state.root, 'builders'); await fsMkdir(builders, { recursive: true, mode: 0o755 });
   const root = await fsMkdtemp(join(builders, 'unit-'));
