@@ -23,7 +23,7 @@ export async function serveRoutes(page: Page, options: { signedOut?: boolean; pe
   let signedIn = !options.signedOut;
   const person = PEOPLE.find(p => p.id === (options.person ?? 'p1'))!;
   const me = { ...ME, person: { ...ME.person, id: person.id, name: person.name, email: person.email, isOwner: person.isOwner } };
-  const detail: TaskDetail = { ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'The shared checkout task.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], log: [], requests: [] };
+  const detail: TaskDetail = { ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'The shared checkout task.', parent: null, after: [], executor: TASKS[0]!.assignee, createdBy: null, subtasks: [], log: [], requests: [] };
   await serveApi(page);
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());

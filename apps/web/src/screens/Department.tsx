@@ -419,7 +419,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   };
 
   const working = d.employees.filter(e => e.status === 'working').length;
-  const stats = t.dept.stats(working, d.employees.length, d.roles.length, 0);
+  const stats = t.dept.stats(working, d.employees.length, d.roles.filter(role => role.kind === 'member').length);
   const far = view.k < FAR_K;
   const worldStyle = {
     width: s.right,

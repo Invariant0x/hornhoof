@@ -50,7 +50,7 @@ const STAGES: EchelonStage[] = ['architecture', 'development', 'review', 'securi
 function owner(id: string, name: string, roleId: string, stage: EchelonStage, index: number): Employee {
   const echelons = taskRoute(stage, id);
   echelons.stages = echelons.stages.map(step => step.stage === stage ? { ...step, status: 'active' } : step);
-  return { ...employee(id, name, roleId), status: 'working', task: { id: `task-${index}`, number: index + 1, title: `Work ${index + 1}`, stage: 0, gateCount: 0, bounces: 0, echelons } };
+  return { ...employee(id, name, roleId), status: 'working', task: { id: `task-${index}`, number: index + 1, title: `Work ${index + 1}`, echelons } };
 }
 
 const DEPARTMENT: Department = {

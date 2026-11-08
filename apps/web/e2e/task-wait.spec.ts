@@ -19,7 +19,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.6.1', commit: 'task-241' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
     const employee = 'Hana with a long employee name for acceptance';
     let wait: ExternalWait | null = { reason: 'Acceptance on a-host', since: '2026-11-04T16:00:00Z', until: '2026-11-04T16:30:00Z', on: { kind: 'employee', employee: 'head', name: employee } };
-    const detail = (): TaskDetail => ({ ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'Check acceptance and submit the work.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [], externalWait: wait });
+    const detail = (): TaskDetail => ({ ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'Check acceptance and submit the work.', parent: null, after: [], executor: TASKS[0]!.assignee, createdBy: null, subtasks: [], requests: [], log: [], externalWait: wait });
     await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: detail() } }));
     await page.route('**/api/tasks/t1/comments', route => {
       wait = null;

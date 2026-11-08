@@ -22,7 +22,7 @@ describe('a repair preserves the assigned candidate history', () => {
     f.atCommit(FIX);
     if (problem === 'branch') f.ctx.readCommit = async () => ({ branch: 'unrelated-fork', commitSha: FIX });
     if (problem === 'ancestry') {
-      const compare = f.ctx.readCompare;
+      const compare = f.ctx.readCompare!;
       f.ctx.readCompare = async (repo, refs, timeout) => refs.base === HEAD ? { complete: false, reason: 'not-an-ancestor' } : compare(repo, refs, timeout);
     }
     const review = { baseCommit: problem === 'base' ? HEAD : BASE };

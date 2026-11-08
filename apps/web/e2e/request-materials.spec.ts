@@ -98,7 +98,7 @@ const ORG_FIXTURE: Org = {
           status: 'working',
           on: true,
           timer: null,
-          task: { echelons: taskRoute(), id: 't508', number: 508, title: 'Question materials', stage: 0, gateCount: 0, bounces: 0 },
+          task: { echelons: taskRoute(), id: 't508', number: 508, title: 'Question materials' },
           context: null,
           program: null,
           alarm: null,
@@ -211,10 +211,6 @@ async function mountFixtureRoutes(page: Page) {
       department: { id: 'd-dsn', name: 'Design' },
       product: null,
       assignee: { id: 'a-dsn', name: 'Head of Design', kind: 'head', role: { en: 'Head of Design', ru: 'Руководитель дизайна' } },
-      stage: 0,
-      gateCount: 0,
-      merging: false,
-      bounces: 0,
       turn: 8,
       parentId: null,
       waitsFor: [],
@@ -486,7 +482,6 @@ const legacyTask = (await createTask(app.ctx, { personId: ceo.id }, {
   departmentId: dsn.id,
   assigneeAgentId: designer.id,
   executor: true,
-  gates: [],
 })).task;
 
 const [attA] = await db.insert(schema.attachments).values({
@@ -521,7 +516,6 @@ const freeTask = (await createTask(app.ctx, { personId: ceo.id }, {
   departmentId: dsn.id,
   assigneeAgentId: designer.id,
   executor: true,
-  gates: [],
 })).task;
 const freeReq = (await ask(app.ctx, designer.id, freeTask.id, {
   kind: 'choice',

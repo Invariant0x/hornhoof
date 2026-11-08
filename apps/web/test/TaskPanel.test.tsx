@@ -176,7 +176,7 @@ describe('a task', () => {
     shell();
     const panel = await openTask(user);
     const workflow = within(panel).getByRole('list', { name: 'Task workflow' });
-    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('ReviewIn progressOwner: Rita');
+    expect(workflow.querySelector('[aria-current="step"]')).toHaveTextContent('Review In progressOwner: Rita');
     expect(panel).toHaveTextContent('Take card payments.');
     expect(within(panel).getByText('card token').tagName).toBe('STRONG');
     expect(within(panel).getByRole('button', { name: /#13 Refunds/ })).toBeInTheDocument();

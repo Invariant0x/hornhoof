@@ -36,7 +36,7 @@ export const TASKS: TaskLine[] = Array.from({ length: 30 }, (_, i) => ({
   echelons: taskRoute(),
   id: `t${i + 1}`, number: i + 1, title: `Checkout step ${i + 1}`,
   brief: 'Take card payments in the shop, refund them on request and show every payment on the order page with its state.',
-  status: 'working', department: DEV, product: null, assignee: BRUNO, stage: 0, gateCount: 0, merging: false, bounces: 0, turn: 3,
+  status: 'working', department: DEV, product: null, assignee: BRUNO, turn: 3,
   parentId: null, waitsFor: [], createdAt: '2026-10-30T08:00:00.000Z', updatedAt: '2026-10-30T09:00:00.000Z',
 }));
 
@@ -45,7 +45,7 @@ export const detail = (task: TaskLine): TaskDetail => ({
   echelonFindings: emptyEchelonFindings(),
   ...task,
   body: Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: the card form checks the number and the date before it sends them.`).join('\n\n'),
-  parent: null, after: [], executor: BRUNO, gates: [], createdBy: { kind: 'agent', id: 'b0', name: 'Dana' }, subtasks: [], log: [], requests: [],
+  parent: null, after: [], executor: BRUNO, createdBy: { kind: 'agent', id: 'b0', name: 'Dana' }, subtasks: [], log: [], requests: [],
 });
 
 /* An improvement the orchestrator took into work, with the task it made. */

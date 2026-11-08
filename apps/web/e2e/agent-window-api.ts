@@ -7,7 +7,7 @@ import { AGENT_HIDDEN, ME, TASKS, serveApi } from './api';
 const ROLE = { en: 'Developer', ru: 'Разработчик' };
 const EMPLOYEE: Employee = {
   id: 'b1', name: 'Bruno', roleId: 'DEV-ENG', title: ROLE, kind: 'worker', model: '', modelName: null, provider: 'codex', effort: null,
-  state: 'sleeping', status: 'idle', on: true, timer: null, task: { id: 't1', number: 1, title: 'Checkout step 1', echelons: taskRoute(), stage: 0, gateCount: 0, bounces: 0 },
+  state: 'sleeping', status: 'idle', on: true, timer: null, task: { id: 't1', number: 1, title: 'Checkout step 1', echelons: taskRoute() },
   context: null, program: null, alarm: null, retry: null, failure: null,
 };
 const AGENT: RunningAgent = { id: 'b1', canOpen: true, name: 'Bruno', title: ROLE, department: { id: 'd2', name: 'Development' }, provider: 'codex', busy: false, since: null, task: null, withCeo: false };
@@ -18,7 +18,7 @@ export const SUB: SubView = {
 };
 const MACHINE: MachineView = { id: 'm1', hostname: 'test-machine', os: 'linux', arch: 'x86_64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, plans: [{ id: 's1', provider: 'codex', status: 'ready', online: true }], load: null, lendsTests: true, running: { agents: [], parts: [] } };
 export const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker', name: 'Bruno', role: { id: 'DEV-ENG', title: ROLE, description: ROLE }, department: { id: 'd2', name: 'Development' }, product: null, model: '', effort: null, subscription: SUB, machine: null, state: 'sleeping', retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null, canEdit: false };
-const DETAIL: TaskDetail = { ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
+const DETAIL: TaskDetail = { ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
 
 /* canType: whether this person types into the terminal, as the owner of its plan; so by default. orchestrator: the company's, for its window. */
 export type AgentFixture = { turnRefused?: TurnRefusal | null; awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator']; viewer?: Me };

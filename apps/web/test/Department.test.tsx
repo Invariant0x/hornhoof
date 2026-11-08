@@ -230,15 +230,18 @@ describe('Department view', () => {
     expect(runningDots('c', d)).toHaveLength(2);
   });
 
-  it('draws no yellow signal on empty space when the schema has no return line', async () => {
+  it('draws a yellow result on the real employee-to-head path without a gate return', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
     const now = Date.now();
     const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
-    shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...dev!, workLines: lines }] });
+    const org = { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...dev!, workLines: lines }] };
+    shell({}, org);
     await flyIn(user);
-    expect(document.querySelector('.dview .wires path.live.a')).toBeNull();
-    expect(document.querySelectorAll('.dview circle.pt.a')).toHaveLength(0);
+    const path = stepPaths(schemaLayout(org.departments[0]!, 1)).toMember('b1');
+    expect(document.querySelector('.dview .wires path.live.a')).toHaveAttribute('d', toD([...path!].reverse()));
+    expect(document.querySelector('.dview .wires path.live.a')).toHaveAttribute('data-work', 'b1');
+    expect(document.querySelectorAll('.dview .rl')).toHaveLength(0);
   });
 
   it.each([false, true])('runs a message dot until arrival, reduced motion %s', async reduce => {
