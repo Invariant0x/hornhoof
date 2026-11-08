@@ -24,18 +24,23 @@ function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironment
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
   return supportsTestProfile(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version));
 }
-function receiptMutations(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
-  const { mutation } = snapshot.description.manifest, scope = snapshot.candidate?.mutation;
+function requiredMutationSuites(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection) {
+  const { mutation } = snapshot.description.manifest;
   const selection = assigned.selection;
   const suites = selection.kind === 'batch' ? selection.selections : selection.kind === 'suite' ? [selection] : [];
-  const required = mutation.status === 'supported' && snapshot.candidate ? suites.filter(suite => suite.files.some(file => mutation.sourcePaths.includes(file))) : [];
+  return mutation.status === 'supported' && snapshot.candidate ? suites.filter(suite => suite.files.some(file => mutation.sourcePaths.includes(file))) : [];
+}
+function suiteMutationMatches(snapshot: EnvironmentSnapshot, suite: ReturnType<typeof requiredMutationSuites>[number], proofs: NonNullable<TestEnvironmentReceipt['mutations']>): boolean {
+  const { mutation } = snapshot.description.manifest, scope = snapshot.candidate?.mutation;
+  const proof = proofs.find(proof => proof.suiteId === suite.suiteId);
+  const files = mutation.status === 'supported' ? suite.files.filter(file => mutation.sourcePaths.includes(file)) : [];
+  return Boolean(scope && proof && mutationResultMatches(scope.selection, proof, files));
+}
+function receiptMutations(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
+  const required = requiredMutationSuites(snapshot, assigned);
   const proofs = receipt.mutations ?? [];
   if (proofs.length !== required.length || new Set(proofs.map(proof => proof.suiteId)).size !== proofs.length) return false;
-  return required.every(suite => {
-    const proof = proofs.find(proof => proof.suiteId === suite.suiteId);
-    const files = mutation.status === 'supported' ? suite.files.filter(file => mutation.sourcePaths.includes(file)) : [];
-    return Boolean(scope && proof && mutationResultMatches(scope.selection, proof, files));
-  });
+  return required.every(suite => suiteMutationMatches(snapshot, suite, proofs));
 }
 export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {
   const parsed = TestEnvironmentReceipt.safeParse(message.environmentReceipt);
