@@ -196,8 +196,9 @@ async function runRequested() {
   const request = requestOf(process.argv.slice(2)), delta = request ? readDelta(request) : null;
   const sources = selectedSources(process.env.HH_TEST_FILES && readFileSync(process.env.HH_TEST_FILES, 'utf8'), mutation);
   const scope = await scopeOf(await judgesFor(manifest, trackedIn('.'), sources), delta);
-  if (scope.selection?.status === 'blocked' || (request && !sources.length)) return { files: sources.map(file => ({ file, status: 'failed' })), selection: scope.selection, failed: true };
-  const files = await mutateSources(sources, scope.tests, {
+  const chosen = request ? [...scope.tests.keys()] : sources;
+  if (scope.selection?.status === 'blocked' || (request && !chosen.length)) return { files: sources.map(file => ({ file, status: 'failed' })), selection: scope.selection, failed: true };
+  const files = await mutateSources(chosen, scope.tests, {
     testsPass: tests => testsPass(tests, Boolean(request)),
     mutate: async (source, tests) => {
       const ended = await mutate(mutation.tool, mutatorArgs(source, tests, judgedAgain(scope.folder, source, scope.prints.get(source)), scope.lines.get(source)));
