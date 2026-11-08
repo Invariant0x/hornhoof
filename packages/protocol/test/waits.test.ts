@@ -92,7 +92,9 @@ describe('the plan of a wait', () => {
 describe('what a wait waits for', () => {
   it.each([
     ['after', `task:${TASK}`],
-    ['review', `review:${TASK}:2:${AGENT}`],
+    ['review', `review:${TASK}:review:${OPERATION}:${AGENT}`],
+    ['review', `review:${TASK}:security:${OPERATION}:${AGENT}`],
+    ['review', `review:${TASK}:cleanup:${OPERATION}:${AGENT}`],
     ['person', `request:${OPERATION}`],
     ['run', `run:${OPERATION}`],
     ['external', `wait_for:${OPERATION}`],
@@ -104,6 +106,7 @@ describe('what a wait waits for', () => {
   it.each([
     ['external', 'machine'], ['external', ''], ['external', 'operation:'], ['external', `run:${OPERATION}`],
     ['run', `run:${OPERATION}:1`], ['run', 'run:7'], ['after', TASK], ['person', `task:${TASK}`], ['review', `review:${TASK}:${AGENT}`],
+    ['review', `review:${TASK}:2:${AGENT}`], ['review', `review:${TASK}:review:${AGENT}`], ['review', `review:${TASK}:development:${OPERATION}:${AGENT}`],
   ] as const)('%s refuses %j', (kind, key) => {
     expect(validSourceKey(kind, key)).toBe(false);
   });
