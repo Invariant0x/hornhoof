@@ -11,11 +11,13 @@ describe('head decisions on the current route', () => {
     const f = await fixture();
     const next = await f.hire('Next author', 'worker', 'DEV-BE', f.codex.id, 'gpt-6.1-sol');
     const [queued] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.author.id, subscriptionId: f.author.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Old assignment', timeoutMs: 1000, status: 'queued' }).returning();
+    const [unrelated] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.author.id, subscriptionId: f.author.subscriptionId!, kind: 'conversation', prompt: 'Another conversation', timeoutMs: 1000, status: 'queued' }).returning();
     const moved = await handOver(f.ctx, await loadTask(f.db, f.task.id), next.id, 'The original plan is at its limit.');
     expect(moved.task).toMatchObject({ assigneeAgentId: next.id, executorAgentId: next.id, status: 'open' });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'development', candidateId: null, ownerAgentId: next.id });
     expect(moved.wakes).toEqual([expect.objectContaining({ agentId: next.id, taskId: f.task.id, why: 'assigned' })]);
     expect((await f.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'failed', error: 'handed_on' });
+    expect((await f.db.select().from(jobs).where(eq(jobs.id, unrelated!.id)))[0]).toMatchObject({ status: 'queued', error: null });
   });
 
   it('refuses automatic executor changes after a candidate has been submitted', async () => {
