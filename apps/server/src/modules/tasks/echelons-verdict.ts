@@ -1,3 +1,4 @@
+import { issuesForEchelon } from './review-findings.js';
 import type { Ctx } from '../../app.js';
 import { sameChecker } from './echelons-policy.js';
 import { agentIdentity } from './echelons-assign.js';
@@ -28,8 +29,9 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
       stages: state.stages.map(step => step.stage === 'security' ? { ...step, status: 'pending', reason: null } : step),
     };
   }
+  const issues = await issuesForEchelon(ctx.db, task, route, candidate, identity, verdict.issues ?? [], verdict.pass);
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: {
-    pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity, ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
+    issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity, ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   } };
   if (verdict.escalate) {
     const wakes = giver(task, 'blocked', agentId, verdict.comment.trim());

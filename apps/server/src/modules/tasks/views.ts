@@ -1,4 +1,5 @@
-import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import { findingReport } from './review-findings.js';
+import type { EchelonsSnapshot, EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import { routeSnapshots } from './echelons-store.js';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
@@ -81,6 +82,7 @@ export type AfterView = { id: string; number: number; title: string; status: Tas
 /* fromPerson: by is a person, the file's author, not the agent it is kept under. */
 export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string };
 export type TaskDetail = TaskLine & {
+  echelonFindings: EchelonFindingsView;
   body: string;
   parent: { id: string; number: number; title: string } | null;
   after: AfterView[];
@@ -251,6 +253,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
   const by = byOf(n, await forWhom(db, events.map(e => e.data)));
   return {
     ...line(task, n, sees),
+    echelonFindings: await findingReport(db, [task.id]),
     body: task.body,
     parent,
     after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),

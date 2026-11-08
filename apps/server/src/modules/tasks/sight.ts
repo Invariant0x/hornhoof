@@ -1,4 +1,4 @@
-import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import { emptyEchelonFindings, type EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canReach } from '../../auth/access.js';
@@ -84,6 +84,7 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   const sees = (id: string | undefined) => seesAgentId(viewer, id);
   return {
     ...maskLine(viewer, detail, detail.parent !== null),
+    echelonFindings: emptyEchelonFindings(),
     executor: shownRef(viewer, detail.executor),
     gates: detail.gates.filter(g => sees(g.id)),
     createdBy: detail.createdBy?.kind === 'agent' && !sees(detail.createdBy.id) ? null : detail.createdBy,

@@ -34,3 +34,15 @@ export const EchelonCandidate = z.object({
   paths: z.array(z.string()), producedBy: EchelonModel.extend({ stage: z.enum(ECHELON_STAGES) }),
 }).strict();
 export type EchelonCandidate = z.infer<typeof EchelonCandidate>;
+
+export type EchelonFindingView = {
+  findingId: string; revision: string; candidateId: string; stage: 'review' | 'security' | 'cleanup';
+  authorId: string; reviewerId: string; reviewerVendor: string; reviewedCommit: string;
+  category: 'security' | 'data' | 'spec' | 'other' | 'mechanical'; blocking: boolean; path: string; line: number; harm: string; confirmed: boolean;
+};
+export type EchelonFindingsView = {
+  uniqueReported: number; uniqueConfirmed: number;
+  review: { reported: number; confirmed: number }; security: { reported: number; confirmed: number }; cleanup: { reported: number; confirmed: number };
+  issues: EchelonFindingView[];
+};
+export const emptyEchelonFindings = (): EchelonFindingsView => ({ uniqueReported: 0, uniqueConfirmed: 0, review: { reported: 0, confirmed: 0 }, security: { reported: 0, confirmed: 0 }, cleanup: { reported: 0, confirmed: 0 }, issues: [] });

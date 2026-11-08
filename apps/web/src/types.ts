@@ -1,3 +1,4 @@
+import type { EchelonFindingsView } from '@hornhoof/protocol/echelons';
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
@@ -374,6 +375,7 @@ export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval'
 export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 
 export type TaskDetail = TaskLine & {
+  echelonFindings: EchelonFindingsView;
   body: string;
   parent: { id: string; number: number; title: string } | null;
   /* The tasks of its turn it comes after, and where each stands. */

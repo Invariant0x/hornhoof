@@ -1,3 +1,4 @@
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from './task-route';
 import { vi } from 'vitest';
 import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
@@ -223,6 +224,7 @@ export const TASKS: TaskLine[] = [
 export const CLOSED_TASKS: TaskLine[] = [line({ id: 't8', number: 8, title: 'Login page', status: 'done', assignee: null })];
 
 export const TASK_DETAIL: TaskDetail = {
+  echelonFindings: emptyEchelonFindings(),
   ...TASKS[0]!,
   body: 'POST /checkout takes a **card token**.',
   parent: { id: 't10', number: 10, title: 'Payments' },
