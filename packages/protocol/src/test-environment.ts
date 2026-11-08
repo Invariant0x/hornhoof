@@ -231,7 +231,13 @@ export async function validateEnvironmentDescription(value: unknown): Promise<En
   if (await hashTestEnvironment(description.manifestSource) !== description.manifestHash) throw new Error('The original manifest hash differs from its description.');
   return description;
 }
-export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id })
+/* One test file's digest of what its result depends on, at the pinned commit. */
+export const UnitFingerprint = z.strictObject({ suiteId: Id, file: RepositoryPath, fingerprint: EnvironmentDigest });
+export type UnitFingerprint = z.infer<typeof UnitFingerprint>;
+/* With a description at its own limit, they still fit one frame between a node and the server. */
+export const UnitFingerprints = z.array(UnitFingerprint).max(10_001).refine(prints => byteLength(JSON.stringify(prints)) <= 960 * 1024, 'The fingerprints exceed their limit.');
+const CandidateTestScope = z.strictObject({ baseCommit: ProductCommitSha, baseFingerprints: UnitFingerprints, fingerprints: UnitFingerprints });
+export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id, candidate: CandidateTestScope.optional() })
   .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.');
 export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
 const LegacySelection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
@@ -304,11 +310,6 @@ export const TestEnvironmentReceipt = z.union([
 ]).superRefine(descriptionSize);
 export type TestEnvironmentReceipt = z.infer<typeof TestEnvironmentReceipt>;
 
-/* One test file's digest of what its result depends on, at the pinned commit. */
-export const UnitFingerprint = z.strictObject({ suiteId: Id, file: RepositoryPath, fingerprint: EnvironmentDigest });
-export type UnitFingerprint = z.infer<typeof UnitFingerprint>;
-/* With a description at its own limit, they still fit one frame between a node and the server. */
-export const UnitFingerprints = z.array(UnitFingerprint).max(10_001).refine(prints => byteLength(JSON.stringify(prints)) <= 960 * 1024, 'The fingerprints exceed their limit.');
 /* What stands for the one explicit preparation among the units: its work depends on the whole tree. */
 export const PREPARATION_UNIT = { suiteId: 'hornhoof-preparation', file: '.hornhoof/test-environment.json' } as const;
 /* What a result came to, in one line. It stays with the result and is shown again whenever that result is reused. */
