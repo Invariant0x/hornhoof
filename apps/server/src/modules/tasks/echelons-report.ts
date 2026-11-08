@@ -41,27 +41,44 @@ async function acceptedUnder(tx: Tx, task: Task, ancestors = new Set<string>()):
   const acceptedChildren: AcceptedChild[] = [];
   for (const child of children) {
     if (child.status === 'cancelled') continue;
-    if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be accepted before the group closes.');
-    const childRoute = await routeOf(tx, child);
-    if (childRoute.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
-    const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
-    if (childRoute.state.resultKind === 'coordination') {
-      const snapshot = z.array(ChildReference).safeParse(report?.data.acceptedChildren);
-      const nested = await acceptedUnder(tx, child, path);
-      if (!snapshot.success || report?.data.routeRevision !== childRoute.revision || JSON.stringify(snapshot.data) !== JSON.stringify(nested)) throw refuse(409, 'task_changed', 'The child aggregate is missing or its accepted results changed.');
-      acceptedChildren.push({ taskId: child.id, children: nested });
-      continue;
-    }
-    const candidate = await currentCandidate(tx, child, childRoute);
-    const acceptance = Acceptance.safeParse(report?.data.acceptedCandidate);
-    const reviewed = childRoute.state.stages.some(step => step.stage === 'review' && step.status === 'complete');
-    const complete = childRoute.state.stages.every(step => step.status === 'complete' || step.status === 'skipped');
-    if (!reviewed || !complete || !acceptance.success || acceptance.data.candidateId !== candidate.id || acceptance.data.commit !== candidate.commit || acceptance.data.routeRevision !== childRoute.revision || acceptance.data.evidence.some(proof => proof.commit !== candidate.commit)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
-    const evidence = (await verifiedCandidateEvidence(tx, child, childRoute, candidate, childRoute.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
-    if (evidence.length !== acceptance.data.evidence.length || acceptance.data.evidence.some(proof => !evidence.some(run => run.runId === proof.runId && run.commit === proof.commit))) throw refuse(409, 'task_changed', 'The accepted evidence differs from its Tests report.');
-    acceptedChildren.push({ taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence });
+    acceptedChildren.push(await acceptedChild(tx, child, path));
   }
   return acceptedChildren;
+}
+
+type ReportData = typeof taskEvents.$inferSelect.data | undefined;
+
+async function acceptedChild(tx: Tx, child: Task, path: Set<string>): Promise<AcceptedChild> {
+  if (child.status !== 'done') throw refuse(409, 'task_invalid', 'Every child must be accepted before the group closes.');
+  const route = await routeOf(tx, child);
+  if (route.state.phase !== 'done') throw refuse(409, 'task_invalid', 'A closed child has no completed route.');
+  const [report] = await tx.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, child.id), eq(taskEvents.companyId, child.companyId), eq(taskEvents.kind, 'report'))).orderBy(desc(taskEvents.id)).limit(1);
+  return route.state.resultKind === 'coordination' ? acceptedAggregate(tx, child, route, report?.data, path) : acceptedCode(tx, child, route, report?.data);
+}
+
+async function acceptedAggregate(tx: Tx, child: Task, route: Route, report: ReportData, path: Set<string>): Promise<AcceptedChild> {
+  const snapshot = z.array(ChildReference).safeParse(report?.acceptedChildren);
+  const nested = await acceptedUnder(tx, child, path);
+  if (!snapshot.success || report?.routeRevision !== route.revision || JSON.stringify(snapshot.data) !== JSON.stringify(nested)) throw refuse(409, 'task_changed', 'The child aggregate is missing or its accepted results changed.');
+  return { taskId: child.id, children: nested };
+}
+
+function completedReview(route: Route): boolean {
+  const reviewed = route.state.stages.some(step => step.stage === 'review' && step.status === 'complete');
+  return reviewed && route.state.stages.every(step => step.status === 'complete' || step.status === 'skipped');
+}
+
+function acceptedIdentity(acceptance: z.infer<typeof Acceptance>, route: Route, candidate: Awaited<ReturnType<typeof currentCandidate>>): boolean {
+  return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision && acceptance.evidence.every(proof => proof.commit === candidate.commit);
+}
+
+async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportData): Promise<AcceptedChild> {
+  const candidate = await currentCandidate(tx, child, route);
+  const acceptance = Acceptance.safeParse(report?.acceptedCandidate);
+  if (!completedReview(route) || !acceptance.success || !acceptedIdentity(acceptance.data, route, candidate)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
+  const evidence = (await verifiedCandidateEvidence(tx, child, route, candidate, route.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
+  if (evidence.length !== acceptance.data.evidence.length || acceptance.data.evidence.some(proof => !evidence.some(run => run.runId === proof.runId && run.commit === proof.commit))) throw refuse(409, 'task_changed', 'The accepted evidence differs from its Tests report.');
+  return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence };
 }
 
 /* The aggregate pins existing accepted results. It never manufactures a repository candidate for itself. */

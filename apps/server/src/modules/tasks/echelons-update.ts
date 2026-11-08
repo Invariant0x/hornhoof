@@ -24,27 +24,38 @@ export function withCleanup(route: Route, enabled: boolean): Route['state'] {
 
 export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, agentId: string, change: TaskChange): Promise<{ state: Route['state']; set: Partial<Task>; paths: string[] }> {
   let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
-  const set: Partial<Task> = {};
   const paths = change.paths ?? route.paths;
   if (paths.some(path => !RepoPath.safeParse(path).success)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
-  if (change.riskClass && change.riskClass !== 'none' && state.resultKind === 'code') {
-    if (['tests', 'security'].includes(state.stage ?? '') && !state.security.required) throw refuse(409, 'task_invalid', 'A newly discovered risk must be resolved before this result proceeds.');
-    state = { ...state, security: { required: true, reason: change.riskClass, addedBy: agentId }, stages: state.stages.map(step => step.stage === 'security' && step.status === 'skipped' ? { ...step, status: 'pending', reason: null } : step) };
-  }
+  state = withRisk(state, agentId, change.riskClass);
   if (change.executor && !['architecture', 'development'].includes(state.stage ?? '')) throw refuse(409, 'task_invalid', 'Change the current checking owner, not the original producer.');
   const ownerId = change.ownerAgentId ?? change.executor;
-  if (ownerId) {
-    const [owner] = await ctx.db.select().from(agents).where(and(eq(agents.id, ownerId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-    if (!owner?.subscriptionId || owner.departmentId !== task.departmentId || (owner.productId && owner.productId !== task.productId)) throw refuse(403, 'task_not_yours', 'The new owner must be available in this task scope.');
-    const abilities: Partial<Record<NonNullable<Route['state']['stage']>, string>> = { review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment' };
-    const ability = state.stage ? abilities[state.stage] : undefined;
-    const assignment = ability ? await checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, ownerId) : null;
-    if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
-    state = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };
-    Object.assign(set, { assigneeAgentId: ownerId, status: ability && state.stage !== 'tests' ? 'review' : 'open', silent: 0 });
-    if (change.executor) set.executorAgentId = ownerId;
+  const owner = ownerId ? await changedOwner(ctx, task, route, state, ownerId, change.executor) : { state, set: {} };
+  return { ...owner, paths };
+}
+
+function withRisk(state: Route['state'], agentId: string, risk: TaskChange['riskClass']): Route['state'] {
+  if (risk && risk !== 'none' && state.resultKind === 'code') {
+    if (['tests', 'security'].includes(state.stage ?? '') && !state.security.required) throw refuse(409, 'task_invalid', 'A newly discovered risk must be resolved before this result proceeds.');
+    return { ...state, security: { required: true, reason: risk, addedBy: agentId }, stages: state.stages.map(step => step.stage === 'security' && step.status === 'skipped' ? { ...step, status: 'pending', reason: null } : step) };
   }
-  return { state, set, paths };
+  return state;
+}
+
+async function requireAvailableOwner(ctx: Ctx, task: Task, ownerId: string): Promise<void> {
+  const [owner] = await ctx.db.select().from(agents).where(and(eq(agents.id, ownerId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  if (!owner?.subscriptionId || owner.departmentId !== task.departmentId || (owner.productId && owner.productId !== task.productId)) throw refuse(403, 'task_not_yours', 'The new owner must be available in this task scope.');
+}
+
+async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], ownerId: string, executor: TaskChange['executor']): Promise<{ state: Route['state']; set: Partial<Task> }> {
+  await requireAvailableOwner(ctx, task, ownerId);
+  const abilities: Partial<Record<NonNullable<Route['state']['stage']>, string>> = { review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment' };
+  const ability = state.stage ? abilities[state.stage] : undefined;
+  const assignment = ability ? await checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, ownerId) : null;
+  if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
+  const next: Route['state'] = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };
+  const set: Partial<Task> = { assigneeAgentId: ownerId, status: ability && state.stage !== 'tests' ? 'review' : 'open', silent: 0 };
+  if (executor) set.executorAgentId = ownerId;
+  return { state: next, set };
 }
 
 /* A head decision belongs to its department in this turn; it is an event, not a compatibility switch. */
