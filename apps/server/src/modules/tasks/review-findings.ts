@@ -74,17 +74,33 @@ export function countedFindings(events: Event[]): FindingReport {
   const byVendor = [...new Set(issues.map(issue => issue.reviewerVendor))].sort().map(vendor => {
     const ids = [...new Set(issues.filter(issue => issue.reviewerVendor === vendor && confirmed.has(issue.findingId)).map(issue => issue.findingId))];
     return { vendor, count: ids.length, findingIds: ids };
-  });
+  }).filter(item => item.count > 0);
   return { uniqueReported: unique(issues), uniqueConfirmed: confirmed.size, confirmedCount: confirmed.size, review: counts('review'), security: counts('security'), cleanup: counts('cleanup'), byVendor, issues: issues.map(issue => ({ ...issue, confirmed: confirmed.has(issue.findingId) })) };
 }
 
 export async function findingReport(db: Reader, ids: string[]): Promise<FindingReport> {
   return countedFindings(await reviewEvents(db, ids));
 }
-export type TurnFindingReport = FindingReport & { status: 'recorded'; reason: null };
+export type TurnFindingReport = (FindingReport & { status: 'recorded'; reason: null }) | {
+  status: 'unavailable'; reason: 'finding-provenance-unavailable'; confirmedCount: null; uniqueReported: null; uniqueConfirmed: null;
+  review: null; security: null; cleanup: null; byVendor: []; issues: [];
+};
+
+function hasUnattestedVerdict(events: Event[]): boolean {
+  return events.some(event => {
+    if (event.kind !== 'verdict') return false;
+    const checker = EchelonModel.safeParse(event.data.checker);
+    const issues = z.array(FindingRecord).safeParse(event.data.issues);
+    const source = events.find(value => value.kind === 'submitted' && value.companyId === event.companyId && value.taskId === event.taskId && EchelonCandidate.safeParse(value.data.candidate).success && (value.data.candidate as EchelonCandidate).id === event.data.candidateId);
+    return !checker.success || checker.data.agentId !== event.agentId || !issues.success || !source;
+  });
+}
+
 export async function findingTurnReport(db: Reader, companyId: string, number: number): Promise<TurnFindingReport> {
   const rows = await db.select({ id: tasks.id }).from(tasks).innerJoin(turns, eq(turns.id, tasks.turnId)).where(and(eq(tasks.companyId, companyId), eq(turns.number, number)));
-  return { ...await findingReport(db, rows.map(row => row.id)), status: 'recorded', reason: null };
+  const events = await reviewEvents(db, rows.map(row => row.id));
+  if (hasUnattestedVerdict(events)) return { status: 'unavailable', reason: 'finding-provenance-unavailable', confirmedCount: null, uniqueReported: null, uniqueConfirmed: null, review: null, security: null, cleanup: null, byVendor: [], issues: [] };
+  return { ...countedFindings(events), status: 'recorded', reason: null };
 }
 
 /* Confirmation records existence, not resolution or permission to skip a stage. A checker never confirms itself. */
