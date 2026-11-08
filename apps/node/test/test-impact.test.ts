@@ -55,6 +55,33 @@ describe('pure commit impact selection', () => {
     }
   });
 
+  it('lets a rule name the tests that read a file, and runs only those of its suites', () => {
+    const input = fixture(); input.graphs[0]!.units = [];
+    input.changes = [{ path: 'templates/roles/a.md', kind: 'modified' }];
+    input.environment.impact.fullPackageGlobs = [{ globs: ['templates/**'], suiteIds: ['server', 'node'], tests: ['apps/server/test/c.test.ts', 'apps/node/test/b.test.ts'] }];
+    const result = selectAffectedTests(input);
+    expect(files(result)).toEqual(['apps/node/test/b.test.ts', 'apps/server/test/c.test.ts']);
+    expect([mode(result, 'node'), mode(result, 'server')]).toEqual(['related', 'related']);
+    expect(result.packages.find(value => value.packageId === 'server')?.reasons).toEqual([{ code: 'named_tests', path: 'templates/roles/a.md' }]);
+  });
+
+  it('keeps a file whose rule names its tests from taking whole what the graph found for other files', () => {
+    const input = fixture();
+    input.changes = [{ path: 'templates/roles/a.md', kind: 'modified' }, { path: 'apps/node/src/a.ts', kind: 'modified' }];
+    input.environment.impact.fullPackageGlobs = [{ globs: ['templates/**'], suiteIds: ['server'], tests: ['apps/server/test/c.test.ts'] }];
+    const result = selectAffectedTests(input);
+    expect(files(result)).toEqual(['apps/node/test/a.test.ts', 'apps/server/test/c.test.ts']);
+    expect([mode(result, 'node'), mode(result, 'server')]).toEqual(['related', 'related']);
+  });
+
+  it('still runs what the graph finds for a code file whose rule names its tests', () => {
+    const input = fixture();
+    input.environment.impact.fullPackageGlobs = [{ globs: ['apps/node/src/a.ts'], suiteIds: ['server'], tests: ['apps/server/test/c.test.ts'] }];
+    const result = selectAffectedTests(input);
+    expect(files(result)).toEqual(['apps/node/test/a.test.ts', 'apps/server/test/c.test.ts']);
+    expect([mode(result, 'node'), mode(result, 'server')]).toEqual(['related', 'related']);
+  });
+
   it('selects exactly the graph dependencies of file X', () => {
     const result = selectAffectedTests(fixture());
     expect(result.status).toBe('ready'); expect(files(result)).toEqual(['apps/node/test/a.test.ts']);

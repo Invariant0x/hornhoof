@@ -69,6 +69,8 @@ const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, co
 /* A run of the profile it replaces, on a due turn, runs as profile and reuses nothing. */
 const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000), replaces: Id, profile: Id });
 const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
+/* Who reads a file the import graph cannot follow: the named suites whole, or with tests only those of their test files. */
+const ImpactRule = z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1), tests: Inputs.min(1).optional() });
 const EnvironmentShape = z.strictObject({
   version: z.literal(1), defaultProfile: Id,
   runtimes: z.array(z.strictObject({ id: Id, version: Text.max(100) })).max(64),
@@ -80,7 +82,7 @@ const EnvironmentShape = z.strictObject({
   dependencies: z.strictObject({ adapter: Id, inputs: Inputs, install: z.array(Command).max(1000), paths: Inputs, cache: z.enum(['copy', 'link', 'none']), env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), RepositoryPath).optional(), bin: z.array(RepositoryPath).max(64).optional() }),
   services: z.array(TestService).max(128), prepare: z.array(TestPrepare).max(1000),
   reset: z.array(TestReset).min(1).max(1000).nullable(), suites: z.array(TestSuite).min(1).max(1000),
-  impact: z.strictObject({ adapter: Id, fullPackageGlobs: z.array(z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1) })).max(1000), migrationCheck: MigrationCheck }),
+  impact: z.strictObject({ adapter: Id, fullPackageGlobs: z.array(ImpactRule).max(1000), migrationCheck: MigrationCheck }),
   mutation: TestMutation,
   execution: ExecutionPolicy.optional(),
 });

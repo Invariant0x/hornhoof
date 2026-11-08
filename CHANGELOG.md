@@ -5,6 +5,15 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.8.3] - 2026-11-08
+
+Keep the checks of one change small and in the workspace of whoever builds or reviews it.
+
+### Changed
+
+- A change of the templates or the skills checks only the tests that read them, not the whole server and node suites.
+  A rule of a test environment can now name test files with `tests` beside its suites.
+
 ## [0.8.2] - 2026-11-08
 
 Make every skill a self-contained ability and every role a short identity, give each employee an assignment of its own,

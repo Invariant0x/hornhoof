@@ -3,7 +3,7 @@ import { builtinModules } from 'node:module';
 import { matchesGlob, posix } from 'node:path';
 import { PREPARATION_UNIT, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
-import { matchesPattern, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
+import { matchesPattern, NAMED_TESTS, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
 import { readCommit, type GitEntry } from './test-mirror.js';
 
 /* What a test file's result depends on, read from the pinned commit alone: nothing is installed and no repository code runs.
@@ -46,7 +46,7 @@ const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[
 const SCREEN = /\.[jt]sx$/;
 const LONGEST_PATH = 300;
 /* What takes a package whole because it runs around its tests, so what it imports does too. */
-const RUNS_AROUND_TESTS = new Set(['configuration', 'full_package_rule']);
+const RUNS_AROUND_TESTS = new Set(['configuration', 'full_package_rule', NAMED_TESTS]);
 const VERDICTS_BETWEEN_PAUSES = 16;
 const SCANS_BETWEEN_PAUSES = 64;
 const READ_BYTES = 64 * 1024 * 1024;
@@ -362,7 +362,9 @@ function keptVerdicts(key: string): Map<string, Verdict> {
 function verdictOn(environment: ImpactEnvironment, path: string): Verdict {
   const selection = selectAffectedTests({ environment, changes: [{ path, kind: 'modified' }], graphs: READY_GRAPHS });
   if (selection.problems.some(problem => problem.code !== 'migration_check_unsupported')) return { packages: environment.packages.map(item => item.id), expands: false };
-  const taken = selection.packages.filter(item => item.mode === 'whole-package');
+  /* A rule that names the tests reading a file narrows what a check of a change runs. A kept result still counts the file for
+     the whole of their suites: other tests may read it through the code they run, and the whole suite is what catches them. */
+  const taken = selection.packages.filter(item => item.mode === 'whole-package' || item.reasons.some(reason => reason.code === NAMED_TESTS));
   return { packages: taken.map(item => item.packageId), expands: taken.some(item => item.reasons.some(reason => RUNS_AROUND_TESTS.has(reason.code))) };
 }
 

@@ -24,6 +24,9 @@ export interface ImpactSelection {
 
 export const SUPPORTED_IMPACT_ADAPTERS: readonly ImpactAdapter[] = ['vitest-related', 'pytest'];
 interface FullRule { code: string; globs: string[]; global?: boolean }
+type ManifestRule = TestEnvironmentV1['impact']['fullPackageGlobs'][number];
+/* Why a test runs that a rule of the manifest names, beside those the graph finds. */
+export const NAMED_TESTS = 'named_tests';
 export const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
   { code: 'migration', globs: ['**/migrations/**', '**/drizzle/**', '**/*.migration.*'] },
   { code: 'schema', globs: ['**/schema.*', '**/schema/**'] },
@@ -117,17 +120,40 @@ function graphPackages(state: SelectionState, graphs: ImpactGraph[], pkg?: Impac
 function widen(state: SelectionState, graphs: ImpactGraph[], pkg: ImpactPackage, reason: ImpactReason): void {
   whole(state, [pkg, ...graphPackages(state, graphs, pkg)], reason);
 }
+const packagesNamed = (state: SelectionState, rule: ManifestRule): ImpactPackage[] => state.environment.packages.filter(pkg => pkg.suiteIds.some(id => rule.suiteIds.includes(id)));
+function readable(state: SelectionState, pkg: ImpactPackage, path: string): boolean {
+  const adapter = ADAPTERS.get(pkg.language ?? state.environment.impact.adapter);
+  return adapter !== undefined && EXTENSIONS[adapter].includes(extname(path));
+}
+/* A rule that names its tests runs only those test files of its suites. */
+function namedTests(state: SelectionState, rule: ManifestRule & { tests: string[] }, path: string): void {
+  for (const pkg of packagesNamed(state, rule)) {
+    const units = state.environment.inventory.filter(unit => pkg.suiteIds.includes(unit.suiteId) && rule.suiteIds.includes(unit.suiteId) && rule.tests.some(glob => matchesPattern(unit.file, glob)));
+    add(state, pkg, 'related', units, { code: NAMED_TESTS, path });
+  }
+}
 function policy(state: SelectionState, graphs: ImpactGraph[], path: string): boolean {
-  const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPattern(path, glob)))
-    .flatMap(rule => state.environment.packages.filter(pkg => pkg.suiteIds.some(id => rule.suiteIds.includes(id))));
+  const matched = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPattern(path, glob)));
+  const targets = matched.filter(rule => !rule.tests).flatMap(rule => packagesNamed(state, rule));
   whole(state, targets, { code: 'full_package_rule', path });
+  for (const rule of matched) if (rule.tests) namedTests(state, { ...rule, tests: rule.tests }, path);
   const rules = DEFAULT_FULL_PACKAGE_RULES.filter(value => value.globs.some(glob => matchesPattern(path, glob)));
+  let taken = targets.length > 0;
   for (const rule of rules) {
     if (rule.code === 'migration') state.migration = true;
-    whole(state, defaultTargets(state, rule, path, targets.length > 0), { code: rule.code, path });
+    const found = defaultTargets(state, rule, path, matched.length > 0);
+    whole(state, found, { code: rule.code, path });
+    taken ||= found.length > 0;
   }
-  if (!targets.length && !rules.length) return false;
-  const consumers = graphPackages(state, graphs, ownerOf(state.environment, path)).filter(pkg => state.choices.get(pkg.id)?.mode !== 'whole-package');
+  if (!matched.length && !rules.length) return false;
+  /* Tests named by a rule are all who read the file without importing it, so the graph adds no one whole for it; what the
+     graph sees of a code file still runs, as for any other. */
+  const owner = ownerOf(state.environment, path);
+  if (!taken) {
+    if (owner && readable(state, owner, path)) related(state, graphs, owner, path);
+    return true;
+  }
+  const consumers = graphPackages(state, graphs, owner).filter(pkg => state.choices.get(pkg.id)?.mode !== 'whole-package');
   whole(state, consumers, { code: 'policy_consumers', path });
   return true;
 }
