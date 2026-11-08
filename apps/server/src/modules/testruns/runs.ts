@@ -660,13 +660,14 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
   const binding = await candidateForRun(ctx.db, task, job.agentId, input, kind);
-  if (binding) input = { ...input, branch: binding.branch, expectedCommit: binding.commit };
+  if (binding) input = { ...input, branch: binding.branch };
   const found = await runRepository(ctx, task, input, kind);
   const files = await workFiles(ctx, task, input, kind);
   const parts = mode.mode === 'manual' ? mode.parts : 0;
   checkManualParts(input.command ?? '', parts);
   await checkRunCapacity(ctx, job);
   const setup = await prepareRun(ctx, job, task, input, kind, mode, found);
+  if (binding && setup.pin.commitSha !== binding.commit) throw refuse(409, 'task_changed', 'Tests must pin the exact current candidate commit.');
   const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts, binding);
   await pumpTests(ctx);
   if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;

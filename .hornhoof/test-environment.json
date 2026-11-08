@@ -621,7 +621,10 @@
           "apps/server/test/conversation.test.ts",
           "apps/server/test/credentials.test.ts",
           "apps/server/test/development-checks-template.test.ts",
+          "apps/server/test/development-echelons-cleanup.test.ts",
+          "apps/server/test/development-echelons-template.test.ts",
           "apps/server/test/instructions.test.ts",
+          "apps/server/test/long-text-storage.test.ts",
           "apps/server/test/notebook.test.ts",
           "apps/server/test/operations-card.test.ts",
           "apps/server/test/operations-required.test.ts",
@@ -629,6 +632,7 @@
           "apps/server/test/pipeline-guidance.test.ts",
           "apps/server/test/program-operator-placement.test.ts",
           "apps/server/test/prompt.test.ts",
+          "apps/server/test/release-improvement-templates.test.ts",
           "apps/server/test/role-levels-guide.test.ts",
           "apps/server/test/skill-independence.test.ts",
           "apps/server/test/staff.test.ts",
@@ -636,8 +640,7 @@
           "apps/server/test/templates-watch-idle.test.ts",
           "apps/server/test/templates.test.ts",
           "apps/server/test/test-environment-templates.test.ts",
-          "apps/server/test/timers.test.ts",
-          "apps/server/test/development-echelons-*.test.ts"
+          "apps/server/test/timers.test.ts"
         ]
       },
       {
