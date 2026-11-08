@@ -248,6 +248,8 @@ export const MutationSelection = z.strictObject({ version: z.literal(1), status:
   problems: z.array(z.strictObject({ file: RepositoryPath.optional(), code: Text.max(1000) })).max(10_000),
 }).refine(value => (value.status === 'ready') === (value.problems.length === 0), 'Blocked mutation scope must retain its problems.');
 export type MutationSelection = z.infer<typeof MutationSelection>;
+export const MutationResult = z.strictObject({ selection: MutationSelection, files: z.array(z.strictObject({ file: RepositoryPath, status: z.enum(['passed', 'failed']) })).max(10_000) });
+export type MutationResult = z.infer<typeof MutationResult>;
 export const CandidateMutation = z.strictObject({ delta: MutationDelta, selection: MutationSelection }).refine(value => {
   if (value.delta.commit !== value.selection.commit || value.delta.baseCommit !== value.selection.baseCommit) return false;
   return value.selection.selected.every(fn => value.delta.changes.some(change => change.path === fn.file && change.ranges.some(([start, count]) => start <= fn.endLine && start + count > fn.startLine)));
@@ -259,6 +261,11 @@ export function mutationSelectionMatches(expected: MutationSelection, actual: Mu
   const selected = new Set(files), ordered = (values: unknown[]) => JSON.stringify(values.map(value => JSON.stringify(value)).sort());
   return ordered(expected.selected.filter(fn => selected.has(fn.file))) === ordered(actual.selected)
     && ordered(expected.excluded.filter(fn => selected.has(fn.file))) === ordered(actual.excluded);
+}
+export function mutationResultMatches(expected: MutationSelection, actual: MutationResult, files: string[]): boolean {
+  const selected = new Set(files), reported = new Set(actual.files.map(file => file.file));
+  return mutationSelectionMatches(expected, actual.selection, files) && actual.files.length === selected.size && reported.size === selected.size
+    && actual.files.every(file => selected.has(file.file) && file.status === 'passed');
 }
 function boundMutation(value: CandidateMutation | undefined, description: EnvironmentDescription, base: string | undefined, ctx: z.RefinementCtx): void {
   if (!value) return;
@@ -355,7 +362,7 @@ const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.
 const Duration = z.number().finite().nonnegative();
 const ReceiptFields = {
   commitSha: ProductCommitSha, manifestHash: EnvironmentDigest,
-  mutations: z.array(z.strictObject({ suiteId: Id, selection: MutationSelection })).max(1000).optional(),
+  mutations: z.array(MutationResult.extend({ suiteId: Id })).max(1000).optional(),
   runtimes: z.array(RuntimeCapability).max(64), dependencies: CacheReceipt,
   environments: z.array(CacheReceipt.safeExtend({ unitId: Id })).max(1000),
   phases: z.strictObject({ checkoutMs: Duration, dependenciesMs: Duration, environmentMs: Duration, servicesMs: Duration, commandMs: Duration, cleanupMs: Duration }),

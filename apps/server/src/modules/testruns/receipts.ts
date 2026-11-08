@@ -1,4 +1,4 @@
-import { mutationSelectionMatches, TestExecution, TestEnvironmentReceipt, supportsTestProfile, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
+import { mutationResultMatches, TestExecution, TestEnvironmentReceipt, supportsTestProfile, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
 import type { TestEnvironmentSelection, testParts } from '../../db/schema.js';
 
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
@@ -33,7 +33,8 @@ function receiptMutations(snapshot: EnvironmentSnapshot, assigned: TestEnvironme
   if (proofs.length !== required.length || new Set(proofs.map(proof => proof.suiteId)).size !== proofs.length) return false;
   return required.every(suite => {
     const proof = proofs.find(proof => proof.suiteId === suite.suiteId);
-    return Boolean(scope && proof && mutationSelectionMatches(scope.selection, proof.selection, suite.files));
+    const files = mutation.status === 'supported' ? suite.files.filter(file => mutation.sourcePaths.includes(file)) : [];
+    return Boolean(scope && proof && mutationResultMatches(scope.selection, proof, files));
   });
 }
 export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {

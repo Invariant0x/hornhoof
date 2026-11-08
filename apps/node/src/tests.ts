@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { mutationSelectionMatches, CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { mutationResultMatches, CheckSlotQueue, KeptFiles, TestExecution, parseTestEnvironment, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type FileOutcome, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentReceipt, type TestEnvironmentV1, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser, playwrightVersionIn } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
@@ -809,9 +809,9 @@ function collectProductMutations(execution: TestExecution, state: ProductState):
   const mutations = state.reports.flatMap(report => {
     const files = report.selected.filter(file => policy.sourcePaths.includes(file));
     if (report.failed || !files.length) return [];
-    const selection = parseMutationReport(readJobFile(report.path, state.user.uid, REPORT_BYTES));
-    if (!selection || !mutationSelectionMatches(scope.selection, selection, files)) environmentError('description_mismatch', 'The mutation report is missing or differs from the assigned candidate functions.');
-    return [{ suiteId: report.suiteId, selection }];
+    const result = parseMutationReport(readJobFile(report.path, state.user.uid, REPORT_BYTES));
+    if (!result || !mutationResultMatches(scope.selection, result, files)) environmentError('description_mismatch', 'The mutation report is missing or differs from the assigned candidate functions or source outcomes.');
+    return [{ suiteId: report.suiteId, ...result }];
   });
   if (mutations.length) state.receipt.mutations = mutations;
 }
