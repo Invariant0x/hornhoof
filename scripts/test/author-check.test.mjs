@@ -32,8 +32,8 @@ function given({ changes = CHANGES, suites = [vitestSuite], selection, hunks = {
     selection: selection ?? { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }], notes: [] } };
 }
 function fake(answer = () => undefined, files = FILES) {
-  const calls = [], lines = [];
-  return { calls, lines, log: line => lines.push(line), read: path => files[path] ?? null, mkdir: () => {},
+  const calls = [], lines = [], values = { ...files };
+  return { calls, lines, log: line => lines.push(line), read: path => values[path] ?? null, write: (path, text) => { values[path] = text; }, mkdir: () => {},
     exec: async (program, args, options) => { calls.push({ program, args, cwd: options.cwd }); return answer(program, args) ?? { code: 0, output: '' }; } };
 }
 const stage = (result, name) => result.stages.find(item => item.name === name);
@@ -157,6 +157,19 @@ test('a suite run by node has its own coverage and counts from the same run', as
   assert.deepEqual(result.numbers.tests, { passed: 2, failed: 1, skipped: 0, total: 3 });
   assert.deepEqual(result.numbers.changedLines, { covered: 1, total: 1 });
   assert.deepEqual([stage(result, 'tests').status, stage(result, 'tests').exitCode], ['failed', 1]);
+});
+
+test('coverage of two selected suites sharing a working directory survives both executions', async () => {
+  const node = { ...vitestSuite, run: { ...vitestSuite.run, cwd: '.' }, finalChecks: [] };
+  const scripts = { id: 'scripts', root: 'scripts', run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, finalChecks: [] };
+  const paths = ['apps/node/src/a.ts', 'scripts/a.mjs'];
+  const selection = { packages: [{ packageId: 'node', mode: 'whole-package', units: [unit('apps/node/test/a.test.ts')] }, { packageId: 'scripts', mode: 'whole-package', units: [{ suiteId: 'scripts', file: 'scripts/test/a.test.mjs', selectionUnit: 'scripts/test/a.test.mjs' }] }], notes: [] };
+  const ports = fake((program, args) => {
+    if (args.includes('vitest')) ports.write('coverage/lcov.info', 'SF:apps/node/src/a.ts\nDA:1,1\nend_of_record\n');
+    if (program === 'node') ports.write('coverage/lcov.info', 'SF:scripts/a.mjs\nDA:1,1\nend_of_record\n');
+  }, { ...FILES, '/tmp/check/tests-scripts.tap': '# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n', '.metrics/crap.edn': edn(['a', 'a', 2, 100, 2]) });
+  const result = await runStages(given({ changes: paths.map(path => ({ path, kind: 'modified' })), suites: [node, scripts], selection, hunks: Object.fromEntries(paths.map(path => [path, [[1, 1]]])) }), ports);
+  assert.deepEqual(result.numbers.changedLines, { covered: 2, total: 2 });
 });
 
 test('a test report that cannot be read leaves the count unknown, never zero', async () => {
