@@ -4,7 +4,7 @@ import { agentIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf } from './echelons-store.js';
-import { loadTask, move, refuse, type Moved } from './engine.js';
+import { giver, loadTask, move, refuse, type Moved } from './engine.js';
 import type { ReviewVerdict } from './review-verdict.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
@@ -20,14 +20,28 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   if (verdict.reviewedCommit !== candidate.commit) throw refuse(409, 'task_changed', 'Name the exact current candidate commit in the verdict.');
   const identity = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The checking assignment model or provider changed. Ask the head to assign it again.');
+  if (verdict.escalate && verdict.pass) throw refuse(400, 'task_invalid', 'An escalation cannot certify PASS.');
+  let state = route.state;
+  if (verdict.security !== undefined) {
+    if (state.stage !== 'review' || !verdict.security.trim()) throw refuse(400, 'task_invalid', 'Only Review adds Security with a concrete risk.');
+    state = { ...state, security: { required: true, reason: verdict.security.trim(), addedBy: agentId },
+      stages: state.stages.map(step => step.stage === 'security' ? { ...step, status: 'pending', reason: null } : step),
+    };
+  }
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: {
-    pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity,
+    pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity, ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   } };
+  if (verdict.escalate) {
+    const wakes = giver(task, 'blocked', agentId, verdict.comment.trim());
+    const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
+    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, tx => changeRoute(tx, route, escalated), wakes);
+    return { task: row, wakes };
+  }
   if (!verdict.pass) {
-    const row = await move(ctx, task, { status: 'working' }, n, tx => changeRoute(tx, route, route.state));
+    const row = await move(ctx, task, { status: 'working' }, n, tx => changeRoute(tx, route, state));
     return { task: row, wakes: [] };
   }
-  const next = await forwardHandoff(ctx, task, route, candidate);
+  const next = await forwardHandoff(ctx, task, { ...route, state }, candidate);
   const row = await move(ctx, task, next.set, n, tx => changeRoute(tx, route, next.state), next.wakes);
   return { task: row, wakes: next.wakes };
 }

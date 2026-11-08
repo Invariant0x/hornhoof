@@ -1,3 +1,4 @@
+import { architectureReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity } from './echelons-assign.js';
 import { producedCandidate } from './echelons-candidates.js';
@@ -1074,6 +1075,12 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
 
 export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
+  const route = await routeOf(ctx.db, task);
+  if (r.done && route.state.stage === 'architecture') {
+    stillOpen(task);
+    await refuseWaiting(ctx.db, task);
+    return architectureReport(ctx, task, route, agentId, r.summary);
+  }
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };

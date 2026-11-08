@@ -5,7 +5,7 @@ import { assertReviewVendor, issuesForVerdict, type NewIssue } from './review-fi
 import { fixReviews, type Fix } from './review-fixes.js';
 import { taskReviewPlan, type Plan } from './review-plan.js';
 
-export type ReviewVerdict = { pass: boolean; reviewedCommit?: string; issues?: NewIssue[]; evidence?: object[] };
+export type ReviewVerdict = { pass: boolean; reviewedCommit?: string; security?: string; escalate?: boolean; issues?: NewIssue[]; evidence?: object[] };
 
 /* Live branch freshness remains a separate fact; it cannot certify a different pinned candidate. */
 export function bindReviewEvidence<T extends object>(runs: T[], commit: string | null): T[] {
