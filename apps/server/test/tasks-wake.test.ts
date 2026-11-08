@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
@@ -702,7 +703,7 @@ describe('waking agents for their tasks', () => {
 });
 
 const NODE_KEY = 'k'.repeat(40);
-type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null } | null };
+type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null; repositoryScope?: { companyId: string; repositoryOwnerId: string; repoUrlHash: string } } | null };
 
 async function nextRun(node: FakeNode): Promise<Run> {
   const m = await node.next();
@@ -870,19 +871,21 @@ describe('a head', () => {
 
 describe("working in the product's repository", () => {
   it("sends an agent's turn with its product's repository, else its department's, and each agent its own folder", async () => {
-    const { ctx, builtin, dev, shop, hire, repository, task } = await withRepositories();
+    const { ctx, builtin, companyId, dev, shop, hire, repository, task } = await withRepositories();
     expect((await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111' })).statusCode).toBe(200);
     expect((await repository(shop.id, { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222' })).statusCode).toBe(200);
     const bruno = await hire('Bruno', shop.id);
     const pia = await hire('Pia', null);
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
     const first = await nextRun(builtin);
-    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null } });
+    /* The repository as the company's registry of what is built knows it, so the agent's worktree gets its dependencies from there. */
+    const scope = (ownerId: string, url: string) => ({ companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) });
+    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null }, repositoryScope: scope(shop.id, 'https://github.com/acme/shop.git') });
     expect(first.prompt).toContain('https://github.com/acme/shop.git');
     expect(first.prompt).toContain('./shop');
     expect(first.prompt).not.toContain('ghp_');
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
-    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null } });
+    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null }, repositoryScope: scope(dev.id, 'https://github.com/acme/platform.git') });
   });
 
   it('tells the agent who its commits are by, and to add no co-author lines', async () => {

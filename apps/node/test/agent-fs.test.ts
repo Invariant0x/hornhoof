@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -79,6 +80,75 @@ describe.each([
     expect(await fs.kind(join(root, 'tree.git', 'inside'))).toBeNull();
     expect(await fs.kind(join(root, 'locked', '.git'))).toBeNull();
     chmodSync(join(root, 'locked'), 0o755);
+  });
+
+  it('says what stands at a path itself, a link not followed, and reads only a plain file there, never through a link or from a pipe', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    writeFileSync(join(root, 'plain'), 'text');
+    mkdirSync(join(root, 'folder'));
+    symlinkSync(join(root, 'plain'), join(root, 'linked'));
+    symlinkSync(join(root, 'elsewhere'), join(root, 'dangling'));
+    execFileSync('mkfifo', [join(root, 'pipe')]);
+    expect(await fs.entry(join(root, 'plain'))).toBe('file');
+    expect(await fs.entry(join(root, 'folder'))).toBe('dir');
+    expect(await fs.entry(join(root, 'linked'))).toBe('link');
+    expect(await fs.entry(join(root, 'dangling'))).toBe('link');
+    expect(await fs.entry(join(root, 'pipe'))).toBe('other');
+    expect(await fs.entry(join(root, 'missing'))).toBeNull();
+    expect(await fs.entry(join(root, 'plain', 'inside'))).toBeNull();
+    expect(await fs.readPlain(join(root, 'plain'))).toBe('text');
+    expect(await fs.readPlain(join(root, 'missing'))).toBeNull();
+    await expect(fs.readPlain(join(root, 'linked'))).rejects.toThrow(/link/);
+    /* Nobody writes into the pipe, so reading it would wait for ever. */
+    await expect(fs.readPlain(join(root, 'pipe'))).rejects.toThrow(/not a plain file/);
+    await expect(fs.readPlain(join(root, 'folder'))).rejects.toThrow(/not a plain file/);
+  });
+
+  it('moves a folder into place with its links as they are, and never over anything already there', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    const from = join(root, 'staging', 'node_modules');
+    mkdirSync(join(from, '.bin'), { recursive: true });
+    writeFileSync(join(from, 'dep'), 'locked');
+    symlinkSync('../dep', join(from, '.bin', 'tool'));
+    mkdirSync(join(root, 'repo'));
+    const to = join(root, 'repo', 'node_modules');
+    await fs.move(from, to);
+    expect(readFileSync(join(to, 'dep'), 'utf8')).toBe('locked');
+    expect(readlinkSync(join(to, '.bin', 'tool'))).toBe('../dep');
+    expect(existsSync(from)).toBe(false);
+    mkdirSync(from);
+    writeFileSync(join(from, 'other'), 'theirs');
+    await expect(fs.move(from, to)).rejects.toThrow(/already/);
+    expect(readFileSync(join(to, 'dep'), 'utf8')).toBe('locked');
+    /* A link that leads nowhere still stands in the way: nothing goes through it. */
+    symlinkSync(join(root, 'elsewhere'), join(root, 'repo', 'linked'));
+    await expect(fs.move(from, join(root, 'repo', 'linked'))).rejects.toThrow(/already/);
+    expect(lstatSync(join(root, 'repo', 'linked')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(root, 'elsewhere'))).toBe(false);
+  });
+
+  it('moves a single file or link into place as it is, and never over anything already there', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    mkdirSync(join(root, 'staging')); mkdirSync(join(root, 'repo'));
+    writeFileSync(join(root, 'staging', 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    symlinkSync('tool', join(root, 'staging', 'alias'));
+    await fs.move(join(root, 'staging', 'tool'), join(root, 'repo', 'tool'));
+    await fs.move(join(root, 'staging', 'alias'), join(root, 'repo', 'alias'));
+    expect(readFileSync(join(root, 'repo', 'tool'), 'utf8')).toBe('#!/bin/sh\n');
+    expect(statSync(join(root, 'repo', 'tool')).mode & 0o777).toBe(0o755);
+    expect(readlinkSync(join(root, 'repo', 'alias'))).toBe('tool');
+    expect(existsSync(join(root, 'staging', 'tool'))).toBe(false);
+    expect(lstatSync(join(root, 'staging')).isDirectory()).toBe(true);
+    writeFileSync(join(root, 'staging', 'tool'), 'new');
+    symlinkSync('elsewhere', join(root, 'staging', 'alias'));
+    await expect(fs.move(join(root, 'staging', 'tool'), join(root, 'repo', 'tool'))).rejects.toThrow(/already/);
+    await expect(fs.move(join(root, 'staging', 'alias'), join(root, 'repo', 'alias'))).rejects.toThrow(/already/);
+    expect(readFileSync(join(root, 'repo', 'tool'), 'utf8')).toBe('#!/bin/sh\n');
+    expect(readlinkSync(join(root, 'repo', 'alias'))).toBe('tool');
+    expect(readFileSync(join(root, 'staging', 'tool'), 'utf8')).toBe('new');
   });
 
   it('says why a write failed', async () => {

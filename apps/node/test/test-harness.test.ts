@@ -228,7 +228,7 @@ describe('the registry over HTTP', () => {
   const unit = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: INPUT, unit: 'dependencies', key: KEY, commitSha: 'e'.repeat(40), platform: 'linux-arm64' };
   type Asked = { method: string; url: string; authorization: string | undefined; range: string | undefined; body: Buffer; company: string | string[] | undefined; attempt: string | string[] | undefined };
   /* A server that answers each request as told, and keeps what it was asked. */
-  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1) {
+  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1, releaseMs?: number) {
     const heard: Asked[] = [];
     const running = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -241,7 +241,7 @@ describe('the registry over HTTP', () => {
     await new Promise<void>(resolve => { running.listen(0, '127.0.0.1', resolve); });
     onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
     const address = running.address() as { port: number };
-    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs) };
+    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs) };
   }
   const send = (response: ServerResponse<IncomingMessage>, status: number, body = '') => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body); };
   async function file(text: string) {
@@ -262,6 +262,14 @@ describe('the registry over HTTP', () => {
     await expect(worded.remote.claim(unit, SIGNAL)).rejects.toThrow('Hornhoof answered 403: This machine takes no tests of this product.');
     const bare = await server((_asked, response) => { send(response, 500, 'not json'); });
     await expect(bare.remote.claim(unit, SIGNAL)).rejects.toThrow(/^Hornhoof answered 500\.$/);
+  });
+
+  it('lets a unit go within a short time even when the server never answers, as the cache lock waits meanwhile', async () => {
+    const { heard, remote } = await server(() => {}, 1, 200);
+    const started = Date.now();
+    await expect(remote.failed(KEY, null, LEASE)).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(heard.map(asked => asked.url)).toEqual([`/api/harness/${KEY}/failed`]);
   });
 
   it('builds locally against a server that answers with the old unfenced protocol', async () => {

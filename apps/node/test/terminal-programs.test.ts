@@ -310,8 +310,11 @@ describe('Kimi Code in a terminal', () => {
       read: path => (done.push(`read ${path}`), ownFs.read(path)),
       write: (path, data) => (done.push(`write ${path}`), ownFs.write(path, data)),
       kind: ownFs.kind,
+      entry: ownFs.entry,
+      readPlain: ownFs.readPlain,
       remove: ownFs.remove,
       copy: ownFs.copy,
+      move: ownFs.move,
       stop() {},
     };
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));

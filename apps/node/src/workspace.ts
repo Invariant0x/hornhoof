@@ -78,6 +78,12 @@ export function gitEnv(repo: Pick<Repo, 'url' | 'token'>): Record<string, string
 
 type Owner = { user: JobUser | null; home: string | null };
 
+/* The commit a clone or worktree of the agent stands at, read as the agent's user, or null when it names none. */
+export async function headOf(dir: string, owner: Owner, git: Git = realGit): Promise<string | null> {
+  const head = await git(['rev-parse', '--verify', 'HEAD'], { cwd: dir, user: owner.user, env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: owner.home ?? process.env.HOME ?? dir, GIT_TERMINAL_PROMPT: '0' } }).catch(() => '');
+  return /^[0-9a-f]{40}$/.test(head) ? head : null;
+}
+
 /* Preserve an author the clone was given separately from Hornhoof's setting. */
 async function setRepoAuthor(author: Repo['author'], run: (args: string[]) => Promise<string>): Promise<void> {
   const AUTHOR = [['user.name', 'hornhoof.username'], ['user.email', 'hornhoof.useremail']] as const;
