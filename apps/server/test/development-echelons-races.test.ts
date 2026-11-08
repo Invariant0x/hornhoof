@@ -20,7 +20,7 @@ describe('one current assignment under retries and identity changes', () => {
   it('does not accept the checking assignment after its subscription changes', async () => {
     const f = await fixture();
     await submit(f.ctx, f.author.id, f.task.id, code);
-    const [plan] = await f.db.insert(subscriptions).values({ companyId: f.task.companyId, provider: 'claude', kind: 'personal', label: 'Another plan', status: 'ready' }).returning();
+    const [plan] = await f.db.insert(subscriptions).values({ companyId: f.task.companyId, provider: 'claude', kind: 'personal', label: 'Another plan', ownerPersonId: f.claude.ownerPersonId, status: 'ready' }).returning();
     await f.db.update(agents).set({ subscriptionId: plan!.id }).where(eq(agents.id, f.reviewer.id));
     await expect(verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Old assignment.', reviewedCommit: HEAD }).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons.stage).toBe('review');
