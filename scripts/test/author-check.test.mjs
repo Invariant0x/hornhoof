@@ -530,6 +530,13 @@ test('a changed node-test file takes its package without asking the Vitest graph
   assert.deepEqual(ports.seen.vitest.changed, ['apps/node/src/a.ts']);
 });
 
+test('a policy and a changed node-test file select the same package only once', async () => {
+  const scripts = { packageId: 'scripts', mode: 'whole-package', units: [UNITS[1]], reasons: [{ code: 'full_package_rule', path: 'apps/node/src/a.ts' }] };
+  const result = await selectTests({ changes: [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'scripts/test/a.test.mjs', kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, selector({ packages: [scripts] }));
+  assert.equal(result.packages.length, 1);
+  assert.deepEqual(result.packages[0].units, [UNITS[1]]);
+});
+
 test('a selection of the whole suite stays unavailable until it is asked for', async () => {
   const whole = { packages: ['node', 'scripts', 'ruby'].map(packageId => ({ packageId, mode: 'whole-package', units: [] })) };
   const changes = [{ path: 'package.json', kind: 'modified' }];
