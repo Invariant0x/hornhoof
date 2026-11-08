@@ -10,7 +10,7 @@ import { pendingSubmission, type PendingSubmission } from './author-check-pendin
 import { finishAuthorCheck } from './author-check-completion.js';
 import { captureReview, type Review, type ReviewSubmission } from './review-context.js';
 
-export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
+export type AuthorCheckSubmission = { operationId?: string; summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
 
 type SubmissionWithPlan = AuthorCheckSubmission & { review: z.infer<typeof ReviewSubmission> & { authorCheckPlan: string } };
 type PinnedReview = Review & { commit: string; source: NonNullable<Review['source']> };

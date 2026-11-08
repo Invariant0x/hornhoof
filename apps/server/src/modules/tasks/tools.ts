@@ -1,3 +1,4 @@
+import { Verification } from './echelons-tests.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -6,7 +7,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
@@ -91,21 +92,6 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
-const isDepartmentTurnParent = (parent: Task | null, departmentId: string | null): parent is Task =>
-  !!parent && !parent.executorAgentId && !!parent.turnId && parent.departmentId === departmentId;
-
-/* Whether a member task without explicit gates is checked by the review of the department's turn. */
-async function turnReviewed(
-  db: Ctx['db'],
-  head: Agent,
-  executor: Agent,
-  parent: Task | null,
-  input: { gates?: string[]; product?: string },
-): Promise<boolean> {
-  if (executor.teamId || input.gates !== undefined || !isDepartmentTurnParent(parent, head.departmentId)) return false;
-  return inRepository(db, { departmentId: head.departmentId, productId: input.product ?? null });
-}
-
 const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
 const Turn = z.number().int().positive().describe('The turn number, like 2.');
 const TurnWords = z
@@ -137,6 +123,7 @@ class TaskTools {
     this.registerComment();
     this.registerReplanWait();
     this.registerAskPerson();
+    this.registerReport();
     if (this.job.agentKind === 'orchestrator') this.registerTurnTools();
     if (this.job.agentKind === 'head') this.registerCreateTask();
     if (this.job.agentKind !== 'worker') this.registerManagementTools();
@@ -155,7 +142,6 @@ class TaskTools {
 
   private registerManagementTools(): void {
     this.registerUpdateTask();
-    this.registerReport();
     this.registerCancelTask();
   }
 
@@ -287,13 +273,6 @@ class TaskTools {
     if (!id) return;
     const [product] = await this.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.parentId, agent.departmentId!)));
     if (!product) throw refuse(404, 'department_unknown', `${id} is not a product of your department.`);
-  }
-
-  /* Code left without gates under the department's task of a turn waits for its review. */
-  private async creationGates(head: Agent, executor: Agent, parent: Task | null, input: { gates?: string[]; product?: string }): Promise<{ inTurnReview: boolean; gates: string[] }> {
-    const inTurnReview = await turnReviewed(this.db, head, executor, parent, input);
-    const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await this.gatesFor(head, executor.id, input.gates);
-    return { inTurnReview, gates };
   }
 
   private async createdTaskText(task: Task, executor: Agent, gates: string[]): Promise<string> {
@@ -565,10 +544,8 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description:
-          'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves. after needs independentPart or independentNone.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. Scope repository paths explicitly; checker ids are optional, otherwise eligible skill owners are selected.',
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).default('code'), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         this.run(async () => {
@@ -578,10 +555,9 @@ class TaskTools {
           if (input.independentPart) await this.member(agent, input.independentPart.executor);
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
-          const { inTurnReview, gates } = await this.creationGates(agent, executor, parent, input);
           const after = await this.afterIds(input.after);
-          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
-          return { text: await this.createdTaskText(moved.task, executor, gates), moved };
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind === 'code', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
+          return { text: await this.createdTaskText(moved.task, executor, []), moved };
         }),
     );
   }
@@ -612,14 +588,14 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Closes a task you own that has no executor (a department task, a turn, a person\'s task): done with what came of it, or not done with what blocks it. Whoever gave it is told.',
-        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1) },
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; coordination closes a checked report only over accepted child results. Code never bypasses Review through a report.',
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional() },
       },
-      async ({ task: ref, done, summary }) =>
+      async ({ task: ref, done, summary, verification }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary);
-          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary });
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary, verification });
           return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );
@@ -647,14 +623,14 @@ class TaskTools {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
-        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
+        description: 'Hands the current Development or checking-stage candidate forward. Review and Security fix findings themselves on the same branch, without returning to the author. summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
-      async ({ task: ref, summary, evidence, review }) =>
+      async ({ task: ref, summary, evidence, review, operationId }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, summary, evidence);
-          const moved = await submitWithAuthorCheck(this.ctx, this.job, task.id, { summary, evidence, review });
+          const moved = await submitWithAuthorCheck(this.ctx, this.job, task.id, { summary, evidence, review, operationId });
           return { text: `Submitted. ${await this.where(moved.task)}`, moved };
         }),
     );
@@ -678,16 +654,16 @@ class TaskTools {
       'verdict',
       {
         description:
-          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. reviewedCommit names the pinned candidate. issues records category/blocking/path/line/harm and taskId for a vertical area. Only original blocking security/data/spec findings get a same-reviewer fix look; repeats add no new issues. Legacy findings is not a confirmed count. Its log retains run/commit provenance.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional(), issues: z.array(IssueInput).max(99).optional() },
+          'Records the current checker decision on an exact candidate. PASS hands it forward; a defect remains with this checker to fix. Wrong-goal escalate asks the head, without an author return. Review can add Security by naming a concrete risk. Structured issues record provenance; numeric counts are derived, never supplied.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), reviewedCommit: ReviewSha, issues: z.array(IssueInput).max(99).optional(), security: z.string().trim().min(1).max(2000).optional(), escalate: z.boolean().optional() },
       },
-      async ({ task: ref, pass, comment: why, findings, reviewedCommit, issues }) =>
+      async ({ task: ref, pass, comment: why, reviewedCommit, issues, security, escalate }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, why);
           const review = await reviewContext(this.ctx.db, task.id);
           const evidence = bindReviewEvidence(await taskEvidence(this.ctx, task), review?.commit ?? null);
-          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
+          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, issues, security, escalate, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await this.where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );
