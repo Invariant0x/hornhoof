@@ -13,6 +13,8 @@ Keep the checks of one change small and in the workspace of whoever builds or re
 
 - A change of the templates or the skills checks only the tests that read them, not the whole server and node suites.
   A rule of a test environment can now name test files with `tests` beside its suites.
+- Submitting a task starts no test run. The author runs the author check in their own workspace before submitting, and
+  the `AUTHOR_CHECK` setting and the `review.authorCheckPlan` field of a submit are gone.
 
 ## [0.8.2] - 2026-11-08
 

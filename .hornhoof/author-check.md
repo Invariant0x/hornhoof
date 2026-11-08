@@ -52,14 +52,8 @@ Exit code 0 means nothing failed, 1 a stage failed, 2 it could not be judged: a 
 
 ## What it prints
 
-The tools write to the log as they run, with `STAGE <name> <status> exit=<n|null> secs=<n> reason=<code>` after each stage. The last line is `AUTHOR_CHECK <json>`: exactly `AuthorCheckInput` of `apps/server/src/modules/tasks/review-quality.ts` except what a command cannot know. It has no `runId` and each stage has `partId: null`; the backend adds them from its own records before it calls `recordAuthorCheck`. Null in `numbers` means unknown, never zero.
+The tools write to the log as they run, with `STAGE <name> <status> exit=<n|null> secs=<n> reason=<code>` after each stage. The last line is `AUTHOR_CHECK <json>`: exactly `AuthorCheckInput` of `apps/server/src/modules/tasks/review-quality.ts` except what a command cannot know. It has no `runId` and each stage has `partId: null`: the record is for whoever ran the command, and the server stores none. Null in `numbers` means unknown, never zero.
 
-## Running when an author submits
+## Nothing runs on submit
 
-Set `AUTHOR_CHECK=1` only when the head decides that submissions of this installation must run the check. It is off by default. A submit with `review.baseCommit` and `review.authorCheckPlan` then queues one `check:author` run on the exact branch commit captured by the server. The plan is the plain text printed by the command above, not a result or a trusted claim. A submit without that input keeps the old behavior, so projects without the adapter do not break.
-
-The server puts the whole command on a machine chosen by the test-run pool. It runs no lint, types, tests, coverage, CRAP or dryer in the author's container. A branch moving before the run is pinned rejects the submission. Repeats and concurrent submits of the same task, commit and command reuse the run instead of creating another one.
-
-The backend reads `AUTHOR_CHECK` from the completed part, supplies the run and part IDs from its own records and stores the result through `recordAuthorCheck`. `passed` and a nonfailed `partial` continue the existing submit with those exact statuses visible; neither is called a full pass. A failed or malformed result returns its output to the author. The first two failures return to the author, and the third goes to the head. Repeating a recorded outcome does not add an attempt or another run.
-
-Until the setting is enabled, three real submissions and their elapsed time are not measured and remain `NOT_RUN`.
+Submitting a task starts no test run. The author runs this command in their own workspace before submitting, and the reviewer runs it in theirs. Only the whole suite goes through `run_tests`, once per turn.
