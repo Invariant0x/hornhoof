@@ -1195,9 +1195,9 @@ export class TerminalHost {
   /* Whether a prompt the program tells of is what a person sent while this turn's prompt waited. A busy machine can tell
      of it once that prompt began to go in: it is still theirs when it is not that prompt and came of their Enter in this
      turn, told of by no channel yet or by another one first. What it is decides, not when the node hears of it. */
-  private personsPrompt(a: Agent, prompt: string | null): boolean {
+  private personsPrompt(a: Agent, prompt?: string): boolean {
     if (a.promptWaits) return true;
-    return prompt !== null && a.typing != null && !a.took && this.personPressed(a) && !typedPrompt(prompt, a.typing);
+    return prompt !== undefined && a.typing != null && !a.took && this.personPressed(a) && !typedPrompt(prompt, a.typing);
   }
 
   private personPressed(a: Agent): boolean {
@@ -1626,7 +1626,7 @@ export class TerminalHost {
   private operatorStarted(a: Agent): void { this.operator?.started(a.key); }
 
   /* prompt: what the program says it took, where its log says. */
-  private tookTurn(a: Agent, id?: string, prompt: string | null = null): void {
+  private tookTurn(a: Agent, id?: string, prompt?: string): void {
     if (this.personsPrompt(a, prompt)) return this.personSent(a);
     this.operatorStarted(a);
     const first = !a.took;
@@ -2041,7 +2041,7 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
-    if (news.started) this.tookTurn(a, undefined, news.prompt ?? null);
+    if (news.started) this.tookTurn(a, undefined, news.prompt);
     if (news.aborted) this.interrupted(a);
     else if (news.failed !== undefined) this.endTurn(a, { status: 'failed', message: '', failure: isRecord(raw.error) ? FAILURE.kimi(raw.error) : failure('unknown', news.failed) }, undefined, news.blocked);
     else if (news.ended) this.endTurn(a, { status: 'done', message: a.lastText ?? '' });
