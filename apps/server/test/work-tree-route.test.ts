@@ -158,8 +158,8 @@ describe('GET /api/departments/:id/tree', () => {
     expect(tree.lines.find(line => line.taskId === page.id)).toMatchObject({ mergedAt: null, doneAt: null,
       echelons: { stage: 'review', ownerAgentId: c.rex.id, candidateId: (await c.snapshot(page.id)).candidateId },
     });
-    expect(tree.review).toBeNull();
-    expect(tree.reviews).toEqual([]);
+    expect(tree).not.toHaveProperty('review');
+    expect(tree).not.toHaveProperty('reviews');
   });
 
   it('shows integration only after the authenticated Tests report and head acceptance', async () => {
@@ -306,9 +306,7 @@ describe('GET /api/departments/:id/tree', () => {
     expect(emptyRes.json<{ tree: DepartmentTree }>().tree).toMatchObject({
       turn: null,
       repository: true,
-      stage: 'work',
       lines: [],
-      review: null,
       time: [],
       idle: [],
     });

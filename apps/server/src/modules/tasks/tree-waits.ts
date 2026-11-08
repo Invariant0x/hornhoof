@@ -1,4 +1,4 @@
-import { taskActor, type TreeAgent, type TreeFacts, type TreeLine, type TreeReview } from './tree.js';
+import { taskActor, type TreeAgent, type TreeFacts, type TreeLine } from './tree.js';
 import { countedSegments, turnSegments, type FactTurn } from './tree-programs.js';
 
 export type TreeWait = { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string };
@@ -65,17 +65,9 @@ function dependencyWait(facts: TreeFacts, line: TreeLine, now: Date): WaitSpan[]
   });
 }
 
-function reviewWait(facts: TreeFacts, review: TreeReview, now: Date): WaitSpan[] {
-  const task = facts.tasks.find(t => t.id === review.taskId)!;
-  return review.reviewers.flatMap(reviewer => reviewer.verdict
-    ? waitFor(facts, reviewer.agent, review.head.id, reviewer.verdict.at, 'stall', { taskId: task.id, number: task.number, title: task.title }, now)
-    : []);
-}
-
-/* A wait needs an explicit upstream assignment or review, an idle recipient, and that upstream's recorded problem. Finished waits remain in history. */
-export function waitingAgents(facts: TreeFacts, lines: TreeLine[], reviews: TreeReview[], now: Date): WaitSpan[] {
-  const candidates = [...lines.flatMap(line => [...finishedWait(facts, line, now), ...dependencyWait(facts, line, now)]),
-    ...reviews.flatMap(review => reviewWait(facts, review, now))];
+/* A wait needs an explicit upstream assignment, an idle recipient, and that upstream's recorded problem. Finished waits remain in history. */
+export function waitingAgents(facts: TreeFacts, lines: TreeLine[], now: Date): WaitSpan[] {
+  const candidates = lines.flatMap(line => [...finishedWait(facts, line, now), ...dependencyWait(facts, line, now)]);
   const spans = new Map<string, WaitSpan>();
   for (const wait of candidates.sort((a, b) => b.from.localeCompare(a.from))) spans.set(`${wait.agent.id}:${wait.waitsForAgent.id}:${wait.to}`, wait);
   return [...spans.values()];

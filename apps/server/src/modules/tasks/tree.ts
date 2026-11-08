@@ -50,9 +50,6 @@ export type TreeLine = {
   live: boolean;
   externalWait?: ExternalWait | null;
 };
-export type TreeVerdict = { at: string; pass: boolean; findings: number | null };
-export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
-export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
 export type TreeActivity = { jobId: string; agent: TreeAgent; task: Pick<FactRelatedTask, 'id' | 'number' | 'title'> | null; segments: TreeSegment[] };
 /* Seconds of each kind from the start of the turn to now, over all of the agent's lines and review lines. */
 export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost: number; alarm: number; queued: number; unknown: number };
@@ -77,10 +74,7 @@ export type DepartmentTree = {
   turn: { id: string; number: number; branch: string; startedAt: string } | null;
   /* The department or one of its products has a repository. */
   repository: boolean;
-  stage: 'work' | 'review';
   lines: TreeLine[];
-  review: TreeReview | null;
-  reviews: TreeReview[];
   waiting: TreeWait[];
   activity: TreeActivity[];
   time: AgentTime[];
@@ -238,16 +232,6 @@ export function lineSegments(input: {
     return head.length ? head : [{ kind: 'unknown', from: iso(startMs), to: iso(cutMs) }];
   }
   return [...head, ...activeSegments(cutMs, input.endAt, input.now.getTime(), input.requests, input.signs.map(d => d.getTime()))];
-}
-
-export function reviewerSegments(input: {
-  openedAt: Date;
-  endAt: Date | null;
-  now: Date;
-  requests?: FactRequest[];
-  signs: Date[];
-}): TreeSegment[] {
-  return activeSegments(input.openedAt.getTime(), input.endAt, input.now.getTime(), input.requests ?? [], input.signs.map(d => d.getTime()));
 }
 
 function sumSegmentSeconds(segments: TreeSegment[], startMs: number, nowMs: number) {
@@ -499,86 +483,15 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   return { line, idle: { agent, taskId: task.id, number: task.number, title: task.title, segments, afterNumbers, waitsFor, requests: asks } };
 }
 
-function verdictOf(ownMoves: FactTaskEvent[]): { event: FactTaskEvent | undefined; verdict: TreeVerdict | null } {
-  const v = ownMoves.find(e => e.kind === 'verdict');
-  if (!v) return { event: undefined, verdict: null };
-  const findings = typeof v.data.findings === 'number' ? v.data.findings : null;
-  return { event: v, verdict: { at: v.createdAt.toISOString(), pass: v.data.pass === true, findings } };
+const isLineTask = (task: FactTask): boolean =>
+  task.visible !== false && task.status !== 'cancelled' && taskActor(task) !== null;
+
+function representedPairs(lines: TreeLine[]): Set<string> {
+  return new Set(lines.map(line => `${line.taskId}:${line.agent.id}`));
 }
 
-function buildReviewer(task: FactTask, reviewerId: string, ix: Indexed, now: Date): { reviewer: TreeReviewer; idle: IdleSource } | null {
-  const actor = ix.agents.get(reviewerId);
-  if (!actor) return null;
-  const agent: TreeAgent = { id: actor.id, name: actor.name };
-  const ownMoves = listOf(ix.movesByTask, task.id).filter(e => e.agentId === reviewerId);
-  const { event: vEvent, verdict } = verdictOf(ownMoves);
-  const job = jobView(ix, task.id, reviewerId);
-  const asks = listOf(ix.asksByPair, `${task.id}:${reviewerId}`);
-  const ownSigns = listOf(ix.signsByTask, task.id).filter(s => s.agentId === reviewerId).map(s => s.at);
-  const signs = [...ownMoves.map(e => e.createdAt), ...ownSigns, ...(job.actionDate ? [job.actionDate] : [])];
-  const segments = withPrograms(reviewerSegments({ openedAt: task.createdAt, endAt: vEvent?.createdAt ?? task.closedAt, now, requests: asks, signs }), listOf(ix.turnsByPair, `${task.id}:${agent.id}`), agent, now);
-  return {
-    reviewer: { agent, verdict, segments, lastActionAt: job.lastActionAt, live: job.live },
-    idle: { agent, taskId: task.id, number: task.number, title: task.title, segments, afterNumbers: [], waitsFor: [], requests: asks },
-  };
-}
-
-function panelIdsOf(data: Record<string, unknown>): string[] {
-  if (!Array.isArray(data.panel)) return [];
-  return data.panel.filter((x): x is string => typeof x === 'string');
-}
-
-type BuiltReview = {
-  review: TreeReview | null;
-  stage: 'work' | 'review';
-  idles: IdleSource[];
-  timeEntries: { agentId: string; segments: TreeSegment[] }[];
-};
-
-const NO_REVIEW: BuiltReview = { review: null, stage: 'work', idles: [], timeEntries: [] };
-
-function buildReview(task: FactTask, createdData: Record<string, unknown>, ix: Indexed, now: Date): BuiltReview {
-  if (task.visible === false || !task.executorAgentId) return NO_REVIEW;
-  const head = ix.agents.get(task.executorAgentId);
-  if (!head) return NO_REVIEW;
-  const built = panelIdsOf(createdData).flatMap(id => {
-    const r = buildReviewer(task, id, ix, now);
-    return r ? [r] : [];
-  });
-  const reviewers = built.map(b => b.reviewer);
-  return {
-    review: {
-      taskId: task.id,
-      number: task.number,
-      openedAt: task.createdAt.toISOString(),
-      closedAt: isoOrNull(task.closedAt),
-      head: { id: head.id, name: head.name },
-      reviewers,
-    },
-    stage: task.status !== 'done' && task.status !== 'cancelled' ? 'review' : 'work',
-    idles: built.map(b => b.idle),
-    timeEntries: reviewers.map(r => ({ agentId: r.agent.id, segments: r.segments })),
-  };
-}
-
-function reviewCreatedMap(tasks: FactTask[], ix: Indexed): Map<string, Record<string, unknown>> {
-  const map = new Map<string, Record<string, unknown>>();
-  for (const t of tasks) {
-    const made = listOf(ix.movesByTask, t.id).find(e => e.kind === 'created' && e.data.turnReview === true);
-    if (made) map.set(t.id, made.data);
-  }
-  return map;
-}
-
-const isLineTask = (t: FactTask, reviews: Map<string, unknown>): boolean =>
-  t.visible !== false && t.status !== 'cancelled' && taskActor(t) !== null && !reviews.has(t.id);
-
-function representedPairs(lines: TreeLine[], reviews: TreeReview[]): Set<string> {
-  return new Set([...lines.map(l => `${l.taskId}:${l.agent.id}`), ...reviews.flatMap(r => r.reviewers.map(p => `${r.taskId}:${p.agent.id}`))]);
-}
-
-function participants(lines: TreeLine[], reviews: TreeReview[]): Set<string> {
-  return new Set([...lines.map(l => l.agent.id), ...reviews.flatMap(r => [r.head.id, ...r.reviewers.map(p => p.agent.id)])]);
+function participants(lines: TreeLine[]): Set<string> {
+  return new Set(lines.map(line => line.agent.id));
 }
 
 function unrepresentedTurn(turn: FactTurn, known: Set<string>, visible: Set<string>, ix: Indexed): boolean {
@@ -595,8 +508,8 @@ function observedEntry(turn: FactTurn, agent: TreeAgent, ix: Indexed, now: Date)
     segments: countedSegments(turnSegments(turn, who), now) };
 }
 
-function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], reviews: TreeReview[], now: Date): ObservedEntry[] {
-  const known = representedPairs(lines, reviews), visible = participants(lines, reviews);
+function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], now: Date): ObservedEntry[] {
+  const known = representedPairs(lines), visible = participants(lines);
   for (const turn of turnsOf(facts)) if (turn.taskId && ix.tasks.get(turn.taskId)?.visible) visible.add(turn.agentId);
   return turnsOf(facts).filter(turn => unrepresentedTurn(turn, known, visible, ix)).flatMap(turn => {
     const agent = ix.agents.get(turn.agentId);
@@ -614,18 +527,11 @@ function taskOrder(a: FactTask, b: FactTask): number {
 
 export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
   if (!facts.turn) {
-    return { now: now.toISOString(), turn: null, repository: facts.repository, stage: 'work', lines: [], review: null, reviews: [], waiting: [], activity: [], time: [], idle: [] };
+    return { now: now.toISOString(), turn: null, repository: facts.repository, lines: [], waiting: [], activity: [], time: [], idle: [] };
   }
   const ix = indexFacts(facts);
-  const reviews = reviewCreatedMap(facts.tasks, ix);
-  const builtReviews = [...facts.tasks]
-    .filter(t => reviews.has(t.id))
-    .sort(taskOrder)
-    .map(t => buildReview(t, reviews.get(t.id)!, ix, now));
-  const rev = builtReviews.at(-1) ?? NO_REVIEW;
-
   const builtLines = [...facts.tasks]
-    .filter(t => isLineTask(t, reviews))
+    .filter(isLineTask)
     .sort(taskOrder)
     .flatMap(t => {
       const built = buildLine(t, ix, now);
@@ -633,13 +539,12 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
     });
 
   const lines = builtLines.map(b => b.line);
-  const reviewRows = builtReviews.flatMap(r => r.review ? [r.review] : []);
-  const spans = waitingAgents(facts, lines, reviewRows, now);
+  const spans = waitingAgents(facts, lines, now);
   const waiting = spans.flatMap(({ to, ...wait }) => to === null ? [wait] : []);
   const waitingSources = spans.map(waitSource);
   const turnStarted = facts.turn.openedAt ?? facts.turn.createdAt;
-  const observed = observedTime(facts, ix, lines, reviewRows, now);
-  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries), ...observed, ...waitingSources.map(w => ({ agentId: w.agent.id, segments: w.segments }))];
+  const observed = observedTime(facts, ix, lines, now);
+  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...observed, ...waitingSources.map(w => ({ agentId: w.agent.id, segments: w.segments }))];
 
   return {
     now: now.toISOString(),
@@ -650,13 +555,10 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
       startedAt: turnStarted.toISOString(),
     },
     repository: facts.repository,
-    stage: rev.stage,
     lines,
-    review: rev.review,
-    reviews: reviewRows,
     waiting,
     activity: observed.map(({ jobId, agent, task, segments }) => ({ jobId, agent, task, segments })),
     time: agentTime(facts.agents, timeEntries, turnStarted, now),
-    idle: idleStretches([...builtLines.map(b => b.idle), ...builtReviews.flatMap(r => r.idles), ...waitingSources], now),
+    idle: idleStretches([...builtLines.map(b => b.idle), ...waitingSources], now),
   };
 }
