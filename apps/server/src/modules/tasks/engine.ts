@@ -654,10 +654,10 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     await refuseWaiting(ctx.db, task);
     return acceptCandidate(ctx, task, route, agentId, r.summary, r.acceptance);
   }
-  if (r.done && route.state.stage === 'tests' && route.state.phase === 'active') {
+  if (route.state.stage === 'tests' && route.state.phase === 'active') {
     stillOpen(task);
     await refuseWaiting(ctx.db, task);
-    return testsReport(ctx, task, route, agentId, r.summary, r.verification);
+    return testsReport(ctx, task, route, agentId, r.summary, r.verification, r.done);
   }
   if (r.done && route.state.stage === 'architecture') {
     stillOpen(task);
