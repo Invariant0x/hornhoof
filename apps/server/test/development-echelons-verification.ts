@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { hashTestEnvironment } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { jobs, testParts, testRuns } from '../src/db/schema.js';
@@ -21,6 +22,11 @@ export async function testsFixture(fix = false) {
     await submit(f.ctx, f.reviewer.id, f.task.id, input);
   } else await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
   const snapshot = (await f.detail()).echelons;
+  return { ...f, ...await candidateChecks(f, snapshot, finalCommit) };
+}
+
+/* Reuse the authenticated run/receipt path for an existing candidate and its live Tests owner. */
+export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>>, 'ctx' | 'db' | 'task' | 'tester'>, snapshot: EchelonsSnapshot, finalCommit: string) {
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.tester.id, subscriptionId: f.tester.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Verify final candidate', timeoutMs: 1000 }).returning();
   const start = async (command?: string) => {
     await startRun(f.ctx, { id: job!.id, companyId: f.task.companyId, agentId: f.tester.id, agentKind: f.tester.kind, departmentId: f.tester.departmentId }, {
@@ -79,6 +85,6 @@ export async function testsFixture(fix = false) {
     return finished!;
   };
   const verified = (ids: string[]) => ({ done: true, summary: 'Verified the final changed scope.', ...{ verification: { candidateId: snapshot.candidateId!, revision: snapshot.revision, runIds: ids } } });
-  return { ...f, run, manualRun, verified, snapshot, finalCommit };
+  return { run, manualRun, verified, snapshot, finalCommit };
 }
 

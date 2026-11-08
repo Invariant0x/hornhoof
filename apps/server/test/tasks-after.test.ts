@@ -4,9 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
-import { cancel, comment, createTask as createTaskEngine, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
+import { cancel, comment, createTask as createTaskEngine, report, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
+import { candidateChecks } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 const NONE = 'Genuine dependency in the existing behavior test.';
@@ -24,18 +27,42 @@ async function company() {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
   const tess = await hire('Tess', 'worker', 'DEV-TEST');
+  const vera = await hire('Vera', 'worker', 'DEV-TEST');
   const ctx = app.ctx;
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  await db.insert(turns).values({ companyId, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, executor: string, after: string[] = []) =>
-    createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, gates: [rita.id], after });
+    createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: vera.id, after });
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
+  const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
+  const accept = async (id: string) => {
+    const task = await read(id), current = await snapshot(id);
+    const [tester] = await db.select().from(agents).where(eq(agents.id, task.assigneeAgentId!));
+    const checks = await candidateChecks({ ctx, db, task, tester: tester! }, current, HEAD);
+    const run = await checks.run();
+    await report(ctx, tester!.id, id, checks.verified([run.id]));
+    const ready = await snapshot(id);
+    return report(ctx, head.id, id, { done: true, summary: 'Observed the verified candidate in turn-17.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
+  };
+  const complete = async (id: string, executor = bruno.id) => {
+    if ((await snapshot(id)).stage === 'architecture') {
+      await updateTask(ctx, head.id, id, { paths: ['logic/totals.ts'] });
+      await report(ctx, executor, id, { done: true, summary: 'Change logic/totals.ts and check its changed totals.' });
+    }
+    await submit(ctx, executor, id, code);
+    const task = await read(id);
+    await verdict(ctx, task.assigneeAgentId!, id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
+    return accept(id);
+  };
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId));
   let n = 0;
   /* Hornhoof's tools as a running turn of this agent sees them. */
@@ -50,18 +77,19 @@ async function company() {
     const [sid] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Sid', roleKey: 'SAL-HEAD', departmentId: sales!.id, model: '', subscriptionId: sub!.id }).returning();
     return (await createTask(ctx, { personId: ceo!.id }, { title: 'Big deal', brief: '', body: '', departmentId: sales!.id, assigneeAgentId: sid!.id })).task;
   };
-  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, turnsOf, tools, outside };
+  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, snapshot, accept, complete, turnsOf, tools, outside };
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
 const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
+const code = { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } };
 const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: string }) => err.reason);
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('a task that comes after others', () => {
   it('waits without waking its executor, and goes to it by itself once the last of them is done', async () => {
-    const { ctx, db, bruno, rita, tess, member, read, turnsOf } = await company();
+    const { ctx, db, bruno, rita, tess, member, read, turnsOf, accept } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const schema = (await member('Database schema', bruno.id)).task;
     const tests = await member('End-to-end tests', tess.id, [api.id, schema.id]);
@@ -69,10 +97,13 @@ describe('a task that comes after others', () => {
     expect(woken(tests)).toEqual([]);
     expect(await db.select().from(pendingWakes).where(eq(pendingWakes.taskId, tests.task.id))).toEqual([]);
 
-    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
-    expect(woken(await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' }))).not.toContainEqual([tess.id, 'assigned']);
-    await submit(ctx, bruno.id, schema.id, { summary: 'Done.', evidence: 'npm test' });
-    const last = await verdict(ctx, rita.id, schema.id, { pass: true, comment: 'Good.' });
+    await submit(ctx, bruno.id, api.id, code);
+    expect(woken(await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.', reviewedCommit: HEAD }))).not.toContainEqual([tess.id, 'assigned']);
+    expect(woken(await accept(api.id))).not.toContainEqual([tess.id, 'assigned']);
+    await submit(ctx, bruno.id, schema.id, code);
+    const checked = await verdict(ctx, rita.id, schema.id, { pass: true, comment: 'Good.', reviewedCommit: HEAD });
+    expect(woken(checked)).not.toContainEqual([tess.id, 'assigned']);
+    const last = await accept(schema.id);
     expect(woken(last)).toContainEqual([tess.id, 'assigned']);
     /* The turn is kept with the move that finished the last of them. */
     expect(await db.select({ why: pendingWakes.why }).from(pendingWakes).where(and(eq(pendingWakes.taskId, tests.task.id), eq(pendingWakes.agentId, tess.id)))).toEqual([{ why: 'assigned' }]);
@@ -90,7 +121,7 @@ describe('a task that comes after others', () => {
     await wakeAll(ctx, (await comment(ctx, { personId: ceo.id }, tests.id, 'Cover refunds too.')).wakes);
     await wakeAll(ctx, [{ agentId: tess.id, taskId: tests.id, why: 'reminder' }]);
     expect(await turnsOf(tess.id)).toEqual([]);
-    expect(await reason(submit(ctx, tess.id, tests.id, { summary: 'Done.', evidence: 'npm test' }))).toBe('task_invalid');
+    expect(await reason(submit(ctx, tess.id, tests.id, code))).toBe('task_invalid');
   });
 
   it('comes only after tasks of its own turn that are not cancelled, and never after itself', async () => {
@@ -139,13 +170,14 @@ describe('a task that comes after others', () => {
   });
 
   it('takes the tasks that wait for a task as it is done before it looks at what else they wait for, so two done at once still start them', async () => {
-    const { ctx, bruno, tess, rita, member } = await company();
+    const { ctx, bruno, tess, rita, member, accept } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const page = (await member('Checkout page', tess.id)).task;
     const launch = (await member('Launch', bruno.id, [api.id, page.id])).task;
-    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
+    await submit(ctx, bruno.id, api.id, code);
+    await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.', reviewedCommit: HEAD });
     const seen = statements();
-    await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' });
+    await accept(api.id);
     const lock = seen.findIndex(s => /from "tasks" where .*"tasks"\."after" @> .* for update$/.test(s.sql));
     const looking = seen.findIndex((s, i) => i > lock && s.sql.includes('"tasks"."status" <> $') && s.params.includes(api.id) && s.params.includes(page.id));
     expect(lock).toBeGreaterThanOrEqual(0);
@@ -166,10 +198,9 @@ describe('a task that comes after others', () => {
   });
 
   it('starts at once when what it comes after is done already', async () => {
-    const { ctx, bruno, rita, tess, member } = await company();
+    const { bruno, tess, member, complete } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
-    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
-    await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' });
+    await complete(api.id);
     expect(woken(await member('End-to-end tests', tess.id, [api.id]))).toEqual([[tess.id, 'assigned']]);
   });
 
@@ -192,15 +223,14 @@ describe('a task that comes after others', () => {
   });
 
   it('ends the turn its holder has waiting on it once it comes to wait, and wakes the holder again once it can start', async () => {
-    const { ctx, head, bruno, rita, tess, member, turnsOf } = await company();
+    const { ctx, head, bruno, tess, member, turnsOf, complete } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const tests = await member('End-to-end tests', tess.id);
     await wakeAll(ctx, tests.wakes);
     expect((await turnsOf(tess.id)).map(j => j.status)).toEqual(['queued']);
     expect(woken(await updateTask(ctx, head.id, tests.task.id, { after: [api.id] }))).toEqual([]);
     expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
-    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
-    await wakeAll(ctx, (await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' })).wakes);
+    await wakeAll(ctx, (await complete(api.id)).wakes);
     expect((await turnsOf(tess.id)).filter(j => j.status === 'queued').map(j => j.taskId)).toEqual([tests.task.id]);
   });
 
@@ -313,7 +343,7 @@ describe('a task that comes after others', () => {
     const { db, head, bruno, tess, member, tools } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, gates: [], after: [api.number], independentNone: NONE });
+    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, after: [api.number], independentNone: NONE });
     expect(made.isError).toBeFalsy();
     expect(text(made)).toContain(`starts once #${api.number} is done`);
     const [tests] = await db.select().from(tasks).where(eq(tasks.title, 'End-to-end tests'));
@@ -321,7 +351,7 @@ describe('a task that comes after others', () => {
     const shown = JSON.parse(text(await call(await tools(tess), 'task', { task: tests!.number })));
     expect(shown.after).toEqual([{ id: api.id, number: api.number, title: 'Checkout API', status: 'open' }]);
     expect(shown.waitsFor).toEqual([api.number]);
-    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, gates: [], after: [999], independentNone: NONE });
+    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, after: [999], independentNone: NONE });
     expect(unknown.isError).toBe(true);
   });
 });
@@ -355,7 +385,7 @@ describe('what a task comes after, as each one sees it', () => {
   it("is refused to a head for another department's task, as a parent is", async () => {
     const { head, tools, outside } = await company();
     const deal = await outside();
-    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, gates: [], after: [deal.number], independentNone: NONE });
+    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, after: [deal.number], independentNone: NONE });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain(`There is no task ${deal.number} to come after`);
   });
@@ -365,7 +395,7 @@ describe('an independent part of a dependent task', () => {
   it('requires a declaration without writing a task, event, child or wake', async () => {
     const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
-    const input = { title: 'Dependent work', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, gates: [], after: [api.id] };
+    const input = { title: 'Dependent work', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, after: [api.id] };
     const before = {
       tasks: (await db.select({ id: tasks.id }).from(tasks)).length,
       events: (await db.select({ id: taskEvents.id }).from(taskEvents)).length,
@@ -380,18 +410,19 @@ describe('an independent part of a dependent task', () => {
   });
 
   it('starts the independent child while the parent waits and exposes the declaration', async () => {
-    const { ctx, db, dev, head, bruno, rita, tess, parent, member } = await company();
+    const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const moved = await createTaskEngine(ctx, { agentId: head.id }, {
       title: 'Full checkout', brief: 'All of it.', body: 'The dependent part.', departmentId: dev.id, parentId: parent.id,
-      assigneeAgentId: tess.id, executor: true, gates: [rita.id], after: [api.id], inTurnReview: true,
+      assigneeAgentId: tess.id, executor: true, after: [api.id],
       independentPart: { title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.', executor: bruno.id },
     });
     expect(moved.task.after).toEqual([api.id]);
     expect(moved.wakes.map(w => [w.agentId, w.why])).toEqual([[bruno.id, 'assigned']]);
     const children = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
     expect(children).toHaveLength(1);
-    expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [rita.id] });
+    expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id });
+    expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'architecture', phase: 'active', ownerAgentId: bruno.id });
     const detail = await taskDetail(ctx, moved.task, () => true);
     expect(detail.independentPart).toMatchObject({
       title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.',
@@ -399,14 +430,15 @@ describe('an independent part of a dependent task', () => {
     });
   });
 
-  it('records the absence reason and leaves an old dependent task valid', async () => {
+  it('records the absence reason and refuses a task missing its required release route', async () => {
     const { ctx, db, companyId, dev, head, bruno, tess, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const declared = (await member('End-to-end tests', tess.id, [api.id])).task;
     expect((await taskDetail(ctx, declared, () => true)).independentPart).toEqual({ reason: NONE });
     const [old] = await db.insert(tasks).values({ companyId, number: 99, title: 'Old dependent', departmentId: dev.id, status: 'open', assigneeAgentId: tess.id, executorAgentId: tess.id, after: [api.id] }).returning();
-    expect((await taskDetail(ctx, old!, () => true)).independentPart).toBeNull();
-    expect((await updateTaskEngine(ctx, head.id, old!.id, { title: 'Old but updated' })).task.title).toBe('Old but updated');
+    await expect(taskDetail(ctx, old!, () => true)).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(updateTaskEngine(ctx, head.id, old!.id, { title: 'Old but updated' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, old!.id)))[0]!.title).toBe('Old dependent');
   });
 
   it('creates the part when update_task changes only independentPart without changing after', async () => {
@@ -436,17 +468,16 @@ describe('an independent part of a dependent task', () => {
     expect(await db.select().from(taskEvents).where(eq(taskEvents.taskId, docs.id))).not.toHaveLength(0);
   });
 
-  it('does not finish the parent or open turn review when the independent child finishes early', async () => {
-    const { ctx, db, dev, head, bruno, rita, tess, parent, member } = await company();
+  it('does not finish the dependent parent when an independent executable child is accepted early', async () => {
+    const { ctx, db, dev, head, bruno, tess, parent, member, complete } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const moved = await createTaskEngine(ctx, { agentId: head.id }, {
       title: 'Full checkout', brief: '', body: '', departmentId: dev.id, parentId: parent.id,
-      assigneeAgentId: tess.id, executor: true, gates: [rita.id], after: [api.id], inTurnReview: true,
+      assigneeAgentId: tess.id, executor: true, after: [api.id],
       independentPart: { title: 'Contract tests', brief: '', body: 'Test first.', executor: bruno.id },
     });
     const [child] = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
-    await submit(ctx, bruno.id, child!.id, { summary: 'Done.', evidence: 'npm test' });
-    await verdict(ctx, rita.id, child!.id, { pass: true, comment: 'Good.' });
+    expect((await complete(child!.id)).task.status).toBe('done');
     expect((await db.select().from(tasks).where(eq(tasks.id, moved.task.id)))[0]!.status).not.toBe('done');
     expect(await db.select().from(taskEvents).where(sql`${taskEvents.data}->>'turnReview' = 'true'`)).toHaveLength(0);
   });
