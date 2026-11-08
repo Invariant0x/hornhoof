@@ -330,7 +330,7 @@ export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;
 export const TestsDescribed = z.strictObject({
   type: z.literal('tests.described'), requestId: z.uuid(), commitSha: ProductCommitSha,
   result: z.discriminatedUnion('status', [
-    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional() }),
+    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional(), baseFingerprints: z.strictObject({ commitSha: ProductCommitSha, fingerprints: UnitFingerprints }).optional() }),
     z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
   ]),
 }).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.');

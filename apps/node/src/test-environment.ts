@@ -240,7 +240,7 @@ type TestMessageOptions = {
   emit: (message: NodeMessage) => void;
 };
 function describeSignature(message: DescribeMessage): string {
-  return digest(JSON.stringify({ scope: message.repositoryScope, url: message.repo.url, sha: message.commitSha }));
+  return digest(JSON.stringify({ scope: message.repositoryScope, url: message.repo.url, sha: message.commitSha, base: message.baseCommit }));
 }
 function descriptionProblem(error: unknown, signal: AbortSignal): EnvironmentProblem {
   if (signal.aborted) return { code: 'cancelled', detail: 'The test environment description was cancelled.' };
@@ -303,7 +303,7 @@ export class NodeTestMessages {
       const described = await withCheckSlot(async granted => {
         executionSignal = granted;
         const context = { cacheRoot: join(this.options.dir, 'cache'), deadline: Date.now() + 60_000, signal: granted, runtimes: this.options.capabilities.testRuntimes, log: () => {} };
-        return this.options.describe ? { description: await this.options.describe(message.repo, message.repositoryScope, message.commitSha, context) } : describeTestEnvironment(message.repo, message.repositoryScope, message.commitSha, context);
+        return this.options.describe && message.baseCommit === undefined ? { description: await this.options.describe(message.repo, message.repositoryScope, message.commitSha, context) } : describeTestEnvironment(message.repo, message.repositoryScope, message.commitSha, context, undefined, message.baseCommit);
       }, { signal, label: 'Describe product test environment' });
       result = { status: 'ready', ...described };
     } catch (error) { result = { status: 'error', problem: descriptionProblem(error, executionSignal) }; }

@@ -693,7 +693,7 @@ const ServerMessage = z.discriminatedUnion('type', [
      empty folder when there is no repository, with the task's files named in files fetched first; what it leaves in its
      output folder goes on the task. commitSha: the one commit every part of the run checks, whatever its branch points
      at by now; none on a part of work, or on one of a run from before commits were pinned. */
-  z.strictObject({ type: z.literal('tests.describe'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),
+  z.strictObject({ type: z.literal('tests.describe'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha, baseCommit: ProductCommitSha.optional() }),
   z.strictObject({ type: z.literal('tests.describe.cancel'), requestId: Id }),
   /* Get the harness of this commit ready before any run asks for it. */
   z.strictObject({ type: z.literal('tests.harness'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),

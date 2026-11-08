@@ -52,8 +52,8 @@ export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | nu
   const node = request && requestNode(request);
   if (node && request?.requestId) ctx.hub.send(node, { type: 'tests.describe.cancel', requestId: request.requestId });
 }
-export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>): TestEnvironmentRequest {
-  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
+export function newEnvironmentRequest(scope: RepositoryScope, mode: Extract<TestRunMode, { mode: 'product' }>, baseCommit?: string): TestEnvironmentRequest {
+  return { version: 1, repositoryScope: scope, ...('suite' in mode ? { suite: mode.suite } : {}), ...('profile' in mode ? { profile: mode.profile } : {}), ...(baseCommit ? { baseCommit } : {}), requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 0, problem: null };
 }
 function snapshotFor(description: EnvironmentDescription, request: TestEnvironmentRequest): EnvironmentSnapshot {
   const profile = request.profile ?? description.manifest.defaultProfile;
@@ -199,7 +199,7 @@ function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest,
   if (!request.requestId || !repo) return;
   const node = requestNode(request)!, delivered = sent.get(ctx) ?? new Map<string, string>(); sent.set(ctx, delivered);
   if (delivered.get(run.id) === request.requestId) return;
-  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
+  if (ctx.hub.send(node, { type: 'tests.describe', requestId: request.requestId, repositoryScope: request.repositoryScope, commitSha: run.commitSha!, ...(request.baseCommit ? { baseCommit: request.baseCommit } : {}), repo: { url: repo.url, token: repo.token } })) delivered.set(run.id, request.requestId);
 }
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {

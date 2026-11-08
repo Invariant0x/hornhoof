@@ -1003,7 +1003,7 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export type TestEnvironmentRequest = {
-  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string;
+  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string; baseCommit?: string;
   requestId: string | null; nodeId: string | null; builtin: boolean;
   sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
 };
