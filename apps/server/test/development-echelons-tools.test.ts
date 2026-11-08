@@ -9,7 +9,8 @@ async function client(f: Awaited<ReturnType<typeof fixture>>, actor = f.author) 
   if (!f.app.server.listening) await listen(f.app);
   const token = `echelon-tools-${actor.id}-0123456789abcdef`;
   await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: actor.id, subscriptionId: actor.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Use the assigned stage', status: 'running', timeoutMs: 1000, toolTokenHash: hashToken(token) });
-  return mcp(f.app, token);
+  const api = await mcp(f.app, token);
+  return { call: (name: string, args: Record<string, unknown>) => api.callTool({ name, arguments: args }) as Promise<{ isError?: boolean; content: { text: string }[] }> }; 
 }
 
 describe('the echelon public tools', () => {
