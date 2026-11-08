@@ -434,6 +434,20 @@ describe("an agent's worktree", () => {
     expect(await installed(f)).toBe(0);
   });
 
+  it('costs nothing and says nothing where the repository keeps no test environment', async () => {
+    const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one'));
+    /* A commit nobody could fetch, so any reading of it would fail. */
+    const tree = await worktree(f, one, 'f'.repeat(40));
+    await rm(join(tree.checkout, '.hornhoof'), { recursive: true });
+    expect(await worktreeHarness(tree, one)).toBeNull();
+    await expect(lstat(join(one.dir, 'cache'))).rejects.toThrow(/ENOENT/);
+    expect(shared.keysSeen).toEqual([]);
+    /* One that is there but cannot be read is read from the commit, and what goes wrong there is said. */
+    const broken = await worktree(f, one, 'f'.repeat(40));
+    await writeFile(join(broken.checkout, '.hornhoof/test-environment.json'), 'not a manifest');
+    await expect(worktreeHarness(broken, one)).rejects.toThrow();
+  });
+
   it('says why when they cannot be built, and leaves nothing behind', async () => {
     const f = await fixture(manifest => { manifest.dependencies.install = [sh('process.exit(3)')]; }), one = machine(f, 'one', registry().remote('one'));
     const tree = await worktree(f, one);

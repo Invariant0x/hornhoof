@@ -555,15 +555,20 @@ async function holdsAny(tree: Worktree, paths: string[]): Promise<boolean> {
   for (const path of paths) if (await tree.fs.kind(join(tree.checkout, path))) return true;
   return false;
 }
-/* What the worktree's own manifest names, read as its owner, so a worktree that holds its dependencies costs no fetch. */
-async function ownManifest(tree: Worktree): Promise<TestEnvironmentV1 | null> {
-  try { return parseTestEnvironment((await tree.fs.read(join(tree.checkout, MANIFEST))) ?? ''); } catch { return null; }
+/* What the worktree's own manifest names, read as its owner, so a worktree that holds its dependencies costs no fetch: 'none'
+   when the repository keeps no manifest, null when one is there but cannot be read here. */
+async function ownManifest(tree: Worktree): Promise<TestEnvironmentV1 | 'none' | null> {
+  try {
+    const text = await tree.fs.read(join(tree.checkout, MANIFEST));
+    return text === null ? 'none' : parseTestEnvironment(text);
+  } catch { return null; }
 }
 
-/* It says in one line what it put in place, or nothing when the worktree holds them already or the repository shares none. */
+/* It says in one line what it put in place, or nothing when the worktree holds them already or the repository shares none.
+   A repository without a manifest costs nothing here: no fetch, and no line. */
 export async function worktreeHarness(tree: Worktree, options: WorktreeOptions): Promise<string | null> {
   const own = await ownManifest(tree);
-  if (own && (own.dependencies.cache === 'none' || await holdsAny(tree, own.dependencies.paths))) return null;
+  if (own === 'none' || (own && (own.dependencies.cache === 'none' || await holdsAny(tree, own.dependencies.paths)))) return null;
   const started = performance.now(), deadline = Date.now() + (options.limitMs ?? WORKTREE_HARNESS_MS), signal = productSignal(options.signal, deadline);
   const description = await readTestEnvironment(tree.repo, tree.repositoryScope, tree.commitSha, { cacheRoot: join(options.dir, 'cache'), deadline, signal, log: () => {}, ...(options.runtimes ? { runtimes: options.runtimes } : {}) });
   const { dependencies } = description.manifest;
