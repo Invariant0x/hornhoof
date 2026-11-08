@@ -30,6 +30,7 @@ const SCRIPTS: Record<string, string> = {
   lint: 'npm run build -w @fx/lib && npm run lint:part --workspaces --include-workspace-root --',
   'lint:part': 'eslint .',
   types: 'npm run build -w @fx/lib && tsc --noEmit',
+  all: 'vitest run',
 };
 
 function file(path: string, text = ''): void {
@@ -666,6 +667,32 @@ describe('a workspace is found by its name, as npm finds it', () => {
     expect(await agent('npm run lint:part --workspaces --if-present --include-workspace-root')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
     expect(await agent('npm run nested -w @fx/lib -w apps/node --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
     expect(await agent('npm run nestedall -w @fx/lib -w apps/node --if-present')).toEqual(denied('whole_suite_local'));
+  });
+
+  it('reads each switch of workspaces as npm does: on alone, the true or false in its word or the next, the opposite behind --no-', async () => {
+    const off = ['--workspaces=false', '--workspaces false', '--no-workspaces', '-ws=false', '-ws false', '--workspaces --no-workspaces', '--no-workspaces=true', '--workspaces --workspaces=false'];
+    for (const flags of off) expect(await agent(`npm run all ${flags} --if-present`), flags).toEqual(denied('whole_suite_local'));
+    for (const flags of ['--workspaces=true', '--workspaces true', '--no-workspaces --workspaces', '--no-workspaces=false']) {
+      expect(await agent(`npm run all ${flags} --if-present`), flags).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    }
+    for (const flags of ['--include-workspace-root', '--include-workspace-root=true', '--include-workspace-root true']) {
+      expect(await agent(`npm run all --workspaces --if-present ${flags}`), flags).toEqual(denied('whole_suite_local'));
+    }
+    for (const flags of ['--include-workspace-root=false', '--include-workspace-root false', '--no-include-workspace-root']) {
+      expect(await agent(`npm run all --workspaces --if-present ${flags}`), flags).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+    }
+    for (const flags of ['--if-present=false', '--if-present false', '--no-if-present']) {
+      expect(await agent(`npm run nested --workspaces ${flags}`), flags).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+    }
+    expect(await agent('npm run nested --workspaces --if-present=true')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+  });
+
+  it('cannot tell a switch of workspaces whose value is no true or false, and runs nothing over every workspace beside a script', async () => {
+    for (const flags of ['--workspaces=maybe', '--workspaces=', '--include-workspace-root=1', '--if-present=yes', '--workspaces "$X"']) {
+      expect(await agent(`npm run all ${flags}`), flags).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'dynamic_check' });
+    }
+    expect(await agent('npm -ws exec tsc')).toEqual({ allow: false, code: 'whole_suite_local', category: 'package_scope' });
+    expect(await agent('npm exec --workspaces=false -- vitest run test/a.test.ts')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
   });
 
   it('reads no more manifests and folders than its limits allow', async () => {

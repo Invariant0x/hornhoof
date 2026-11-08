@@ -1450,14 +1450,16 @@ const NPX: Handler = (guard, args, place) => runExec(guard, args, place, true);
 
 /* A package manager's call: where it works, whether over many packages, and its first word. workspaces: what npm's -w named,
    a folder or a package's name; every: npm's --workspaces; withRoot: the root beside them; ifPresent: a package without the
-   script is passed over. */
-type ManagerCall = { sub: Word | null; rest: Word[]; dir: Word | null; workspaces: Word[]; every: boolean; withRoot: boolean; ifPresent: boolean; many: boolean; atRoot: boolean };
+   script is passed over; unclear: a switch of these whose value cannot be read. */
+type ManagerCall = { sub: Word | null; rest: Word[]; dir: Word | null; workspaces: Word[]; every: boolean; withRoot: boolean; ifPresent: boolean; unclear: boolean; many: boolean; atRoot: boolean };
 const DIR_FLAGS = new Set(['--prefix', '-C', '--dir', '--cwd']);
 const WORKSPACE_FLAGS = new Set(['-w', '--workspace']);
 const MANY_FLAGS = new Set(['-ws', '--workspaces', '-r', '--recursive', '--filter', '-F', '--include-workspace-root', '-A', '--all']);
 const VALUE_FLAGS = new Set([...DIR_FLAGS, '--filter', '-F', '--loglevel', '--registry', '--userconfig', '--cache', '--reporter', '--store-dir']);
 
 function afterManagerFlag(call: ManagerCall, args: Word[], at: number, workspaces: boolean): number {
+  const switched = workspaces ? afterSwitch(call, args, at) : null;
+  if (switched !== null) return switched;
   const { name, value, after } = flagAt(args, at);
   noteManagerFlag(call, name, value, workspaces);
   return VALUE_FLAGS.has(name) || (workspaces && WORKSPACE_FLAGS.has(name)) ? after : at + 1;
@@ -1465,7 +1467,6 @@ function afterManagerFlag(call: ManagerCall, args: Word[], at: number, workspace
 
 /* -w is a workspace to npm, and the root of them all to pnpm. */
 function noteManagerFlag(call: ManagerCall, name: string, value: Word | null, workspaces: boolean): void {
-  if (workspaces && noteWorkspaces(call, name)) return;
   if (MANY_FLAGS.has(name)) call.many = true;
   if (DIR_FLAGS.has(name)) call.dir = value;
   if (!WORKSPACE_FLAGS.has(name)) return;
@@ -1474,16 +1475,28 @@ function noteManagerFlag(call: ManagerCall, name: string, value: Word | null, wo
 }
 
 /* npm runs a script in every workspace it is given, the root too when asked, and only where the script is with --if-present. */
-function noteWorkspaces(call: ManagerCall, name: string): boolean {
-  if (name === '-ws' || name === '--workspaces') call.every = true;
-  else if (name === '--include-workspace-root') call.withRoot = true;
-  else if (name === '--if-present') call.ifPresent = true;
-  else return false;
-  return true;
+type Switch = 'every' | 'withRoot' | 'ifPresent';
+const NPM_SWITCHES: Readonly<Record<string, Switch>> = { '-ws': 'every', '--workspaces': 'every', '--include-workspace-root': 'withRoot', '--if-present': 'ifPresent' };
+
+/* npm reads a switch alone as on, takes the true or false written in its own word or in the next one, and reads the opposite
+   behind --no-. The last one written counts. Any other value npm may read in its own way, so the call cannot be told. */
+function afterSwitch(call: ManagerCall, args: Word[], at: number): number | null {
+  const text = args[at]!.text;
+  const name = flagName(text);
+  const negated = name.startsWith('--no-');
+  const field = own(NPM_SWITCHES, negated ? `--${name.slice('--no-'.length)}` : name);
+  if (!field) return null;
+  const next = args[at + 1];
+  const nextTells = next !== undefined && (!next.literal || next.text === 'true' || next.text === 'false');
+  const written = text.length > name.length ? literalWord(text.slice(name.length + 1)) : nextTells ? next : null;
+  const value = written === null ? true : written.literal && (written.text === 'true' || written.text === 'false') ? written.text === 'true' : null;
+  if (value === null) call.unclear = true;
+  else call[field] = value !== negated;
+  return written !== null && text.length === name.length ? at + 2 : at + 1;
 }
 
 function readManager(args: Word[], workspaces: boolean): ManagerCall {
-  const call: ManagerCall = { sub: null, rest: [], dir: null, workspaces: [], every: false, withRoot: false, ifPresent: false, many: false, atRoot: false };
+  const call: ManagerCall = { sub: null, rest: [], dir: null, workspaces: [], every: false, withRoot: false, ifPresent: false, unclear: false, many: false, atRoot: false };
   let at = 0;
   while (at < args.length && isFlag(args[at])) at = afterManagerFlag(call, args, at, workspaces);
   call.sub = args[at] ?? null;
@@ -1601,6 +1614,7 @@ async function runScriptCall(manager: Manager, guard: Guard, call: ManagerCall, 
   const scoped: ManagerCall = { ...call, workspaces: [...call.workspaces] };
   const forwarded = forwardedWords(manager, rest, scoped);
   if (scoped.many) return guard.note(check('package_scope'));
+  if (scoped.unclear) return guard.note(unavailable('dynamic_check'));
   if (scoped.every || scoped.workspaces.length) return workspaceScripts(guard, scoped, name, forwarded, place);
   await guard.packageScript(name, forwarded, await scriptsFolder(guard, scoped, place), place);
 }
@@ -1625,7 +1639,11 @@ const scriptAction: ManagerAction = async (manager, guard, call, _sub, rest, pla
   await runScriptCall(manager, guard, call, name.text, rest.filter(word => word !== name), place);
 };
 const namedAction: ManagerAction = (manager, guard, call, sub, rest, place) => runScriptCall(manager, guard, call, own(SCRIPT_NAMES, sub) ?? sub, rest, place);
-const execAction: ManagerAction = (manager, guard, _call, _sub, rest, place) => runExec(guard, rest, place, manager.execFetches);
+/* A program run over every workspace is told in none of them. */
+const execAction: ManagerAction = async (manager, guard, call, _sub, rest, place) => {
+  if (call.every || call.unclear) return guard.note(call.unclear ? unavailable('dynamic_check') : check('package_scope'));
+  await runExec(guard, rest, place, manager.execFetches);
+};
 
 const fetchAction: ManagerAction = async (manager, guard, call, sub, rest, place) => {
   guard.note(dependency('implicit_install'));
