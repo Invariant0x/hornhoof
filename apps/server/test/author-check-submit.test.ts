@@ -18,17 +18,17 @@ describe('author check on submit', () => {
     expect(config({ AUTHOR_CHECK: '1' }).authorCheck).toBe(true);
   });
 
-  it('keeps the old submission when disabled', async () => {
+  it('uses the direct stage submission when the adapter is disabled', async () => {
     const f = await qualityFixture();
-    await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, { summary: 'Done', evidence: 'Old path' });
-    await expectOldSubmission(f);
+    await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, { summary: 'Done', evidence: 'Direct stage checks', review: { baseCommit: OTHER } });
+    await expectDirectSubmission(f);
   });
 
   it('keeps submissions without adapter input out of the runner and without a false quality pass', async () => {
     const f = await qualityFixture();
     f.app.ctx.config.authorCheck = true;
     await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, { summary: 'Done', evidence: 'No adapter', review: { baseCommit: SHA } });
-    await expectOldSubmission(f);
+    await expectDirectSubmission(f);
   });
 
   it('pins one remote check on the submission SHA and reuses it for repeats and races', async () => {
@@ -81,7 +81,7 @@ describe('author check on submit', () => {
     expect(submitted).toMatchObject({ data: { review: { quality: { status: 'partial', record: { scope: { paths } } } } } });
   });
 
-  it('returns a red lint result to the author without a second run or attempt on repeat', async () => {
+  it('keeps a red lint result with its producer without another run or attempt on repeat', async () => {
     const f = await qualityFixture({ NODE_KEY });
     f.app.ctx.config.authorCheck = true;
     const node = await nodeOf(f);
@@ -105,7 +105,7 @@ describe('author check on submit', () => {
     expect(events.some(event => event.data.authorCheck !== undefined)).toBe(false);
   });
 
-  it('returns the first two failures to the author and the third to the head', async () => {
+  it('keeps the first two failures with their producer and escalates the third to the head', async () => {
     const f = await qualityFixture({ NODE_KEY });
     f.app.ctx.config.authorCheck = true;
     const [head] = await f.db.insert(agents).values({ companyId: f.author.companyId, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: f.author.departmentId, subscriptionId: f.author.subscriptionId, model: '' }).returning();
@@ -187,7 +187,7 @@ function authorLine(failedStage?: string, commit = SHA, paths = ['logic/totals.t
   })}`;
 }
 
-async function expectOldSubmission(f: Fixture) {
+async function expectDirectSubmission(f: Fixture) {
   const submitted = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
   const runs = await f.db.select().from(testRuns).where(eq(testRuns.taskId, f.task.id));
   expect(submitted).toHaveLength(1);
