@@ -145,10 +145,16 @@ function requestOf(args) {
   if (!args.length) return null;
   const request = {};
   while (args.length) takeOption(args, request);
+  requireRequestCommits(request);
+  readRequestPlan(request);
+  return request;
+}
+function requireRequestCommits(request) {
   if (!SHA.test(request.base ?? '') || !SHA.test(request.head ?? '')) throw new Error('Mutation base and head require full commit SHAs.');
+}
+function readRequestPlan(request) {
   if (Object.hasOwn(request, 'plan') && Object.hasOwn(request, 'plan-file')) throw new Error('Choose one mutation delta plan.');
   if (Object.hasOwn(request, 'plan-file')) request.plan = readPlanFile(request['plan-file']);
-  return request;
 }
 function takeOption(args, request) {
   const flag = args.shift();
@@ -173,8 +179,14 @@ function hasCommit(sha) {
 function deltaFromPlan(request) {
   if (!request.plan) throw new Error('The mutation base is unavailable; provide its bound --plan.');
   const plan = JSON.parse(request.plan);
-  if (plan?.sha !== request.head || plan?.base !== request.base || !Array.isArray(plan.changes) || !plan.hunks || typeof plan.hunks !== 'object' || Array.isArray(plan.hunks)) throw new Error('The mutation plan must name this base and head and include its lines.');
+  if (!matchesPlanRequest(plan, request) || !hasPlanHunks(plan)) throw new Error('The mutation plan must name this base and head and include its lines.');
   return { changes: plan.changes, hunks: plan.hunks, deltaSource: 'plan' };
+}
+function matchesPlanRequest(plan, request) {
+  return plan?.sha === request.head && plan?.base === request.base && Array.isArray(plan.changes);
+}
+function hasPlanHunks(plan) {
+  return plan.hunks && typeof plan.hunks === 'object' && !Array.isArray(plan.hunks);
 }
 function deltaFromGit(request) {
   git(['merge-base', '--is-ancestor', request.base, request.head]);
