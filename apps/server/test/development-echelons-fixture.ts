@@ -8,7 +8,7 @@ export const HEAD = 'b'.repeat(40);
 
 export async function fixture(options: { small?: boolean; riskClass?: 'none' | 'security'; authorProvider?: 'claude' | 'codex'; reviewerModel?: string; autoReviewer?: boolean; cleanup?: boolean; creator?: 'author' } = {}) {
   const { app, db } = await testApp();
-  await setUpCompany(app);
+  const ceoToken = await setUpCompany(app);
   const [company] = await db.select().from(companies);
   const [person] = await db.select().from(people);
   const [claude] = await db.select().from(subscriptions);
@@ -37,6 +37,6 @@ export async function fixture(options: { small?: boolean; riskClass?: 'none' | '
     const { loadTask } = await import('../src/modules/tasks/engine.js');
     return taskDetail(app.ctx, await loadTask(db, id), () => true);
   };
-  return { ctx: app.ctx, db, task, create, atCommit, head, author, reviewer, security, tester, detail, hire, claude: claude!, codex: codex! };
+  return { app, ceoToken, ctx: app.ctx, db, task, create, atCommit, head, author, reviewer, security, tester, detail, hire, claude: claude!, codex: codex! };
 }
 
