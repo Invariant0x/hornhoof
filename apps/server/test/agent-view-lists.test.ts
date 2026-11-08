@@ -135,7 +135,8 @@ describe('what waits for people', () => {
   it('counts a request by a hidden agent on a task the person sees as theirs only when they may answer it', async () => {
     const c = await aclCompany();
     const { createTask } = await import('../src/modules/tasks/engine.js');
-    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.far.id, executor: true, gates: [c.crew.mine.id] });
+    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.far.id, executor: true, reviewerAgentId: c.crew.mine.id });
+    await c.db.update(tasks).set({ createdByAgentId: c.crew.mine.id }).where(eq(tasks.id, task.id));
     const { request } = await ask(c.app.ctx, c.crew.far.id, task.id, { text: 'Costs money?', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
     const ann = (await c.get('/api/requests', c.tokens.ann)).json();
     expect([ann.requests, ann.addressed]).toEqual([[], []]);

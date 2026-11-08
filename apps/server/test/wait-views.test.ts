@@ -1,7 +1,7 @@
 import { TaskWaitView } from '@hornhoof/protocol/waits';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { taskWaits, turns, waitPolicies } from '../src/db/schema.js';
+import { tasks, taskWaits, turns, waitPolicies } from '../src/db/schema.js';
 import { ask, createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { afterSourceKey } from '../src/modules/tasks/wait-state.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
@@ -59,7 +59,8 @@ describe('what people read of the waits on a task', () => {
 
   it('leaves out an owner the reader does not see, and a person other than themselves', async () => {
     const c = await aclCompany();
-    const shared = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.other.id, executor: true, gates: [c.crew.mine.id] })).task;
+    const shared = (await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.other.id, executor: true, reviewerAgentId: c.crew.mine.id })).task;
+    await c.db.update(tasks).set({ createdByAgentId: c.crew.mine.id }).where(eq(tasks.id, shared.id));
     const follow = await comesAfter(c, 'Follow', c.crew.mine, [shared]);
     const res = await c.get(`/api/tasks/${follow.id}`, c.tokens.ann);
     expect(res.json().task.waits).toMatchObject([{ kind: 'after', owner: null }]);

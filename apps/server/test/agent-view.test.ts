@@ -226,11 +226,11 @@ describe('tasks', () => {
     expect((await c.get('/api/tasks', c.tokens.ceo)).json().tasks).toHaveLength(3);
   });
 
-  it('names no hidden agent on a seen task: not its gates, log, requests or files', async () => {
+  it('names no hidden agent on a seen task: not its stage owners, log, requests or files', async () => {
     const c = await aclCompany();
     const { createTask, comment, ask } = await import('../src/modules/tasks/engine.js');
     const parent = await c.work('Hidden parent', c.crew.other);
-    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, gates: [c.crew.other.id], parentId: parent.id });
+    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, reviewerAgentId: c.crew.other.id, parentId: parent.id });
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, 'Otto was here');
     await comment(c.app.ctx, { agentId: c.crew.mine.id }, task.id, 'Mina says hello');
     await comment(c.app.ctx, { personId: c.ids.ann }, task.id, 'Ann says hello');
@@ -243,7 +243,8 @@ describe('tasks', () => {
     expect(res.body).not.toContain('Otto was here');
     expect(t.parentId).toBeNull();
     expect(t.parent).toBeNull();
-    expect(t.gates).toEqual([]);
+    expect(t).not.toHaveProperty('gates');
+    expect(t.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBeNull();
     expect(t.createdBy).toBeNull();
     expect(t.assignee.id).toBe(c.crew.mine.id);
     expect(t.executor.id).toBe(c.crew.mine.id);
