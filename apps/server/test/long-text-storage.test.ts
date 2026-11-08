@@ -7,6 +7,8 @@ import { agents, attachments, companies, departments, jobs, people, requests, se
 import { ask, comment, createTask, note, submit } from '../src/modules/tasks/engine.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
 import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
+import { routeOf } from '../src/modules/tasks/echelons-store.js';
 
 const WORDS = ('Full text: права и данные 🌿.\n' + 'Keep every word and its author.\n'.repeat(500)).slice(0, 11999) + '!';
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -19,12 +21,14 @@ async function fixture() {
   const [company] = await db.select().from(companies);
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
-  const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
-  const hire = async (name: string, roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dev!.id, subscriptionId: sub!.id, name, kind: roleKey === 'DEV-HEAD' ? 'head' : 'worker', roleKey, model: '' }).returning())[0]!;
+  const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
+  const hire = async (name: string, roleKey: string) => (await db.insert(agents).values({ companyId: company!.id, departmentId: dev!.id, subscriptionId: sub!.id, name, kind: roleKey === 'DEV-HEAD' ? 'head' : 'worker', roleKey, model: 'claude-opus-5-5', skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [] }).returning())[0]!;
   const head = await hire('Hana', 'DEV-HEAD');
   const worker = await hire('Bruno', 'DEV-BE');
   const reviewer = await hire('Rita', 'DEV-REV');
-  const make = () => createTask(app.ctx, { agentId: head.id }, { title: 'Full report', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker.id, executor: true, gates: [reviewer.id] });
+  const make = () => createTask(app.ctx, { agentId: head.id }, { title: 'Full report', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: reviewer.id });
+  app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: HEAD });
+  app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const task = (await make()).task;
   const token = 'storage-tool-fixture-0123456789abcdef';
   await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId: worker.id, kind: 'conversation', prompt: '', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
@@ -61,7 +65,7 @@ it('archives a person comment as a complete UTF-8 task file with the actual auth
 it('archives summary and evidence in the same successful move and rejects a duplicate move', async () => {
   const c = await fixture();
   const evidence = WORDS + '\nEvidence.';
-  await submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence });
+  await submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence, review: { baseCommit: BASE } });
   const [event] = await c.events('submitted');
   const refs = event!.data.fullTexts as Ref[];
   expect(refs).toHaveLength(2);
@@ -81,7 +85,7 @@ it('archives summary and evidence in the same successful move and rejects a dupl
   expect(view.log.find((e: { kind: string }) => e.kind === 'submitted').data.fullTexts).toEqual(refs);
   expect(view.files).toHaveLength(2);
   const before = (await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!;
-  await expect(submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence })).rejects.toMatchObject({ status: 403 });
+  await expect(submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence, review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 403 });
   expect(await c.events('submitted')).toHaveLength(1);
   expect(await c.files()).toHaveLength(2);
   expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!.version).toBe(before.version);
@@ -90,13 +94,15 @@ it('archives summary and evidence in the same successful move and rejects a dupl
 it('rolls a state move back if its full text cannot fit, then permits one retry', async () => {
   const c = await fixture();
   const before = (await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!;
+  const beforeRoute = await routeOf(c.db, c.task);
   const limited = { ...c.app.ctx, config: { ...c.app.ctx.config, taskFilesBytes: Buffer.byteLength(WORDS) + 4 } };
-  await expect(submit(limited, c.worker.id, c.task.id, { summary: WORDS, evidence: WORDS + ' Evidence.' })).rejects.toMatchObject({ status: 413, reason: 'attachment_invalid' });
+  await expect(submit(limited, c.worker.id, c.task.id, { summary: WORDS, evidence: WORDS + ' Evidence.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 413, reason: 'attachment_invalid' });
   expect(await c.events('submitted')).toEqual([]);
   expect(await c.files()).toEqual([]);
   const unchanged = (await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]!;
-  expect(unchanged).toMatchObject({ version: before.version, status: before.status, stage: before.stage });
-  await submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence: WORDS + ' Evidence.' });
+  expect(unchanged).toMatchObject({ version: before.version, status: before.status, assigneeAgentId: before.assigneeAgentId });
+  expect(await routeOf(c.db, c.task)).toEqual(beforeRoute);
+  await submit(c.app.ctx, c.worker.id, c.task.id, { summary: WORDS, evidence: WORDS + ' Evidence.', review: { baseCommit: BASE } });
   expect(await c.events('submitted')).toHaveLength(1);
   expect(await c.files()).toHaveLength(2);
 });
