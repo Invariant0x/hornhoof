@@ -410,7 +410,7 @@ describe('the employee card', () => {
     expect(await snapshot(checking.id)).toMatchObject({ stage: 'review', phase: 'active', ownerAgentId: robId, candidateId });
     expect((await snapshot(atWork.id)).stages.find(step => step.stage === 'review')).toMatchObject({ status: 'pending', ownerAgentId: null });
     expect(await db.select().from(jobs).where(eq(jobs.agentId, ritaId))).toMatchObject([{ taskId: checking.id, status: 'failed', error: 'switched_off' }]);
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject(withQuestion ? [] : [{ taskId: checking.id, status: 'queued' }]);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject([{ taskId: checking.id, status: 'queued', startedAt: null }]);
     if (question) {
       expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
       await expect(verdict(app.ctx, robId, checking.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked.' })).rejects.toMatchObject({ reason: 'task_invalid' });
@@ -419,7 +419,7 @@ describe('the employee card', () => {
     expect((await patch(app, ceo, robId, { team: urgent!.id })).statusCode).toBe(200);
     expect(await snapshot(checking.id)).toMatchObject({ stage: 'review', phase: 'waiting', ownerAgentId: null, candidateId });
     expect((await db.select().from(tasks).where(eq(tasks.id, checking.id)))[0]!.status).toBe('waiting');
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject(withQuestion ? [] : [{ taskId: checking.id, status: 'failed', error: 'switched_off' }]);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, robId))).toMatchObject([{ taskId: checking.id, status: 'failed', error: 'switched_off' }]);
     if (question) expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
   });
 
