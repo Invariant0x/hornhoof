@@ -22,8 +22,8 @@ async function github(code) {
   return { sent, url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(done => server.close(done)) };
 }
 
-function leave(api) {
-  const env = { ...process.env, GITHUB_API_URL: api, GITHUB_SERVER_URL: 'https://github.example', GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'token-1', GITHUB_SHA: SHA, GITHUB_RUN_ID: '77' };
+function leave(api, extra = {}) {
+  const env = { ...process.env, GITHUB_API_URL: api, GITHUB_SERVER_URL: 'https://github.example', GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'token-1', GITHUB_SHA: SHA, GITHUB_RUN_ID: '77', TESTS_SINCE: '', ...extra };
   return new Promise(done => execFile(process.execPath, [SCRIPT, '--leave'], { env }, (error, stdout, stderr) => done({ code: error ? error.code : 0, stdout, stderr })));
 }
 
@@ -47,5 +47,26 @@ test('--leave fails when GitHub does not take the mark', async () => {
     const out = await leave(gh.url);
     assert.notEqual(out.code, 0);
     assert.match(out.stderr, /GitHub answered 403/);
+  } finally { await gh.close(); }
+});
+
+test('--leave after the tests a change reached says which passed commit they stood on', async () => {
+  const gh = await github(201);
+  try {
+    const since = 'b'.repeat(40);
+    const out = await leave(gh.url, { TESTS_SINCE: since });
+    assert.equal(out.code, 0, out.stderr);
+    assert.equal(gh.sent[0].body.description, `GitHub ran the tests the change since ${since.slice(0, 12)} reaches, and that commit had passed.`);
+    assert.ok(gh.sent[0].body.description.length <= 140);
+    assert.match(out.stdout, new RegExp(since.slice(0, 12)));
+  } finally { await gh.close(); }
+});
+
+test('--leave leaves no mark for a base that is not a commit', async () => {
+  const gh = await github(201);
+  try {
+    const out = await leave(gh.url, { TESTS_SINCE: 'main' });
+    assert.notEqual(out.code, 0);
+    assert.deepEqual(gh.sent, []);
   } finally { await gh.close(); }
 });

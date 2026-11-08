@@ -61,7 +61,7 @@ function wholeOf(environment, suites, changes) {
 }
 
 /* Each suite's package fully selected is the whole fast suite, which an author runs only when asked for by name. */
-function isWholeSuite(packages, suites) {
+export function isWholeSuite(packages, suites) {
   return suites.every(suite => packages.some(item => item.packageId === suite.id && item.mode === 'whole-package'));
 }
 

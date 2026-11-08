@@ -263,7 +263,7 @@ describe('whether a mark spares this commit the tests', () => {
   });
 });
 
-type Job = { needs?: string | string[]; if?: string; 'runs-on': string; permissions?: Record<string, string>; outputs?: Record<string, string>; strategy?: { matrix: { part?: number[] } }; steps: { uses?: string; if?: string; with?: Record<string, unknown>; id?: string; run?: string; env?: Record<string, string> }[] };
+type Job = { needs?: string | string[]; if?: string; 'runs-on': string; permissions?: Record<string, string>; outputs?: Record<string, string>; strategy?: { matrix: { part?: number[] | string } }; env?: Record<string, string>; steps: { uses?: string; if?: string; with?: Record<string, unknown>; id?: string; run?: string; env?: Record<string, string> }[] };
 const JOBS = (parse(WORKFLOW) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job) => [job.needs ?? []].flat();
 
@@ -280,7 +280,7 @@ function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, 
     cancelled: () => cancelled,
     needs: Object.fromEntries(Object.keys(results).map(n => [n, { result: results[n], outputs: { proved: n === 'mark' && results[n] === 'success' ? String(proved) : '' } }])),
   });
-  for (const name of ['mark', 'test', 'images', 'publish', 'release']) {
+  for (const name of ['mark', 'test', 'passed', 'images', 'publish', 'release']) {
     const expression = (JOBS[name]!.if ?? 'true').replace(/^\$\{\{|\}\}$/g, '').trim();
     const ownStatus = /\b(always|cancelled|failure|success)\(\)/.test(expression);
     const allowed = ownStatus || (ancestors(name).every(n => results[n] === 'success') && !cancelled);
@@ -291,9 +291,10 @@ function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, 
 }
 
 describe('.github/workflows/images.yml', () => {
-  it('runs the jobs in that order: the mark first, the tests on it, the images and the publish job on both, the release after the publish job', () => {
+  it('runs the jobs in that order: the mark first, the tests on it, the passed mark, the images and the publish job on both, the release after the publish job', () => {
     expect(needsOf(JOBS.mark!)).toEqual([]);
     expect(needsOf(JOBS.test!)).toEqual(['mark']);
+    expect(needsOf(JOBS.passed!)).toEqual(['mark', 'test']);
     expect(needsOf(JOBS.images!)).toEqual(['mark', 'test']);
     expect(needsOf(JOBS.publish!)).toEqual(['mark', 'test']);
     expect(needsOf(JOBS.release!)).toEqual(['publish']);
@@ -302,56 +303,57 @@ describe('.github/workflows/images.yml', () => {
   const BY_HAND = { event: 'workflow_dispatch', ref: 'refs/heads/turn-8' };
 
   it('skips the tests and goes straight to the publish job and the release when the mark proved the commit', () => {
-    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
   });
 
   it('runs the tests before the publish job when the mark did not prove it', () => {
-    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', passed: 'success', images: 'skipped', publish: 'success', release: 'success' });
   });
 
   it('skips the tests and builds the images of a run by hand when the mark proved the commit', () => {
-    expect(runWorkflow({ ...BY_HAND, proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
   });
 
   it('runs the tests before the images of a run by hand when the mark did not prove it', () => {
-    expect(runWorkflow({ ...BY_HAND, proved: false })).toEqual({ mark: 'success', test: 'success', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: false })).toEqual({ mark: 'success', test: 'success', passed: 'success', images: 'success', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing when the tests failed', () => {
-    expect(runWorkflow({ proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ ...BY_HAND, proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: false, tests: 'failure' })).toEqual({ mark: 'success', test: 'failure', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('runs the tests when the first job itself failed, and goes on from them only', () => {
-    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'skipped', publish: 'success', release: 'success' });
-    expect(runWorkflow({ ...BY_HAND, markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', images: 'success', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ markJob: 'failure', tests: 'failure' })).toEqual({ mark: 'failure', test: 'failure', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', passed: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ ...BY_HAND, markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', passed: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ markJob: 'failure', tests: 'failure' })).toEqual({ mark: 'failure', test: 'failure', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing for a pull request, marked or not', () => {
-    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: false })).toEqual({ mark: 'success', test: 'success', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'pull_request', ref: 'refs/pull/1/merge', proved: false })).toEqual({ mark: 'success', test: 'success', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('publishes and releases only for a push to main, not for a run by hand from main either', () => {
-    expect(runWorkflow({ event: 'workflow_dispatch', ref: 'refs/heads/main', proved: true })).toEqual({ mark: 'success', test: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'workflow_dispatch', ref: 'refs/heads/main', proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
     expect(runWorkflow({ event: 'push', ref: 'refs/heads/turn-8', proved: true })).toMatchObject({ publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing once the run is cancelled', () => {
-    expect(runWorkflow({ proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ proved: true, cancelled: true })).toMatchObject({ test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ ...BY_HAND, proved: true, cancelled: true })).toMatchObject({ test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
-  it('runs the tests in four parts, on GitHub’s machines unless the repository variable names other runners', () => {
+  it('runs the tests in the parts the first job chose, four without its answer, on GitHub’s machines unless the repository variable names other runners', () => {
     expect(JOBS.test!['runs-on']).toBe(TESTS_RUNS_ON);
-    expect(JOBS.test!.strategy!.matrix.part).toEqual([1, 2, 3, 4]);
+    expect(JOBS.test!.strategy!.matrix.part).toBe("${{ fromJSON(needs.mark.outputs.parts || '[1, 2, 3, 4]') }}");
+    expect(JOBS.test!.env).toEqual({ PART: '${{ matrix.part }}/4', SELECTION: '${{ needs.mark.outputs.selection }}' });
   });
 
   it('sends the first job and the tests by one variable, and images, publishing and the release by another', () => {
-    expect(JOBS.mark!['runs-on']).toBe(TESTS_RUNS_ON);
+    for (const name of ['mark', 'passed']) expect(JOBS[name]!['runs-on']).toBe(TESTS_RUNS_ON);
     for (const name of ['images', 'publish', 'release']) expect(JOBS[name]!['runs-on']).toBe(BUILD_RUNS_ON);
-    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'publish', 'release', 'test']);
+    expect(Object.keys(JOBS).sort()).toEqual(['images', 'mark', 'passed', 'publish', 'release', 'test']);
     expect(WORKFLOW).not.toMatch(/self-hosted|home-api|a-host|hornhoof-gh-buildkit/);
   });
 
@@ -362,12 +364,13 @@ describe('.github/workflows/images.yml', () => {
     expect(qemu.map(step => step.if)).toEqual(['${{ !vars.BUILDKIT_ENDPOINT }}']);
   });
 
-  it('gives the first job a checkout deep enough for a merge, the token, and only the rights to read', () => {
+  it('gives the first job the whole history, the token, and only the rights to read', () => {
     const { permissions, outputs, steps } = JOBS.mark!;
     expect(permissions).toEqual({ contents: 'read', statuses: 'read' });
-    expect(outputs).toEqual({ proved: '${{ steps.mark.outputs.proved }}' });
+    expect(outputs).toEqual({ proved: '${{ steps.mark.outputs.proved }}', parts: '${{ steps.select.outputs.parts }}', selection: '${{ steps.select.outputs.selection }}', base: '${{ steps.select.outputs.base }}' });
     expect(steps[0]!.uses).toMatch(/^actions\/checkout@/);
-    expect(steps[0]!.with).toEqual({ 'fetch-depth': 2 });
+    expect(steps[0]!.with).toEqual({ 'fetch-depth': 0 });
     expect(steps[1]).toEqual({ id: 'mark', env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }, run: 'node scripts/tests-mark.mjs' });
+    expect(steps.filter(step => step.env?.GITHUB_TOKEN).map(step => step.id)).toEqual(['mark', 'select']);
   });
 });

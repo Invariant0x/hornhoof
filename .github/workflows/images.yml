@@ -26,9 +26,12 @@ permissions:
   contents: read
 
 jobs:
-  # A full test run leaves the status hornhoof/tests on the commit it checked: Hornhoof's own, or GitHub's through the
+  # A passed test run leaves the status hornhoof/tests on the commit it checked: Hornhoof's own, or GitHub's through the
   # passed job below. With a success there, or on the second parent of a merge with the same tree, GitHub need not run
   # the tests again; whatever it cannot tell, they run.
+  # Without one, this job chooses the tests, as an author's check does (.hornhoof/author-check.md): those the change since
+  # the nearest commit whose tests passed reaches. A change the selector cannot tell, or one that reaches every suite whole,
+  # runs the whole suite, and so does a choice that fails.
   # While the repository is private, the repository variable TESTS_RUNS_ON, a JSON list of runner labels, can send this
   # job and the tests to our own runners; without it they run on GitHub's machines. Remove the variable before the
   # repository goes public: a pull request from anyone would otherwise run its code on our machine.
@@ -39,29 +42,55 @@ jobs:
       statuses: read
     outputs:
       proved: ${{ steps.mark.outputs.proved }}
+      parts: ${{ steps.select.outputs.parts }}
+      selection: ${{ steps.select.outputs.selection }}
+      base: ${{ steps.select.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The commit and its parents: a merge may take the mark of its second parent.
-          fetch-depth: 2
+          # The whole history: a merge may take the mark of its second parent, and the tests are chosen against a commit
+          # further back.
+          fetch-depth: 0
       - id: mark
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/tests-mark.mjs
+      - if: ${{ steps.mark.outputs.proved != 'true' }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      # The selector reads the node's build and, through Vitest, the import graph.
+      - id: prepare
+        if: ${{ steps.mark.outputs.proved != 'true' }}
+        continue-on-error: true
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npm run build -w @hornhoof/protocol
+          npm run build -w @hornhoof/node
+      - id: select
+        if: ${{ steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/tests-select.mjs
 
-  # The tests run in four parts at once, two workers in each: on one machine with two processors, which GitHub gives a
-  # private repository, the suite took half an hour. TESTS_RUNS_ON above decides whose machines.
+  # The whole suite runs in four parts at once, two workers in each: on one machine with two processors, which GitHub gives
+  # a private repository, it took half an hour. The tests the first job chose run in as many parts as they fill, up to four.
+  # TESTS_RUNS_ON above decides whose machines.
   test:
     needs: mark
-    # A first job that failed leaves no answer, so the tests run.
+    # A first job that failed leaves no answer, so the whole suite runs.
     if: ${{ !cancelled() && needs.mark.outputs.proved != 'true' }}
     runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: ${{ fromJSON(needs.mark.outputs.parts || '[1, 2, 3, 4]') }}
     env:
       PART: ${{ matrix.part }}/4
+      # The tests the first job chose; empty for the whole suite.
+      SELECTION: ${{ needs.mark.outputs.selection }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -72,38 +101,53 @@ jobs:
         run: |
           npm ci --prefer-offline --no-audit --no-fund
           npm run build -w @hornhoof/protocol
-      # What npm test runs besides the three apps' suites, with the lint and the scripts' checks: once, in the first part.
-      # Every check runs even when one before it failed, so one run shows all that is wrong.
-      - name: Lint, release checks, protocol and scripts
+      # What npm test runs besides the suites, once, in the first part: the lint, of the files the change left when the
+      # tests were chosen, the types and the release checks. Every step runs even when one before it failed, so one run
+      # shows all that is wrong.
+      - name: Lint and release checks
         if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 }}
         env:
           # The limit node sets by itself on a machine with less than 15 GB of memory: what outgrows it fails here too.
           NODE_OPTIONS: --max-old-space-size=2048
         run: |
-          npm run lint
+          node scripts/tests-select.mjs --lint
           npm run typecheck:tests
           node scripts/check-release.mjs --local
-          npm run test:release
-          npm test -w @hornhoof/protocol
           bash -n scripts/install.sh
           shellcheck scripts/install.sh scripts/node-build.sh
+      - name: Scripts and protocol
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 && !env.SELECTION }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: |
+          npm run test:release
+          npm test -w @hornhoof/protocol
       - name: Server
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && !env.SELECTION }}
         working-directory: apps/server
         run: npx vitest run --shard="$PART" --maxWorkers=2
       - name: Node
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && !env.SELECTION }}
         working-directory: apps/node
         run: npm test -- --shard="$PART" --maxWorkers=2
       - name: Web
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && !env.SELECTION }}
         working-directory: apps/web
         run: npx vitest run --shard="$PART" --maxWorkers=2
+      # Each suite with the files of this part, as a node runs them.
+      - name: The tests the change reaches
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && env.SELECTION }}
+        env:
+          NUMBER: ${{ matrix.part }}
+        run: |
+          npm run build -w @hornhoof/node
+          node scripts/tests-select.mjs --run "$NUMBER"
 
   # Every part passed: the commit gets the mark, so the push to main that takes a commit built by hand, or any other run
-  # of it, skips the tests. A pull request leaves none.
+  # of it, skips the tests. Tests the change chose prove the commit as the whole suite does, as they stood on a commit whose
+  # tests passed: the mark names that commit. A pull request leaves none.
   passed:
-    needs: test
+    needs: [mark, test]
     if: ${{ needs.test.result == 'success' && github.event_name != 'pull_request' }}
     runs-on: ${{ vars.TESTS_RUNS_ON && fromJSON(vars.TESTS_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
@@ -115,6 +159,7 @@ jobs:
           persist-credentials: false
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TESTS_SINCE: ${{ needs.mark.outputs.base }}
         run: node scripts/tests-mark.mjs --leave
 
   images:

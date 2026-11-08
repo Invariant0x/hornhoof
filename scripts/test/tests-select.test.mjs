@@ -1,0 +1,190 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
+import { LOOK_BACK, provedBase } from '../github-tests/base.mjs';
+import { FILES_PER_PART, PARTS, invocationsOf, lintCommands, outputsOf, partsOf, planOf, runAll } from '../github-tests/parts.mjs';
+
+const root = fileURLToPath(new URL('../..', import.meta.url));
+const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
+const ZERO = '0'.repeat(40);
+
+function folder(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-tests-select-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+/* A repository with main, and a way to add a commit to whatever is checked out. */
+function repository(t) {
+  const dir = folder(t);
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...process.env, ...IDENTITY } }).trim();
+  git('init', '--quiet', '--initial-branch=main');
+  let count = 0;
+  const commit = () => {
+    count += 1;
+    writeFileSync(join(dir, `f${count}.txt`), `${count}\n`);
+    git('add', '.');
+    git('commit', '--quiet', '-m', `c${count}`);
+    return git('rev-parse', 'HEAD');
+  };
+  return { dir, git, commit };
+}
+
+/* GitHub's marks: the commits whose tests passed. */
+const passed = (...shas) => async sha => shas.includes(sha);
+
+test('a push stands on the tip it moved, when that tip passed', async t => {
+  const { git, commit } = repository(t);
+  commit();
+  const before = commit(), sha = commit();
+  const found = await provedBase({ name: 'push', event: { before }, sha }, { git, proved: passed(before) });
+  assert.equal(found.base, before, found.why);
+});
+
+test('a push stands on the nearest commit before that tip that passed, as a push of texts alone leaves no mark', async t => {
+  const { git, commit } = repository(t);
+  const marked = commit(), before = commit(), sha = commit();
+  const found = await provedBase({ name: 'push', event: { before }, sha }, { git, proved: passed(marked) });
+  assert.equal(found.base, marked, found.why);
+});
+
+test(`a push looks back no further than ${LOOK_BACK} commits, and without a passed one there runs the whole suite`, async t => {
+  const { git, commit } = repository(t);
+  const marked = commit();
+  let before;
+  for (let i = 0; i < LOOK_BACK; i += 1) before = commit();
+  const sha = commit();
+  const found = await provedBase({ name: 'push', event: { before }, sha }, { git, proved: passed(marked) });
+  assert.equal(found.base, null);
+  assert.match(found.why, /passed/);
+});
+
+test('a push that starts a branch, or whose tip before is not in the checkout, runs the whole suite', async t => {
+  const { git, commit } = repository(t);
+  const sha = commit();
+  for (const before of [ZERO, 'e'.repeat(40), undefined]) {
+    const found = await provedBase({ name: 'push', event: { before }, sha }, { git, proved: passed(sha) });
+    assert.equal(found.base, null, String(before));
+  }
+});
+
+test('a run by hand stands on where its branch left main, not on where main is now', async t => {
+  const { git, commit } = repository(t);
+  commit();
+  const left = commit();
+  git('checkout', '--quiet', '-b', 'turn-8');
+  commit();
+  const sha = commit();
+  git('checkout', '--quiet', 'main');
+  const moved = commit();
+  git('update-ref', 'refs/remotes/origin/main', moved);
+  git('checkout', '--quiet', sha);
+  const found = await provedBase({ name: 'workflow_dispatch', event: {}, sha }, { git, proved: passed(left, moved) });
+  assert.equal(found.base, left, found.why);
+});
+
+test('a run by hand of main itself stands on the commit before it that passed, never on itself', async t => {
+  const { git, commit } = repository(t);
+  const marked = commit(), sha = commit();
+  git('update-ref', 'refs/remotes/origin/main', sha);
+  const found = await provedBase({ name: 'workflow_dispatch', event: {}, sha }, { git, proved: passed(marked) });
+  assert.equal(found.base, marked, found.why);
+});
+
+test('a pull request stands on its base', async t => {
+  const { git, commit } = repository(t);
+  const base = commit(), sha = commit();
+  const found = await provedBase({ name: 'pull_request', event: { pull_request: { base: { sha: base } } }, sha }, { git, proved: passed(base) });
+  assert.equal(found.base, base, found.why);
+});
+
+test('any other event, or a GitHub that cannot say which commit passed, runs the whole suite', async t => {
+  const { git, commit } = repository(t);
+  const before = commit(), sha = commit();
+  assert.equal((await provedBase({ name: 'schedule', event: { before }, sha }, { git, proved: passed(before) })).base, null);
+  const found = await provedBase({ name: 'push', event: { before }, sha }, { git, proved: async () => { throw new Error('GitHub answered 502'); } });
+  assert.equal(found.base, null);
+  assert.match(found.why, /502/);
+});
+
+const unit = (suiteId, file) => ({ suiteId, file, selectionUnit: file });
+const pick = (packageId, mode, files) => ({ packageId, mode, units: files.map(file => unit(packageId, file)), reasons: [] });
+const serverFiles = count => Array.from({ length: count }, (_, i) => `apps/server/test/t${String(i).padStart(3, '0')}.test.ts`);
+
+test('a small selection runs in one part', () => {
+  assert.deepEqual(partsOf({ packages: [pick('server', 'related', ['apps/server/test/a.test.ts']), pick('release-scripts', 'whole-package', ['scripts/test/b.test.mjs'])], notes: [] }),
+    [{ server: ['apps/server/test/a.test.ts'], 'release-scripts': ['scripts/test/b.test.mjs'] }]);
+});
+
+test(`a larger one takes a part for each ${FILES_PER_PART} files, ${PARTS} at most, every file in exactly one`, () => {
+  for (const [count, parts] of [[FILES_PER_PART, 1], [FILES_PER_PART + 1, 2], [FILES_PER_PART * 3, 3], [FILES_PER_PART * 10, PARTS]]) {
+    const files = serverFiles(count);
+    const found = partsOf({ packages: [pick('server', 'related', files)], notes: [] });
+    assert.equal(found.length, parts, String(count));
+    assert.deepEqual(found.flatMap(part => part.server).sort(), files);
+    const sizes = found.map(part => part.server.length);
+    assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, sizes.join(' '));
+  }
+});
+
+test('a change that reaches no test still runs the checks, in one part', () => {
+  assert.deepEqual(partsOf({ packages: [], notes: ['document without tests: README.md'] }), [{}]);
+});
+
+test('the plan lints the files the change left, one eslint for each workspace', () => {
+  const base = 'b'.repeat(40);
+  const changes = [
+    { kind: 'modified', path: 'apps/server/src/a.ts' }, { kind: 'added', path: 'apps/server/test/a.test.ts' }, { kind: 'deleted', path: 'apps/server/src/gone.ts' },
+    { kind: 'renamed', previousPath: 'apps/web/src/old.tsx', path: 'apps/web/src/New.tsx' }, { kind: 'modified', path: 'scripts/tests-mark.mjs' },
+    { kind: 'modified', path: 'README.md' }, { kind: 'modified', path: 'tool.config.mjs' },
+  ];
+  const suites = [{ id: 'server', root: 'apps/server' }, { id: 'web', root: 'apps/web' }, { id: 'release-scripts', root: 'scripts' }];
+  const plan = planOf(base, changes, { packages: [pick('server', 'related', ['apps/server/test/a.test.ts'])], notes: [] }, suites);
+  assert.deepEqual(plan, { base, lint: [['apps/server/src/a.ts', 'apps/server/test/a.test.ts'], ['apps/web/src/New.tsx'], ['scripts/tests-mark.mjs'], ['tool.config.mjs']], parts: [{ server: ['apps/server/test/a.test.ts'] }] });
+});
+
+test('the outputs give the parts to run, the selection and its base, or the whole suite in four parts', () => {
+  const plan = { base: 'b'.repeat(40), lint: [], parts: [{ server: ['apps/server/test/a.test.ts'] }, { web: ['apps/web/test/b.test.ts'] }] };
+  assert.equal(outputsOf(plan), `parts=[1,2]\nselection=${JSON.stringify(plan)}\nbase=${plan.base}\n`);
+  assert.equal(outputsOf(null), 'parts=[1,2,3,4]\nselection=\nbase=\n');
+});
+
+test('the lint is the whole lint without a selection, and the files of the change with one', () => {
+  assert.deepEqual(lintCommands(null), [{ program: 'npm', args: ['run', 'lint'], cwd: '.' }]);
+  assert.deepEqual(lintCommands({ lint: [['apps/server/src/a.ts'], ['scripts/x.mjs']] }), [
+    { program: 'npx', args: ['--no-install', 'eslint', 'apps/server/src/a.ts'], cwd: '.' },
+    { program: 'npx', args: ['--no-install', 'eslint', 'scripts/x.mjs'], cwd: '.' },
+  ]);
+  assert.deepEqual(lintCommands({ lint: [] }), []);
+});
+
+test('a part runs each suite as a node runs it, with its own files, and Vitest with two workers', async t => {
+  const dir = folder(t);
+  const { parseTestEnvironment } = await import('@hornhoof/protocol');
+  const manifest = parseTestEnvironment(readFileSync(join(root, '.hornhoof/test-environment.json'), 'utf8'));
+  const built = [];
+  const build = async (suite, files, context) => { built.push({ id: suite.id, files, context }); return { command: { ...suite.run, args: [...suite.run.args, 'built'] }, env: { MARK: suite.id } }; };
+  const found = await invocationsOf({ server: ['apps/server/test/a.test.ts'], 'release-scripts': ['scripts/test/b.test.mjs'] }, manifest.suites, { root, dir }, build);
+  const server = manifest.suites.find(suite => suite.id === 'server'), scripts = manifest.suites.find(suite => suite.id === 'release-scripts');
+  assert.deepEqual(found, [
+    { command: { ...server.run, args: [...server.run.args, 'built', '--maxWorkers=2'] }, env: { MARK: 'server' } },
+    { command: { ...scripts.run, args: [...scripts.run.args, 'built'] }, env: { MARK: 'release-scripts' } },
+  ]);
+  assert.deepEqual(built.map(item => [item.id, item.files, item.context]), [
+    ['server', ['apps/server/test/a.test.ts'], { checkout: root, filesPath: join(dir, 'files-server.json'), shard: { index: 1, count: 1 } }],
+    ['release-scripts', ['scripts/test/b.test.mjs'], { checkout: root, filesPath: join(dir, 'files-release-scripts.json'), shard: { index: 1, count: 1 } }],
+  ]);
+});
+
+test('every command of a part runs even when one before it failed, and the part fails then', async () => {
+  const ran = [];
+  const exec = async command => { ran.push(command.program); return command.program === 'bad' ? 1 : 0; };
+  assert.equal(await runAll([{ command: { program: 'bad', args: [], cwd: '.' }, env: {} }, { command: { program: 'good', args: [], cwd: '.' }, env: {} }], exec), 1);
+  assert.deepEqual(ran, ['bad', 'good']);
+  assert.equal(await runAll([{ command: { program: 'good', args: [], cwd: '.' }, env: {} }], exec), 0);
+  assert.equal(await runAll([], exec), 0);
+});

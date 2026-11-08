@@ -78,14 +78,53 @@ test('images built with our own BuildKit keep their cache in it, and send none t
   assert.match(images.images, /cache-to: \$\{\{ !vars\.BUILDKIT_ENDPOINT && format\('type=gha,mode=max,scope=\{0\}', matrix\.name\) \|\| '' \}\}\n/);
 });
 
-test('tests GitHub passed in full leave the mark on their commit, so another run of it skips them', () => {
+test('tests GitHub passed leave the mark on their commit, naming the passed commit they stood on when the change chose them', () => {
   const passed = images.passed;
   assert.ok(passed, 'a job named passed');
-  assert.match(passed, /needs: test\n/);
+  assert.match(passed, /needs: \[mark, test\]\n/);
   assert.match(passed, /if: \$\{\{ needs\.test\.result == 'success' && github\.event_name != 'pull_request' \}\}\n/);
   assert.match(passed, /statuses: write\n/);
+  assert.match(passed, /TESTS_SINCE: \$\{\{ needs\.mark\.outputs\.base \}\}\n/);
   assert.match(passed, /run: node scripts\/tests-mark\.mjs --leave\n/);
   for (const [name, text] of Object.entries(images)) {
     if (name !== 'passed') assert.doesNotMatch(text, /statuses: write/, name);
   }
+});
+
+/* Each step of a job as its text, in order. */
+const steps = job => job.slice(job.indexOf('\n    steps:\n')).split(/(?<=\n) {6}- /).slice(1);
+
+test('the first job chooses the tests only for a commit no mark proved, against the whole history, and a choice that fails leaves the whole suite', () => {
+  const mark = images.mark;
+  assert.match(mark, /fetch-depth: 0\n/);
+  for (const name of ['parts', 'selection', 'base']) assert.match(mark, new RegExp(`\\n {6}${name}: \\$\\{\\{ steps\\.select\\.outputs\\.${name} \\}\\}\\n`));
+  const [checkout, decide, node, prepare, select, ...rest] = steps(mark);
+  assert.match(checkout, /^uses: actions\/checkout@/);
+  assert.match(decide, /run: node scripts\/tests-mark\.mjs\n/);
+  assert.match(node, /if: \$\{\{ steps\.mark\.outputs\.proved != 'true' \}\}\n[^]*uses: actions\/setup-node@/);
+  assert.match(prepare, /if: \$\{\{ steps\.mark\.outputs\.proved != 'true' \}\}\n/);
+  assert.match(prepare, /continue-on-error: true\n/);
+  assert.match(prepare, /npm ci [^]*npm run build -w @hornhoof\/protocol\n[^]*npm run build -w @hornhoof\/node\n/);
+  assert.doesNotMatch(prepare, /GITHUB_TOKEN/);
+  assert.match(select, /id: select\n/);
+  assert.match(select, /if: \$\{\{ steps\.prepare\.outcome == 'success' \}\}\n/);
+  assert.match(select, /continue-on-error: true\n/);
+  assert.match(select, /run: node scripts\/tests-select\.mjs\n/);
+  assert.deepEqual(rest, []);
+});
+
+test('the tests run in the parts the first job chose, and as the whole suite in four parts when it chose none', () => {
+  const test = images.test;
+  assert.match(test, /part: \$\{\{ fromJSON\(needs\.mark\.outputs\.parts \|\| '\[1, 2, 3, 4\]'\) \}\}\n/);
+  assert.match(test, /SELECTION: \$\{\{ needs\.mark\.outputs\.selection \}\}\n/);
+  const named = Object.fromEntries(steps(test).filter(step => step.startsWith('name: ')).map(step => [step.slice(6, step.indexOf('\n')), step]));
+  assert.deepEqual(Object.keys(named), ['Lint and release checks', 'Scripts and protocol', 'Server', 'Node', 'Web', 'The tests the change reaches']);
+  assert.match(named['Lint and release checks'], /matrix\.part == 1 \}\}\n/);
+  assert.match(named['Lint and release checks'], /run: \|\n {10}node scripts\/tests-select\.mjs --lint\n {10}npm run typecheck:tests\n {10}node scripts\/check-release\.mjs --local\n/);
+  assert.match(named['Scripts and protocol'], /matrix\.part == 1 && !env\.SELECTION \}\}\n[^]*npm run test:release\n {10}npm test -w @hornhoof\/protocol\n/);
+  for (const name of ['Server', 'Node', 'Web']) assert.match(named[name], /&& !env\.SELECTION \}\}\n[^]*--shard="\$PART"/, name);
+  const chosen = named['The tests the change reaches'];
+  assert.match(chosen, /if: \$\{\{ !cancelled\(\) && steps\.install\.outcome == 'success' && env\.SELECTION \}\}\n/);
+  assert.match(chosen, /NUMBER: \$\{\{ matrix\.part \}\}\n/);
+  assert.match(chosen, /npm run build -w @hornhoof\/node\n {10}node scripts\/tests-select\.mjs --run "\$NUMBER"\n/);
 });
