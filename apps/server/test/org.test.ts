@@ -6,6 +6,8 @@ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { failureCompany } from './failure-company.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
+import type { EchelonsSnapshot } from '@hornhoof/protocol';
 import { as, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 describe('GET /api/org', () => {
@@ -146,7 +148,7 @@ describe('GET /api/org', () => {
       ])
       .returning();
     const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId: string | null = sub!.id) =>
-      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId }).returning())[0]!;
+      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [] }).returning())[0]!;
     const hana = await hire('Hana', 'head', 'DEV-HEAD');
     const bruno = await hire('Bruno', 'worker', 'DEV-BE');
     const felix = await hire('Felix', 'worker', 'DEV-FE');
@@ -155,18 +157,21 @@ describe('GET /api/org', () => {
     await hire('Ida', 'worker', 'DEV-OPS');
     await hire('Otto', 'worker', 'DEV-TEST', null);
     const ctx = app.ctx;
+    await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, dev!.id));
+    ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
     const [ceoRow] = await db.select().from(people);
     const top = (await createTask(ctx, { personId: ceoRow!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: hana.id })).task;
-    const member = async (title: string, agentId: string, gates: string[] = []) =>
-      (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, gates })).task;
+    const member = async (title: string, agentId: string, reviewerAgentId = rita.id) =>
+      (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
     const api = await member('Checkout API', bruno.id);
-    const page = await member('Checkout page', felix.id, [rita.id]);
+    const page = await member('Checkout page', felix.id, rita.id);
     const accept = await member('Acceptance', quinn.id);
-    await submit(ctx, felix.id, page.id, { summary: 'Done', evidence: 'npm test' });
+    await submit(ctx, felix.id, page.id, { summary: 'Done', evidence: 'npm test', review: { baseCommit: BASE } });
     await ask(ctx, quinn.id, accept.id, { kind: 'question', text: 'Which cards?' });
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, taskId: api.id, prompt: 'build', status: 'running', timeoutMs: 1000 });
 
-    const doing = (org: { departments: { id: string; employees: { name: string; status: string; task: { number: number; stage: number } | null }[] }[] }) =>
+    const doing = (org: { departments: { id: string; employees: { name: string; status: string; task: { number: number; echelons: EchelonsSnapshot } | null }[] }[] }) =>
       Object.fromEntries(org.departments.find(d => d.id === dev!.id)!.employees.map(e => [e.name, [e.status, e.task && e.task.number]]));
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(doing(org)).toEqual({
@@ -179,7 +184,7 @@ describe('GET /api/org', () => {
       Otto: ['off', null],
     });
     const felixLine = org.departments.find((d: { id: string }) => d.id === dev!.id).employees.find((e: { name: string }) => e.name === 'Felix');
-    expect(felixLine.task).toMatchObject({ id: page.id, title: 'Checkout page', stage: 1, gateCount: 1, bounces: 0 });
+    expect(felixLine.task).toMatchObject({ id: page.id, title: 'Checkout page', echelons: { stage: 'review', phase: 'active', ownerAgentId: rita.id, candidateId: expect.any(String) } });
     const roles = org.departments.find((d: { id: string }) => d.id === dev!.id).roles;
     expect(roles.find((r: { id: string }) => r.id === 'DEV-REV')).toMatchObject({ gate: 1, title: { en: 'Code reviewer' } });
     expect(roles.find((r: { id: string }) => r.id === 'DEV-BE')).toMatchObject({ gate: null });
@@ -189,27 +194,32 @@ describe('GET /api/org', () => {
     expect(doing(hers)).toEqual({});
   });
 
-  it('shows a reviewer at work on a gate while another reviewer there waits for a person', async () => {
+  it('shows independent Review owners while one waits for a person', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const [company] = await db.select().from(companies);
     const [sub] = await db.select().from(subscriptions);
-    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 0, repoUrl: 'https://github.com/acme/shop.git' }).returning();
     const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-      (await db.insert(agents).values({ companyId: company!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+      (await db.insert(agents).values({ companyId: company!.id, kind, name, roleKey, departmentId: dev!.id, model: 'claude-opus-5-5', subscriptionId: sub!.id, skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(s => s.on).map(s => s.id) ?? [] }).returning())[0]!;
     const hana = await hire('Hana', 'head', 'DEV-HEAD');
     const felix = await hire('Felix', 'worker', 'DEV-FE');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
     const rita = await hire('Rita', 'worker', 'DEV-REV');
-    /* Rex reviews on Codex, so both check the work at once. */
-    const [ceoPerson] = await db.select().from(people);
-    const [codex] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceoPerson!.id, status: 'ready' }).returning();
-    await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Rex', roleKey: 'DEV-REV', departmentId: dev!.id, model: '', subscriptionId: codex!.id });
-    const { task } = await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout page', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: felix.id, executor: true, gates: [rita.id] });
-    await submit(app.ctx, felix.id, task.id, { summary: 'Done', evidence: 'npm test' });
-    await ask(app.ctx, rita.id, task.id, { kind: 'question', text: 'Which browsers?' });
-    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    const rex = await hire('Rex', 'worker', 'DEV-REV');
+    app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+    app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+    const create = async (title: string, assigneeAgentId: string, reviewerAgentId: string) => (await createTask(app.ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId })).task;
+    const page = await create('Checkout page', felix.id, rita.id);
+    const api = await create('Checkout API', bruno.id, rex.id);
+    await submit(app.ctx, felix.id, page.id, { summary: 'Page candidate', evidence: 'Changed page tests.', review: { baseCommit: BASE } });
+    await submit(app.ctx, bruno.id, api.id, { summary: 'API candidate', evidence: 'Changed API tests.', review: { baseCommit: BASE } });
+    await ask(app.ctx, rita.id, page.id, { kind: 'question', text: 'Which browsers?' });
+    const response = await app.inject({ url: '/api/org', ...as(ceo) });
+    expect(response.statusCode).toBe(200);
+    const org = response.json();
     const doing = Object.fromEntries(org.departments[0].employees.map((e: { name: string; status: string; task: { number: number } | null }) => [e.name, [e.status, e.task?.number ?? null]]));
-    expect(doing).toMatchObject({ Rita: ['waiting', task.number], Rex: ['queued', task.number] });
+    expect(doing).toMatchObject({ Rita: ['waiting', page.number], Rex: ['queued', api.number] });
   });
 
   it('shows nobody at a task that still waits for the tasks it comes after', async () => {
