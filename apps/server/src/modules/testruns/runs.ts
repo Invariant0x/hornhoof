@@ -513,7 +513,8 @@ export async function partReceived(ctx: Ctx, id: NodeIdentity, partId: string): 
 
 /* Parts whose machine did not say within RECEIVE_MS that it got them: each goes to another machine under a new id, as a
    lost part does, so nothing that machine says of the old id counts, and the machine is told to stop it should it have
-   it after all. */
+   it after all. Each sending's own timer calls it; the minute round does not, as a later moment it is given to look at
+   time limits would make an answer still on its way late. */
 export async function checkTestReceipts(ctx: Ctx, now = new Date()): Promise<void> {
   const due = deliveriesOf(ctx).due(now.getTime());
   for (const { partId, node } of due) {
@@ -580,7 +581,6 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
    waited too long for a machine. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
   const { db } = ctx;
-  await checkTestReceipts(ctx, now);
   const open = await db
     .select({ part: testParts, run: testRuns })
     .from(testParts)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { testParts } from '../src/db/schema.js';
-import { checkTestTimes } from '../src/modules/testruns/runs.js';
+import { checkTestReceipts, checkTestTimes } from '../src/modules/testruns/runs.js';
 import { connectNode, until } from './helpers.js';
 import { company, done, gets, idle, nextOf } from './test-runs-company.js';
 
@@ -20,7 +20,7 @@ async function movedOnce(c: Company) {
   await call('run_tests', { command: 'make test' });
   const lost = await nextOf(silent.node, 'tests.run');
   const ann = await c.machine(c.ann, 'ann-pc');
-  await checkTestTimes(c.app.ctx, past());
+  await checkTestReceipts(c.app.ctx, past());
   return { silent, ann, lost, call };
 }
 
@@ -32,10 +32,10 @@ describe('a part sent to a machine', () => {
     await call('run_tests', { command: 'make test' });
     const lost = await nextOf(silent.node, 'tests.run');
     const ann = await c.machine(c.ann, 'ann-pc');
-    await checkTestTimes(c.app.ctx, inside());
+    await checkTestReceipts(c.app.ctx, inside());
     expect(await partsOf(c)).toMatchObject([{ id: lost.partId, status: 'running', nodeId: silent.nodeId, lost: [] }]);
 
-    await checkTestTimes(c.app.ctx, past());
+    await checkTestReceipts(c.app.ctx, past());
     const [moved] = await partsOf(c);
     expect(moved).toMatchObject({ status: 'running', nodeId: ann.nodeId, machineName: 'ann-pc', lost: [{ machine: 'silent-box', why: 'not_received' }] });
     expect(moved!.id).not.toBe(lost.partId);
@@ -60,7 +60,7 @@ describe('a part sent to a machine', () => {
     slow.node.send({ type: 'tests.received', partId: run.partId });
     await new Promise(r => setTimeout(r, 200));
 
-    await checkTestTimes(c.app.ctx, past());
+    await checkTestReceipts(c.app.ctx, past());
     expect(await partsOf(c)).toMatchObject([{ id: run.partId, status: 'running', nodeId: slow.nodeId, lost: [] }]);
     expect(await gets(slow.node, 'tests.cancel')).toBe(false);
   });
@@ -126,6 +126,7 @@ describe('a part sent to a machine', () => {
     box.node.close();
     await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: box.nodeId }));
 
+    await checkTestReceipts(c.app.ctx, past());
     await checkTestTimes(c.app.ctx, past());
     expect(await partsOf(c)).toMatchObject([{ id: run.partId, status: 'running', nodeId: box.nodeId, lost: [] }]);
     const back = await connectNode(c.url, box.key, { receives: false });
@@ -144,7 +145,7 @@ describe('a part sent to a machine', () => {
     await call('run_work', { command: 'make deploy' });
     const deploy = await nextOf(silent.node, 'tests.run');
     const ann = await c.machine(c.ann, 'ann-pc');
-    await checkTestTimes(c.app.ctx, past());
+    await checkTestReceipts(c.app.ctx, past());
     expect(await partsOf(c)).toMatchObject([{ id: deploy.partId, status: 'failed', error: 'not_received' }]);
     expect(await nextOf(silent.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: deploy.partId });
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
@@ -159,11 +160,11 @@ describe('a part sent to a machine', () => {
     await call('run_tests', { command: 'make test' });
     for (const lost of [0, 1]) {
       await nextOf(silent.node, 'tests.run');
-      await checkTestTimes(c.app.ctx, past());
+      await checkTestReceipts(c.app.ctx, past());
       expect((await partsOf(c))[0]!.lost).toHaveLength(lost + 1);
     }
     await nextOf(silent.node, 'tests.run');
-    await checkTestTimes(c.app.ctx, past());
+    await checkTestReceipts(c.app.ctx, past());
     expect(await partsOf(c)).toMatchObject([{ status: 'failed', error: 'not_received' }]);
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     expect(await c.wokeWith(c.bruno.id)).toMatch(

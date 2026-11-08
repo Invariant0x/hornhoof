@@ -500,7 +500,7 @@ it('resends its persisted describe request after server state is recreated and i
   expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
   const restarted = { ...c.app.ctx };
   const { noteTestCapabilities } = await import('../src/modules/testruns/describe.js');
-  noteTestCapabilities(restarted, { kind: 'builtin' }, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
+  noteTestCapabilities(restarted, { kind: 'builtin' }, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }], testDispatch: 1 });
   await pumpTests(restarted);
   expect(await nextOf(node, 'tests.describe')).toEqual(request);
   node.send({ ...await productDescription(request), requestId: '99999999-9999-4999-8999-999999999999' }); await pumpTests(c.app.ctx);
