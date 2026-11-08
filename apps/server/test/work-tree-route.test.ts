@@ -3,9 +3,12 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { DepartmentTree } from '../src/modules/tasks/tree.js';
 import { treeFacts } from '../src/modules/tasks/tree-facts.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { BASE, HEAD } from './development-echelons-fixture.js';
+import { candidateChecks } from './development-echelons-verification.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
@@ -20,10 +23,6 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     .insert(subscriptions)
     .values({ companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' })
     .returning();
-  const [kimi] = await db
-    .insert(subscriptions)
-    .values({ companyId, provider: 'kimi', kind: 'personal', label: 'Kimi', ownerPersonId: ceo!.id, status: 'ready' })
-    .returning();
   const [dev] = await db
     .insert(departments)
     .values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' })
@@ -31,15 +30,15 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', repoUrl: null }).returning();
 
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, sub: string | null = claude!.id) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: sub === codex!.id ? 'gpt-6.1-sol' : 'claude-opus-5-5', subscriptionId: sub, skills: app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id) }).returning())[0]!;
 
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const kai = await hire('Kai', 'worker', 'DEV-FE');
-  /* A turn's review takes reviewers on another provider than the authors', each provider once, so these three can all sit on one. */
-  const rita = await hire('Rita', 'worker', 'DEV-REV', kimi!.id);
+  const rita = await hire('Rita', 'worker', 'DEV-REV');
   const rex = await hire('Rex', 'worker', 'DEV-REV', codex!.id);
   const sid = await hire('Sid', 'worker', 'DEV-SEC', codex!.id);
+  const tester = await hire('Tess', 'worker', 'DEV-TEST');
 
   const turnOpenedAt = new Date(Date.now() - openedMinutesAgo * 60_000);
   const [turn] = openTurn
@@ -50,22 +49,36 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     : [];
 
   const ctx = app.ctx;
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: HEAD });
+  ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
   const parent = openTurn
     ? (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task
     : null;
 
-  const member = async (executor: string, title: string, { productId = null as string | null, body = '' } = {}) =>
+  const member = async (executor: string, title: string, { productId = null as string | null, body = '', riskClass = 'none' as 'none' | 'security', reviewerAgentId = rita.id } = {}) =>
     (
       await createTask(
         ctx,
         { agentId: head.id },
-        { title, brief: '', body, departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, inTurnReview: true },
+        { title, brief: '', body, departmentId: dev!.id, productId, parentId: parent?.id ?? null, assigneeAgentId: executor, executor: true, small: true, paths: ['logic/totals.ts'], riskClass, reviewerAgentId, securityAgentId: sid.id, testsAgentId: tester.id },
       )
     ).task;
 
-  const merged = async (executor: string, taskId: string) => {
-    await submit(ctx, executor, taskId, { summary: 'Done.', evidence: 'npm test' });
-    return submit(ctx, executor, taskId, { summary: 'Merged into turn-4.', evidence: 'git log: 1a2b3c4' });
+  const code = { summary: 'Candidate', evidence: 'Changed total tests.', review: { baseCommit: BASE } };
+  const snapshot = async (id: string) => {
+    const task = await loadTask(db, id);
+    return routeSnapshot(await routeOf(db, task), task.assigneeAgentId);
+  };
+  const accepted = async (executor: string, taskId: string) => {
+    await submit(ctx, executor, taskId, code);
+    await verdict(ctx, rita.id, taskId, { pass: true, reviewedCommit: HEAD, comment: 'Checked the candidate.' });
+    if ((await snapshot(taskId)).stage === 'security') await verdict(ctx, sid.id, taskId, { pass: true, reviewedCommit: HEAD, comment: 'Checked the declared risk.' });
+    const task = await loadTask(db, taskId);
+    const checks = await candidateChecks({ ctx, db, task, tester }, await snapshot(taskId), HEAD);
+    const run = await checks.run();
+    await report(ctx, tester.id, taskId, checks.verified([run.id]));
+    const ready = await snapshot(taskId);
+    return report(ctx, head.id, taskId, { done: true, summary: 'Observed the checked candidate in turn-4.', acceptance: { candidateId: ready.candidateId!, revision: ready.revision, integrationCommit: HEAD } });
   };
 
   let n = 0;
@@ -77,7 +90,7 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
     return mcp(app, token);
   };
 
-  return { app, ctx, db, companyId, ceoToken, claude: claude!, dev: dev!, sales: sales!, turn: turn ?? null, head, bruno, kai, rita, rex, sid, parent, member, merged, tools };
+  return { app, ctx, db, companyId, ceoToken, claude: claude!, dev: dev!, sales: sales!, turn: turn ?? null, head, bruno, kai, rita, rex, sid, tester, parent, member, code, snapshot, accepted, tools };
 }
 
 describe('GET /api/departments/:id/tree', () => {
@@ -119,47 +132,49 @@ describe('GET /api/departments/:id/tree', () => {
     expect(tree.time.find(t => t.agent.id === c.bruno.id)?.stall).toBe(0);
   });
 
-  it('lists member tasks with agents, part, mergedAt after a merge, and the turn review with reviewers and findings', async () => {
-    const { app, ctx, db, ceoToken, dev, turn, head, bruno, kai, rita, rex, sid, parent, member, merged, tools } = await company();
-    /* Security checks only a change in its area. */
-    const api = await member(bruno.id, 'Checkout API', { body: 'Risk class: security' });
-    const page = await member(kai.id, 'Checkout page');
-
-    await merged(bruno.id, api.id);
-    await merged(kai.id, page.id);
-
-    const [review] = await db.select().from(tasks).where(and(eq(tasks.departmentId, dev.id), eq(tasks.title, 'Review of turn 4')));
-    const said = await (await tools(rita)).callTool({ name: 'verdict', arguments: { task: review!.number, pass: false, comment: 'Two issues.', findings: 2 } });
+  it('shows independent current checkers, candidates and their attributed findings on each task line', async () => {
+    const c = await company();
+    const api = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security' });
+    const page = await c.member(c.kai.id, 'Checkout page', { reviewerAgentId: c.rex.id });
+    await submit(c.ctx, c.bruno.id, api.id, c.code);
+    await submit(c.ctx, c.kai.id, page.id, c.code);
+    const issues = [1, 2].map(line => ({ category: 'data', blocking: false, path: 'logic/totals.ts', line, harm: `Clarify boundary ${line}.` }));
+    const said = await (await c.tools(c.rita)).callTool({ name: 'verdict', arguments: { task: api.number, pass: false, reviewedCommit: HEAD, comment: 'I will repair these boundaries.', issues } });
     expect(said.isError).toBeFalsy();
-    await verdict(ctx, rex.id, review!.id, { pass: true, comment: 'Clean.' });
-
-    const res = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(ceoToken) });
+    const res = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) });
     expect(res.statusCode).toBe(200);
     const { tree } = res.json<{ tree: DepartmentTree }>();
-
     expect(tree.repository).toBe(true);
-    expect(tree.turn).toEqual({
-      id: turn!.id,
-      number: 4,
-      branch: 'turn-4',
-      startedAt: turn!.openedAt!.toISOString(),
-    });
-    expect(tree.stage).toBe('review');
-    expect(tree.lines.map(l => [l.title, l.agent.name, l.part?.id, l.branch])).toEqual([
-      ['Payments', 'Hana', undefined, `task-${parent!.number}`],
-      ['Checkout API', 'Bruno', parent!.id, `task-${api.number}`],
-      ['Checkout page', 'Kai', parent!.id, `task-${page.number}`],
+    expect(tree.turn).toEqual({ id: c.turn!.id, number: 4, branch: 'turn-4', startedAt: c.turn!.openedAt!.toISOString() });
+    expect(tree.lines.map(line => [line.title, line.agent.name, line.part?.id, line.branch])).toEqual([
+      ['Payments', 'Hana', undefined, `task-${c.parent!.number}`],
+      ['Checkout API', 'Rita', c.parent!.id, `task-${api.number}`],
+      ['Checkout page', 'Rex', c.parent!.id, `task-${page.number}`],
     ]);
-    expect(tree.lines.find(l => l.taskId === api.id)!.mergedAt).not.toBeNull();
-    expect(tree.lines.find(l => l.taskId === api.id)!.doneAt).toBeNull();
-    expect(tree.lines.find(l => l.taskId === page.id)!.mergedAt).not.toBeNull();
+    expect(tree.lines.find(line => line.taskId === api.id)).toMatchObject({ mergedAt: null, doneAt: null,
+      echelons: { stage: 'review', ownerAgentId: c.rita.id, candidateId: (await c.snapshot(api.id)).candidateId },
+      echelonFindings: { uniqueReported: 2, review: { reported: 2, confirmed: 0 }, security: { reported: 0, confirmed: 0 } },
+    });
+    expect(tree.lines.find(line => line.taskId === page.id)).toMatchObject({ mergedAt: null, doneAt: null,
+      echelons: { stage: 'review', ownerAgentId: c.rex.id, candidateId: (await c.snapshot(page.id)).candidateId },
+    });
+    expect(tree.review).toBeNull();
+    expect(tree.reviews).toEqual([]);
+  });
 
-    expect(tree.review).not.toBeNull();
-    expect(tree.review!.head).toEqual({ id: head.id, name: 'Hana' });
-    const byReviewer = new Map(tree.review!.reviewers.map(r => [r.agent.id, r.verdict]));
-    expect(byReviewer.get(rita.id)).toMatchObject({ pass: false, findings: 2 });
-    expect(byReviewer.get(rex.id)).toMatchObject({ pass: true, findings: null });
-    expect(byReviewer.get(sid.id)).toBeNull();
+  it('shows integration only after the authenticated Tests report and head acceptance', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Checkout API', { riskClass: 'security' });
+    await c.accepted(c.bruno.id, task.id);
+    const res = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) });
+    expect(res.statusCode).toBe(200);
+    const { tree } = res.json<{ tree: DepartmentTree }>();
+    const line = tree.lines.find(line => line.taskId === task.id)!;
+    expect(line).toMatchObject({ mergedAt: expect.any(String), echelons: { phase: 'done', candidateId: (await c.snapshot(task.id)).candidateId } });
+    const reports = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'report')));
+    const acceptance = reports.find(event => event.data.acceptedCandidate);
+    expect(line.mergedAt).toBe(acceptance!.createdAt.toISOString());
+    expect(await c.db.select().from(tasks).where(eq(tasks.title, 'Review of turn 4'))).toEqual([]);
   });
 
   it('keeps an old action timestamp without guessing the program state during forty quiet minutes', async () => {
