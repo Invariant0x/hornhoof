@@ -132,7 +132,7 @@ async function mutationScopeFixture() {
   description.manifestSource = JSON.stringify(description.manifest);
   description.manifestHash = await hashTestEnvironment(description.manifestSource);
   const mutation = {
-    delta: { baseCommit: BASE, commit: f.finalCommit, changes: [{ path: sources[0]!, ranges: [[1, 1]] }, { path: sources[1]!, ranges: [[1, 1]] }] },
+    delta: { baseCommit: BASE, commit: f.finalCommit, changes: [{ path: sources[0]!, ranges: [[1, 1] as [number, number]] }, { path: sources[1]!, ranges: [[1, 1] as [number, number]] }] },
     selection: { version: 1 as const, status: 'ready' as const, baseCommit: BASE, commit: f.finalCommit,
       selected: [{ file: sources[0]!, name: 'total', startLine: 1, endLine: 1, lines: [1], tests: ['web/test/b.test.ts'], reason: 'changed_pure_function' as const }],
       excluded: [{ file: sources[1]!, name: 'process', reason: 'purity_unproven' }], problems: [] },
