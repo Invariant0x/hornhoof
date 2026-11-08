@@ -811,6 +811,7 @@ button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ea
 .slayer { left: 0; top: 0; width: 0; height: 0; }
 .slayer > * { position: absolute; }
 /* A frame per role: its name, what it does and how many agents hold it; a gate's frame has a cyan line. */
+.frame .sslot { z-index: 1; }
 .frame > .edge { height: 100%; background: var(--line2); }
 .frame.gt > .edge { background: color-mix(in srgb, var(--cyan) 55%, var(--line2)); }
 .frame .edge-in { background: color-mix(in srgb, var(--surface) 45%, var(--bg)); }

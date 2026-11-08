@@ -448,7 +448,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                 <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
                   <span className="fn">{frameTitle(f, language, t)}</span>
                   {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
-                  <span className="fc">{f.status && t.tasks.echelons.statuses[f.status]}</span>
+                  {f.status && <span className="fc">{t.tasks.echelons.statuses[f.status]}</span>}
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
               </Edge>
