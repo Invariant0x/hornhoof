@@ -55,9 +55,9 @@ const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'mess
 
 const sameVersion = (task: Task, state: TaskWake): boolean => state.version === undefined || state.version === task.version;
 
-export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId || (task.stage > 0 && task.panel.includes(agentId));
+export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId;
 const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && !task.merging && task.assigneeAgentId === agentId;
-const review = (task: Task, agentId: string): boolean => task.status === 'review' && task.panel.includes(agentId);
+const review = (task: Task, agentId: string): boolean => task.status === 'review' && task.assigneeAgentId === agentId;
 
 function recipient(task: Task, agentId: string, why = ''): boolean {
   if (why === 'assigned') return assignment(task, agentId);

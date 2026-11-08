@@ -1,3 +1,5 @@
+import { matchesGlob } from 'node:path';
+import { RepoPath } from './review-schema.js';
 import { randomUUID } from 'node:crypto';
 import { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -10,6 +12,8 @@ import type { Review } from './review-context.js';
 
 export function producedCandidate(route: Route, producer: CheckerIdentity, review: Review | null): EchelonCandidate {
   if (!review?.commit || !review.branch || !review.source) throw refuse(409, 'task_invalid', 'A handoff needs the exact candidate commit, branch and base comparison.');
+  const inScope = review.source.paths.every(path => RepoPath.safeParse(path).success && route.paths.some(pattern => matchesGlob(path, pattern)));
+  if (!inScope) throw refuse(403, 'task_not_yours', 'The candidate changes paths outside the head-approved scope. Ask the head to revise the scope.');
   return EchelonCandidate.parse({ id: randomUUID(), parentId: route.state.candidateId, revision: route.revision + 1,
     baseCommit: review.source.baseCommit, commit: review.commit, branch: review.branch, paths: review.source.paths,
     producedBy: { ...producer, stage: route.state.stage },

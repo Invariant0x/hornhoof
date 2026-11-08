@@ -1,3 +1,4 @@
+import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
 import { agentIdentity } from './echelons-assign.js';
 import { producedCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
@@ -763,7 +764,7 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
-  if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
+  if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
@@ -774,11 +775,16 @@ export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; s
 type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
 
 /* The executor hands its work to the first gate, or finishes a task without gates. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }, checked?: CheckedSubmission): Promise<Moved> {
+export async function submit(ctx: Live, agentId: string, taskId: string, r: Submission, checked?: CheckedSubmission): Promise<Moved> {
+  const before = await loadTask(ctx.db, taskId);
+  await liveAgent(ctx.db, before.companyId, agentId);
+  const operation = submissionOperation(r);
+  const replay = await replayedSubmission(ctx.db, before, agentId, operation);
+  if (replay) return replay;
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
-  if (route.state.stage !== 'development' || route.state.phase !== 'active') throw notYours(task, 'is not waiting for Development');
-  const review = checked?.review ?? await captureReview(ctx, task, r.review);
+  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage) || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
+  const review = checked?.review ?? await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
   const candidate = producedCandidate(route, producer, review);
@@ -786,7 +792,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary,
-    data: { evidence: r.evidence, candidate, routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
+    data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}) },
   }, async tx => { await changeRoute(tx, route, next.state); await unstuck.also(tx); }, next.wakes);
   unstuck.tell();
   return { task: row, wakes: next.wakes };
