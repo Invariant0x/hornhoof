@@ -8,6 +8,7 @@ import { changeRoute, type Route } from './echelons-store.js';
 import { sameChecker } from './echelons-policy.js';
 import { agentIdentity } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
+import { ReviewSha } from './review-schema.js';
 import { verifiedReuse } from './review-reuse.js';
 import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
 
