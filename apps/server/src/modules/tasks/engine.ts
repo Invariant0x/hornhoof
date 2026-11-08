@@ -235,6 +235,7 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
 export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
   let lit: Task | null = null;
+  let unstuck = false;
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
@@ -264,6 +265,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     const event = await note(tx, row, n, ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
+    if (CLOSED.includes(row.status)) unstuck = await letStuckGo(tx, row.id);
     await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
@@ -277,6 +279,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     return row;
   });
   published(ctx, row);
+  if (unstuck) ctx.bus.publish(row.companyId, { type: 'requests', spot: taskSpot(row) });
   for (const t of started) published(ctx, t);
   linesMoved(ctx, lit);
   await handOff(ctx, n.actor, row);
@@ -816,6 +819,10 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const revised = await prepareRouteChange(ctx, task, route, agentId, c);
   const set = revised.set;
   for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) if (c[key] !== undefined) Object.assign(set, { [key]: c[key] });
+  const rewritten = (['title', 'brief', 'body'] as const).some(key => c[key] !== undefined && c[key] !== task[key]);
+  if (rewritten && task.status === 'blocked' && task.assigneeAgentId && revised.state.phase === 'active') {
+    Object.assign(set, { status: ['review', 'cleanup', 'security'].includes(revised.state.stage ?? '') ? 'review' : 'open', silent: 0 });
+  }
   if (c.after !== undefined) {
     if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
     checkAfterPlans(c.after, c.afterPlans);

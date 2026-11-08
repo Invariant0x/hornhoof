@@ -8,6 +8,8 @@ import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask, verdict, type NewTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
 
@@ -1061,6 +1063,7 @@ describe('obsolete task turns', () => {
     const [queued] = (await c.turnsOf(c.rita.id)).filter(j => j.status === 'queued');
     expect(queued).toBeDefined();
     await verdict(c.ctx, c.rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Checked the current candidate.' });
+    await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1000) }).where(eq(jobs.id, queued!.id));
     await c.release(held.id);
     expect(c.builtin.queued()).toBe(0);
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
@@ -1140,7 +1143,7 @@ describe('obsolete task turns', () => {
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
   });
 
-  it('drops a legacy task turn when its worker also created the task', async () => {
+  it('rejects a task turn without workflow identity even when its owner created the task', async () => {
     const c = await busyQueue();
     const task = await c.memberTask();
     await c.db.update(tasks).set({ createdByAgentId: c.bruno.id }).where(eq(tasks.id, task.id));
@@ -1150,20 +1153,25 @@ describe('obsolete task turns', () => {
     expect((await c.db.select().from(jobs).where(eq(jobs.id, queued)))[0]).toMatchObject({ error: 'stale', startedAt: null });
   });
 
-  it('still dispatches a current legacy task turn', async () => {
+  it('dispatches a current task turn with its canonical workflow identity', async () => {
     const c = await busyQueue();
     const task = await c.memberTask();
-    const [queued] = await c.db.insert(jobs).values({ companyId: task.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: task.id, kind: 'conversation', prompt: 'A current legacy assignment.', timeoutMs: 900000 }).returning();
+    const route = routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId);
+    const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.bruno.id, taskId: task.id,
+      prompt: 'Continue the assigned task.', createdBy: null, message: { personId: null, text: 'Continue the assigned task.', taskWake: taskWakeOf(task, { why: 'assigned' }, route) } });
     await c.release();
-    expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
+    expect((await nextRun(c.builtin)).jobId).toBe(queued);
   });
 
-  it('still dispatches a legacy completion notice to the giver', async () => {
+  it('dispatches a canonical completion notice to the giver after the task closes', async () => {
     const c = await busyQueue();
     const held = await c.hold(c.head.id);
     const task = await c.memberTask();
+    const route = routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId);
     await c.close([task.id]);
-    const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.head.id, taskId: task.id, prompt: wakePrompt(c.head, task, { agentId: c.head.id, taskId: task.id, why: 'done' }), createdBy: null });
+    const prompt = wakePrompt(c.head, task, { agentId: c.head.id, taskId: task.id, why: 'done' });
+    const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.head.id, taskId: task.id, prompt, createdBy: null,
+      message: { personId: null, text: prompt, taskWake: taskWakeOf(task, { why: 'done' }, route) } });
     await c.release(held.id);
     expect((await nextRun(c.builtin)).jobId).toBe(queued);
   });
