@@ -172,6 +172,13 @@ test('coverage of two selected suites sharing a working directory survives both 
   assert.deepEqual(result.numbers.changedLines, { covered: 2, total: 2 });
 });
 
+test('a mixed opaque suite keeps the total unknown while its execution can pass', async () => {
+  const selection = { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }, { packageId: 'ruby', mode: 'whole-package', units: [] }], notes: [] };
+  const result = await runStages(given({ suites: [vitestSuite, opaqueSuite], selection }), fake());
+  assert.equal(stage(result, 'tests').status, 'passed');
+  assert.equal(result.numbers.tests, null);
+});
+
 test('a test report that cannot be read leaves the count unknown, never zero', async () => {
   const files = { ...FILES }; delete files[REPORT];
   const result = await runStages(given(), fake(undefined, files));
