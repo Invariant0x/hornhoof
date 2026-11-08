@@ -251,7 +251,7 @@ describe('tasks', () => {
     expect(t.log.map((l: { text: string }) => l.text)).toEqual(expect.arrayContaining(['Mina says hello', 'Ann says hello']));
     expect(t.requests[0].agent.id).toBe(c.crew.mine.id);
     const whole = await c.get(`/api/tasks/${task.id}`, c.tokens.lisa);
-    expect(whole.json().task.echelons.stages.map((step: { ownerAgentId: string | null }) => step.ownerAgentId)).toEqual([c.crew.other.id]);
+    expect(whole.json().task.echelons.stages.find((step: { stage: string }) => step.stage === 'review').ownerAgentId).toBe(c.crew.other.id);
     expect(whole.body).toContain('Otto was here');
     expect(whole.json().task.parent.id).toBe(parent.id);
   });

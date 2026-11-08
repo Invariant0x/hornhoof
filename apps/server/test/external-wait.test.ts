@@ -10,7 +10,8 @@ import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { keepWakes, wakesLeft } from '../src/modules/tasks/outbox.js';
-import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { discardStaleTurn, taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -48,7 +49,8 @@ async function fixture(env?: NodeJS.ProcessEnv) {
     expect((await client.listTools()).tools.map(t => t.name)).toContain('wait_for');
     return await client.callTool({ name: 'wait_for', arguments: { task: ref, reason, until } }) as { isError?: boolean; content: { text: string }[] };
   };
-  return { app, ctx: app.ctx, db, owner, url, company: company!, sub: sub!, orchestrator: orchestrator!, department: department!, head: head!, worker: worker!, peer: peer!, task, read, tools, wait };
+  const messageState = async (task: Awaited<ReturnType<typeof read>>) => ({ ...taskWakeOf(task, { why: 'comment' }, routeSnapshot(await routeOf(db, task), task.assigneeAgentId)), why: 'message' });
+  return { app, ctx: app.ctx, db, owner, url, messageState, company: company!, sub: sub!, orchestrator: orchestrator!, department: department!, head: head!, worker: worker!, peer: peer!, task, read, tools, wait };
 }
 
 async function messaging() {
@@ -433,7 +435,7 @@ describe('external task wait', () => {
   it('keeps a queued task message current when work starts, but drops it after reassignment', async () => {
     const c = await fixture();
     const task = await c.task();
-    const id = await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are ready.', createdBy: null, message: { personId: null, text: 'Images are ready.', taskWake: { why: 'message', status: task.status, stage: 0, merging: false } } });
+    const id = await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are ready.', createdBy: null, message: { personId: null, text: 'Images are ready.', taskWake: await c.messageState(task) } });
     const [job] = await c.db.select().from(jobs).where(eq(jobs.id, id));
     await c.db.update(tasks).set({ status: 'working', version: sql`${tasks.version} + 1` }).where(eq(tasks.id, task.id));
     expect(await discardStaleTurn(c.db, job!)).toBe(false);
@@ -444,7 +446,7 @@ describe('external task wait', () => {
   it('refuses a new wait while an unread task message is queued', async () => {
     const c = await fixture();
     const task = await c.task();
-    await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are already ready.', createdBy: null, message: { personId: null, text: 'Images are already ready.', taskWake: { why: 'message', status: task.status, stage: 0, merging: false } } });
+    await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are already ready.', createdBy: null, message: { personId: null, text: 'Images are already ready.', taskWake: await c.messageState(task) } });
     const result = await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('message');
