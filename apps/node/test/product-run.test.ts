@@ -22,6 +22,7 @@ vi.mock('node:child_process', async original => {
 vi.mock('node:fs', async original => {
   const module = await original<typeof import('node:fs')>();
   return { ...module, chownSync: () => {}, fchownSync: () => {},
+    fstatSync: (fd: number) => { const stat = module.fstatSync(fd); return Object.assign(stat, { uid: stat.uid === process.getuid?.() ? sharedState.jobUid : stat.uid }); },
     readdirSync: (path: import('node:fs').PathLike) => {
       const folder = String(path);
       if (['/tmp', '/var/tmp', '/dev/shm'].includes(folder)) return [...sharedState.builderFiles].filter(file => file.startsWith(folder + '/') && !file.slice(folder.length + 1).includes('/')).map(file => file.slice(folder.length + 1));
@@ -279,5 +280,6 @@ it.each(['valid', 'missing', 'wrong-head'] as const)('records only actual bound 
   expect(done.log).toContain('narrow candidate');
   if (problem === 'valid') {
     expect(done, done.log).toMatchObject({ ok: true, environmentReceipt: { mutations: [{ suiteId: 'mutation', selection: { baseCommit: f.baseCommit, commit: f.commitSha, selected: [{ name: 'total', lines: [1] }] } }] } });
+    expect(done.files).toEqual([{ suiteId: 'mutation', file: 'logic.ts', status: 'passed' }]);
   } else expect(done, done.log).toMatchObject({ ok: false, error: 'failed' });
 });
