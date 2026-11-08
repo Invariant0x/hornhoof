@@ -79,6 +79,13 @@ describe('install.sh and the updater of the nodes on a computer that is not the 
     expect(starts(r.calls)).toEqual([]);
   });
 
+  it('starts none, and says so, while the server can name its updater image only by its tag', () => {
+    const r = install({ script: served(ELSEWHERE, `ghcr.io/invariant0x/hornhoof-updater:${COMMIT}`), env: { HORNHOOF_HOME: machine() } });
+    expect(r.code).toBe(0);
+    expect(starts(r.calls)).toEqual([]);
+    expect(r.out).toContain('only when you run this command again');
+  });
+
   it('removes it with the nodes on --uninstall, and keeps it while the nodes stay', () => {
     const gone = install({ script: served(), args: ['--uninstall'], tty: 'y\nn\n', env: { STUB_CONTAINERS: `${CLAUDE}=${SERVER}`, STUB_NODES_UPDATER: 'updater-cid' } });
     expect(gone.code).toBe(0);

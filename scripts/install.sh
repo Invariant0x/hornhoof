@@ -21,8 +21,8 @@
 #
 # On a computer that is not the server's own, joining and updating also start one updater for that server's nodes there, in
 # a container of the updater image of the server's build (see apps/updater/updater.sh). It moves them to the server's build as
-# their work ends, through this script, run with HORNHOOF_FROM_UPDATER=1 and the plan of one node in HORNHOOF_NODES_ONLY, and
-# it goes with the nodes on --uninstall.
+# their work ends, through the copy of this script inside its image, run with HORNHOOF_FROM_UPDATER=1 and the plan of one node
+# in HORNHOOF_NODES_ONLY, and it goes with the nodes on --uninstall.
 #
 # The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
 # commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
@@ -727,16 +727,20 @@ nodes_updaters() {
   esac
 }
 
-# One updater for each server's nodes on this computer, on the updater image of the server's build, with Docker's socket: it
-# moves them to the server's build as their work ends, and itself to the server's updater. One that runs stays, so it is never
-# stopped while it replaces a node. The server's own computer needs none, as the server knows it or runs on localhost: the
-# updater next to the server moves its nodes.
+# One updater for each server's nodes on this computer, on the updater image of the server's build by its digest, with Docker's
+# socket: it moves them to the server's build as their work ends, and itself to the server's updater. One that runs stays, so
+# it is never stopped while it replaces a node. The server's own computer needs none, as the server knows it or runs on
+# localhost: the updater next to the server moves its nodes.
 nodes_updater() {
   local host
   [ -n "$UPDATER_BUILD" ] && [ -z "$LOCAL_SERVER" ] || return 0
   host=$(host_id)
   [ -z "$SERVER_HOST_ID" ] || [ "$SERVER_HOST_ID" != "$host" ] || return 0
   [ -z "$(nodes_updaters -q)" ] || return 0
+  if ! [[ "$UPDATER_BUILD" =~ ^ghcr\.io/invariant0x/hornhoof-updater@sha256:[0-9a-f]{64}$ ]]; then
+    say "This Hornhoof cannot name its updater image by its digest yet, so these nodes move to a new build only when you run this command again."
+    return 0
+  fi
   say "Starting the updater of these nodes. When this Hornhoof moves to another build, it moves them too, each once its work ends."
   "${DOCKER[@]}" run --rm -v /var/run/docker.sock:/var/run/docker.sock "$UPDATER_BUILD" start-nodes "$SERVER" "$UPDATER_BUILD" "$host" > /dev/null ||
     say "Could not start the updater of these nodes, so they move to a new build of Hornhoof only when you run this command again."

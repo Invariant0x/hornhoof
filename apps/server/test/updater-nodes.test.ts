@@ -1,12 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
+const DOCKERFILE = fileURLToPath(new URL('../../updater/Dockerfile', import.meta.url));
+const INSTALL = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
 const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
 const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
@@ -14,6 +16,7 @@ if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 const SERVER = 'https://hornhoof.example.test';
 const HOST = 'a'.repeat(64);
+const SERVER_HOST = 'f'.repeat(64);
 const NODE = 'ghcr.io/invariant0x/hornhoof-node';
 const UPDATER = 'ghcr.io/invariant0x/hornhoof-updater';
 const OLD_NODE = `${NODE}@sha256:${'1'.repeat(64)}`;
@@ -29,18 +32,37 @@ const KIMI = 'hornhoof-kimi-22222222';
 /* Two nodes on the build before, and one on the server's build already. */
 const BEHIND = `${CLAUDE}=${PLAN_A}=${OLD_NODE} ${CODEX}=${PLAN_B}=${OLD_NODE} ${KIMI}=${PLAN_C}=${NEW_NODE}`;
 
-type Served = { build?: string; noNode?: string | null; updater?: string | null; host?: string };
+type Served = { build?: string; noNode?: string | null; updater?: string | null; host?: string; extra?: string[] };
 
-/* What GET /install.sh answers: an installer that says what its build is in the lines install.sh has, and records how it ran. */
-function serve(dir: string, { build = NEW_NODE, noNode = '', updater = SELF, host = 'f'.repeat(64) }: Served): string {
+/* What GET /install.sh answers: the lines install.sh says its build in, and commands, which nothing may ever run. */
+function serve(dir: string, { build = NEW_NODE, noNode = '', updater = SELF, host = SERVER_HOST, extra = [] }: Served): string {
   const file = join(dir, 'served.sh');
   writeFileSync(file, [
     '#!/usr/bin/env bash',
+    'touch "$STUB_STATE/pwned"',
+    'SERVER="${HORNHOOF_SERVER:-https://elsewhere.example.test}"',
     `BUILD_IMAGE="${build}"`,
     ...(noNode === null ? [] : [`NO_NODE="${noNode}"`]),
     ...(updater === null ? [] : [`UPDATER_BUILD="${updater}"`]),
     `SERVER_HOST_ID="${host}"`,
-    'printf \'served installer %s NODES_ONLY=%s FROM_UPDATER=%s SERVER=%s TTY=%s\\n\' "$*" "${HORNHOOF_NODES_ONLY:-}" "${HORNHOOF_FROM_UPDATER:-}" "${HORNHOOF_SERVER:-}" "${HORNHOOF_TTY:-}" >> "$STUB_LOG"',
+    ...extra,
+    'printf \'served installer ran\\n\' >> "$STUB_LOG"',
+    '',
+  ].join('\n'));
+  return file;
+}
+
+/* The installer inside the updater image: install.sh's lines with its placeholders, and a record of what it was given. */
+function bundled(dir: string): string {
+  const file = join(dir, 'bundled.sh');
+  writeFileSync(file, [
+    '#!/usr/bin/env bash',
+    'SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"',
+    'BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"',
+    'NO_NODE="__HORNHOOF_NO_NODE__"',
+    'UPDATER_BUILD="__HORNHOOF_UPDATER_IMAGE__"',
+    'SERVER_HOST_ID="__HORNHOOF_HOST_ID__"',
+    'printf \'bundled installer SERVER=%s BUILD_IMAGE=%s NO_NODE=%s UPDATER_BUILD=%s SERVER_HOST_ID=%s NODES_ONLY=%s FROM_UPDATER=%s TTY=%s\\n\' "$SERVER" "$BUILD_IMAGE" "$NO_NODE" "$UPDATER_BUILD" "$SERVER_HOST_ID" "${HORNHOOF_NODES_ONLY:-}" "${HORNHOOF_FROM_UPDATER:-}" "${HORNHOOF_TTY:-}" >> "$STUB_LOG"',
     '[ -z "${STUB_INSTALLER_FAILS:-}" ] || { echo "Could not start the node." >&2; exit 1; }',
     'echo "Starting the node."',
     '',
@@ -55,13 +77,18 @@ function updater(args: string[], env: Record<string, string> = {}, served: Serve
   const res = spawnSync('bash', [SCRIPT, ...args], {
     encoding: 'utf8',
     timeout: 30_000,
-    env: { PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`, HOME: dir, STUB_LOG: log, STUB_STATE: dir, STUB_SERVED: serve(dir, served), ...env },
+    env: { PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`, HOME: dir, STUB_LOG: log, STUB_STATE: dir, STUB_SERVED: serve(dir, served), HORNHOOF_INSTALLER: bundled(dir), ...env },
   });
-  return { code: res.status, out: res.stdout + res.stderr, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) };
+  const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+  /* Whatever happens, nothing of what the server served ran. */
+  expect(existsSync(join(dir, 'pwned'))).toBe(false);
+  expect(calls).not.toContain('served installer ran');
+  return { code: res.status, out: res.stdout + res.stderr, calls };
 }
 
 const look = (env: Record<string, string> = {}, served: Served = {}) => updater(['nodes', SERVER, SELF, HOST, '--once'], { STUB_PLAN_NODES: BEHIND, ...env }, served);
-const installers = (calls: string[]) => calls.filter(c => c.startsWith('served installer'));
+const installers = (calls: string[]) => calls.filter(c => c.startsWith('bundled installer'));
+const ran = (plan: string) => `bundled installer SERVER=${SERVER} BUILD_IMAGE=${NEW_NODE} NO_NODE= UPDATER_BUILD=${SELF} SERVER_HOST_ID=${SERVER_HOST} NODES_ONLY=${plan} FROM_UPDATER=1 TTY=/dev/null`;
 const moves = (calls: string[]) => calls.filter(c => c.startsWith('docker run') && c.includes(' start-nodes '));
 
 describe('updater of a server\'s nodes on another computer', () => {
@@ -69,32 +96,78 @@ describe('updater of a server\'s nodes on another computer', () => {
     if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
   });
 
-  it('replaces each node on another image than the server\'s build through the installer the server serves, side by side', () => {
+  it('replaces each node on another image than the server\'s build through the installer in its own image, side by side', () => {
     const r = look();
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('curl') && c.includes(`${SERVER}/install.sh`))).toBe(true);
     expect(r.calls).toContain(`docker ps --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.check"}}`);
-    /* Each installer asks the server, with the node's own key in its volume, to let the node's work end, and replaces only it. */
-    expect(installers(r.calls).sort()).toEqual([PLAN_A, PLAN_B].sort().map(plan => `served installer  NODES_ONLY=${plan} FROM_UPDATER=1 SERVER=${SERVER} TTY=/dev/null`));
+    /* Each installer asks the server, with the node's own key in its volume, to let the node's work end, and replaces only it.
+       It goes to the address the updater was started with, not one the server's answer names. */
+    expect(installers(r.calls).sort()).toEqual([ran(PLAN_A), ran(PLAN_B)].sort());
     expect(r.out).toContain('Starting the node.');
   });
 
-  it('runs the installer of a build from before this once for all of them, since it replaces every node of its server', () => {
-    const r = look({}, { updater: null });
+  it('runs nothing the server serves, also a value that carries a command', () => {
+    const r = look({}, { build: `${NEW_NODE}$(touch "$STUB_STATE/pwned")`, extra: ['$(touch "$STUB_STATE/pwned")', '`touch "$STUB_STATE/pwned"`'] });
     expect(r.code).toBe(0);
-    expect(installers(r.calls)).toEqual([`served installer  NODES_ONLY=${PLAN_A} ${PLAN_B} FROM_UPDATER=1 SERVER=${SERVER} TTY=/dev/null`]);
+    expect(installers(r.calls)).toEqual([]);
+    expect(installers(look({}, { extra: ['$(touch "$STUB_STATE/pwned")'] }).calls)).toHaveLength(2);
+  });
+
+  it.each([
+    ['by its tag', `${NODE}:${'c'.repeat(40)}`],
+    ['as a local build', 'local'],
+    ['in another repository', `ghcr.io/acme/hornhoof-node@sha256:${'2'.repeat(64)}`],
+    ['by a digest of another length', `${NODE}@sha256:${'2'.repeat(63)}`],
+    ['by a digest with a command after it', `${NEW_NODE};touch /tmp/x`],
+  ])('changes nothing when the server names its node image %s', (_, build) => {
+    const r = look({}, { build });
+    expect(r.code).toBe(0);
+    expect(installers(r.calls)).toEqual([]);
+    expect(moves(r.calls)).toEqual([]);
+  });
+
+  it.each([
+    ['by its tag', `${UPDATER}:${'c'.repeat(40)}`],
+    ['as a local build', 'local'],
+    ['in another repository', `ghcr.io/acme/hornhoof-updater@sha256:${'4'.repeat(64)}`],
+    ['not at all, as a build from before 0.8.4', null],
+  ])('changes nothing when the server names its updater image %s', (_, updater) => {
+    const r = look({}, { updater });
+    expect(r.code).toBe(0);
+    expect(installers(r.calls)).toEqual([]);
+    expect(moves(r.calls)).toEqual([]);
+  });
+
+  it('changes nothing when the server names its own computer in a way no hash is written', () => {
+    const r = look({}, { host: 'not-a-hash' });
+    expect(installers(r.calls)).toEqual([]);
+  });
+
+  it('moves itself to the updater image of the server\'s build first, through a helper that outlives it, and replaces no node meanwhile', () => {
+    const r = look({}, { updater: NEXT });
+    expect(r.code).toBe(0);
+    const name = `hornhoof-updater-${createHash('sha256').update(SERVER).digest('hex').slice(0, 12)}`;
+    expect(moves(r.calls)).toEqual([`docker run -d --rm --name ${name}-move -v /var/run/docker.sock:/var/run/docker.sock ${NEXT} start-nodes ${SERVER} ${NEXT} ${HOST}`]);
+    expect(installers(r.calls)).toEqual([]);
+    expect(moves(look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` }, { updater: NEXT }).calls)).toHaveLength(1);
+  });
+
+  it('stays as it is on the updater image of the server\'s build', () => {
+    const r = look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
+    expect(r.code).toBe(0);
     expect(moves(r.calls)).toEqual([]);
   });
 
   it('leaves the nodes of another server on this computer alone', () => {
     const r = look({ STUB_FOREIGN_NODES: CODEX });
-    expect(installers(r.calls)).toEqual([`served installer  NODES_ONLY=${PLAN_A} FROM_UPDATER=1 SERVER=${SERVER} TTY=/dev/null`]);
+    expect(installers(r.calls)).toEqual([ran(PLAN_A)]);
   });
 
   it('leaves a node that check-node moved for a live check on its build for a day, and moves it after that', () => {
     const now = Math.floor(Date.now() / 1000);
     const fresh = look({ STUB_CHECKED_NODES: `${CLAUDE}=${now - 3600}` });
-    expect(installers(fresh.calls)).toEqual([`served installer  NODES_ONLY=${PLAN_B} FROM_UPDATER=1 SERVER=${SERVER} TTY=/dev/null`]);
+    expect(installers(fresh.calls)).toEqual([ran(PLAN_B)]);
     const old = look({ STUB_CHECKED_NODES: `${CLAUDE}=${now - 25 * 3600}` });
     expect(installers(old.calls)).toHaveLength(2);
   });
@@ -120,12 +193,6 @@ describe('updater of a server\'s nodes on another computer', () => {
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it.each([`${NODE}:${'c'.repeat(40)}`, 'local', `ghcr.io/acme/hornhoof-node@sha256:${'2'.repeat(64)}`])('changes nothing until the server names its node image by a digest of Hornhoof\'s: %s', build => {
-    const r = look({}, { build });
-    expect(r.code).toBe(0);
-    expect(installers(r.calls)).toEqual([]);
-  });
-
   it('stands aside on the server\'s own computer, whose own updater moves the nodes', () => {
     const r = look({}, { host: HOST, updater: NEXT });
     expect(r.code).toBe(0);
@@ -141,32 +208,26 @@ describe('updater of a server\'s nodes on another computer', () => {
   });
 
   it('looks again later after an installer failed, and says what it said', () => {
-    const r = look({ STUB_INSTALLER_FAILS: '1' }, { updater: NEXT });
+    const r = look({ STUB_INSTALLER_FAILS: '1' });
     expect(r.code).toBe(1);
     expect(r.out).toContain('Could not start the node.');
-    expect(moves(r.calls)).toEqual([]);
-  });
-
-  it('moves itself to the updater image of the server\'s build afterwards, through a helper that outlives it', () => {
-    const r = look({}, { updater: NEXT });
-    expect(r.code).toBe(0);
-    expect(moves(r.calls)).toEqual([`docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock ${NEXT} start-nodes ${SERVER} ${NEXT} ${HOST}`]);
-    expect(r.calls.indexOf(moves(r.calls)[0]!)).toBeGreaterThan(Math.max(...installers(r.calls).map(c => r.calls.indexOf(c))));
-    expect(moves(look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` }, { updater: NEXT }).calls)).toHaveLength(1);
-  });
-
-  it.each([['the one it runs', SELF], ['none', null], ['a local build', 'local'], ['another repository', `ghcr.io/acme/hornhoof-updater@sha256:${'4'.repeat(64)}`]])('stays as it is when the build names %s', (_, served) => {
-    const r = look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` }, { updater: served });
-    expect(r.code).toBe(0);
-    expect(moves(r.calls)).toEqual([]);
   });
 
   it('refuses a server address or an image it cannot take as they are', () => {
-    for (const args of [['nodes', 'https://x.test/"; rm -rf /', SELF, HOST, '--once'], ['nodes', SERVER, 'ubuntu:latest', HOST, '--once'], ['nodes', SERVER, SELF, 'not-a-host', '--once']]) {
+    for (const args of [['nodes', 'https://x.test/"; rm -rf /', SELF, HOST, '--once'], ['nodes', SERVER, 'ubuntu:latest', HOST, '--once'], ['nodes', SERVER, `${UPDATER}:${'c'.repeat(40)}`, HOST, '--once'], ['nodes', SERVER, SELF, 'not-a-host', '--once']]) {
       const r = updater(args, { STUB_PLAN_NODES: BEHIND });
       expect(r.code).not.toBe(0);
       expect(r.calls.filter(c => c.startsWith('curl') || c.startsWith('docker'))).toEqual([]);
     }
+  });
+
+  it('runs the installer its own image carries, which fills in every value the server fills in', () => {
+    expect(readFileSync(DOCKERFILE, 'utf8')).toMatch(/^COPY scripts\/install\.sh \/usr\/local\/share\/hornhoof\/install\.sh$/m);
+    const updaterScript = readFileSync(SCRIPT, 'utf8');
+    expect(updaterScript).toContain('INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"');
+    const placeholders = [...new Set(readFileSync(INSTALL, 'utf8').match(/__HORNHOOF_[A-Z_]+__/g))];
+    expect(placeholders.sort()).toEqual(['__HORNHOOF_HOST_ID__', '__HORNHOOF_NODE_IMAGE__', '__HORNHOOF_NO_NODE__', '__HORNHOOF_SERVER__', '__HORNHOOF_UPDATER_IMAGE__']);
+    for (const placeholder of placeholders) expect(updaterScript).toContain(placeholder);
   });
 });
 
@@ -188,8 +249,8 @@ describe('updater start-nodes', () => {
     expect(r.calls.filter(c => c.startsWith('docker rm') || c.startsWith('docker run'))).toEqual([]);
   });
 
-  it('starts nothing on an image that is not Hornhoof\'s updater', () => {
-    const r = updater(['start-nodes', SERVER, 'ubuntu:latest', HOST], { STUB_NODES_UPDATERS: 'old-1' });
+  it.each(['ubuntu:latest', `${UPDATER}:${'c'.repeat(40)}`])('starts nothing on an image that is not Hornhoof\'s updater by its digest: %s', image => {
+    const r = updater(['start-nodes', SERVER, image, HOST], { STUB_NODES_UPDATERS: 'old-1' });
     expect(r.code).not.toBe(0);
     expect(r.calls.filter(c => c.startsWith('docker rm') || c.startsWith('docker run'))).toEqual([]);
   });
