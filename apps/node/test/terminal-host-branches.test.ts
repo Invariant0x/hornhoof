@@ -402,3 +402,15 @@ describe('program reports and invocation hooks', () => {
     expect(c.sent).toEqual([]);
   });
 });
+
+describe('the start of a turn', () => {
+  it('starts each turn with its own sign, never one left from the last turn or none at all', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T12:00:00Z') });
+    const c = fixture();
+    for (const left of [0, Date.now() - 40 * 60_000]) {
+      c.agent.signAt = left;
+      c.host['beginTurn'](c.agent);
+      expect(c.agent.signAt).toBe(Date.now());
+    }
+  });
+});
