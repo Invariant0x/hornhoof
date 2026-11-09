@@ -6,8 +6,7 @@ import type { Ctx } from '../../app.js';
 import { taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { sameChecker } from './echelons-policy.js';
-import { agentIdentity, departmentHead } from './echelons-assign.js';
+import { checkingIdentity, departmentHead } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
 import { scopeKey } from '../testruns/load.js';
@@ -176,7 +175,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
   const input = Verification.safeParse(value);
   if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
-  await requireTestsIdentity(ctx.db, task, route, agentId);
+  await requireTestsIdentity(ctx.db, task, route);
   if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
   const headId = await departmentHead(ctx.db, task);
   const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
@@ -192,9 +191,9 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   return { task: row, wakes };
 }
 
-async function requireTestsIdentity(db: Reader['db'], task: Task, route: Route, agentId: string): Promise<void> {
-  const identity = await agentIdentity(db, task.companyId, agentId);
-  if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed. Ask the head to assign it again.');
+async function requireTestsIdentity(db: Reader['db'], task: Task, route: Route): Promise<void> {
+  const candidate = await currentCandidate(db, task, route);
+  await checkingIdentity({ db }, task, route, candidate);
 }
 
 function matchesTestsReport(proof: z.infer<typeof Verified>, eventAgent: string | null | undefined, tester: string | null | undefined, candidate: EchelonCandidate, revision: number): boolean {

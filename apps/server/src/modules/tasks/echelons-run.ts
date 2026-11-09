@@ -2,9 +2,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents, tasks } from '../../db/schema.js';
-import { agentIdentity } from './echelons-assign.js';
+import { checkingIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
-import { sameChecker } from './echelons-policy.js';
 import { routeOf, type Route } from './echelons-store.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
 
@@ -32,9 +31,8 @@ export async function candidateForRun(db: Reader, task: Task, agentId: string, i
   }
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', 'Only the current Tests owner can start candidate verification.');
   requireCurrentRequest(route, input.candidate);
-  const identity = await agentIdentity(db, task.companyId, agentId);
-  if (!identity || !sameChecker(identity, route.state.assignment)) throw refuse(409, 'task_changed', 'The Tests assignment changed.');
   const candidate = await currentCandidate(db, task, route);
+  await checkingIdentity({ db }, task, route, candidate);
   requireCandidateBranch(input.branch, candidate.branch);
   return { candidateId: candidate.id, routeRevision: route.revision, baseCommit: candidate.baseCommit, commit: candidate.commit, branch: candidate.branch, testerId: agentId };
 }

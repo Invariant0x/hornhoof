@@ -26,6 +26,7 @@ import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
 import { captureReview } from './review-context.js';
+import { repoAt } from '../departments/repository.js';
 import type { ReviewVerdict } from './review-verdict.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
@@ -553,6 +554,10 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
 }
 
 export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
+  if (input.resultKind === undefined && input.executor) {
+    const resultKind = await repoAt(ctx, [input.productId ?? null, input.departmentId]) ? 'code' : 'coordination';
+    input = { ...input, resultKind, executor: resultKind === 'code' };
+  }
   const setup = await prepareNewTask(ctx, actor, input);
   const { task, wakes, independent } = await ctx.db.transaction(tx => insertNewTask(tx, actor, input, setup));
   published(ctx, task);
@@ -602,7 +607,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   requireSubmissionStage(task, route);
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
-  if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff.');
+  if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.');
   const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
   if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);
   const candidate = producedCandidate(route, producer, review);

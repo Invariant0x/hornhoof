@@ -51,6 +51,7 @@ function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string
   const { finish, stuck } = nextStep(task, w.agentId);
   if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
+  if (agent.kind === 'worker') return `${ref} is yours to do. ${READ_TASK} Do the assigned work and report its concrete checked result. If you cannot go on, use blocked; if only a person can answer, use ask_person.`;
   return `${ref} is your department's. ${READ_TASK} Give each connected block to one generalist developer to finish end to end. Give independent blocks to different members at once with create_task, each under it (parent ${task.number}) with its executor. Every executable result must pass its required Review. Report the checked child results when they are accepted.`;
 }
 

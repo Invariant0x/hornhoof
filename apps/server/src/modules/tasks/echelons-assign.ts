@@ -20,7 +20,7 @@ export async function agentIdentity(db: Reader['db'], companyId: string, agentId
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), eq(subscriptions.companyId, agents.companyId), isNull(subscriptions.removedAt)))
     .where(and(eq(agents.id, agentId), eq(agents.companyId, companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!row) return null;
-  const capability = modelCapability(row.model);
+  const capability = modelCapability(row.model, row.provider);
   return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: row.model, provider: modelProvider(row.provider), capability };
 }
 
@@ -42,7 +42,7 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
 
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
-  const ability = route.state.stage === 'review' ? 'dev-review-diff' : route.state.stage === 'security' ? 'dev-security-review' : 'dev-cleanup';
+  const ability = route.state.stage === 'tests' ? 'dev-test-environment' : route.state.stage === 'review' ? 'dev-review-diff' : route.state.stage === 'security' ? 'dev-security-review' : 'dev-cleanup';
   const identity = await checkerFor(ctx, task, candidate.producedBy, ability, task.assigneeAgentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
   return identity;

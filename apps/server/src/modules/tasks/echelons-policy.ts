@@ -12,7 +12,9 @@ const CAPABILITY: Readonly<Record<string, number>> = {
   'gpt-6-astra': 2,
 };
 
-export const modelCapability = (model: string): number | null => CAPABILITY[model] ?? null;
+const CLAUDE_PLAN_CAPABILITY: Readonly<Record<string, number>> = { opus: 2, fable: 2, sonnet: 1, haiku: 0 };
+export const modelCapability = (model: string, provider?: string): number | null =>
+  (provider === 'claude' ? CLAUDE_PLAN_CAPABILITY[model] : undefined) ?? CAPABILITY[model] ?? null;
 const PROVIDERS: Readonly<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
 export const modelProvider = (provider: string): string => PROVIDERS[provider] ?? provider;
 export type CheckerIdentity = EchelonModel;

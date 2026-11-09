@@ -18,6 +18,18 @@ describe('pure checker policy', () => {
     expect(modelProvider('kimi')).toBe('kimi');
   });
 
+  it.each([['opus', 2], ['fable', 2], ['sonnet', 1], ['haiku', 0]] as const)('classifies the trusted Claude Code alias %s', (model, capability) => {
+    expect(modelCapability(model, 'claude')).toBe(capability);
+    expect(modelCapability(model, 'codex')).toBeNull();
+    expect(modelCapability(model, 'anthropic_api')).toBeNull();
+  });
+
+  it('does not classify Claude Default or an unknown alias from a catalog comment', () => {
+    expect(modelCapability('', 'claude')).toBeNull();
+    expect(modelCapability('default', 'claude')).toBeNull();
+    expect(modelCapability('unknown', 'claude')).toBeNull();
+  });
+
   it('refuses self review even on a different subscription and provider', () => {
     expect(reviewEligibility(author, { ...author, subscriptionId: reviewer.agentId, provider: 'codex' })).toBe('self_review');
   });
