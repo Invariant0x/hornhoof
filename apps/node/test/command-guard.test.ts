@@ -375,6 +375,70 @@ describe('what cannot be told is refused, not allowed', () => {
   });
 });
 
+/* On a machine the agent's folder holds the clone: the project's manifest stands below the folder the guard may read. */
+describe('a project cloned inside the agent folder', () => {
+  let folder: string;
+  let clone: string;
+  const put = (path: string, text = '') => {
+    const at = join(folder, path);
+    mkdirSync(join(at, '..'), { recursive: true });
+    writeFileSync(at, text);
+  };
+  const inClone = (command: string, cwd = clone) => classifyAgentCommand({ command, cwd, workspaceRoot: folder });
+
+  beforeAll(() => {
+    folder = join(base, 'agent');
+    clone = join(folder, 'hornhoof');
+    put('hornhoof/package.json', JSON.stringify({ workspaces: ['apps/*', 'packages/*'], scripts: { lint: SCRIPTS.lint, 'lint:part': 'eslint .', types: SCRIPTS.types, 'typecheck:tests': 'npm run build -w @fx/lib && tsc -p apps/server/tsconfig.json --noEmit', all: 'vitest run' } }));
+    put('hornhoof/apps/server/package.json', JSON.stringify({ name: '@fx/server', scripts: { 'lint:part': 'eslint src', one: 'vitest run test/a.test.ts' } }));
+    put('hornhoof/apps/server/test/a.test.ts');
+    put('hornhoof/packages/lib/package.json', JSON.stringify({ name: '@fx/lib', scripts: { build: 'tsc -p tsconfig.json', one: 'vitest run test/a.test.ts', 'lint:part': 'eslint src' } }));
+    put('hornhoof/packages/lib/test/a.test.ts');
+    put('hornhoof/node_modules/.bin/vitest', '#!/bin/sh\n');
+    put('hornhoof/go/pkg/totals/totals_test.go');
+    put('hornhoof/Totals.Tests/Totals.Tests.csproj');
+  });
+
+  it.each(['npm run lint', 'npm run -s lint', 'npm run lint:part --workspaces --include-workspace-root --', 'npm run types', 'npm run typecheck:tests'])('runs a script over its workspaces: %s', async command => {
+    expect(await inClone(command)).toEqual(expect.objectContaining({ allow: true }));
+  });
+
+  it.each(['npm run one -w @fx/lib', 'npm run one -w packages/lib', 'npm run one --workspace=@fx/server', 'npm run one -w packages', 'npm -w @fx/lib run one'])('finds a workspace by its name, its path or its parent: %s', async command => {
+    expect(await inClone(command)).toEqual({ allow: true, kind: 'test_files', coverage: 'recognized' });
+  });
+
+  it('finds a workspace by a path from a folder inside the project', async () => {
+    expect(await inClone('npm run one -w ../packages/lib', join(clone, 'apps'))).toEqual({ allow: true, kind: 'test_files', coverage: 'recognized' });
+  });
+
+  it('still refuses a whole suite of the project', async () => {
+    expect(await inClone('npm run all')).toEqual(denied('whole_suite_local'));
+  });
+
+  it('says a script is not there, apart from one it cannot read', async () => {
+    expect(await inClone('npm run nosuch')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'missing_script' });
+    expect(await inClone('npm run nosuch -w @fx/lib')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'missing_script' });
+    expect(refusalText({ allow: false, code: 'command_guard_unavailable', category: 'missing_script' })).toContain('has no such script');
+  });
+
+  it.each([
+    'go test ./go/pkg/totals', 'go test -run TestTotals -v ./go/pkg/totals', 'go test -count=1 ./go/pkg/totals',
+    'cargo test -p totals', 'cargo test --package totals adds', 'cargo test -p totals --lib -- --nocapture',
+    'dotnet test --filter FullyQualifiedName~Totals', 'dotnet test Totals.Tests/Totals.Tests.csproj --filter Name=Adds',
+    'mvn -Dtest=TotalsTest test', 'mvn test -Dtest=TotalsTest#adds -pl core', './mvnw -q -Dtest=TotalsTest test',
+    'gradle test --tests com.acme.TotalsTest', './gradlew :core:test --tests com.acme.TotalsTest.adds',
+  ])('runs a named part of a test suite here: %s', async command => {
+    expect(await inClone(command)).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
+  });
+
+  it.each([
+    'go test ./...', 'go test ./go/...', 'go test', 'go test ./go/pkg/missing', 'cargo test', 'cargo test --workspace', 'cargo test adds', 'dotnet test', 'dotnet test --filter "$F"',
+    'mvn test', 'mvn -Dtest=Totals* test', 'mvn -Dtest=TotalsTest verify', 'gradle test', 'gradle test --tests com.acme.*', './gradlew build --tests com.acme.TotalsTest',
+  ])('refuses one that can run the whole suite: %s', async command => {
+    expect(await inClone(command)).toEqual(expect.objectContaining({ allow: false }));
+  });
+});
+
 describe('a flag and its value in one word are told like two', () => {
   it.each(['env --chdir=apps/node npm run nested', 'env -Capps/node npm run nested', 'pnpm -Capps/node run nested', 'npm -wapps/node run nested', 'npm --prefix=apps/node run nested'])('moves to the folder it names: %s', async command => {
     expect(await agent(command)).toEqual({ allow: true, kind: 'test_files', coverage: 'recognized' });
@@ -662,7 +726,7 @@ describe('a workspace is found by its name, as npm finds it', () => {
   it('refuses a workspaces run when one workspace refuses, and one without the script unless --if-present', async () => {
     expect(await agent('npm test --workspaces')).toEqual(denied('whole_suite_local'));
     expect(await agent('npm run nestedall --workspaces --if-present')).toEqual(denied('whole_suite_local'));
-    expect(await agent('npm run nested --workspaces')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+    expect(await agent('npm run nested --workspaces')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'missing_script' });
     expect(await agent('npm run nested --workspaces --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
     expect(await agent('npm run lint:part --workspaces --if-present --include-workspace-root')).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
     expect(await agent('npm run nested -w @fx/lib -w apps/node --if-present')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
@@ -682,7 +746,7 @@ describe('a workspace is found by its name, as npm finds it', () => {
       expect(await agent(`npm run all --workspaces --if-present ${flags}`), flags).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
     }
     for (const flags of ['--if-present=false', '--if-present false', '--no-if-present']) {
-      expect(await agent(`npm run nested --workspaces ${flags}`), flags).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+      expect(await agent(`npm run nested --workspaces ${flags}`), flags).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'missing_script' });
     }
     expect(await agent('npm run nested --workspaces --if-present=true')).toEqual(expect.objectContaining({ allow: true, kind: 'test_files' }));
   });

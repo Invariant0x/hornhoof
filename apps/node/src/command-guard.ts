@@ -687,7 +687,7 @@ function readShell(source: string): { steps: Step[] } | { category: Category } {
 /* What one stage came to. */
 type Category =
   | 'dependency_install' | 'implicit_install' | 'build' | 'types' | 'lint' | 'format' | 'test_scope' | 'browser' | 'coverage' | 'quality' | 'mutation' | 'watch'
-  | 'task_runner' | 'package_scope' | 'dynamic_check' | 'unresolved_script' | 'script_cycle' | 'malformed' | 'over_budget' | 'package_boundary' | 'guard_failed';
+  | 'task_runner' | 'package_scope' | 'dynamic_check' | 'unresolved_script' | 'missing_script' | 'script_cycle' | 'malformed' | 'over_budget' | 'package_boundary' | 'guard_failed';
 type Finding =
   | { kind: 'ordinary'; coverage: CommandCoverage }
   | { kind: 'test_file' }
@@ -737,7 +737,7 @@ class Guard {
   private reads = 0;
   private walked = 0;
   private readonly manifests = new Map<string, Manifest | null>();
-  private workspaceList: Promise<Workspace[] | null> | null = null;
+  private readonly workspaceLists = new Map<string, Promise<Workspace[] | null>>();
 
   constructor(private readonly files: CommandFiles, readonly root: string, private readonly realRoot: string | null) {}
 
@@ -851,6 +851,13 @@ class Guard {
     return (await this.inside(absolute)) && (await this.files.lstat(absolute)) === 'file';
   }
 
+  /* Whether this word is one folder in the workspace. */
+  async regularFolder(word: Word, place: Place): Promise<boolean> {
+    if (unknownPath(word, place) || GLOB_LETTERS.test(word.text)) return false;
+    const absolute = resolve(place.cwd!, word.text);
+    return (await this.inside(absolute)) && (await this.files.lstat(absolute)) === 'directory';
+  }
+
   /* An executable the workspace has installed, for npx and its like to find without fetching one. */
   async localBin(tool: string, place: Place): Promise<boolean> {
     if (place.cwd === null) return false;
@@ -876,16 +883,17 @@ class Guard {
     if (forwarded.some(word => !word.literal)) return this.note(unavailable('dynamic_check'));
     const found = from === null ? null : await this.nearestScripts(from);
     const stages = found ? stagesOf(found.scripts, name, forwarded) : [];
-    if (!stages.length) return this.note(unavailable(this.overRead() ? 'over_budget' : 'unresolved_script'));
+    if (!stages.length) return this.note(unavailable(this.overRead() ? 'over_budget' : found && !Object.hasOwn(found.scripts, name) ? 'missing_script' : 'unresolved_script'));
     const inner = this.deeper(place, `script:${found!.folder}:${name}`);
     if (!inner) return;
     for (const stage of stages) await this.scriptStage(stage, { ...inner, cwd: found!.folder, boundary: true });
   }
 
+  /* A manifest with no scripts has none of them. One that cannot be read says nothing. */
   private async nearestScripts(from: string): Promise<{ folder: string; scripts: Record<string, unknown> } | null> {
     const folder = await this.manifestFolder(from);
-    const scripts = folder === null ? null : await this.scriptsOf(folder);
-    return scripts && { folder: folder!, scripts };
+    const manifest = folder === null ? null : await this.manifestOf(folder);
+    return manifest && { folder: folder!, scripts: manifest.scripts ?? {} };
   }
 
   private async scriptStage(text: string, place: Place): Promise<void> {
@@ -913,19 +921,27 @@ class Guard {
     return (await this.hasManifest(folder)) && typeof (await this.scriptsOf(folder))?.[name] === 'string';
   }
 
-  /* The workspaces of the root manifest, as npm finds them: folders its globs match that hold a manifest. Null when a glob
-     cannot be listed here or the limits run out. */
-  workspaces(): Promise<Workspace[] | null> {
-    this.workspaceList ??= this.findWorkspaces();
-    return this.workspaceList;
+  /* The root of the project npm works in from this folder, as npm finds it: the nearest manifest above it in the workspace that
+     declares workspaces. A clone inside the agent's folder has its own. Without one, the workspace itself. */
+  async projectRoot(from: string | null): Promise<string> {
+    if (from !== null) for (const folder of this.upToRoot(from)) if ((await this.hasManifest(folder)) && workspaceGlobs((await this.manifestOf(folder))?.workspaces)) return folder;
+    return this.root;
   }
 
-  private async findWorkspaces(): Promise<Workspace[] | null> {
-    const patterns = (await this.hasManifest(this.root)) ? workspaceGlobs((await this.manifestOf(this.root))?.workspaces) : null;
+  /* The workspaces of a project's root manifest, as npm finds them: folders its globs match that hold a manifest. Null when a
+     glob cannot be listed here or the limits run out. */
+  workspaces(root = this.root): Promise<Workspace[] | null> {
+    let list = this.workspaceLists.get(root);
+    if (!list) this.workspaceLists.set(root, (list = this.findWorkspaces(root)));
+    return list;
+  }
+
+  private async findWorkspaces(root: string): Promise<Workspace[] | null> {
+    const patterns = (await this.hasManifest(root)) ? workspaceGlobs((await this.manifestOf(root))?.workspaces) : null;
     if (!patterns) return null;
     const found: Workspace[] = [];
     for (const pattern of patterns) {
-      const folders = await this.expand(pattern);
+      const folders = await this.expand(pattern, root);
       if (!folders) return null;
       for (const folder of folders) if (!found.some(item => item.folder === folder) && (await this.hasManifest(folder))) found.push({ folder, name: (await this.manifestOf(folder))?.name ?? null });
     }
@@ -933,10 +949,10 @@ class Guard {
   }
 
   /* The folders a glob of a manifest matches, one part of its path at a time. */
-  private async expand(pattern: string): Promise<string[] | null> {
+  private async expand(pattern: string, root: string): Promise<string[] | null> {
     const parts = pattern.split('/').filter(part => part && part !== '.');
     if (pattern.startsWith('!') || parts.some(part => part === '..' || part.includes('**'))) return null;
-    let folders = [this.root];
+    let folders = [root];
     for (const part of parts) {
       const next: string[] = [];
       for (const folder of folders) {
@@ -1565,44 +1581,51 @@ function forwardedWords(manager: Manager, rest: Word[], call: ManagerCall): Word
 }
 
 /* The folder a flag names is that folder or nothing. With no flag the nearest manifest counts, as npm finds it. */
-function namedFolder(guard: Guard, call: ManagerCall, place: Place): string | null {
-  if (call.atRoot) return guard.root;
+async function namedFolder(guard: Guard, call: ManagerCall, place: Place): Promise<string | null> {
+  if (call.atRoot) return guard.projectRoot(place.cwd);
   return call.dir?.literal && place.cwd !== null ? resolve(place.cwd, call.dir.text) : null;
 }
 
 async function scriptsFolder(guard: Guard, call: ManagerCall, place: Place): Promise<string | null> {
   if (!call.atRoot && !call.dir) return place.cwd;
-  const folder = namedFolder(guard, call, place);
+  const folder = await namedFolder(guard, call, place);
   return folder !== null && (await guard.hasManifest(folder)) ? folder : null;
 }
 
-/* A workspace npm's -w names: a folder of the workspace with a manifest, or else the workspace of that package name. */
-async function workspaceFolder(guard: Guard, word: Word): Promise<string | null> {
+/* What npm's -w names, as npm reads it: a workspace by its package name, by its folder, or every workspace under a folder,
+   the folder taken from where the command stands. */
+async function workspaceFolder(guard: Guard, word: Word, root: string, cwd: string | null): Promise<string[] | null> {
   if (!word.literal) return null;
-  const folder = resolve(guard.root, word.text);
-  if (!leavesFolder(relative(guard.root, folder)) && (await guard.hasManifest(folder))) return folder;
-  return (await guard.workspaces())?.find(item => item.name === word.text)?.folder ?? null;
+  const listed = await guard.workspaces(root);
+  const named = listed?.find(item => item.name === word.text);
+  if (named) return [named.folder];
+  const folder = resolve(cwd ?? root, word.text);
+  if (leavesFolder(relative(root, folder))) return null;
+  if (!listed) return (await guard.hasManifest(folder)) ? [folder] : null;
+  const under = listed.filter(item => item.folder === folder || !leavesFolder(relative(folder, item.folder))).map(item => item.folder);
+  return under.length ? under : null;
 }
 
 /* Every folder a workspace call runs its script in, or null when one cannot be found. */
-async function workspaceFolders(guard: Guard, call: ManagerCall): Promise<string[] | null> {
-  const named = call.every ? ((await guard.workspaces())?.map(item => item.folder) ?? null) : await namedWorkspaces(guard, call.workspaces);
-  return named && [...new Set([...(call.withRoot ? [guard.root] : []), ...named])];
+async function workspaceFolders(guard: Guard, call: ManagerCall, cwd: string | null): Promise<string[] | null> {
+  const root = await guard.projectRoot(cwd);
+  const named = call.every ? ((await guard.workspaces(root))?.map(item => item.folder) ?? null) : await namedWorkspaces(guard, call.workspaces, root, cwd);
+  return named && [...new Set([...(call.withRoot ? [root] : []), ...named])];
 }
 
-async function namedWorkspaces(guard: Guard, words: Word[]): Promise<string[] | null> {
+async function namedWorkspaces(guard: Guard, words: Word[], root: string, cwd: string | null): Promise<string[] | null> {
   const folders: string[] = [];
   for (const word of words) {
-    const folder = await workspaceFolder(guard, word);
-    if (folder === null) return null;
-    folders.push(folder);
+    const found = await workspaceFolder(guard, word, root, cwd);
+    if (found === null) return null;
+    folders.push(...found);
   }
   return folders;
 }
 
 /* A script npm runs in workspaces is told in each of them: the call is refused when any of them is. */
 async function workspaceScripts(guard: Guard, call: ManagerCall, name: string, forwarded: Word[], place: Place): Promise<void> {
-  const folders = await workspaceFolders(guard, call);
+  const folders = await workspaceFolders(guard, call, place.cwd);
   if (!folders) return guard.note(unavailable(guard.overRead() ? 'over_budget' : 'unresolved_script'));
   for (const folder of folders) {
     if (call.ifPresent && !(await guard.hasScript(folder, name))) continue;
@@ -1688,13 +1711,90 @@ const DENO: Handler = (guard, args, place) => {
 
 const BUSYBOX: Handler = (guard, args, place) => guard.run(args, place);
 
+/* A named part of another language's suite: words a runner reads as one bounded selection, all literal. allowed: its flags, each
+   saying whether a value follows; select: the flag that names the part, whose value has no wildcard. */
+type PartRule = { allowed: Flags; select: readonly string[] };
+type Part = { flags: Map<string, Word[]>; words: Word[]; after: Word[] };
+
+/* The flags, other words and words past -- of a runner's call, or null when a flag is not one it allows or a word is not literal. */
+function readPart(args: Word[], allowed: Flags): Part | null {
+  const part: Part = { flags: new Map(), words: [], after: [] };
+  for (let at = 0; at < args.length; at++) {
+    const word = args[at]!;
+    if (!word.literal) return null;
+    if (word.text === '--') return { ...part, after: args.slice(at + 1) };
+    if (!isFlag(word)) { part.words.push(word); continue; }
+    const name = flagName(word.text);
+    if (!Object.hasOwn(allowed, name)) return null;
+    const value = word.text.length > name.length ? literalWord(word.text.slice(name.length + 1)) : allowed[name] ? args[++at] : literalWord('');
+    if (!value?.literal || (allowed[name] && isFlag(value))) return null;
+    part.flags.set(name, [...(part.flags.get(name) ?? []), value]);
+  }
+  return part;
+}
+
+const WILDCARD = /[*?[\]{}$`]/;
+/* Some flag of the rule names a part, and none of its names has a wildcard. */
+const selects = (part: Part, rule: PartRule): boolean => {
+  const named = rule.select.flatMap(flag => part.flags.get(flag) ?? []);
+  return named.some(value => value.text.length > 0) && named.every(value => !WILDCARD.test(value.text));
+};
+
+/* A part runs here only as a selection the runner bounds itself; anything else stays the finding it was. */
+async function namedPart(guard: Guard, place: Place, bounded: boolean, otherwise: () => Promise<void> | void): Promise<void> {
+  if (bounded && !place.tainted && !place.loop) return guard.note({ kind: 'test_file' });
+  await otherwise();
+}
+
+const GO_TEST: Flags = { '-run': true, '-v': false, '-count': true, '-race': false, '-timeout': true, '-short': false, '-failfast': false, '-cover': false, '-coverprofile': true, '-json': false };
+/* go test of package folders of the workspace, never a pattern of them. */
+const GO: Handler = async (guard, args, place) => {
+  if (args[0]?.text !== 'test') return toolHandler('go')!(guard, args, place);
+  const part = readPart(args.slice(1), GO_TEST);
+  const folders = part && part.words.length > 0 && part.words.every(word => !word.text.includes('...') && /^\.\.?(?:\/|$)/.test(word.text))
+    ? await Promise.all(part.words.map(word => guard.regularFolder(word, place))) : [false];
+  await namedPart(guard, place, Boolean(part && !part.after.length) && folders.every(Boolean), () => toolHandler('go')!(guard, args, place));
+};
+
+const CARGO_TEST: PartRule = { allowed: { '-p': true, '--package': true, '--lib': false, '--test': true, '--release': false, '-q': false, '--quiet': false, '-v': false, '--no-fail-fast': false, '--features': true }, select: ['-p', '--package'] };
+/* cargo test of named packages, with one test name to filter by if it likes. */
+const CARGO: Handler = async (guard, args, place) => {
+  if (!['test', 't'].includes(args[0]?.text ?? '')) return toolHandler('cargo')!(guard, args, place);
+  const part = readPart(args.slice(1), CARGO_TEST.allowed);
+  await namedPart(guard, place, Boolean(part && selects(part, CARGO_TEST) && part.words.length <= 1), () => toolHandler('cargo')!(guard, args, place));
+};
+
+const DOTNET_TEST: PartRule = { allowed: { '--filter': true, '-c': true, '--configuration': true, '--no-build': false, '--no-restore': false, '-v': true, '--verbosity': true, '--logger': true, '-f': true, '--framework': true }, select: ['--filter'] };
+/* dotnet test with a filter, of one project file of the workspace at most. */
+const DOTNET: Handler = async (guard, args, place) => {
+  if (args[0]?.text !== 'test') return toolHandler('dotnet')!(guard, args, place);
+  const part = readPart(args.slice(1), DOTNET_TEST.allowed);
+  const project = part && part.words.length === 1 ? await guard.regularFile(part.words[0]!, place) : part?.words.length === 0;
+  await namedPart(guard, place, Boolean(part && selects(part, DOTNET_TEST) && project && !part.after.length), () => toolHandler('dotnet')!(guard, args, place));
+};
+
+const MAVEN_TEST: PartRule = { allowed: { '-Dtest': true, '-DfailIfNoTests': true, '-Dsurefire.failIfNoSpecifiedTests': true, '-q': false, '--quiet': false, '-o': false, '--offline': false, '-B': false, '--batch-mode': false, '-pl': true, '--projects': true }, select: ['-Dtest'] };
+/* mvn of the test goal alone, with -Dtest naming its classes. */
+const MAVEN: Handler = async (guard, args, place) => {
+  const part = readPart(args, MAVEN_TEST.allowed);
+  await namedPart(guard, place, Boolean(part && selects(part, MAVEN_TEST) && part.words.length === 1 && part.words[0]!.text === 'test' && !part.after.length), () => toolHandler('mvn')!(guard, args, place));
+};
+
+const GRADLE_TEST: PartRule = { allowed: { '--tests': true, '-q': false, '--quiet': false, '-i': false, '--info': false, '--offline': false, '--no-daemon': false, '--console': true }, select: ['--tests'] };
+/* gradle of test tasks alone, with --tests naming what they run. */
+const GRADLE: Handler = async (guard, args, place) => {
+  const part = readPart(args, GRADLE_TEST.allowed);
+  const tasks = part?.words ?? [];
+  await namedPart(guard, place, Boolean(part && selects(part, GRADLE_TEST) && tasks.length > 0 && tasks.every(word => /^(?::[\w.-]+)*:?test$/.test(word.text)) && !part.after.length), () => toolHandler('gradle')!(guard, args, place));
+};
+
 const HANDLERS = new Map<string, Handler>([
   ...Object.entries(WRAPPERS).map(([name, wrapper]): [string, Handler] => [name, wrapperHandler(wrapper)]),
   ...['sh', 'bash', 'dash', 'zsh', 'ksh', 'ash'].map((name): [string, Handler] => [name, SHELL]),
   ...['chromium', 'chromium-browser', 'chrome', 'google-chrome', 'google-chrome-stable', 'chrome-headless-shell', 'headless_shell'].map((name): [string, Handler] => [name, BROWSER]),
   ['eval', EVAL], ['source', SOURCE], ['.', SOURCE], ['cd', CD], ['pushd', CD], ['popd', CD], ['export', EXPORT], ['xargs', XARGS], ['parallel', XARGS], ['find', FIND], ['busybox', BUSYBOX],
   ...['mocha', 'ava', 'tap', 'rspec', 'phpunit', 'behave', 'nosetests', 'jasmine', 'tape', 'cucumber'].map((name): [string, Handler] => [name, JEST]),
-  ['deno', DENO],
+  ['deno', DENO], ['go', GO], ['cargo', CARGO], ['dotnet', DOTNET], ['mvn', MAVEN], ['mvnw', MAVEN], ['gradle', GRADLE], ['gradlew', GRADLE],
   ['c8', COVERAGE], ['nyc', COVERAGE], ['coverage', COVERAGE],
   ['vitest', VITEST], ['jest', JEST], ['pytest', PYTEST], ['py.test', PYTEST], ['playwright', PLAYWRIGHT], ['node', NODE], ['nodejs', NODE], ['tsx', TSX], ['python', PYTHON_HANDLER], ['pacman', PACMAN],
   ['npx', NPX], ['bunx', NPX], ['npm', managerHandler(NPM)], ['pnpm', managerHandler(PNPM)], ['yarn', managerHandler(YARN)], ['bun', BUN_HANDLER],
@@ -1707,6 +1807,7 @@ const CATEGORY_WORDS: Readonly<Partial<Record<Category, string>>> = {
   task_runner: 'This task runner can run the whole suite.',
   dynamic_check: 'What this check selects cannot be read before it runs.',
   unresolved_script: 'This package script cannot be read before it runs.',
+  missing_script: 'This package has no such script: read its package.json for the scripts it has.',
   script_cycle: 'These scripts call each other.',
   package_scope: 'This runs over more than one package.',
   package_boundary: 'What this package command does cannot be told here.',
