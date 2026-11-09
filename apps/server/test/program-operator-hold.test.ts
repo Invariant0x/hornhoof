@@ -11,7 +11,7 @@ import { afterRestart, afterRestartOutsideTask } from '../src/modules/tasks/rest
 import { recordJobProgram } from '../src/modules/tasks/silent.js';
 import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
-import { adoptOperatorOwnerTurn } from '../src/modules/program-operator/recovery.js';
+import { adoptOperatorOwnerTurn, continueRecovery } from '../src/modules/program-operator/recovery.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
@@ -75,6 +75,24 @@ it('goes on by itself only once for its words, and then waits for a person or Op
   expect((await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, second!.id)))[0]).toMatchObject({ recoveryHold: true });
   expect(await again(true)).toBe(true);
   expect(await c.db.select().from(jobs).where(eq(jobs.continueOf, child!.id))).toHaveLength(1);
+});
+
+it('goes on by itself once along all the turns its words went on in, also after Operations let them through between', async () => {
+  const c = await held();
+  await c.ready(false);
+  const [child] = await c.children();
+  /* Each turn the words go on in is lost the same way, on the same program: its own case and hold. */
+  const lost = async (job: string) => {
+    await c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: new Date(), nodeId: c.identity.nodeId, subscriptionId: c.sub.id }).where(eq(jobs.id, job));
+    return (await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.agent.id, jobId: job, nodeId: c.identity.nodeId, instance: c.fact.instance, reason: 'assignment_unrecorded', evidenceKey: job, deliveryId: c.delivery.id, capability: randomUUID(), evidence: [], status: 'escalated', deadlineAt: new Date(), escalatedAt: new Date(), recoveryHold: true }).returning())[0]!;
+  };
+  const second = await lost(child!.id);
+  await continueRecovery(c.ctx, second, { outcome: 'released', text: 'Rob of Operations released the hold; the original words continue once.' });
+  const [grandchild] = await c.db.select().from(jobs).where(eq(jobs.continueOf, child!.id));
+  const third = await lost(grandchild!.id);
+  await acceptOperatorEvidence(c.ctx, c.identity, { type: 'program.recovery_ready', agentKey: c.agent.id, jobId: grandchild!.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 100, case: third.id, owner: false }, new Date());
+  expect(await c.db.select().from(jobs).where(eq(jobs.continueOf, grandchild!.id))).toEqual([]);
+  expect((await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, third.id)))[0]).toMatchObject({ recoveryHold: true });
 });
 
 it('still lets an owner through who said so without the new field', async () => {

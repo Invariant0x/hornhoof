@@ -408,7 +408,7 @@ export class TerminalHost {
   constructor(private readonly opts: Options) {
     const owner = ownership(opts, key => this.panes(key));
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
-      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason), unowned: (key, event) => this.unownedHook(key, event),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };
@@ -500,6 +500,13 @@ export class TerminalHost {
   private intentional(a: Agent, why: Parameters<OperatorRuntime['intentional']>[1]): void { this.operator?.intentional(a.key, why); }
 
   private operatorEnabled(a: Agent): boolean { return Boolean(this.operator?.enabled(a.key)); }
+
+  /* A start the node could not prove came from the program, as when a busy node checks its caller after the caller gave up,
+     still says the program started: Hornhoof's prompt then waits only for its input to show, and nothing it carries is
+     taken. Otherwise no turn would ever type into that program. */
+  private unownedHook(key: string, event: string): void {
+    if (event === 'start') this.agents.get(key)?.started?.resolve();
+  }
 
   private hookRejected(key: string | null, event: string, reason: string): void {
     (this.opts.log ?? console.log)(`Hook ${event} rejected: ${reason}${key ? ` (agent ${key})` : ''}`);

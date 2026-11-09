@@ -9,7 +9,7 @@ import { TerminalHost } from '../src/terminal/host.js';
 import { codexProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
-import { until } from './terminal-host-helpers.js';
+import { job, until } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 const stops: (() => Promise<void>)[] = [];
@@ -95,4 +95,35 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
   expect(paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
   expect(keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(changes ? 3 : 2);
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', deliveryId, phase: 'taken' }));
+});
+
+/* A busy node may check who sends Claude Code's start only after the caller gave up waiting, and then refuses it. */
+it('types the words into a Claude Code whose start the node could not prove came from it, once its input shows', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'hh-operator-unproven-'));
+  const agentKey = randomUUID(), jobId = randomUUID(), words = 'Check the checkout.';
+  const tmux = new Tmux({ env: { HOME: home } });
+  let input = '';
+  vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  vi.spyOn(tmux, 'run').mockResolvedValue('80 24');
+  vi.spyOn(tmux, 'alive').mockResolvedValue(true);
+  vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+  vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
+  vi.spyOn(tmux, 'screen').mockImplementation(async () => `❯ ${input}\n`);
+  vi.spyOn(tmux, 'keys').mockResolvedValue();
+  const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => { input = text; });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], log: () => {}, readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
+    owner: () => ({ owns: async () => false }),
+    operator: { dir: join(home, 'operator'), send: () => true, connected: () => true },
+  });
+  await host.start();
+  const starts: number[] = [];
+  vi.spyOn(tmux, 'launch').mockImplementation(async () => {
+    starts.push((await fetch(`${host['bridge'].agent(agentKey).hookUrl}/start`, { method: 'POST', body: '{}' })).status);
+  });
+  const abort = new AbortController();
+  const running = host.run({ ...job(agentKey, words, { jobId, workDir: join(home, 'work'), signal: abort.signal }), home, operatorDelivery: { id: randomUUID(), ordinal: 1 } });
+  stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
+  await until(() => paste.mock.calls.length > 0);
+  expect(starts).toEqual([403]);
+  expect(paste.mock.calls.map(([, text]) => text)).toEqual([words]);
 });

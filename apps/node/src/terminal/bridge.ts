@@ -46,7 +46,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void } = {},
   ) { this.failures = new HookFailures(options.rejected); }
 
   async start(): Promise<void> {
@@ -198,7 +198,10 @@ export class Bridge {
        caller closing its socket; it is never applied until ownership succeeds. */
     const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
     void reading.catch(() => {});
-    if (!(await owned)) return this.refused(req, res, 403, 'owner check failed');
+    if (!(await owned)) {
+      if (kind === 'hook' && event) this.options.unowned?.(key, event);
+      return this.refused(req, res, 403, 'owner check failed');
+    }
     const body = await reading;
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
