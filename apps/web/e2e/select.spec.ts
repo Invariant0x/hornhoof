@@ -162,6 +162,14 @@ async function serveSelectScreens(page: Page) {
       body: JSON.stringify(ORG_VIEW),
     }),
   );
+  await page.route('**/api/task-departments', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ whole: true, departments: [{ id: LONG_DEPT.id, name: LONG_DEPT.name, templateKey: null }] }),
+    }),
+  );
+  await page.route('**/api/departments/*/backlog', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) }));
   await page.route('**/api/tasks?*', route =>
     route.fulfill({
       status: 200,
@@ -241,24 +249,27 @@ async function expectSelectInsideViewport(select: Locator, viewportWidth: number
   return b;
 }
 
-test('keeps the department select, its arrow and the search box inside a 375 px phone screen and preserves 1280 px layout when a department name is long', async ({ page }) => {
+/* The choice of a department wraps a long name inside the page, as wide as the search box under it; on a phone both run
+   from gutter to gutter. */
+async function expectChoiceInside(page: Page, phone: boolean) {
+  const choice = await box(page.getByRole('group', { name: 'Department' }));
+  const search = await box(page.getByLabel('Search tasks'));
+  expect({ x: choice.x, right: choice.x + choice.width }).toEqual({ x: search.x, right: search.x + search.width });
+  if (phone) expect({ x: search.x, right: search.x + search.width }).toEqual({ x: 16, right: 359 });
+  expect(await page.getByRole('main').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+}
+
+test('keeps the department choice and the search box inside a 375 px phone screen and a 1280 px one when a department name is long', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await serveSelectScreens(page);
   await page.goto('/');
   await page.getByRole('button', { name: /^Tasks/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible();
 
-  const deptSelect = page.getByLabel('Department');
-  const search = page.getByLabel('Search tasks');
-
-  for (const value of ['', LONG_DEPT.id]) {
-    if (value) await deptSelect.selectOption(value);
-    const sBox = await expectSelectInsideViewport(deptSelect, 375);
-    const qBox = await box(search);
-    expect(sBox.x).toBe(16);
-    expect(sBox.x + sBox.width).toBe(359);
-    expect(qBox.x).toBe(16);
-    expect(qBox.x + qBox.width).toBe(359);
+  for (const name of [LONG_DEPT.name, 'No department']) {
+    await page.getByRole('group', { name: 'Department' }).locator('label', { hasText: name }).click();
+    await expect(page.getByRole('radio', { name })).toBeChecked();
+    await expectChoiceInside(page, true);
   }
 
   /* StaffCard selects on Tasks screen */
@@ -290,12 +301,10 @@ test('keeps the department select, its arrow and the search box inside a 375 px 
     await expectSelectInsideViewport(cardSelects.nth(i), 375);
   }
 
-  /* Desktop 1280x800 layout on Tasks keeps filter and search side by side */
+  /* Desktop 1280x800 layout on Tasks */
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
   await page.getByRole('button', { name: /^Tasks/ }).click();
-  const dBox1280 = await expectSelectInsideViewport(deptSelect, 1280);
-  const qBox1280 = await box(search);
-  expect(dBox1280.y).toBe(qBox1280.y);
-  expect(dBox1280.x + dBox1280.width).toBeLessThan(qBox1280.x);
+  await expect(page.getByRole('radio', { name: LONG_DEPT.name })).toBeChecked();
+  await expectChoiceInside(page, false);
 });

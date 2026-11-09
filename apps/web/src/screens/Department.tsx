@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { useStream } from '../live';
-import { useDepartmentTree, useTasks } from '../tasks';
+import { useDepartmentTree, useTaskDepartments, useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { Chip, agentWorking, doingLine, modelLine, Switch, STATUS_CLASS } from '../ui/Chip';
@@ -175,12 +175,14 @@ function MemberLines({ s, toMember, stateOf, still }: { s: Schema; toMember(id: 
   );
 }
 
-/* The department's open tasks, and a new one for its head from people whose access lists the department. */
+/* The department's open tasks, read only by people who have the department, and a new one for its head from people whose
+   access lists the department. */
 function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { department: Department; head: Employee | undefined; canGive: boolean; selected: string | null; onOpenTask(id: string): void }) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
-  const { tasks, failure, load } = useTasks({ status: 'open', department: d.id });
+  const { taskDepartments } = useTaskDepartments();
+  const { tasks, failure, load } = useTasks({ status: 'open', department: d.id }, Boolean(taskDepartments?.departments.some(x => x.id === d.id)));
   const [writing, setWriting] = useState(false);
 
   return (

@@ -332,6 +332,8 @@ export type StreamMessage =
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
   | { type: 'improvements' }
+  /* A department's list of work kept for later turns changed. */
+  | { type: 'backlog'; spot: { departmentId: string | null } }
   | { type: 'context'; agentId: string; used: number }
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
   | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
@@ -501,6 +503,12 @@ export type TurnView = {
   closedAt: string | null;
   tasks: { total: number; done: number };
 };
+
+/* The departments whose tasks a person reads, and whether they have the whole company. */
+export type TaskDepartments = { whole: boolean; departments: { id: string; name: string | null; templateKey: TemplateKey | null }[] };
+
+/* What people of a department keep for a later turn: not work yet, until it goes into a turn. */
+export type BacklogItem = { id: string; departmentId: string; title: string; text: string; by: { id: string; name: string }; at: string };
 
 export type Machine = { id: string; hostname: string };
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { en } from '../src/i18n/en';
 import { LANGUAGES, type Language } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
-import type { Decisions, Me, Org, TaskLine, WaitingRequest } from '../src/types';
+import type { Decisions, Me, Org, TaskDepartments, TaskLine, WaitingRequest } from '../src/types';
 import { startServer } from './real-server';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -110,6 +110,8 @@ const ORG_FIXTURE: Org = {
     },
   ],
 };
+/* The departments whose tasks the CEO reads, as the server gives them for the Tasks screen. */
+const TASK_DEPARTMENTS: TaskDepartments = { whole: true, departments: ORG_FIXTURE.departments.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
 
 function collectStrings(value: unknown, out: string[] = []): string[] {
   if (typeof value === 'string') out.push(value);
@@ -234,6 +236,10 @@ async function mountFixtureRoutes(page: Page) {
     }
     if (url.pathname === '/api/org') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ORG_FIXTURE) });
+      return;
+    }
+    if (url.pathname === '/api/task-departments') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TASK_DEPARTMENTS) });
       return;
     }
     if (url.pathname === '/api/tasks') {
@@ -688,6 +694,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
     }
     if (url.pathname === '/api/me') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME_CEO) });
     if (url.pathname === '/api/org') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ORG_FIXTURE) });
+    if (url.pathname === '/api/task-departments') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TASK_DEPARTMENTS) });
     if (url.pathname === '/api/tasks') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
     if (url.pathname === '/api/requests') {
       const payload: Decisions = {

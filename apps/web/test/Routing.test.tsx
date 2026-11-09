@@ -10,7 +10,7 @@ function fixture(extra: Parameters<typeof mockApi>[0] = {}) {
     'GET /api/setup': [200, { needed: false }], 'GET /api/me': [200, ME],
     'GET /api/org': [200, DEV_ORG], 'GET /api/people': [200, { people: PEOPLE }],
     'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }],
-    'GET /api/tasks?status=all': [200, { tasks: TASKS }], 'GET /api/turns': [200, { turns: [] }],
+    'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }], 'GET /api/turns': [200, { turns: [] }],
     'GET /api/requests': [200, { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     'GET /api/link': [200, { link: null, domain: 'example.test' }],
@@ -218,7 +218,7 @@ describe('shareable workspace', () => {
   });
 
   it.each([
-    ['/', '/api/org'], ['/tasks', '/api/tasks?status=all'], ['/subscriptions', '/api/subscriptions'],
+    ['/', '/api/org'], ['/tasks', '/api/tasks?status=all&department=d2'], ['/subscriptions', '/api/subscriptions'],
     ['/people', '/api/people'], ['/machines', '/api/machines'], ['/improvements', '/api/improvements'],
     ['/versions', '/api/updates'], ['/settings', '/api/link'],
   ])('offers the map when %s is denied by its API', async (path, api) => {

@@ -30,7 +30,6 @@ it('gives every select a shared theme-colored arrow inset from the right edge an
   expect(decl('select:disabled', 'opacity')).toBe('.55');
   expect(decl('.field', 'min-width')).toBe('0');
   expect(decl('.field select', 'width')).toBe('100%');
-  expect(decl('.task-filters', 'min-width')).toBe('0');
 
   for (const sel of ['.field select', '.share select', '.staff-pick select', '.sel']) {
     for (const rule of rulesFor(sel)) {
