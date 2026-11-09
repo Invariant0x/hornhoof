@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
@@ -13,6 +13,13 @@ import { setAside } from '../release/workspace-versions.mjs';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const IDENTITY = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
 const ZERO = '0'.repeat(40);
+
+/* The selector reads the manifest with the built protocol: a checkout that has not built it yet builds it here, as a part's
+   preparation would. */
+async function protocol() {
+  if (!existsSync(join(root, 'packages/protocol/dist/index.js'))) execFileSync('npm', ['run', '-s', 'build', '-w', '@hornhoof/protocol'], { cwd: root, stdio: 'inherit' });
+  return import('@hornhoof/protocol');
+}
 
 function folder(t) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-tests-select-'));
@@ -166,7 +173,7 @@ test('the lint is the whole lint without a selection, and the files of the chang
 
 test('a part runs each suite as a node runs it, with its own files, and Vitest with two workers', async t => {
   const dir = folder(t);
-  const { parseTestEnvironment } = await import('@hornhoof/protocol');
+  const { parseTestEnvironment } = await protocol();
   const manifest = parseTestEnvironment(readFileSync(join(root, '.hornhoof/test-environment.json'), 'utf8'));
   const built = [];
   const build = async (suite, files, context) => { built.push({ id: suite.id, files, context }); return { command: { ...suite.run, args: [...suite.run.args, 'built'] }, env: { MARK: suite.id } }; };
