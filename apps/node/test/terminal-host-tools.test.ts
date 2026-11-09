@@ -64,19 +64,31 @@ describe("a program's connection to Hornhoof's tools", () => {
     expect(await c.running).toMatchObject({ ok: true, result: 'Done.' });
   });
 
-  it('lets a program connect between two turns once the next turn opens, rather than fail its tools for good', async () => {
+  it('answers a program that connects again between turns with what Hornhoof said before, and still refuses its tool calls', async () => {
     const up = await hornhoof();
     const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url }, connects: true });
     await connect(c.host);
     c.finish();
     await c.running;
-    /* The program connects again, as one does whose turn was called off before it had connected. */
-    const late = call(c.host, 3, 'initialize');
-    await new Promise(resolve => setTimeout(resolve, 50));
+    /* A program started again between turns, as a person's window or a restart does, connects with no turn open. */
+    expect(await connect(c.host)).toEqual([{ jsonrpc: '2.0', id: 1, result: {} }, { jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'task' }] } }]);
+    expect(await call(c.host, 3, 'tools/call')).toMatchObject({ id: 3, error: { code: -32001 } });
     expect(up.heard).toHaveLength(2);
+    expect(c.log).toHaveBeenCalledWith("Hornhoof's tools refused tools/call of agent receipt: no Hornhoof turn is running.");
+  });
+
+  it('lets the first program of an agent connect between two turns once the next turn opens, rather than fail its tools for good', async () => {
+    const up = await hornhoof();
+    const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 1000 }, connects: true });
+    c.finish();
+    await c.running;
+    /* The program connects only now, as one does whose turn was called off as it started, and the node knows no answer. */
+    const late = call(c.host, 1, 'initialize');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(up.heard).toEqual([]);
     const next = c.run('NEXT', 'job-next');
-    expect(await late).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
-    expect(up.heard[2]).toEqual({ method: 'initialize', auth: 'Bearer tok-turn' });
+    expect(await late).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
+    expect(up.heard).toEqual([{ method: 'initialize', auth: 'Bearer tok-turn' }]);
     await until(() => c.sent.some(m => m.type === 'job.program' && m.jobId === 'job-next' && m.state === 'thinking'));
     c.finish();
     expect(await next).toMatchObject({ ok: true });
@@ -87,8 +99,9 @@ describe("a program's connection to Hornhoof's tools", () => {
     const c = await liveTerminal('claude', 'queued', { host: { hornhoof: up.url, toolsMs: 100 }, connects: true });
     c.finish();
     await c.running;
-    /* The program connects only now, long after its turn, and no turn opens while it waits. */
+    /* The program connects only now, long after its turn, no turn opens while it waits, and the node knows no answer. */
     expect(await call(c.host, 1, 'initialize')).toMatchObject({ id: 1, error: { code: -32001 } });
+    expect(c.log).toHaveBeenCalledWith("Hornhoof's tools refused initialize of agent receipt: no Hornhoof turn is running.");
     expect(c.launch).toHaveBeenCalledTimes(1);
     const next = c.run('NEXT', 'job-next');
     await until(() => c.launch.mock.calls.length === 2);

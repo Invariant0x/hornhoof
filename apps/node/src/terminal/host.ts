@@ -409,6 +409,7 @@ export class TerminalHost {
     const owner = ownership(opts, key => this.panes(key));
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+      refused: (key, method, reason) => this.log(`Hornhoof's tools refused ${method} of agent ${key}: ${reason}.`),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     const set = { ...DEFAULTS, ...defined(opts) };
