@@ -5,6 +5,28 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.17.1] - 2026-11-09
+
+Let an employee hand in work that adds a database migration: GitHub shows no patch of a migration's large snapshot, and
+0.17.0 refused every such handoff.
+
+### Fixed
+
+- A handoff no longer takes the comparison with its base for unknown when GitHub lists a file but shows no patch of it,
+  as it does for a large file such as a migration's snapshot. The file's path stays in the candidate and is checked
+  against the task's paths as before, the diff names the file with its added and removed lines, and the count of changed
+  lines includes them. A patch GitHub cut short, or a comparison of 300 files or more, is still refused.
+
+### Russian
+
+Сотрудник снова может сдать работу с новой миграцией базы: GitHub не показывает patch большого снимка миграции, и 0.17.0
+отказывала в каждой такой сдаче.
+
+- Сдача больше не считает сравнение с базой неизвестным, когда GitHub перечисляет файл, но не показывает его patch, как
+  бывает с большим файлом вроде снимка миграции. Путь файла остается в кандидате и проверяется по путям задачи, как
+  раньше, diff называет файл с числом добавленных и удаленных строк, а число измененных строк их учитывает. Patch, который
+  GitHub урезал, и сравнение из 300 файлов и больше по-прежнему отказ.
+
 ## [0.17.0] - 2026-11-09
 
 Give every executable task of Development one required route with one current owner at each stage, let the checkers
