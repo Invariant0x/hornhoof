@@ -176,7 +176,7 @@ describe('the task engine', () => {
     expect(woken(sent)).toEqual([[rita.id, 'review']]);
     const checked = await verdict(ctx, rita.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'Clean diff.' });
     expect(await snapshot(task.id)).toMatchObject({ stage: 'tests', phase: 'active', ownerAgentId: tess.id });
-    expect(woken(checked)).toEqual([[tess.id, 'tests']]);
+    expect(woken(checked)).toEqual([[tess.id, 'assigned']]);
     expect((await read(task.id)).closedAt).toBeNull();
     expect(await reason(verdict(ctx, tess.id, task.id, { pass: true, reviewedCommit: HEAD, comment: 'A verdict cannot replace finished test receipts.' }))).toBe('task_not_yours');
   });
@@ -302,17 +302,18 @@ describe('the task engine', () => {
   });
 
   it('takes no work in while work under it is open, and tells its executor once that work is done', async () => {
-    const { ctx, db, dev, head, bruno, tess, memberTask, read } = await company();
+    const { ctx, db, dev, head, bruno, memberTask, read } = await company();
     const task = await memberTask();
-    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refund decision', brief: '', body: 'Record the agreed refund scope.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, resultKind: 'coordination' });
+    const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refund decision', brief: '', body: 'Record the agreed refund scope.', departmentId: dev.id, parentId: task.id, assigneeAgentId: head.id, resultKind: 'coordination' });
     expect(await reason(submit(ctx, bruno.id, task.id, code))).toBe('task_invalid');
     expect((await read(task.id)).status).toBe('open');
-    const finished = await report(ctx, tess.id, under.id, { done: true, summary: 'Checked refund scope.' });
+    /* Where the department keeps code, a coordination piece without accepted subtasks is the head's to close. */
+    const finished = await report(ctx, head.id, under.id, { done: true, summary: 'Checked refund scope.' });
     const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, under.id)).orderBy(taskEvents.id);
-    expect(log.at(-1)).toMatchObject({ kind: 'report', agentId: tess.id, text: 'Checked refund scope.' });
+    expect(log.at(-1)).toMatchObject({ kind: 'report', agentId: head.id, text: 'Checked refund scope.' });
     expect(finished.wakes).toContainEqual({
       agentId: bruno.id, taskId: task.id, why: 'subtasks',
-      cause: { actor: { agentId: tess.id }, action: 'reported work done', eventId: log.find(event => event.kind === 'report')!.id, task: { id: under.id, number: under.number }, report: 'Checked refund scope.' },
+      cause: { actor: { agentId: head.id }, action: 'reported work done', eventId: log.find(event => event.kind === 'report')!.id, task: { id: under.id, number: under.number }, report: 'Checked refund scope.' },
     });
     expect((await submit(ctx, bruno.id, task.id, code)).task.status).toBe('review');
   });

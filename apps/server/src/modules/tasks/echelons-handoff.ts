@@ -18,8 +18,9 @@ function advancedSteps(route: Route, next: EchelonStep, owner: CheckerIdentity |
 }
 
 async function handoffWake(ctx: Pick<Ctx, 'db'>, task: Task, stage: EchelonStage, owner: CheckerIdentity | null): Promise<Wake> {
-  /* The owner of a checking stage ran nothing yet, Tests included: 'tests' tells of a run of its own that ended. */
-  if (owner) return { agentId: owner.agentId, taskId: task.id, why: 'review' };
+  /* The owner of a checking stage ran nothing yet: 'tests' tells of a run of its own that ended. Tests is open work of its owner,
+     never handed to another once it has a candidate. */
+  if (owner) return { agentId: owner.agentId, taskId: task.id, why: stage === 'tests' ? 'assigned' : 'review' };
   return { agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: `${stage} needs an eligible owner with the required ability and a model not weaker than the producer.` };
 }
 

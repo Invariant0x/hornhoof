@@ -55,6 +55,8 @@ const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: stri
 describe('a task that comes after others', () => {
   it('in a department with no policy keeps a wait with no dates for each open edge, its holder answering for it', async () => {
     const c = await company();
+    /* Where the department keeps code, a worker closes a task without code only through its head; these keep none. */
+    await c.db.update(departments).set({ repoUrl: null });
     const first = await c.task('First', { assigneeAgentId: c.rita.id });
     const finished = await c.task('Finished decision', { executor: false, resultKind: 'coordination' });
     await report(c.ctx, c.bruno.id, finished.id, { done: true, summary: 'Checked the scope decision.' });
@@ -151,6 +153,8 @@ describe('a task that comes after others', () => {
 
   it('ends its edge when the task before it is done, also after that task changed hands, and starts only with the last', async () => {
     const c = await company();
+    /* Where the department keeps code, a worker closes a task without code only through its head; these keep none. */
+    await c.db.update(departments).set({ repoUrl: null });
     await c.policy();
     const [one, two] = [await c.task('One decision', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' }), await c.task('Two decisions', { assigneeAgentId: c.rita.id, executor: false, resultKind: 'coordination' })];
     const follow = await c.task('Follow', { after: [one.id, two.id], independentNone: 'One piece.' });

@@ -186,6 +186,8 @@ describe("a turn whose program ended without the work done", () => {
 
   it('is not done by what the agent recorded on another task while it ran, and goes on', async () => {
     const c = await company();
+    /* Where the department keeps code, a worker closes a task without code only through its head; these keep none. */
+    await c.db.update(departments).set({ repoUrl: null }).where(eq(departments.id, c.task.departmentId!));
     const other = (await createTask(c.ctx, { agentId: c.hana.id }, { title: 'Refund email', brief: '', body: 'Send it.', departmentId: c.task.departmentId, assigneeAgentId: c.bruno.id })).task;
     const work = await c.brunoAtWork();
     /* While his turn on the checkout runs, he reports on the refund email, and nothing on the checkout. */

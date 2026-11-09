@@ -829,8 +829,8 @@ export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver
     const owner = await waitingRouteChecker(ctx, task, route);
     if (!owner) return null;
     const state = { ...route.state, phase: 'active' as const, assignment: owner, stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, ownerAgentId: owner.agentId, status: 'active' as const, reason: null } : step) };
-    /* An owner given a checking stage ran nothing yet, Tests included. */
-    const due: Wake[] = [{ agentId: owner.agentId, taskId: task.id, why: 'review' }];
+    /* An owner given a checking stage ran nothing yet: Tests is open work of its owner, the others are reviews. */
+    const due: Wake[] = [{ agentId: owner.agentId, taskId: task.id, why: route.state.stage === 'tests' ? 'assigned' : 'review' }];
     await move(ctx, task, { assigneeAgentId: owner.agentId, status: route.state.stage === 'tests' ? 'open' : 'review' }, { kind: 'updated', actor, text, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), due);
     wakes.push(...due);
     return task;

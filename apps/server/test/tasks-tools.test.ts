@@ -102,7 +102,7 @@ describe('task tools', () => {
     const { head, tools } = await company();
     const create = (await (await tools(head)).listTools()).tools.find(t => t.name === 'create_task')!;
     expect(create.description).toContain('Assigns one whole result in your department.');
-    expect(create.description).toContain('Scope repository paths explicitly');
+    expect(create.description).toContain('A code task needs its repository paths (paths)');
     expect(create.description).toContain('eligible skill owners are selected');
   });
 

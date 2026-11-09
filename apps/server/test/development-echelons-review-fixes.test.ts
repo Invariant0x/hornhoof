@@ -133,9 +133,9 @@ describe('the accepted review fixes', () => {
     await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Focused checks.', review: { baseCommit: BASE } });
     const moved = await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
     const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
-    expect(wake).toMatchObject({ taskId: f.task.id, why: 'review' });
+    expect(wake).toMatchObject({ taskId: f.task.id, why: 'assigned' });
     const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
-    expect(prompt).toContain('is with you at its current checking stage');
+    expect(prompt).toContain('report verified final-candidate runs in Tests');
     expect(prompt).not.toContain('The tests you ran');
   });
 
