@@ -175,7 +175,8 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       const model = [...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
       /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
       const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
-      if (input.instructions) writePrivate(toldPlace('codex', input).file, input.instructions + '\n', user);
+      const told = toldPlace('codex', input);
+      if (input.instructions) writePrivate(told.file, told.head + input.instructions + '\n', user);
       const root = codexRootFlags(Boolean(input.programDir));
       const args = input.sessionId
         ? ['exec', 'resume', ...mcp, ...root, ...FLAGS, ...model, '--', input.sessionId, input.prompt]

@@ -7,7 +7,7 @@ import { loggable } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { keepTimings } from '../testruns/timings.js';
 import { refuse, type Tx } from './engine.js';
-import { laterBugsOf, pipelineFacts, reportRows, type CountedFacts, type FactsInput, type FactsTask, type LaterBug } from './pipeline-facts.js';
+import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsTask, type LaterBug } from './pipeline-facts.js';
 import { NUDGES, workTree, type AgentTime } from './tree.js';
 import { treeFactsOf } from './tree-facts.js';
 
@@ -188,7 +188,7 @@ function departmentReport(d: DepartmentFacts, read: Read, bugs: LaterBug[], abou
     described: !!about.get(d.department.id)?.trim(),
     criticalPath: d.criticalPath.tasks,
     rows: reportRows(counted(d, bugs)!, other(read.previous), other(read.baseline)),
-    tests: { packages: d.tests.packages, slowestFiles: d.tests.slowestFiles, slowestTests: d.tests.slowestTests },
+    tests: testsShown(d.tests),
   };
 }
 

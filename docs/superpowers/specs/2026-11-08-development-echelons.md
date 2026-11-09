@@ -313,8 +313,9 @@ proves that scope; that outcome is recorded as such, never as tests having run.
 | #723 selection owner | Impact/fingerprint/mutation logic and affected tests; consumes final candidate contract, does not own workflow schema. |
 | #724 test owner | Test environment/manifest and shared final checks on the integrated exact candidate. |
 
-Each implementation owner supplies RED/GREEN and affected checks through
-`run_tests`; this note's checks are source/contract inspection and documentation
+Each implementation owner supplies RED/GREEN and affected checks run in their
+own workspace, naming test files; only whole suites and declared profiles go
+through `run_tests`. This note's checks are source/contract inspection and documentation
 selection. Planned acceptance is not evidence of implemented behavior.
 
 | Requirement from #717 | Required implementation evidence |

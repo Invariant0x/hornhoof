@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { laterBugsOf, pipelineFacts, type FactsEvent, type FactsInput, type FactsRun, type FactsTask } from '../src/modules/tasks/pipeline-facts.js';
+import { laterBugsOf, pipelineFacts, testsShown, type FactsEvent, type FactsInput, type FactsRun, type FactsTask } from '../src/modules/tasks/pipeline-facts.js';
 import type { AgentTime } from '../src/modules/tasks/tree.js';
 
 const T0 = Date.parse('2026-11-04T14:00:00.000Z');
@@ -325,5 +325,31 @@ describe('test times', () => {
     }));
     expect(tests.slowestTests.map(t => [t.name, t.ms])).toEqual([['slower', 95], ['slow', 90], ['quick', 2]]);
     expect(tests.packages[0]).toMatchObject({ tests: 30, medianTestMs: 6, slowerThanMedian: 13 });
+  });
+
+  it('names each file over 30 s and each test over 1 s, also past the slowest ten', () => {
+    const many = Array.from({ length: 12 }, (_, i) => file(`over-${i}.test.ts`, 31_000 + i * 1000, null, [{ name: `slow ${i}`, ms: 1001 + i }, { name: `quick ${i}`, ms: 1000 }]));
+    const { tests } = pipelineFacts(input({ timings: [{ runId: 'r1', files: [...many, file('at-limit.test.ts', 30_000)], packages: [] }] }));
+    expect(tests.slowestFiles).toHaveLength(10);
+    expect(tests.overBudgetFiles!.map(f => f.file)).toEqual(many.map(f => f.file).reverse());
+    expect(tests.overBudgetTests!.map(t => [t.name, t.ms])).toEqual(many.map((_, i) => [`slow ${i}`, 1001 + i]).reverse());
+  });
+
+  it('names at most 50 files and 50 tests over the budget, the slowest', () => {
+    const many = Array.from({ length: 60 }, (_, i) => file(`over-${i}.test.ts`, 31_000 + i, null, [{ name: `slow ${i}`, ms: 1001 + i }]));
+    const { tests } = pipelineFacts(input({ timings: [{ runId: 'r1', files: many, packages: [] }] }));
+    expect(tests.overBudgetFiles!.map(f => f.file)).toEqual(many.slice(10).map(f => f.file).reverse());
+    expect(tests.overBudgetTests!.map(t => t.name)).toEqual(many.slice(10).map((_, i) => `slow ${i + 10}`).reverse());
+  });
+
+  it('takes what is over the budget from the slowest lists of an older snapshot', () => {
+    const { tests } = pipelineFacts(input({ timings: [{ runId: 'r1', files: [file('a.test.ts', 40_000, null, [{ name: 'slow', ms: 2000 }]), file('b.test.ts', 100)], packages: [] }] }));
+    const older = { ...tests };
+    delete older.overBudgetFiles;
+    delete older.overBudgetTests;
+    const shown = testsShown(older);
+    expect(shown.overBudgetFiles.map(f => f.file)).toEqual(['a.test.ts']);
+    expect(shown.overBudgetTests.map(t => t.name)).toEqual(['slow']);
+    expect(shown.slowestFiles.map(f => f.file)).toEqual(['a.test.ts', 'b.test.ts']);
   });
 });

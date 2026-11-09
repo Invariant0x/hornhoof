@@ -18,6 +18,7 @@ import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { openTestDb, timed } from './helpers-db.js';
 import { TEST_SECRET } from './helpers-basic.js';
+import { templatesFor } from './templates-once.js';
 import { listenAt } from '../../../test-support/ports.mjs';
 export { createTestDb, fixture, ownDatabases, statements } from './helpers-db.js';
 export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
@@ -61,7 +62,7 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }) }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }) }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }

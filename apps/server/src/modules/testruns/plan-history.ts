@@ -33,6 +33,8 @@ export type PlanningHistory = {
   paces?: Map<string, number>;
   /* What a file no part measured counts for, in the time of these durations. */
   unknownFileMs?: number;
+  /* How long a preparation that passed took from its start to its end, at the middle pace. */
+  preparationMs?: number;
 };
 
 type InventoryIndex = Map<string, TestUnit[]>;

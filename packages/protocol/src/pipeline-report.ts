@@ -11,6 +11,9 @@ export type RiskClass = (typeof RISK_CLASSES)[number];
 export const TIMING_LINE = '::hh-test-timing::';
 /* The slowest tests of a file a line names: a log has room for the slow ones, and a package's median covers the rest. */
 export const SLOWEST_TESTS = 5;
+/* The testing policy's time budget: the report names each file and test over it, as a defect to fix. */
+export const FILE_BUDGET_MS = 30_000;
+export const TEST_BUDGET_MS = 1_000;
 
 const Ms = z.number().finite().min(0).max(1e10);
 const Name = z.string().min(1).max(500);
@@ -107,6 +110,9 @@ export type TestsFacts = {
   packages: PackageTime[];
   slowestFiles: FileTime[];
   slowestTests: SlowTest[];
+  /* Older snapshots have no such lists. */
+  overBudgetFiles?: FileTime[];
+  overBudgetTests?: SlowTest[];
 };
 
 export type PipelineFacts = {
@@ -163,7 +169,7 @@ export type DepartmentReport = {
   described: boolean;
   criticalPath: number[];
   rows: PipelineRow[];
-  tests: Pick<TestsFacts, 'packages' | 'slowestFiles' | 'slowestTests'>;
+  tests: Required<Pick<TestsFacts, 'packages' | 'slowestFiles' | 'slowestTests' | 'overBudgetFiles' | 'overBudgetTests'>>;
 };
 export type PipelineHead = { turn: PipelineTurn; previous: PipelineTurn | null; baseline: PipelineTurn | null; turns: number[] };
 export type PipelineReport = PipelineHead & { whole: PipelineRow[]; departments: DepartmentReport[] };

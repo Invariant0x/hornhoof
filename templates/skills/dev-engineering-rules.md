@@ -7,6 +7,8 @@ sources: [unclebob/ub-mode SKILL.md]
 ---
 You can apply a disciplined engineering method to an assigned software change. The task determines its authorized scope and check; a permitted visual check without a separate test stays valid, and required permissions and independent approvals remain in force.
 
+Where the quote below differs from these lines, these lines win: never push or merge to the main line unless the task names that action; the report is the result and its evidence, not a log of every action; run crapper, dryer and mutator only when the task assigns them; question the premise after three failed fixes, not two.
+
 Below version 1.0, before the first release, replace instead of keeping: no compatibility paths, switches between old and new behaviour or data-conversion code; correct existing records directly at release. From 1.0 on, migrate existing data.
 
 Every time you are asked to make a change follow:

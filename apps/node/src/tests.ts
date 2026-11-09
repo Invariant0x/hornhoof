@@ -11,9 +11,10 @@ import { redact } from './redact.js';
 import { chown as fsChown, copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, rmdir as fsRmdir, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
 import type { AgentFs } from './agent-fs.js';
 import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies } from './test-environment.js';
+import { EnvironmentFailure, MANIFEST, buildSharedTestInvocation, buildTestInvocation, sharedVitestCommand, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies, type SharedMember } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
+import { machineLoad } from './load.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
@@ -40,6 +41,9 @@ type Options = {
   signal?: AbortSignal;
   proc?: string;
   cpus?: number;
+  /* The machine's load average over the last minute and the memory a new program can get, in bytes, when a part starts. */
+  load?: number;
+  memFree?: number;
   env?: NodeJS.ProcessEnv;
   /* The task's files of a part of work, in and out. */
   files?: PartFiles;
@@ -380,8 +384,18 @@ export function partFolders(root: string, msg: TestRun): { own: string; user: st
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
-const vitestWorkers = (cpus = availableParallelism(), env: NodeJS.ProcessEnv = process.env) =>
-  env.VITEST_MAX_WORKERS?.trim() || String(Math.max(1, Math.floor(cpus / 2)));
+/* A Vitest worker of the product's tests takes up to about a gigabyte, and Vitest itself about as much again. */
+const WORKER_BYTES = 2 ** 30;
+/* Vitest's workers: the cores and memory the machine has free when the part starts, one core left for Vitest itself,
+   and never fewer than half the cores. */
+function vitestWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>): string {
+  const preset = (options.env ?? process.env).VITEST_MAX_WORKERS?.trim();
+  if (preset) return preset;
+  const machine = options.load === undefined || options.memFree === undefined ? machineLoad() : null;
+  const cpus = options.cpus ?? availableParallelism(), load = options.load ?? machine!.load, memFree = options.memFree ?? machine!.memFree;
+  const free = Math.min(cpus - 1, Math.floor(cpus - load), Math.floor(memFree / WORKER_BYTES) - 1);
+  return String(Math.max(1, Math.floor(cpus / 2), free));
+}
 
 function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: string): NodeJS.ProcessEnv {
   const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
@@ -395,7 +409,7 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
    goes, whatever happened. */
 export async function runTests(msg: TestRun, options: Options): Promise<TestsDone> {
   if (msg.environment) return runProductPart(msg, options);
-  const { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) } = options;
+  const { dir, user, hidden, signal, proc = '/proc', files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) } = options;
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
   const parts = partsFolder(dir);
@@ -475,7 +489,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = { ...commandEnv(base, msg, inbox, outbox, vitestWorkers(cpus, hostEnv)), ...harnessEnv };
+      const env = { ...commandEnv(base, msg, inbox, outbox, vitestWorkers(options)), ...harnessEnv };
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);
@@ -667,7 +681,8 @@ async function leaveWorktreeFolder(root: string, staging: string, handed: { tree
 }
 
 const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
-type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean };
+/* index: the suite's place in the part; shared: its report is the one report of suites that ran as one command. */
+type SuiteReport = { suiteId: string; selected: string[]; path: string; failed: boolean; index: number; shared?: true };
 /* builder: the user its builds run as, when not the one of test runs. */
 type PreparationState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
@@ -793,10 +808,55 @@ async function productSuite(execution: TestExecution, operation: Extract<Product
   if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
   if (invocation.env.HH_MUTATION_PLAN_FILE) chownSync(invocation.env.HH_MUTATION_PLAN_FILE, state.user.uid, state.user.gid);
   await productResets(execution, suite.id, state, env);
-  const report: SuiteReport = { suiteId: suite.id, selected: operation.files, path: join(state.root, 'reports', `${index}.json`), failed: false };
+  const report: SuiteReport = { suiteId: suite.id, selected: operation.files, path: join(state.root, 'reports', `${index}.json`), failed: false, index };
   state.reports.push(report);
   try { await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env, HH_TEST_REPORT: report.path }); }
   catch (error) { report.failed = true; throw error; }
+}
+type SuiteOperation = Extract<ProductOperation, { kind: 'suite' }>;
+function sharedMember(execution: TestExecution, operation: ProductOperation): SharedMember | null {
+  if (operation.kind !== 'suite') return null;
+  const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === operation.suiteId)!;
+  return { suite, files: operation.files, shard: operation.shard ?? { index: 1, count: 1 } };
+}
+/* The operations of a part as they run: Vitest suites that can share one command run together, where the first of them stands. */
+function productRuns(execution: TestExecution, operations: ProductOperation[]): number[][] {
+  const runs: number[][] = [], taken = new Set<number>();
+  for (const [index, operation] of operations.entries()) {
+    if (taken.has(index)) continue;
+    const first = sharedMember(execution, operation), run = [index];
+    for (const [other, next] of operations.entries()) {
+      const member = other > index && !taken.has(other) ? sharedMember(execution, next) : null;
+      if (first && member && sharedVitestCommand([first, member], execution.snapshot)) run.push(other);
+    }
+    for (const member of run) taken.add(member);
+    runs.push(run);
+  }
+  return runs;
+}
+/* Suites that run as one command write one report, which each of them reads for its own files. */
+async function productSharedSuites(execution: TestExecution, run: number[], operations: ProductOperation[], state: ProductState, env: Record<string, string>): Promise<void> {
+  const members = run.map(index => sharedMember(execution, operations[index]!)!), filesPath = join(state.root, `selection-${run[0]}.json`);
+  const invocation = await buildSharedTestInvocation(members, { checkout: state.repo, filesPath, snapshot: execution.snapshot });
+  chownSync(filesPath, state.user.uid, state.user.gid);
+  for (const member of members) await productResets(execution, member.suite.id, state, env);
+  const path = join(state.root, 'reports', `${run[0]}.json`);
+  const reports = run.map((index): SuiteReport => ({ suiteId: (operations[index] as SuiteOperation).suiteId, selected: (operations[index] as SuiteOperation).files, path, failed: false, index, shared: true }));
+  state.reports.push(...reports);
+  try { await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env, HH_TEST_REPORT: path }); }
+  catch (error) { for (const report of reports) report.failed = true; throw error; }
+}
+/* A shared command that failed says whose failure it was when its report names a failed file: a suite with none of them proved
+   its files and passed. One that names none proves nothing of any of them. */
+function settleSharedFailures(state: ProductState, said: { report: SuiteReport; text: string | null }[], checkout: string): void {
+  const failedIn = (text: string | null, selected: string[]) => parseFileReport(text, { checkout, suiteId: '', selected, suiteFailed: false }).some(file => file.status === 'failed');
+  for (const { report, text } of said) {
+    if (!report.shared || !report.failed) continue;
+    const together = said.filter(other => other.report.path === report.path).flatMap(other => other.report.selected);
+    if (!failedIn(text, together) || failedIn(text, report.selected)) continue;
+    report.failed = false;
+    if (state.receipt.version === 2) state.receipt.outcomes[report.index] = { index: report.index, status: 'passed', exitCode: 0 };
+  }
 }
 /* What a suite kept from its last run goes back before anything of this one runs. */
 function restoreProductKept(msg: TestRun, execution: TestExecution, state: ProductState): void {
@@ -828,6 +888,7 @@ function collectProductResults(execution: TestExecution, state: ProductState, re
   try {
     const checkout = realpathSync(state.repo);
     const said = state.reports.map(report => ({ report, text: readJobFile(report.path, state.user.uid, REPORT_BYTES) }));
+    settleSharedFailures(state, said, checkout);
     state.files = said.flatMap(({ report, text }) => parseFileReport(text, { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
     state.failed = said.flatMap(({ report, text }) => report.failed ? parseFailedTests(text, { checkout, selected: report.selected }) : []);
     state.kept = keptBySuites(execution, state, checkout, restored);
@@ -844,13 +905,15 @@ async function versionedProductSelection(execution: TestExecution, state: Produc
   if (receipt.version !== 2) environmentError('environment_invalid', 'Versioned execution requires a complete receipt.');
   const operations = productOperations(execution);
   let firstFailure: ProductCommandFailure | undefined;
-  for (const [index, operation] of operations.entries()) {
+  for (const run of productRuns(execution, operations)) {
+    const operation = operations[run[0]!]!;
     try {
-      if (operation.kind === 'command') await selectedProductCommand(state, operation.command, env);
-      else await productSuite(execution, operation, state, env, index);
-      receipt.outcomes[index] = { index, status: 'passed', exitCode: 0 };
+      if (run.length > 1) await productSharedSuites(execution, run, operations, state, env);
+      else if (operation.kind === 'command') await selectedProductCommand(state, operation.command, env);
+      else await productSuite(execution, operation, state, env, run[0]!);
+      for (const index of run) receipt.outcomes[index] = { index, status: 'passed', exitCode: 0 };
     } catch (error) {
-      receipt.outcomes[index] = { index, status: 'failed', exitCode: error instanceof ProductCommandFailure ? error.exitCode : null };
+      for (const index of run) receipt.outcomes[index] = { index, status: 'failed', exitCode: error instanceof ProductCommandFailure ? error.exitCode : null };
       firstFailure = rememberProductFailure(error, firstFailure, state);
       if (!(error instanceof ProductCommandFailure) || execution.selection.kind === 'prepare') throw error;
     }
@@ -877,7 +940,7 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     await timedPhase(state.receipt, 'servicesMs', () => prepareBrowsers(description, state.repo, state.options.prepareRepoBrowser ?? (folder => ensureRepoBrowser(state.options.dir, folder, state.user))));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
     services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
-    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
+    await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
     collectProductResults(execution, state, msg.kept ?? []);

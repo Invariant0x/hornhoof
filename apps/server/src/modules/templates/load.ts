@@ -202,8 +202,23 @@ function sortDepartmentRoster(roles: Iterable<Role>, order: ReadonlyMap<string, 
     .sort((a, b) => roleRank(a) - roleRank(b) || order.get(a.id)! - order.get(b.id)! || a.id.localeCompare(b.id));
 }
 
+/* The order of the roles of each roster as their files give it, kept for copies of the templates. */
+const orders = new WeakMap<Templates, ReadonlyMap<string, number>>();
+
+function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, order: ReadonlyMap<string, number>): Templates {
+  const templates: Templates = { roles, skills, roster: key => sortDepartmentRoster(roles.values(), order, key) };
+  orders.set(templates, order);
+  return templates;
+}
+
 export function loadTemplates(dir: string): Templates {
   const skills = loadSkills(dir);
   const { roles, order } = loadRoles(dir, skills);
-  return { roles, skills, roster: key => sortDepartmentRoster(roles.values(), order, key) };
+  return templatesOf(roles, skills, order);
+}
+
+/* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the
+   templates it came from do not see. A test file reads the templates once for all the servers it builds. */
+export function copyTemplates(templates: Templates): Templates {
+  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), orders.get(templates)!);
 }

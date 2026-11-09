@@ -251,6 +251,52 @@ describe('versioned node execution', () => {
   });
 });
 
+/* A runner that says how it was called, reads the files it was given and reports each of them, failing the ones named in failing. */
+const vitestRunner = (failing: string[]) => `const f=require('fs'),files=JSON.parse(f.readFileSync(process.env.HH_TEST_FILES,'utf8')),failing=${JSON.stringify(failing.map(file => `./${file}`))};
+console.log('vitest called',JSON.stringify(process.argv.slice(2)),JSON.stringify(files));
+f.writeFileSync(process.env.HH_TEST_REPORT,JSON.stringify({files:files.map(file=>({file,status:failing.includes(file)?'failed':'passed',ms:5}))}));
+process.exit(failing.length?1:0);`;
+/* Two Vitest suites whose commands differ only in the project they name. */
+async function vitestBatchFixture(failing: string[] = [], runner = vitestRunner(failing)) {
+  const files = ['a.test.js', 'b.test.js'];
+  const f = await fixture(manifest => {
+    manifest.dependencies = { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }; manifest.prepare = [];
+    manifest.suites = files.map((file, index) => ({ id: `suite-${index}`, root: '.', files: [file], run: { program: 'node', args: ['runner.js', 'run', `--project=p${index}`], cwd: '.' }, split: { kind: 'vitest-shard' }, profiles: ['fast'] }));
+    manifest.profiles[0]!.requiredSuiteIds = manifest.suites.map(suite => suite.id);
+    manifest.execution = { version: 2 };
+  }, { 'runner.js': runner, ...Object.fromEntries(files.map(file => [file, '// a test file'])) });
+  f.msg.environment!.selection = { kind: 'batch', version: 2, expectedCommitSha: f.msg.commitSha!, selections: files.map((file, index) => ({ kind: 'suite', suiteId: `suite-${index}`, files: [file], shard: { index: 1, count: 2 } })) };
+  return { ...f, options: { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} } };
+}
+describe('Vitest suites of one part', () => {
+  it('run as one command over the projects and files of them all', async () => {
+    const f = await vitestBatchFixture();
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: true, environmentReceipt: { outcomes: [{ index: 0, status: 'passed', exitCode: 0 }, { index: 1, status: 'passed', exitCode: 0 }] } });
+    expect(result.log.match(/vitest called/g)).toHaveLength(1);
+    expect(result.log).toContain('vitest called ["run","--project=p0","--project=p1","--shard=1/2"] ["./a.test.js","./b.test.js"]');
+    expect(result.files).toEqual([{ suiteId: 'suite-0', file: 'a.test.js', status: 'passed', ms: 5 }, { suiteId: 'suite-1', file: 'b.test.js', status: 'passed', ms: 5 }]);
+  });
+  it('keep what one suite proved when a file of another fails', async () => {
+    const f = await vitestBatchFixture(['b.test.js']);
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: false, error: 'failed', exitCode: 1, environmentReceipt: { outcomes: [{ index: 0, status: 'passed', exitCode: 0 }, { index: 1, status: 'failed', exitCode: 1 }] } });
+    expect(result.files).toEqual([{ suiteId: 'suite-0', file: 'a.test.js', status: 'passed', ms: 5 }, { suiteId: 'suite-1', file: 'b.test.js', status: 'failed', ms: 5 }]);
+  });
+  it('prove nothing of either suite when the command fails without naming a file', async () => {
+    const f = await vitestBatchFixture([], "console.log('vitest called');process.exit(3);");
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: false, exitCode: 3, environmentReceipt: { outcomes: [{ index: 0, status: 'failed', exitCode: 3 }, { index: 1, status: 'failed', exitCode: 3 }] } });
+    expect(result.files).toBeUndefined();
+  });
+  it('run one after another when their commands differ in more than their projects', async () => {
+    const f = await vitestBatchFixture(), selection = f.msg.environment!.selection;
+    if (selection.kind === 'batch') selection.selections[1]!.shard = { index: 2, count: 2 };
+    const result = await runTests(f.msg, f.options);
+    expect(result.log.match(/vitest called/g)).toHaveLength(2);
+  });
+});
+
 
 async function mutationProductFixture(problem: 'valid' | 'missing' | 'wrong-head' | 'missing-files' | 'failed-file' | 'duplicate-file') {
   const candidateRun = { program: 'node', args: ['narrow.cjs', '--base', '{baseCommit}', '--head', '{commit}', '--plan-file', '{planFile}'], cwd: '.' };

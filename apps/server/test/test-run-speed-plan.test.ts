@@ -83,6 +83,33 @@ describe('parts laid out by the pace of the machines that run them', () => {
     expect(plan.parts.every(part => part.machine === undefined)).toBe(true);
   });
 
+  it('gives the machine that runs the preparation first less work, and lays its part out last when the machines go at one pace', () => {
+    const plan = planTestParts({ ...input([]), availableMachines: 3, preparationMs: 60_000 });
+    expect(plan.parts).toHaveLength(3);
+    const [first, second, last] = plan.parts.map(part => part.testMs) as [number, number, number];
+    expect(last).toBeLessThan(Math.min(first, second) - 30_000);
+    expect(Math.abs(last + 60_000 - Math.max(first, second))).toBeLessThanOrEqual(Math.max(...sizes));
+    expect(plan.estimatedWallMs).toBe(20_000 + Math.max(first, second, last + 60_000) + 3 * 1000);
+    expect(plan.preparationMachine).toBeUndefined();
+    expect(plan.parts.flatMap(part => part.units.map(u => u.file)).sort()).toEqual(units.map(u => u.file).sort());
+  });
+
+  it('names the fastest machine for the preparation and gives it that much less work when the machines go at different paces', () => {
+    const { paces } = machinePaces(measured), pace = paces.get('host:a-host')!;
+    const plan = planTestParts({ ...input([...paces].map(([key, pace]) => ({ key, pace }))), preparationMs: 60_000 });
+    expect(plan.preparationMachine).toBe('host:a-host');
+    const fast = plan.parts.find(part => part.machine?.key === 'host:a-host')!.machine!.ms + 60_000 * pace;
+    const slow = plan.parts.find(part => part.machine?.key === 'host:home-api')!.machine!.ms;
+    expect(Math.abs(fast - slow) / Math.max(fast, slow)).toBeLessThan(0.1);
+  });
+
+  it('gives the machine of the preparation no part when the preparation alone takes longer than the rest', () => {
+    const plan = planTestParts({ ...input([]), availableMachines: 2, units: units.slice(0, 2), preparationMs: 600_000, costs: { setupMs: 1000, collectMs: 1000 } });
+    expect(plan.parts).toHaveLength(1);
+    expect(plan.parts[0]!.units.map(u => u.file).sort()).toEqual(units.slice(0, 2).map(u => u.file).sort());
+    expect(plan.estimatedWallMs).toBe(1000 + 600_000 + 2 * 1000);
+  });
+
   it('runs on the fastest machine when one part is cheaper than two', () => {
     const request = input([{ key: 'host:slow', pace: 2 }, { key: 'host:fast', pace: 0.5 }]);
     const plan = planTestParts({ ...request, units: units.slice(0, 1), durations: request.durations.slice(0, 1), costs: { setupMs: 600_000, collectMs: 1000 } });
