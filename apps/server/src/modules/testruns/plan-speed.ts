@@ -1,3 +1,4 @@
+import type { TestExecution } from '@hornhoof/protocol';
 import type { FileDuration } from './plan.js';
 import { median } from './plan-statistics.js';
 
@@ -9,6 +10,12 @@ export type MachinePaces = { paces: Map<string, number>; durations: FileDuration
 const ROUNDS = 30;
 const fileKey = (time: Pick<FileDuration, 'suiteId' | 'file'>): string => JSON.stringify([time.suiteId, time.file]);
 const lexical = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+
+/* The files a part was assigned, whether it ran one suite or a batch. Preparation and final checks name none. */
+export function plannedFiles(selection: TestExecution['selection'] | undefined): Pick<FileDuration, 'suiteId' | 'file'>[] {
+  const suites = selection?.kind === 'batch' ? selection.selections : selection?.kind === 'suite' ? [selection] : [];
+  return suites.flatMap(suite => suite.files.map(file => ({ suiteId: suite.suiteId, file })));
+}
 
 function grouped<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   const groups = new Map<string, T[]>();

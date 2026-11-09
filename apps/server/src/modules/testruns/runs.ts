@@ -279,14 +279,20 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   return places;
 }
 
-/* A part laid out for a computer by its pace waits for that computer while it is online and may take it; after a loss, or when it
-   cannot, any computer does. Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
+/* Both a node and its physical computer count as a place the part was lost, including old records that name only the node. */
+function lostPlaces(part: Pick<Part, 'lost'>, open: Place[]): Set<string> {
+  return new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
+}
+
+/* Prefer the computer chosen by its pace when it can start the part now. Otherwise any suitable computer may take it.
+   Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
 function placeFor(open: Place[], run: Run, part: Part, department: Department | null, reserved: Reservations): Place | null {
   const need = needOf(run, department) * GIB;
   const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: mayTake(p, run, department), busy: reserved.busy(p), load: p.load }));
-  const laidOut = part.lost.length ? [] : spots.filter(s => s.computer === part.environmentSelection?.computer && s.lent && s.reaches);
-  if (laidOut.length) { const own = pickMachine(laidOut, need); return own ? open.find(p => p.key === own.key) ?? null : null; }
-  const lostOn = new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
+  const laidOut = part.lost.length ? [] : spots.filter(s => s.computer === part.environmentSelection?.computer);
+  const own = pickMachine(laidOut, need);
+  if (own) return open.find(p => p.key === own.key) ?? null;
+  const lostOn = lostPlaces(part, open);
   const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need) ?? pickMachine(spots, need);
   return spot ? open.find(p => p.key === spot.key) ?? null : null;
 }

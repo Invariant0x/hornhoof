@@ -1,11 +1,19 @@
+import { setImmediate } from 'node:timers/promises';
 import { hashTestEnvironment, type ServerMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
-import { expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { testPartTimings, testParts, testRuns } from '../src/db/schema.js';
 import { newEnvironmentRequest } from '../src/modules/testruns/describe.js';
 import { AWAY_MS, checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
 import { until } from './helpers.js';
 import { company, done, idle, nextOf } from './test-runs-company.js';
+
+/* Socket and database work advances by events, while the run's clock stays under the test's control. */
+vi.mock('./helpers.js', async original => ({ ...await original<typeof import('./helpers.js')>(), until: async (check: () => boolean | Promise<boolean>) => {
+  while (!(await check())) await setImmediate();
+} }));
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-09T12:00:00Z')); });
+afterEach(() => vi.useRealTimers());
 
 const FILES = Array.from({ length: 30 }, (_, index) => `test/${String(index).padStart(2, '0')}.ts`);
 /* What each file takes on the faster machine; the slower one took 2.3 times as long for the same files. */
@@ -30,7 +38,7 @@ async function described(request: Extract<ServerMessage, { type: 'tests.describe
   } } };
 }
 
-it('lays a run out by what each machine took for the same files before, and gives each part to the machine it was laid out for', async () => {
+it.each(['offline', 'loaded', 'memory'] as const)('lays a run out by machine pace and reassigns a part when its machine is %s', async mode => {
   const c = await company();
   const fastHost = 'f'.repeat(64), slowHost = '5'.repeat(64);
   const fast = await c.planless(c.ceo, 'fast-pc', idle({ load: 0.1, host: fastHost })), slow = await c.planless(c.ceo, 'slow-pc', idle({ load: 0.1, host: slowHost }));
@@ -58,7 +66,7 @@ it('lays a run out by what each machine took for the same files before, and give
     await c.db.insert(testPartTimings).values({ partId: part!.id, companyId: run!.companyId, runId: earlier!.id, files: timings(host, files, pace) });
   }
   describer.node.send(await described(request));
-  await until(async () => (await c.db.select().from(testParts).where(eq(testParts.runId, run!.id))).length === 2, 15_000);
+  await until(async () => (await c.db.select().from(testParts).where(eq(testParts.runId, run!.id))).length === 2);
   await pumpTests(c.app.ctx);
   const parts = await c.db.select().from(testParts).where(eq(testParts.runId, run!.id)).orderBy(asc(testParts.part));
   const filesOf = (part: typeof parts[number]) => { const selection = part.environmentSelection!.selection; return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : []; };
@@ -69,13 +77,27 @@ it('lays a run out by what each machine took for the same files before, and give
   expect(work(onFast)).toBeGreaterThan(2 * work(onSlow));
   expect(Math.abs(work(onFast) - 2.3 * work(onSlow)) / work(onFast)).toBeLessThan(0.15);
   expect([...filesOf(onFast), ...filesOf(onSlow)].sort()).toEqual(FILES);
-  /* The slower machine goes away for good. Its part does not wait for it: once lost, it goes to the machine that is left. */
+  /* A lost or unfit machine does not leave the other one idle. */
   const fastPart = await nextOf(fast.node, 'tests.run');
-  slow.node.close(); await slow.node.closed;
-  await checkTestTimes(c.app.ctx, new Date(Date.now() + AWAY_MS + 60_000));
-  expect((await c.db.select().from(testParts).where(eq(testParts.id, onSlow.id)))).toEqual([]);
+  if (mode === 'offline') {
+    slow.node.close(); await slow.node.closed;
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + AWAY_MS + 60_000));
+    expect((await c.db.select().from(testParts).where(eq(testParts.id, onSlow.id)))).toEqual([]);
+  } else {
+    /* A part whose send did not finish is queued again. Its named machine is still connected, but cannot take it now. */
+    await c.db.update(testParts).set({ status: 'queued', nodeId: null, computer: null, startedAt: null }).where(eq(testParts.id, onSlow.id));
+    slow.node.send({ type: 'load', ...idle({ host: slowHost, ...(mode === 'loaded' ? { load: 100 } : { memFree: 0 }) }) });
+    const { nodeIdentity } = await import('../src/modules/nodes/hub.js');
+    await until(() => {
+      const load = c.app.ctx.hub.loadOf(nodeIdentity(slow.nodeId));
+      return mode === 'loaded' ? load?.load === 100 : load?.memFree === 0;
+    });
+  }
   /* What its runner said each file took is kept as the part ends, for the next plan. */
   fast.node.send(done(fastPart, { ok: false, error: 'failed', exitCode: 1, commit: run!.commitSha, files: [{ suiteId: 'unit', file: 'test/00.ts', status: 'failed', ms: 4100 }] }));
+  await until(async () => (await c.db.select().from(testParts).where(eq(testParts.id, fastPart.partId)))[0]?.status === 'failed');
+  await pumpTests(c.app.ctx);
+  if (mode !== 'offline') expect((await c.db.select().from(testParts).where(eq(testParts.id, onSlow.id)))[0]?.nodeId).toBe(fast.nodeId);
   const moved = await nextOf(fast.node, 'tests.run');
   expect(moved.environment!.selection).toEqual(onSlow.environmentSelection!.selection);
   expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, fastPart.partId)))[0]?.files).toMatchObject([{ package: '.', file: 'test/00.ts', totalMs: 4100 }]);

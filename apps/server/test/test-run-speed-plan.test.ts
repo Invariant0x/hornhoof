@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planTestParts, type TestPartPlanInput } from '../src/modules/testruns/plan.js';
-import { machinePaces, partPaces, type FileTime } from '../src/modules/testruns/plan-speed.js';
+import { machinePaces, partPaces, plannedFiles, type FileTime } from '../src/modules/testruns/plan-speed.js';
 
 const unit = (file: string) => ({ suiteId: 'server', file, selectionUnit: file });
 /* Forty files of uneven length, as the server suite has. */
@@ -11,6 +11,17 @@ const measured: FileTime[] = units.flatMap((u, index) => [
   ...(index % 3 !== 0 ? [{ computer: 'host:a-host', suiteId: u.suiteId, file: u.file, ms: sizes[index]! }] : []),
   ...(index % 3 !== 1 ? [{ computer: 'host:home-api', suiteId: u.suiteId, file: u.file, ms: sizes[index]! * 2.3 }] : []),
 ]);
+
+it('weights only test files from old single-suite parts and new batches, leaving preparation and final checks out of machine pace', () => {
+  const first = { kind: 'suite' as const, suiteId: 'server', files: ['a.ts', 'b.ts'], shard: { index: 1, count: 1 } };
+  expect(plannedFiles(first)).toEqual([{ suiteId: 'server', file: 'a.ts' }, { suiteId: 'server', file: 'b.ts' }]);
+  expect(plannedFiles({ kind: 'batch', version: 2, expectedCommitSha: '1'.repeat(40), selections: [first, { ...first, suiteId: 'node', files: ['c.ts'] }] })).toEqual([
+    { suiteId: 'server', file: 'a.ts' }, { suiteId: 'server', file: 'b.ts' }, { suiteId: 'node', file: 'c.ts' },
+  ]);
+  expect(plannedFiles({ kind: 'prepare', version: 2, expectedCommitSha: '1'.repeat(40) })).toEqual([]);
+  expect(plannedFiles({ kind: 'final', suiteId: 'server', files: [] })).toEqual([]);
+  expect(plannedFiles(undefined)).toEqual([]);
+});
 
 describe('the pace of each machine from what its parts took before', () => {
   it('finds how much longer one machine takes for the same files, against the middle one', () => {

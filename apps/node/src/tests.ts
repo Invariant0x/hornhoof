@@ -14,7 +14,7 @@ import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContex
 import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
-import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
+import { collectKept, failedTestLine, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -921,16 +921,13 @@ function productDone(msg: TestRun, state: ProductState | undefined, error: TestE
   return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}), ...partResults(state) };
 }
 /* The last lines of a part's log are what its agent reads of it, so they name the tests that failed and their errors, whatever the
-   services said as they stopped. They go into the log before its secrets are hidden, like the rest of it. */
+   services said as they stopped. Hide secrets before shortening these lines. */
 const FAILED_SHOWN = 10;
 const FAILED_LINE = 150;
-function sayFailedTests(out: Output, failed: FailedTest[]): void {
+function sayFailedTests(out: Output, failed: FailedTest[], hidden: string[]): void {
   if (!failed.length) return;
   out.line('Failed tests:');
-  for (const test of failed.slice(0, FAILED_SHOWN)) {
-    const line = `${test.file} > ${test.name}: ${test.message}`;
-    out.line(line.length > FAILED_LINE ? `${line.slice(0, FAILED_LINE - 3)}...` : line);
-  }
+  for (const test of failed.slice(0, FAILED_SHOWN)) out.line(failedTestLine(test, hidden, FAILED_LINE));
   if (failed.length > FAILED_SHOWN) out.line(`and ${failed.length - FAILED_SHOWN} more`);
 }
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
@@ -939,7 +936,7 @@ async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone
   try { state = await productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
   catch (failure) { out.line(failure instanceof Error ? failure.message : String(failure)); error = productFailure(failure, failedProductSignal(state, options)); }
   finally { error = await cleanupProduct(state, out) ?? error; }
-  sayFailedTests(out, state?.failed ?? []);
+  sayFailedTests(out, state?.failed ?? [], hidden);
   return productDone(msg, state, error, out, hidden);
 }
 

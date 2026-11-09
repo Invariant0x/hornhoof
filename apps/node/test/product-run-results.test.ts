@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const shared = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000, handedOver: (() => {}) as (path: string) => void }));
 import type { TestEnvironmentV1, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
@@ -26,10 +26,12 @@ import { readTestEnvironment } from '../src/test-environment.js';
 import { runTests } from '../src/tests.js';
 
 const roots: string[] = [];
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-09T12:00:00Z')); });
+afterEach(() => vi.useRealTimers());
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const report = (files: object[]) => `require('fs').writeFileSync(process.env.HH_TEST_REPORT, ${JSON.stringify(JSON.stringify({ files }))});`;
 
-async function fixture(script: string, suite: Partial<TestEnvironmentV1['suites'][number]> = {}) {
+async function fixture(script: string, suite: Partial<TestEnvironmentV1['suites'][number]> = {}, hidden: string[] = []) {
   const root = await mkdtemp(join(tmpdir(), 'hh-product-results-')); roots.push(root);
   const source = join(root, 'source'); await mkdir(join(source, '.hornhoof'), { recursive: true }); await mkdir(join(root, 'proc')); await mkdir(join(source, 'test'));
   const manifest: TestEnvironmentV1 = { version: 1, defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }], runtimes: [{ id: 'node', version: process.versions.node.split('.')[0]! }],
@@ -46,7 +48,7 @@ async function fixture(script: string, suite: Partial<TestEnvironmentV1['suites'
   const description = await readTestEnvironment(repo, repositoryScope, commitSha, { cacheRoot: join(dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
   const message: Extract<ServerMessage, { type: 'tests.run' }> = { type: 'tests.run', partId: 'part-one', repo, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 20_000,
     environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test/a.js', 'test/b.js'] } } };
-  const run = (over: Partial<typeof message> = {}) => runTests({ ...message, ...over }, { dir, proc: join(root, 'proc'), user: { uid: shared.jobUid, gid: shared.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
+  const run = (over: Partial<typeof message> = {}) => runTests({ ...message, ...over }, { dir, proc: join(root, 'proc'), user: { uid: shared.jobUid, gid: shared.jobUid }, hidden, prepareRepoBrowser: async () => {} });
   return { run };
 }
 
@@ -77,6 +79,19 @@ it('names at most ten failed tests at the end, each on one short line, and how m
   expect(end.match(/^test\/b\.js > case/gm)).toHaveLength(10);
   expect(end).toContain('and 4 more');
   expect(end.length).toBeLessThanOrEqual(2000);
+});
+
+it.each(['clipped message', 'clipped name', 'multiline message', 'multiline name'])('hides the complete secret before shortening a %s in the failure summary', async kind => {
+  const secret = kind.startsWith('multiline') ? 'private-key-first-line\nprivate-key-second-line' : 'private-token-0123456789abcdefghijklmnop';
+  const text = kind.startsWith('multiline') ? secret : 'x'.repeat(110) + secret + ' tail';
+  const failures = [{ name: kind.endsWith('name') ? text : 'case', message: kind.endsWith('message') ? text : 'Error: failed' }];
+  const f = await fixture(report([{ file: 'test/b.js', status: 'failed', failures }]) + 'process.exit(1);', {}, [secret]);
+  const done = await f.run();
+  expect(done).toMatchObject({ ok: false, exitCode: 1 });
+  expect(done.log).toContain('[hidden]');
+  expect(done.log).not.toContain(secret.split('\n')[0]!.slice(0, 12));
+  const end = done.log.trimEnd().split('\n').at(-1)!;
+  expect(end.length).toBeLessThanOrEqual(150);
 });
 
 it('says the same of a run that passed, and nothing when the runner reports nothing', async () => {

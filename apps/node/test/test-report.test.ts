@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collectKept, parseFileReport, readJobFile, restoreKept } from '../src/test-report.js';
+import { collectKept, failedTestLine, parseFailedTests, parseFileReport, readJobFile, restoreKept } from '../src/test-report.js';
 
 const folders: string[] = [];
 afterEach(() => { for (const dir of folders.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -10,6 +10,27 @@ const folder = (): string => { const dir = mkdtempSync(join(tmpdir(), 'hh-report
 const me = process.getuid!();
 const context = (over: object = {}) => ({ checkout: '/work/repo', suiteId: 'unit', selected: ['test/a.test.ts', 'test/b.test.ts'], suiteFailed: true, ...over });
 const report = (files: object[]) => JSON.stringify({ files });
+
+describe('the short failure summary', () => {
+  it.each(['file', 'name', 'message'] as const)('hides a multiline secret in the %s before taking its first line', field => {
+    const secret = 'private-first-line\nprivate-second-line';
+    const test = { file: 'test/a.test.ts', name: 'case', message: 'Error: failed', [field]: secret };
+    expect(failedTestLine(test, [secret], 150)).toContain('[hidden]');
+    expect(failedTestLine(test, [secret], 150)).not.toContain('private-');
+  });
+
+  it('hides base64 forms and terminal escapes before shortening, and keeps a short plain error intact', () => {
+    const secret = 'private-token-0123456789';
+    const line = failedTestLine({ file: 'a', name: '\u001b[31mcase\u001b[0m', message: `${'x'.repeat(110)}${Buffer.from(secret).toString('base64')}` }, [secret], 150);
+    expect(line).toContain('[hidden]'); expect(line).not.toContain('cHJpdmF0Z'); expect(line.length).toBeLessThanOrEqual(150);
+    expect(failedTestLine({ file: 'a', name: 'case', message: '\n Error: failed\nmore' }, [], 150)).toBe('a > case: Error: failed');
+  });
+
+  it('keeps the selected failure whole for redaction and ignores malformed or unselected failures', () => {
+    const failure = { name: 'whole\nname', message: 'whole\nmessage' };
+    expect(parseFailedTests(report([{ file: 'test/a.test.ts', status: 'failed', failures: [failure, { name: 3 }] }, { file: 'test/other.test.ts', status: 'failed', failures: [failure] }]), context())).toEqual([{ file: 'test/a.test.ts', ...failure }]);
+  });
+});
 
 describe('what a runner reports of its files', () => {
   it('names each selected file from the repository root, absolute or relative alike', () => {

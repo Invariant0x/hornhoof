@@ -44,10 +44,8 @@ export function packageTiming(modules: readonly TestModule[], name: string): Tes
   return { package: name, tests: times.length, medianTestMs: Math.round(middle), slowerThanMedian: times.filter(t => t > middle).length };
 }
 
-/* Each test of a file that failed, with its error, and what failed the file before its tests: the node ends a failed part's log with
-   them. A message is cut here; the node keeps only its first line. */
-const MESSAGE = 2000;
-const said = (name: string, message: string | undefined) => ({ name: name.slice(0, 500), message: (message ?? '').slice(0, MESSAGE) });
+/* Keep names and errors whole until the node hides its secrets, before it takes the first line or shortens the summary. */
+const said = (name: string, message: string | undefined) => ({ name, message: message ?? '' });
 function failuresOf(module: TestModule): { name: string; message: string }[] {
   const own = module.errors().map(error => said(module.relativeModuleId, error.message));
   const tests = [...module.children.allTests()].filter(test => test.result().state === 'failed').map(test => said(test.fullName, test.result().errors?.[0]?.message));

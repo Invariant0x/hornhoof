@@ -4,7 +4,7 @@ import { posix } from 'node:path';
 import type { Ctx } from '../../app.js';
 import { testPartTimings, testParts, testRuns } from '../../db/schema.js';
 import type { PlanningHistory } from './plan-history.js';
-import { machinePaces, partPaces, type FileTime, type PartTime } from './plan-speed.js';
+import { machinePaces, partPaces, plannedFiles, type FileTime, type PartTime } from './plan-speed.js';
 import { median } from './plan-statistics.js';
 
 /* The parts of a repository whose times a plan reads: the last ones, enough for each machine to have run most files. */
@@ -29,9 +29,7 @@ function fileTimes(rows: Row[], snapshot: EnvironmentSnapshot): { times: FileTim
 /* How long each part's command ran, for all its files. */
 function partTimes(rows: Row[]): PartTime[] {
   return rows.flatMap(row => {
-    const selection = row.selection?.selection, ms = row.receipt?.phases.commandMs;
-    const suites = selection?.kind === 'batch' ? selection.selections : selection?.kind === 'suite' ? [selection] : [];
-    const files = suites.flatMap(suite => suite.files.map(file => ({ suiteId: suite.suiteId, file })));
+    const files = plannedFiles(row.selection?.selection), ms = row.receipt?.phases.commandMs;
     return row.computer && ms !== undefined && files.length ? [{ computer: row.computer, ms, files }] : [];
   });
 }

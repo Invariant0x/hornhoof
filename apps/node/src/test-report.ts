@@ -2,6 +2,8 @@ import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdi
 import { join, relative, resolve } from 'node:path';
 import { MutationResult, FileNote, KEPT_BYTES, RepositoryPath, type FileOutcome } from '@hornhoof/protocol';
 import { z } from 'zod';
+import { stripEscapes } from './providers/process.js';
+import { redact } from './redact.js';
 
 /* What a suite's runner says of its files, in the file $HH_TEST_REPORT names: { files: [{ file, status, ms?, note?, failures? }] }, each
    file absolute or from the repository root, failures naming each test that failed and its error. A runner that writes none is judged
@@ -11,7 +13,7 @@ export const REPORT_BYTES = 64 * 1024 * 1024;
 const Failure = z.object({ name: z.string(), message: z.string() });
 const Report = z.object({ files: z.array(z.object({ file: z.string().min(1).max(4096), status: z.enum(['passed', 'failed']), ms: z.number().nonnegative().optional(), note: FileNote.optional(),
   failures: z.unknown().optional() })).max(10_000) });
-/* A test that failed, by its file in the repository, its name and the first line of its error. */
+/* A test that failed, with its name and error whole until its secrets have been hidden. */
 export type FailedTest = { file: string; name: string; message: string };
 type Kept = { path: string; text: string };
 
@@ -33,13 +35,19 @@ function readReport(text: string | null): z.infer<typeof Report>['files'] {
   catch { return []; }
 }
 const oneLine = (text: string): string => (text.split('\n').map(line => line.trim()).find(Boolean) ?? '').replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ');
+/* Secrets can span lines or the summary's boundary, so hide them before either shortens their text. */
+export function failedTestLine(test: FailedTest, hidden: string[], limit: number): string {
+  const clean = (text: string) => oneLine(redact(stripEscapes(text), hidden));
+  const line = redact(`${clean(test.file)} > ${clean(test.name)}: ${clean(test.message)}`, hidden);
+  return line.length > limit ? `${line.slice(0, limit - 3)}...` : line;
+}
 /* The tests of the selected files that the runner said failed. */
 export function parseFailedTests(text: string | null, context: { checkout: string; selected: string[] }): FailedTest[] {
   const selected = new Set(context.selected);
   return readReport(text).flatMap(({ file, failures }) => {
     const path = relative(context.checkout, resolve(context.checkout, file));
     const said = Array.isArray(failures) ? failures.flatMap(failure => Failure.safeParse(failure).data ?? []) : [];
-    return selected.has(path) ? said.map(failure => ({ file: path, name: oneLine(failure.name), message: oneLine(failure.message) })) : [];
+    return selected.has(path) ? said.map(failure => ({ file: path, ...failure })) : [];
   });
 }
 
