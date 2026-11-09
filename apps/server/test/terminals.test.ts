@@ -608,7 +608,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     await until(() => screens.every(s => s.frames.some(f => f.type === 'data' && f.data === 'Owner node connected')));
     expect(screens.every(s => s.frames.some(f => f.type === 'program' && f.running === false) && s.frames.filter(f => f.type === 'program').every(f => f.running === false))).toBe(true);
     expect(screens.every(s => !s.frames.some(f => f.type === 'data' && f.data === 'Foreign node data'))).toBe(true);
-    await expect.poll(() => back.queued()).toBe(1);
+    await until(() => back.queued() === 1);
     const start = await next(back, 'job.run');
     expect(start).toMatchObject({ prompt: '', sessionId: 'saved-history', provider });
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
@@ -658,7 +658,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     const open = await next(plan, 'term.open');
     plan.send({ type: 'term.program', termId: open.termId, running: false });
     plan.send({ type: 'agent.start', agentKey: orchestratorId });
-    await expect.poll(() => plan.queued()).toBe(1);
+    await until(() => plan.queued() === 1);
     const start = await next(plan, 'job.run');
     expect(start).toMatchObject({ prompt: '', sessionId: null });
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
@@ -715,7 +715,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     const open = await next(plan, 'term.open');
     plan.send({ type: 'term.program', termId: open.termId, running: false });
     plan.send({ type: 'agent.start', agentKey: orchestratorId });
-    await expect.poll(() => plan.queued()).toBe(1);
+    await until(() => plan.queued() === 1);
     const start = await next(plan, 'job.run');
     plan.send({ type: 'term.data', termId: open.termId, data: 'No conversation found with session ID: saved-history' });
     plan.send({ type: 'term.program', termId: open.termId, running: true });

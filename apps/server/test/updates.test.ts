@@ -383,7 +383,9 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
@@ -404,7 +406,9 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
 
     await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build 2', status: 'running', timeoutMs: 1000 });
     const now = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
@@ -517,7 +521,9 @@ describe('updates', () => {
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+    /* The request is written whole and then moved into place, so once it is there it is all there. */
+    await until(() => request(control) !== null);
+    expect(request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
