@@ -186,9 +186,15 @@ describe('templates', () => {
     expect(trouble).toMatch(/Database repair is not permission to change people or protected access through SQL/);
   });
 
+  it('asks for reports to people and heads in ordinary words with spaces', () => {
+    for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
+  });
+
   it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
-    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /one idle node at a time/, /actual program's request receipt, answer and normal completion/, /fixture or another commit does not prove/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
+    expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);
     expect(body('dev-worktrees')).toMatch(/Never delete a workspace with uncommitted files/);
     expect(body('dev-task-flow')).toMatch(/generic wake-up[\s\S]*cannot override an explicit restriction/);

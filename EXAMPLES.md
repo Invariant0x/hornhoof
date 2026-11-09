@@ -26,7 +26,7 @@ Instead of a dozen chats you have one company. You write to the orchestrator onc
 
 ### A development team that checks its own work
 
-Give the Development department a git repository and a token for it. The head splits each task into large pieces, one for each developer, with a short design note from an architect first when the feature is new or big. Each piece gets only the checks it needs: none for research and docs, one review for code, and a security review when the change touches sign-in, access or secrets. The whole turn is tested once at the end, on its own branch. Nothing reaches the main branch until you approve the exact commit.
+Give the Development department a git repository and a token for it. The head keeps connected work with one developer and splits off only independent parts, with a short design note from an architect first when the feature is new or big. Each piece gets only the checks it needs: none for research and docs, one review for code, and a security review when the change touches sign-in, access or secrets. The whole turn is tested once at the end, on its own branch. Nothing reaches the main branch until you approve the exact commit.
 
 ![The Development department at work](.github/assets/development.gif)
 

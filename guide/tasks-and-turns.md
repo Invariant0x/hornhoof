@@ -1,6 +1,6 @@
 # Tasks and turns
 
-> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. One turn runs at a time, and each department's head splits its task into a few large pieces that pass only the checks they need. Nothing reaches the main branch until a person approves the exact commit.
+> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. One turn runs at a time, and each department's head keeps connected work with one owner and splits off only the parts that are truly independent, each passing only the checks it needs. Nothing reaches the main branch until a person approves the exact commit.
 
 ![Tasks and turns](../.github/assets/tasks.gif)
 
@@ -40,7 +40,7 @@ When people add to the work, he puts it into the next planned turn, or into a ne
 
 ## How does a department split its task?
 
-Each task of a running turn goes to its department's head. The head gives it out at once, in two to four large pieces.
+Each task of a running turn goes to its department's head. The head gives it out at once. Connected work stays with one owner, only truly independent parts go to different people, and a whole task can go to one developer.
 
 In Development, each piece is a whole feature for one developer of the pool. When the feature is new or large, an architect writes a short design note first.
 
