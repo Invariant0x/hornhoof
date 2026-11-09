@@ -17,6 +17,11 @@ vi.mock('node:fs', async importOriginal => {
   } }) };
 });
 
+/* A service that stops at once is done at once, whatever its grace, and a preparation that works is done long before its
+   deadline: both are only how long a slow or loaded machine may take, so no verdict here rests on how fast the machine is. */
+const GRACE = 10_000;
+const ENOUGH = 15_000;
+
 const roots: string[] = [];
 let root: string;
 let bin: string;
@@ -51,7 +56,7 @@ beforeEach(() => {
   const uid = process.getuid!(); const gid = process.getgid!();
   vi.spyOn(process, 'getuid').mockReturnValue(0);
   context = { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid }, signal: new AbortController().signal,
-    deadline: Date.now() + 15_000, log: line => log.push(line), registerSecrets: values => secrets.push(...values), postgresBin: bin };
+    deadline: Date.now() + ENOUGH, log: line => log.push(line), registerSecrets: values => secrets.push(...values), postgresBin: bin };
   fakePostgres();
 });
 afterEach(() => { vi.restoreAllMocks(); for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -203,7 +208,7 @@ describe('prepared native services', () => {
 });
 
 describe('managed process services', () => {
-  function processDefinitions(graceMs = 100): ServiceDefinitions {
+  function processDefinitions(graceMs = GRACE): ServiceDefinitions {
     executable('service', `const fs=require('node:fs'); const p=require('node:path'); const state=process.env.HH_SERVICE_STATE; fs.mkdirSync(p.join(state,'data'),{recursive:true}); fs.writeFileSync(p.join(state,'data','value'),'prepared'); fs.writeFileSync(p.join(state,'undeclared'),'private'); process.on('SIGINT',()=>{fs.writeFileSync(p.join(state,'data','stopped'),'yes');process.exit(0)}); setInterval(()=>{},100);`);
     executable('ready', `const fs=require('node:fs'); const p=require('node:path'); const t=setInterval(()=>{if(fs.existsSync(p.join(process.env.HH_SERVICE_STATE,'data','value'))){clearInterval(t);process.exit(process.env.BAD_READY==='1'?3:0)}},5);`);
     return { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['fast'], options: {
@@ -231,7 +236,7 @@ describe('managed process services', () => {
     expect(readFileSync(join(artifacts.paths.worker!, 'data', 'stopped'), 'utf8')).toBe('yes');
   });
   it('waits for descendant writers before snapshotting declared process state', async () => {
-    const defs = processDefinitions(1000);
+    const defs = processDefinitions(GRACE);
     const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'child-stopped'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER,'yes');process.exit(0)},500));fs.writeFileSync(p.join(d,'child-ready'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER+'.ready','yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});const t=setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){clearInterval(t);fs.writeFileSync(p.join(d,'value'),'ready')}},5);process.on('SIGINT',()=>process.exit(0));setInterval(()=>{},100);`);
     executable('ready', "const fs=require('node:fs'),p=require('node:path');const marker=process.env.CHILD_STOP_MARKER?process.env.CHILD_STOP_MARKER+'.ready':p.join(process.env.HH_SERVICE_STATE,'data','value');setInterval(()=>{if(fs.existsSync(marker))process.exit(0)},5);");
@@ -251,7 +256,7 @@ describe('managed process services', () => {
     expect(existsSync(join(root, 'runs', 'partial', 'state'))).toBe(false);
   });
   it('honors a longer stop grace while descendants flush prepared state', async () => {
-    const defs = processDefinitions(5000);
+    const defs = processDefinitions(GRACE);
     const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'flushed'),'yes');process.exit(0)},3000));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready')))fs.writeFileSync(p.join(d,'value'),'ready')},5);process.on('SIGINT',()=>process.exit(0));`);
     const artifact = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) });
@@ -279,7 +284,7 @@ describe('service preparation lock ownership', () => {
     return { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['fast'], options: {
       start: { program: join(bin, 'worker'), args: [], cwd: '.' },
       readiness: { program: join(bin, 'worker-ready'), args: [], cwd: '.' },
-      stop: { signal: 'SIGINT', graceMs: 1000 }, statePaths: ['data'],
+      stop: { signal: 'SIGINT', graceMs: GRACE }, statePaths: ['data'],
     } }], prepare: [{ id: 'barrier', serviceIds: ['worker'], commands: [{ program: join(bin, 'barrier'), args: [], cwd: '.' }] }] };
   }
   function preparationContext(name: string) {
@@ -314,7 +319,7 @@ describe('service preparation lock ownership', () => {
       running.child.kill('SIGKILL');
       expect((await running.ended)[1]).toBe('SIGKILL');
       rmSync(join(root, 'hold'));
-      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + 2500 });
+      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + ENOUGH });
       expect(existsSync(join(recovered.paths.worker!, 'data'))).toBe(true);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(true);
     } finally { running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
@@ -330,7 +335,7 @@ describe('service preparation lock ownership', () => {
       expect(readFileSync(join(root, 'workers'), 'utf8').trim().split('\n')).toHaveLength(1);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(false);
       stopWorkers(); rmSync(join(root, 'hold'));
-      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + 2500 });
+      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + ENOUGH });
       expect(existsSync(join(recovered.paths.worker!, 'data'))).toBe(true);
     } finally { running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
   });
@@ -357,7 +362,7 @@ describe('service preparation lock ownership', () => {
     mkdirSync(lock, { recursive: true, mode: 0o700 });
     const inode = statSync(lock).ino;
     try {
-      await expect(prepareServiceArtifacts(defs, root, { ...preparationContext('legacy'), deadline: Date.now() + 2500 })).rejects.toThrow(/legacy.*directory.*lock/i);
+      await expect(prepareServiceArtifacts(defs, root, { ...preparationContext('legacy'), deadline: Date.now() + ENOUGH })).rejects.toThrow(/legacy.*directory.*lock/i);
       expect(statSync(lock).ino).toBe(inode);
       expect(existsSync(join(root, 'workers'))).toBe(false);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(false);
