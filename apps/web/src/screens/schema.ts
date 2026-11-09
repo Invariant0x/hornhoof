@@ -1,18 +1,20 @@
-import { ECHELON_STAGES, type EchelonStage, type EchelonStep } from '@hornhoof/protocol/echelons';
 import type { Department, DeptRole, Employee, Team } from '../types';
 import type { Point } from '../ui/wires';
 
 /* A department's schema in world pixels, laid out like the prototype. From the top: the head with the people who reach the
-   department at its right, the bus from the head to every frame, the pipeline between actual task stages, then frames for their current owners. Idle staff, sub-units and observers remain outside it. */
+   department at its right, the bus from the head to every frame, the pipeline between stages with a numbered gate before each
+   check, then a frame per role. Work goes left to right: design, ordinary work, each check in order, then the final check.
+   Only sub-units and observers stand apart from the pipeline. */
 export const FW = 280, GS = 44, G = 150, CW = 240, CH = 84, PY = 96, HW = 380, HH = 184, PW = 220, PH = 56;
 export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 100, REP = 92;
 const PEOPLE_Y = 12, PEOPLE_STEP = 66;
 
 export type Placed = { e: Employee; x: number; y: number; cy: number };
 /* key: the role's id, 'team:<id>' for a sub-unit frame, or '' for the frame of employees whose role the department does not know. */
-export type Frame = { key: string; role: DeptRole | null; team?: Team | null; x: number; h: number; stage: number; echelon?: EchelonStage; status?: EchelonStep['status']; members: Placed[] };
-/* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; rl: the way back; gate: between stages. */
-export type Line = { cls: 'tr' | 'tick' | 'pl'; pts: Point[]; arrow?: boolean };
+/* check: the frame stands behind a gate, as every check after the ordinary work does. */
+export type Frame = { key: string; role: DeptRole | null; team?: Team | null; x: number; h: number; stage: number; check?: boolean; members: Placed[] };
+/* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; gate: between stages. */
+export type Line = { cls: 'tr' | 'tick' | 'pl' | 'gate'; pts: Point[]; arrow?: boolean };
 
 export type Schema = {
   head: Employee | null;
@@ -25,6 +27,8 @@ export type Schema = {
   stages: Frame[][];
   lines: Line[];
   vias: Point[];
+  /* Diamonds on the pipeline before each check, numbered from the first one. */
+  gates: { x: number; n: number }[];
   report: { pts: Point[]; label: Point } | null;
   /* The top left of each person's chip. */
   people: Point[];
@@ -62,31 +66,36 @@ function addTeamLines(lines: Line[], vias: Point[], teamFrames: Frame[], hx: num
   }
 }
 
-type Group = { role: DeptRole | null; key: string; echelon: EchelonStage; status: EchelonStep['status'] }[];
+type Group = { role: DeptRole | null; key: string }[];
 
-function pipelineGroups(members: Employee[]) {
-  const routes = [...new Map(members.flatMap(e => e.task ? [[e.task.id, e.task.echelons] as const] : [])).values()];
-  const names = ECHELON_STAGES.filter(name => routes.some(route => route.stages.some(step => step.stage === name)));
-  const groups: Group[] = names.map(name => {
-    const steps = routes.flatMap(route => route.stages.filter(step => step.stage === name));
-    const status = steps.every(step => step.status === 'skipped') ? 'skipped' : steps.some(step => step.status === 'active') ? 'active' : steps.every(step => ['complete', 'skipped'].includes(step.status)) ? 'complete' : 'pending';
-    return [{ role: null, key: `stage:${name}`, echelon: name, status }];
-  });
-  return groups;
+/* Role metadata decides the pipeline, in the order of the development stages: design, ordinary work, each check in its order,
+   then the final check. Every check after the work is a numbered gate the work passes in turn. */
+function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[]) {
+  const roles = [...known.values()].filter(r => r.schema !== 'observer');
+  const before = roles.filter(r => r.schema === 'before_work');
+  const plain = roles.filter(r => r.gate === null && !r.schema);
+  const checks = roles.filter(r => r.gate !== null && !r.schema);
+  const final = roles.filter(r => r.schema === 'final_check');
+  const gateNumbers = [...new Set(checks.map(r => r.gate!))].sort((a, b) => a - b);
+  const groups: Group[] = [];
+  if (before.length) groups.push(before.map(r => ({ role: r, key: r.id })));
+  const workGroup: Group = [...plain.map(r => ({ role: r, key: r.id })), ...(loose.length ? [{ role: null, key: '' }] : [])];
+  if (workGroup.length) groups.push(workGroup);
+  const firstCheck = groups.length;
+  for (const n of gateNumbers) groups.push(checks.filter(r => r.gate === n).map(r => ({ role: r, key: r.id })));
+  if (final.length) groups.push(final.map(r => ({ role: r, key: r.id })));
+  return { groups, firstCheck };
 }
 
-const ownsStage = (e: Employee): boolean => Boolean(e.task && e.task.echelons.resultKind === 'code' && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
+/* Whoever leads a stage of a task now: it stays in its role's frame and is marked there. */
+export const leadsStage = (e: Employee): boolean => Boolean(e.task && e.task.echelons.resultKind === 'code' && e.task.echelons.ownerAgentId === e.id && e.task.echelons.phase === 'active');
 
-/* Idle staff and observers stay outside the route; role metadata never assigns a workflow stage. */
-function outsideFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {
-  const outside = members.filter(e => !ownsStage(e) || known.get(e.roleId ?? '')?.schema === 'observer');
-  const keyOf = (e: Employee) => known.has(e.roleId ?? '') ? e.roleId! : '';
-  const keys = [...new Set(outside.map(keyOf))];
-  return keys.map((key, i) => {
-    const role = known.get(key) ?? null;
+/* Observers sit beside the pipeline and connect directly to the head, like sub-unit frames. */
+function observerFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {
+  return [...known.values()].filter(r => r.schema === 'observer').map((role, i) => {
     const x = startX + i * (FW + GS);
-    const held = outside.filter(e => keyOf(e) === key);
-    return { key: `outside:${key}`, role, x, h: FHEAD + Math.max(1, held.length) * PY + 8, stage: -1, members: placeMembers(held, x) };
+    const held = members.filter(e => e.roleId === role.id);
+    return { key: role.id, role, x, h: FHEAD + Math.max(1, held.length) * PY + 8, stage: -1, members: placeMembers(held, x) };
   });
 }
 
@@ -94,26 +103,28 @@ export function schemaLayout(d: Department, people: number): Schema {
   const head = d.employees.find(e => e.kind === 'head') ?? null;
   const { teamFrames, members, startX, teamEnd } = splitMembers(d);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
-  const groups = pipelineGroups(members);
-  const observers = outsideFrames(known, members, startX);
+  const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
+  const { groups, firstCheck } = pipelineGroups(known, loose);
+  const observers = observerFrames(known, members, startX);
   const lastObserver = observers[observers.length - 1];
   const outsideEnd = lastObserver ? lastObserver.x + FW : teamEnd;
   const pipelineStart = lastObserver ? outsideEnd + G : startX;
 
   const stages: Frame[][] = [];
+  const starts: number[] = [];
   const ends: number[] = [];
   let x = pipelineStart;
   for (const [k, group] of groups.entries()) {
+    starts.push(x);
     const frames = group.map(g => {
-      const held = members.filter(e => ownsStage(e) && e.task!.echelons.stage === g.echelon && known.get(e.roleId ?? '')?.schema !== 'observer');
+      const held = g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
       const frame: Frame = {
         key: g.key,
         role: g.role,
-        echelon: g.echelon,
-        status: g.status,
         x,
         h: FHEAD + Math.max(1, held.length) * PY + 8,
         stage: k,
+        check: k >= firstCheck,
         members: placeMembers(held, x),
       };
       x += FW + GS;
@@ -132,6 +143,13 @@ export function schemaLayout(d: Department, people: number): Schema {
   const lines: Line[] = [];
   const vias: Point[] = [];
   addTeamLines(lines, vias, [...teamFrames, ...observers], hx);
+  /* Between stages, a dotted divider; on the pipeline, a numbered diamond before every check. */
+  const gates: Schema['gates'] = [];
+  for (let k = 1; k < stages.length; k++) {
+    const sx = (ends[k - 1]! + starts[k]!) / 2;
+    lines.push({ cls: 'gate', pts: [[sx, RY + 16], [sx, h]] });
+    if (k >= firstCheck) gates.push({ x: sx, n: gates.length + 1 });
+  }
   /* The head leads every stage frame: down to the bus, along it, and down each frame's spine to its chips. */
   if (stageFrames.length) {
     lines.push({ cls: 'tr', pts: [[hx, HH], [hx, BUS]] });
@@ -170,7 +188,7 @@ export function schemaLayout(d: Department, people: number): Schema {
 
   const peopleAt: Point[] = Array.from({ length: people }, (_, k) => [px, PEOPLE_Y + k * PEOPLE_STEP]);
   const right = Math.max(w, hx + HW / 2, people ? px + PW : 0);
-  return { head, hx, w, h, right, frames, stages, lines, vias, report, people: peopleAt };
+  return { head, hx, w, h, right, frames, stages, lines, vias, gates, report, people: peopleAt };
 }
 
 type Spot = { f: Frame; m: Placed };
