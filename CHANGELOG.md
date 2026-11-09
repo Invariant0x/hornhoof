@@ -5,6 +5,69 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.17.0] - 2026-11-09
+
+Give every executable task of Development one required route with one current owner at each stage, let the checkers
+repair what they find in the same branch, and close coordination work with a checked report instead of an invented
+commit.
+
+### Before you update
+
+- This version replaces the numbered gates of a task with its route. Migrations 0087 and 0088 add the empty route table
+  and drop the old gate, panel, stage, merging and bounces columns of tasks. They convert no existing task.
+- Before the update, stop new work on the old server, settle running turns and keep a backup of the database. Record
+  what the dropped columns hold for each task, then give every existing task its route by hand, as
+  `docs/development-echelons-release-data.md` describes. An open task with no decided route stays held.
+- Once the columns are dropped and work has moved through the new route, the old server can no longer read the
+  database. Going back means the backup with its matching old server.
+
+### Added
+
+- Each executable task follows one route: Architecture when the task is large, Development, Review, Cleanup only when
+  the head turns it on, Security when the head requires it or Review finds the risk, and Tests on the final candidate.
+  Each stage has one current owner, and task tools and the work tree show the route and its owner.
+- A checker is another employee whose model is at least as capable as the producer's. Another provider is preferred
+  when one is free; the same provider, plan or tariff is allowed.
+- A task without a repository and with no result kind named finishes with a checked report of its accepted parts, with
+  no Git candidate made up for it.
+
+### Changed
+
+- Review and Security repair their own findings in the same branch. An ordinary finding no longer goes back to the
+  author; work that pursues the wrong goal goes to the head.
+- Tests checks the exact final candidate with every repair in it, reuses only results whose fingerprint matches, and
+  mutates only changed pure functions that have fast tests.
+- The department skills and guides describe the single route. A change to access, root, permissions or secrets still
+  passes an independent Security engineer before it reaches any shared branch.
+
+### Russian
+
+У каждой исполняемой задачи Разработки теперь один обязательный маршрут с одним текущим владельцем на каждом этапе.
+Проверяющие сами исправляют найденное в той же ветке, а координационная работа закрывается проверенным отчетом без
+выдуманного коммита.
+
+- Исполняемая задача проходит один маршрут: Архитектура для большой задачи, Разработка, Ревью, Очистка только по решению
+  главы, Безопасность, когда ее требует глава или риск находит Ревью, и Тесты на итоговом кандидате. У каждого этапа один
+  текущий владелец; инструменты задач и дерево работы показывают маршрут и владельца.
+- Проверяет другой сотрудник с моделью не слабее, чем у автора. Другой провайдер предпочтителен, когда он свободен; тот же
+  провайдер, подписка или тариф допустимы.
+- Задача без репозитория и без явно названного вида результата завершается проверенным отчетом о принятых частях, без
+  придуманного Git-кандидата.
+- Ревью и Безопасность исправляют свои находки в той же ветке. Обычная находка больше не возвращается автору; работа
+  с неверной целью идет к главе.
+- Тесты проверяют точный итоговый кандидат со всеми исправлениями, повторно используют только результаты с совпадающим
+  отпечатком и мутируют только измененные чистые функции с быстрыми тестами.
+- Навыки отдела и руководства описывают единый маршрут. Правка доступа, root, прав или секретов по-прежнему проходит
+  независимого инженера безопасности до любой общей ветки.
+
+Перед обновлением: версия заменяет нумерованные ворота задачи ее маршрутом. Миграции 0087 и 0088 добавляют пустую таблицу
+маршрутов и удаляют старые столбцы задач gates, panel, stage, merging и bounces; существующие задачи они не переводят.
+Перед обновлением остановите выдачу новой работы на старом сервере, завершите идущие ходы и сохраните резервную копию базы.
+Запишите, что хранят удаляемые столбцы для каждой задачи, затем вручную задайте маршрут каждой существующей задаче, как
+описано в `docs/development-echelons-release-data.md`. Открытая задача без решенного маршрута остается на удержании.
+После удаления столбцов и работы по новому маршруту старый сервер больше не читает базу; откат возможен только
+к резервной копии вместе с ее старым сервером.
+
 ## [0.8.4] - 2026-11-08
 
 Let the nodes on every computer follow the server to a new build by themselves, release a version without turns of the
