@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { OPERATOR_CELLS_BYTES, OPERATOR_SNAPSHOT_MS, ProgramKey, type OperatorError, type OperatorQuestion, type OperatorServerMessage, type ProgramInputLine, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
 import { operatorCells } from './operator-control.js';
+import { redact } from '../redact.js';
 
 type ViewCommand = Extract<OperatorServerMessage, { type: 'program.view_get' }>;
 type InputCommand = Extract<OperatorServerMessage, { type: 'program.input_send' }>;
@@ -37,7 +38,8 @@ export class ProgramAccess {
       if (!bounded(pane)) return this.noView(command, 'input_not_proven');
       const snapshot = { token: randomUUID(), instance: facts.instance, at: this.source.now() };
       this.snapshots.set(command.agentKey, snapshot);
-      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', tool: facts.tool?.slice(0, 100) ?? null, question: facts.question, input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, this.source.secrets()) };
+      const secrets = this.source.secrets();
+      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', tool: facts.tool === null ? null : redact(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
     });
   }
 
@@ -69,7 +71,7 @@ export class ProgramAccess {
   }
 
   private finish(command: InputCommand, facts: ProgramFacts | null, result: ProgramInputResult['result'], reason: OperatorError | null): ProgramInputResult {
-    const reply: ProgramInputResult = { type: 'program.input_result', agentKey: command.agentKey, action: command.action, result, reason, jobId: facts?.jobId ?? null, instance: facts?.instance ?? null, question: facts?.question ?? null };
+    const reply: ProgramInputResult = { type: 'program.input_result', agentKey: command.agentKey, action: command.action, result, reason, jobId: facts?.jobId ?? null, instance: facts?.instance ?? null, question: maskedQuestion(facts?.question ?? null, this.source.secrets()) };
     if (this.done.size >= MAX_DONE) this.done.delete(this.done.keys().next().value!);
     this.done.set(command.action, reply);
     return reply;
@@ -78,6 +80,10 @@ export class ProgramAccess {
   private noView(command: ViewCommand, reason: OperatorError): ProgramView {
     return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'refused', reason, jobId: null, instance: null, snapshot: null, state: 'gone', tool: null, question: null, input: 'unknown', undelivered: false, cols: 1, rows: 1, cells: '' };
   }
+}
+
+function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
+  return question ? { ...question, tool: redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
 }
 
 function bounded(pane: Pane): boolean {

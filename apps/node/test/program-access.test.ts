@@ -37,6 +37,16 @@ it('shows the program as it is, with only the values of secrets masked, and what
   expect(view.cells).toBe('Sign in with [hidden]\nPassword:\nAccept the terms of use?');
 });
 
+it('masks node secrets in tool and question metadata before either reply leaves the node', async () => {
+  const c = fixture();
+  c.state.facts = { ...c.state.facts!, tool: SECRET, question: { id: randomUUID(), kind: 'protected', tool: SECRET, text: `Use ${SECRET}`, callId: SECRET } };
+  const view = await c.look();
+  const masked = { tool: '[hidden]', text: 'Use [hidden]', callId: '[hidden]' };
+  expect(view).toMatchObject({ tool: '[hidden]', question: masked });
+  expect(await c.type(view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', question: masked });
+  expect(c.state.facts.question!.text).toBe(`Use ${SECRET}`);
+});
+
 it('pastes text first, then presses any keys, Ctrl+U and Escape too, into the program the look showed', async () => {
   const c = fixture();
   const view = await c.look();

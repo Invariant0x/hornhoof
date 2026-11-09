@@ -8,13 +8,15 @@ import { agentEvents, agents, attachments, jobs, people, programOperatorCases, s
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
+import * as programRpc from '../src/modules/program-operator/rpc.js';
+import * as turnLog from '../src/modules/tasks/turn-log.js';
 import { readProgramView, reportOperatorCase, sendProgramInput } from '../src/modules/program-operator/tools.js';
 import * as screenRenderer from '../src/modules/program-operator/screen.js';
 import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { operatorCompany } from './program-operator-company.js';
 
 type Caller = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker'; roleKey: string | null };
-const SECRET = 'sk-live-0123456789abcdef';
+const SECRET = 'sk-live-0123456789abcdef-???';
 
 /* An employee of Development with its program on a node, and the orchestrator, the head of Operations and the program operator,
    each in a turn of its own. The node answers as ProgramAccess does: what the screen shows, and what came of the input. */
@@ -28,12 +30,12 @@ async function fixture() {
     return { id: job!.id, companyId: c.companyId, agentId: agent.id, agentKind: agent.kind, roleKey: agent.roleKey };
   };
   const callers = { orchestrator: await turn(orchestrator!), opsHead: await turn(opsHead!), operator: await turn(c.operator!), developer: await turn(developer!), watcher: await turn(c.watcher) };
-  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', question: null as OperatorQuestion | null, input: 'applied' as 'applied' | 'refused', answers: true };
+  const screen = { cells: 'Choose a theme.\n> Dark\n  Light', question: null as OperatorQuestion | null, tool: null as string | null, input: 'applied' as 'applied' | 'refused', answers: true };
   const snapshot = randomUUID();
   const frames = () => c.sent.mock.calls.map(([node, frame]) => ({ node, frame: frame as OperatorServerMessage })).filter((sent): sent is { node: typeof sent.node; frame: Extract<OperatorServerMessage, { type: 'program.view_get' | 'program.input_send' }> } => sent.frame.type === 'program.view_get' || sent.frame.type === 'program.input_send');
   c.sent.mockImplementation((node, frame) => {
     if (!screen.answers) return false;
-    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: null, question: screen.question, input: 'hornhoof', undelivered: true, cols: 80, rows: 24, cells: screen.cells }));
+    if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: 80, rows: 24, cells: screen.cells }));
     if (frame.type === 'program.input_send') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.input_result', agentKey: frame.agentKey, action: frame.action, result: screen.input, reason: screen.input === 'refused' ? 'snapshot_stale' : null, jobId: c.job.id, instance: c.fact.instance, question: screen.question }));
     return true;
   });
@@ -111,6 +113,53 @@ it('masks the values of secrets on the snapshot, in the question and in the log,
   const [entry] = await c.journal();
   expect(JSON.stringify(entry)).not.toContain(SECRET);
   expect(entry!.operatorAction).toMatchObject({ text: '[hidden]', question: { text: 'Paste [hidden] here?' } });
+});
+
+it('masks known secrets in input reasons, encoded text and every question field', async () => {
+  const c = await fixture();
+  await c.db.update(subscriptions).set({ secretEnc: encryptSecret(SECRET, c.ctx.config.secret) }).where(eq(subscriptions.id, c.sub.id));
+  const forms = [SECRET, Buffer.from(SECRET).toString('base64'), Buffer.from(SECRET).toString('base64').replace(/=+$/, ''), Buffer.from(SECRET).toString('base64url')];
+  for (const value of forms) {
+    c.screen.tool = value;
+    c.screen.question = { id: randomUUID(), kind: 'protected', tool: value, text: `Use ${value}?`, callId: value };
+    const view = await readProgramView(c.ctx, c.callers.operator, { employee: c.agent.id });
+    expect(view.tool).toBe('[hidden]');
+    expect(view.question).toMatchObject({ tool: '[hidden]', text: 'Use [hidden]?', callId: '[hidden]' });
+    await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, text: value, keys: ['Enter'], reason: `Use ${value} to continue.` });
+  }
+  const entries = await c.journal();
+  expect(entries).toHaveLength(forms.length);
+  for (const entry of entries) {
+    for (const value of forms) expect(JSON.stringify(entry)).not.toContain(value);
+    expect(entry.operatorAction).toMatchObject({ reason: 'Use [hidden] to continue.', text: '[hidden]', question: { tool: '[hidden]', text: 'Use [hidden]?', callId: '[hidden]' } });
+    expect(entry.text).toContain('Reason: Use [hidden] to continue.');
+  }
+});
+
+it('saves the masked actor and input intent before dispatch, then records its matching result', async () => {
+  const c = await fixture();
+  await c.db.update(subscriptions).set({ secretEnc: encryptSecret(SECRET, c.ctx.config.secret) }).where(eq(subscriptions.id, c.sub.id));
+  const original = programRpc.requestProgramInput;
+  const send = vi.spyOn(programRpc, 'requestProgramInput').mockImplementation(async (...args) => {
+    const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.job.id));
+    const intents = events.map(event => event.data as { operatorInputIntent?: Record<string, unknown> }).filter(data => data.operatorInputIntent);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]!.operatorInputIntent).toMatchObject({ id: args[2].action, phase: 'requested', actor: { id: c.callers.operator.agentId }, operatorJobId: c.callers.operator.id, snapshot: c.snapshot, keys: ['Enter'], text: '[hidden]', reason: 'Use [hidden].' });
+    expect(JSON.stringify(intents)).not.toContain(SECRET);
+    return original(...args);
+  });
+  onTestFinished(() => send.mockRestore());
+  const result = await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, text: SECRET, keys: ['Enter'], reason: `Use ${SECRET}.` });
+  expect(result.result).toBe('applied');
+  expect((await c.journal())[0]!.operatorAction).toMatchObject({ id: result.action, phase: 'finished', result: 'applied' });
+});
+
+it('sends no input when its intent cannot be saved', async () => {
+  const c = await fixture();
+  const log = vi.spyOn(turnLog, 'logTurnFact').mockRejectedValueOnce(new Error('Audit unavailable'));
+  onTestFinished(() => log.mockRestore());
+  await expect(sendProgramInput(c.ctx, c.callers.operator, { ...c.input, keys: ['Enter'] })).rejects.toThrow('Audit unavailable');
+  expect(c.frames()).toEqual([]);
 });
 
 it('keeps an employee of another department and the rest of Operations off another employee\'s program', async () => {

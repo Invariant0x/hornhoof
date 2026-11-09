@@ -87,7 +87,7 @@ export async function readProgramView(ctx: Ctx, caller: OperatorCaller, input: V
   await keepForCase(ctx, caller, program, rendered.png);
   return {
     employee: program.agentId, name: program.name, job: view.jobId, instance: view.instance, snapshot: view.snapshot, state: view.state,
-    tool: view.tool, question: maskedQuestion(view.question, secrets), input: view.input, undelivered: view.undelivered, png: rendered.png, text: rendered.text,
+    tool: view.tool && masked(view.tool, secrets), question: maskedQuestion(view.question, secrets), input: view.input, undelivered: view.undelivered, png: rendered.png, text: rendered.text,
   };
 }
 
@@ -98,9 +98,12 @@ export async function sendProgramInput(ctx: Ctx, caller: OperatorCaller, input: 
   const me = await authorizeAccess(ctx, caller);
   const program = await programOf(ctx, me, input.employee);
   const action = randomUUID();
+  const entry: Entry = { me, caller, program, input, typed, reply: null, outcome: { action, result: 'unknown', reason: 'action_unknown' } };
+  /* If the server or its journal fails after dispatch, this durable intent still identifies who sent what and why. */
+  await record(ctx, entry, 'requested');
   const reply = await requestProgramInput(ctx, program, { action, snapshot: input.snapshot, ...typed });
   const outcome = outcomeOf(action, reply);
-  await record(ctx, { me, caller, program, input, typed, reply, outcome });
+  await record(ctx, { ...entry, reply, outcome }, 'finished');
   return outcome;
 }
 
@@ -129,13 +132,14 @@ async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, p
 }
 
 /* Who, why, which keys and what text with its secrets masked, and what came of it, in the employee's conversation. */
-async function record(ctx: Ctx, entry: Entry): Promise<void> {
+async function record(ctx: Ctx, entry: Entry, phase: 'requested' | 'finished'): Promise<void> {
   const { me } = entry;
   const secrets = await pictureSecrets(ctx, me.companyId);
   const job = await turnOf(ctx, entry);
-  const action = { ...actionOf(entry, secrets), case: await caseOf(ctx, entry), targetJobId: job.id };
+  const action = { ...actionOf(entry, secrets), phase, case: await caseOf(ctx, entry), targetJobId: job.id };
   const actor = await agentParty(ctx, me.companyId, me.id);
-  await logTurnFact(ctx, job, lineOf(entry, action), { notification: await operatorNotification(ctx, job), actor, from: 'agent', by: me.id, name: me.name, operatorAction: action });
+  const kind = phase === 'requested' ? 'operatorInputIntent' : 'operatorAction';
+  await logTurnFact(ctx, job, lineOf(entry, action), { notification: await operatorNotification(ctx, job), actor, from: 'agent', by: me.id, name: me.name, [kind]: action });
 }
 
 /* The turn the input went into, as the node said, or else the employee's last one. */
@@ -156,7 +160,7 @@ function actionOf({ me, caller, input, typed, reply, outcome }: Entry, secrets: 
   const question = maskedQuestion(reply?.question ?? null, secrets);
   return {
     id: outcome.action, operatorJobId: caller.id, instance: reply?.instance ?? null, snapshot: input.snapshot, at: new Date().toISOString(),
-    actor: { id: me.id, name: me.name }, keys: typed.keys, key: typed.keys.at(-1) ?? null, text: typed.text && masked(typed.text, secrets), reason: input.reason, result: outcome.result, error: outcome.reason,
+    actor: { id: me.id, name: me.name }, keys: typed.keys, key: typed.keys.at(-1) ?? null, text: typed.text && masked(typed.text, secrets), reason: masked(input.reason, secrets), result: outcome.result, error: outcome.reason,
     question, requestedDecision: input.decision, ...decided(input, question, outcome),
   };
 }
@@ -166,18 +170,20 @@ function decided(input: KeysInput, question: OperatorQuestion | null, outcome: O
   return input.decision && question?.kind === 'permission' && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
 }
 
-function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf>): string {
+function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { phase: 'requested' | 'finished' }): string {
   const said = [action.keys.length ? `keys ${action.keys.join(' ')}` : '', action.text ? `text "${action.text}"` : ''].filter(Boolean).join(' and ');
   const choice = 'permissionDecision' in action ? ` Decision: ${input.decision}. Request: ${action.question!.text}.` : '';
-  return `${me.name}, ${said}: ${action.result}${action.error ? ` (${action.error})` : ''}. Reason: ${input.reason}.${choice}`;
+  const result = action.phase === 'requested' ? 'requested' : `${action.result}${action.error ? ` (${action.error})` : ''}`;
+  return `${me.name}, ${said}: ${result}. Reason: ${action.reason}.${choice}`;
 }
 
 function masked(text: string, secrets: string[]): string {
   let out = text;
-  for (const secret of secrets.filter(s => s.length >= SECRET_MIN).sort((a, b) => b.length - a.length)) out = out.replaceAll(secret, HIDDEN);
+  const forms = secrets.flatMap(secret => secret.length >= SECRET_MIN ? [secret, Buffer.from(secret).toString('base64'), Buffer.from(secret).toString('base64').replace(/=+$/, ''), Buffer.from(secret).toString('base64url')] : secret ? [secret] : []);
+  for (const secret of [...new Set(forms)].sort((a, b) => b.length - a.length)) out = out.replaceAll(secret, HIDDEN);
   return out;
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
-  return question ? { ...question, text: masked(question.text, secrets) } : null;
+  return question ? { ...question, tool: masked(question.tool, secrets), text: masked(question.text, secrets), callId: question.callId && masked(question.callId, secrets) } : null;
 }
