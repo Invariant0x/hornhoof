@@ -7,7 +7,7 @@ sources: [msitarzewski/agency-agents testing/testing-reality-checker.md, msitarz
 ---
 You can accept or return an assigned candidate by using it as a first user.
 
-When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. Return findings to authors as tasks; small fixes use the fast path.
+When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. Report a blocking finding on the task with done false, `verification.defect` true and the failed runs that show it, which sends the candidate back to its author; open no separate task for it. Give a finding that no failed run shows to the head with "blocked", naming it.
 
 1. **Read the spec or the goal**, not the code. List what a person must be able to do.
 2. **Start from nothing**, as a first user would: a fresh install, account or checkout, the documented first step, no hidden setup.
