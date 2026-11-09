@@ -24,7 +24,7 @@ async function late() {
     finalReview: { headAgentId: head!.id, anchorAt: after(fromNow + 4 * HOUR), intervalMs: HOUR },
   });
   const wait = await pg.db.transaction(tx => syncSourceWaits(tx as never, {
-    taskId: one.task.id, kind: 'external', sourceKey: waitForSourceKey(randomUUID()), sourceRevision: 1, ownerBinding: { agentId: one.job.agentId }, plan: plan(), sourceState: {}, actor: { agentId: one.job.agentId },
+    taskId: one.task.id, kind: 'external', sourceKey: waitForSourceKey(randomUUID()), sourceRevision: 1, ownerBinding: { agentId: two.job.agentId }, plan: plan(), sourceState: {}, actor: { agentId: one.job.agentId },
   }));
   const row = async () => (await pg.db.select().from(taskWaits).where(eq(taskWaits.id, wait.id)))[0]!;
   const notices = () => pg.db.select().from(waitNotices).where(eq(waitNotices.waitId, wait.id));
@@ -38,7 +38,7 @@ it('takes one step and writes one notice when two sweeps run at once across conn
   const now = c.at(1.5 * HOUR);
   await Promise.all([sweepWaits(c.one.ctx, now), sweepWaits(c.two.ctx, now)]);
   expect(await c.row()).toMatchObject({ level: 1, generation: 1, nextActionAt: c.wait.headDueAt });
-  expect(await c.notices()).toMatchObject([{ agentId: c.one.job.agentId, purpose: 'escalation', level: 1 }]);
+  expect(await c.notices()).toMatchObject([{ agentId: c.two.job.agentId, purpose: 'escalation', level: 1 }]);
   expect(await c.lines('wait_due')).toHaveLength(1);
 });
 
