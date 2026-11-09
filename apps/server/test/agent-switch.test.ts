@@ -285,7 +285,7 @@ describe('work an agent held when it was switched off', () => {
     await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     const waiting = await row(db, task.id);
     expect(waiting.status).toBe('waiting');
-    expect(wakePrompt(rita, waiting, { agentId: rita.id, taskId: task.id, why: 'reminder' })).toContain('give verdict on the exact candidate');
+    expect(wakePrompt(rita, waiting, { agentId: rita.id, taskId: task.id, why: 'reminder' })).toContain('use blocked or escalate a wrong goal to the head');
   });
 
   it('drops queued turns after the switched-off employee leaves its assignment', async () => {

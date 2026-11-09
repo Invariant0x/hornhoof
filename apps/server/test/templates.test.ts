@@ -26,14 +26,11 @@ describe('templates', () => {
     }
   });
 
-  it('puts virtual time next to testing only our program, above what superpowers teaches on mocks and timed waits', () => {
+  it('puts virtual time next to testing only our program, and names no skill set the agents do not have', () => {
     for (const id of ['dev-testing-policy', 'dev-tdd', 'hh-run-checks', 'dev-e2e-tests']) {
       expect(body(id), id).toMatch(/we test our program, not the operating system and not other programs/);
       expect(body(id), id).toMatch(/time in a test is virtual only/);
-      expect(body(id), id).toMatch(/rank above superpowers/);
-      expect(body(id), id).toMatch(/test-driven-development skill \(SKILL\.md and writing-good-tests\.md\)/);
-      expect(body(id), id).toMatch(/systematic-debugging\/condition-based-waiting\.md says to wait on the real clock with a timeout \(waitFor with timeoutMs\), our rule applies here/);
-      expect(body(id), id).toMatch(/only as recorded samples or fakes, time is only virtual, and nothing waits on the real clock/);
+      expect(body(id), id).not.toMatch(/superpowers|test-driven-development skill|condition-based-waiting/);
     }
     for (const id of ['dev-test-gaps', 'dev-test-environment', 'dev-review-diff']) expect(body(id), id).toMatch(/time in a test is virtual only/);
     for (const role of roles.filter(r => /we test our program/.test(r.body))) expect(role.body, role.id).toMatch(/on virtual time only\.$/);
