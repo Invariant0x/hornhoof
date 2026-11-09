@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -106,15 +106,19 @@ describe('Shell', () => {
     expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  /* The window checks its agent's card as it opens; one the server refuses would close it again. */
   it('opens the orchestrator\'s window at once after setup, and closes it', async () => {
-    mockApi({
+    const calls = mockApi({
       'GET /api/org': [200, ORG],
+      'GET /api/agents/orchestrator': [200, { id: 'orchestrator' }],
       'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<Shell me={ME} welcome onSignOut={() => {}} />);
-    const window = await screen.findByRole('complementary', { name: 'Orchestrator' });
-    expect(window).toBeInTheDocument();
+    await screen.findByRole('complementary', { name: 'Orchestrator' });
+    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/agents/orchestrator')).toBe(true));
+    await act(async () => { await new Promise(resolve => { setTimeout(resolve, 0); }); });
+    expect(screen.getByRole('complementary', { name: 'Orchestrator' })).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();
   });
