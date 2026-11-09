@@ -5,6 +5,123 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.17.1] - 2026-11-09
+
+Fix what stalled turn 17 and the release of 0.17.0, so that a turn goes through its stages without waiting for people:
+test results are reused, the author check takes minutes, a task can be paused, notices and waits stop repeating, a
+message reaches every employee, and nodes check pages in Chromium, Firefox and WebKit.
+
+### Before you update
+
+- Migration 0089 adds the empty column `tasks.paused`. Every task starts not paused; nothing is converted.
+- `create_task` now asks a code task for the paths its change may touch, and for the product when only the product keeps
+  the repository. An open code task made on 0.17.0 without paths keeps its route; its head sets the paths before the
+  task moves on, as `docs/development-echelons-release-data.md` describes.
+- The node image now brings Firefox and WebKit beside Chromium, so it is larger.
+- 0.17.0 kept green test results whatever runtimes a part ran on. After the update, clear the results kept before it
+  once, as `docs/development-echelons-release-data.md` describes, so the next full run checks those files again.
+
+### Added
+
+- A head, the orchestrator or a person with the CEO's rights can pause a task: nothing wakes its holder until someone
+  resumes it (`pause_task`, `resume_task` and a button in the task panel).
+- `submit` takes a named branch or commit, and refuses a submission without a commit it can read.
+- `run_tests` refuses a command that names a test file its pinned commit does not have, before any part goes out.
+- `npm run -s deps` puts the dependencies and builds in place in a new worktree, linking the packages its clone installed
+  from the same lockfile.
+- Nodes prepare Chromium, Firefox and WebKit and check that each one starts, naming the one that does not.
+- `test_run` shows how many fingerprints a run brought and how many green results it kept.
+
+### Changed
+
+- The author check runs the tests near a change with coverage, lists the rest of the import graph as left to the full
+  run, and checks the types of only the projects the change reaches. On the same change it took 75 seconds instead of
+  about 14.5 minutes.
+- Gemini 4 Argon and Kimi K3.1 Pro check and hand in work in the strong band.
+- Images build by themselves when a new version reaches main, one run of a branch at a time, so a release needs nobody
+  to start them.
+- An employee hears once about the waits of one holder on them until the work moves, and nobody hears of a wait on
+  themselves.
+- A blocked task opens again only on its giver's first comment after the block, and blocking a blocked task is refused.
+- Program evidence receipts stay out of the employee feed.
+- A message for an Antigravity employee at work goes with its next turn, as Antigravity takes typed words as a turn of
+  its own.
+- A new Tests owner is woken with its open work, an answered task goes back to the status of its stage, a head is never
+  picked as checker by itself, and an independent part takes its parent's paths.
+- A worker cannot close a coordination task without accepted subtasks in a department that keeps code.
+- A person who sees a task sees the true number of findings at each stage; their details stay with those who see the
+  whole task.
+- The templates and the guide keep connected work with one owner, drop the release check on live programs, and ask for
+  reports in plain words with spaces.
+
+### Fixed
+
+- A test part keeps green results only where it ran on the runtimes its run's fingerprints name, so a later run skips
+  unchanged files.
+- Quality tools in a test part read the grammars the machine keeps, and a crapper failure says why.
+- A preparation step that hears nothing from Hornhoof for a minute stops, a part waits at most ten minutes for another
+  machine's build and then builds it itself, and the part's log says each step.
+- The local command rule finds a project's workspaces and named packages, names a missing script, and allows named parts
+  of Go, Cargo, .NET, Maven and Gradle suites.
+- The check command tests pass when the tests run as root, as in a clean `node:22` container.
+- A turn is not reported stalled before its program gives its first sign.
+- Tests that read the screen once now wait for the state they need.
+- Antigravity's own words on its screen no longer look like a question for the subscription owner.
+- The tree and speed views of a department with long turns answer at once.
+- A checker's result is refused when its model, plan or ability changed before the result was stored.
+- A cancelled task's route shows as cancelled, every stage reason is named, and an owner's raw id is never shown.
+
+### Russian
+
+Исправлено то, что останавливало ход 17 и выпуск 0.17.0, чтобы ход проходил свои этапы без ожидания людей: результаты
+тестов используются повторно, проверка автора идет минуты, задачу можно поставить на паузу, уведомления и ожидания не
+повторяются, сообщение доходит до каждого сотрудника, а ноды проверяют страницы в Chromium, Firefox и WebKit.
+
+- Перед обновлением: миграция 0089 добавляет пустой столбец `tasks.paused`, все задачи начинают без паузы, ничего не
+  переводится. `create_task` теперь требует у задачи кода пути, которые может менять правка, и продукт, когда репозиторий
+  есть только у продукта. Открытая задача кода с 0.17.0 без путей сохраняет маршрут; глава задает пути до следующего
+  этапа, как описано в `docs/development-echelons-release-data.md`. Образ ноды теперь содержит Firefox и WebKit рядом с
+  Chromium и поэтому больше. 0.17.0 сохраняла зеленые результаты тестов, на каких бы средах ни шла часть: после
+  обновления один раз удалите результаты, сохраненные до него, как описано в том же документе, и следующий полный прогон
+  проверит эти файлы заново.
+- Глава, оркестратор или человек с правами CEO ставит задачу на паузу: никто не будит ее исполнителя, пока паузу не
+  снимут (`pause_task`, `resume_task` и кнопка в панели задачи).
+- `submit` принимает названную ветку или коммит и отказывает сдаче без читаемого коммита.
+- `run_tests` отказывает команде, которая называет тестовый файл, которого нет в закрепленном коммите, до раздачи частей.
+- `npm run -s deps` ставит зависимости и сборки в новой рабочей папке, связывая пакеты, которые клон поставил по тому же
+  lockfile.
+- Ноды готовят Chromium, Firefox и WebKit и проверяют, что каждый запускается, и называют тот, который не запустился.
+- `test_run` показывает, сколько отпечатков пришло в прогон и сколько зеленых результатов сохранено.
+- Проверка автора запускает тесты рядом с правкой с покрытием, остальной граф импортов перечисляет как оставленный
+  полному прогону и проверяет типы только затронутых проектов: на одной и той же правке 75 секунд вместо примерно 14,5
+  минуты.
+- Gemini 4 Argon и Kimi K3.1 Pro сдают и проверяют работу в сильной полосе.
+- Образы собираются сами, когда новая версия попадает в main, по одному запуску на ветку, и выпуск не ждет человека.
+- Сотрудник слышит об ожиданиях одного исполнителя на нем один раз, пока работа не сдвинется; об ожидании на самом себе
+  никто не слышит.
+- Заблокированная задача открывается снова только первым комментарием того, кому ушла блокировка; повторная блокировка
+  отказывается.
+- Квитанции о свидетельствах программы не попадают в ленту сотрудника.
+- Сообщение сотруднику в Antigravity во время работы уходит с его следующим ходом, потому что Antigravity принимает
+  набранные слова отдельным ходом.
+- Новый владелец Тестов будится со своей открытой работой, задача после ответа возвращается в статус своего этапа, глава
+  не выбирается проверяющим сам, а независимая часть берет пути родителя.
+- Исполнитель не закрывает координационную задачу без принятых подзадач в отделе, который хранит код.
+- Тот, кто видит задачу, видит настоящее число находок на каждом этапе; подробности видят только те, кто видит задачу
+  целиком.
+- Шаблоны и руководство держат связанную работу у одного владельца, убирают проверку живыми программами при выпуске и
+  просят отчеты обычными словами с пробелами.
+- Исправлено: часть сохраняет зеленые результаты только там, где шла на средах, названных в отпечатках прогона; quality
+  tools читают грамматики машины, а отказ crapper называет причину; шаг подготовки, который минуту ничего не слышит от
+  Hornhoof, останавливается, часть ждет чужую сборку не больше десяти минут и потом собирает сама, а журнал части
+  называет каждый шаг; локальное правило команд находит рабочие пространства и пакеты по имени, называет отсутствующий
+  скрипт и пропускает части наборов Go, Cargo, .NET, Maven и Gradle; тесты check-command проходят под root в чистом
+  `node:22`; ход не объявляется застрявшим до первого знака программы; тесты ждут нужного состояния вместо одного чтения
+  экрана; собственные слова Antigravity на экране больше не выглядят вопросом владельцу подписки; дерево и скорость
+  отдела с длинными ходами отвечают сразу; итог проверяющего отказывает, если его модель, подписка или навык сменились до
+  записи; маршрут отмененной задачи показывается отмененным, каждая причина этапа названа, а сырой id владельца не
+  показывается.
+
 ## [0.17.0] - 2026-11-09
 
 Give every executable task of Development one required route with one current owner at each stage, let the checkers

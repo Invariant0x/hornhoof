@@ -43,3 +43,14 @@ This is a release handoff, not a data conversion program. Before 1.0, an authori
 ## Rollback limit
 
 Once replaced schema fields are dropped and work has moved through the new engine, the old server is not a supported reader/writer of that schema. The releaser must use the backed-up database with its matching old server, or a separately reviewed recovery procedure. Do not run the old workflow against newly prepared route records.
+
+## Release 0.17.1
+
+0.17.1 converts no record either. What the releaser checks or does by hand:
+
+| Existing records | Change in 0.17.1 | What the releaser does |
+| --- | --- | --- |
+| `tasks` | Migration 0089 adds the nullable column `paused` (who paused the task, when and why). | Nothing. Every existing task reads as not paused. Do not fill the column: a pause is set only through `pause_task`, `resume_task` or the task panel. |
+| Routes of open code tasks made on 0.17.0 without `paths` | `create_task` now refuses a code task without paths, and an independent part takes its parent's paths. Existing routes are not rewritten. | List the open code tasks whose route has no paths. Their head sets the paths with an ordinary task update before the task moves to its next stage, as was done for #746 (`["**"]`). Do not invent paths for a closed task. |
+| `test_file_results` written on 0.17.0 | 0.17.0 kept a part's green result whatever runtimes the part ran on. 0.17.1 keeps one only where the part ran on the runtimes its fingerprints name, and new runs record `kept`, the number of green results a run kept. | After the update and before the first full run, delete the rows written before the update once: `DELETE FROM test_file_results WHERE created_at < '<time of the update>';`. This is a cache: no run, part, log or event goes, and the next full run checks those files again. Old runs show no `kept` count; do not backfill it. |
+| Node images | The image brings Firefox and WebKit beside Chromium. | Nothing in the database. A node reports a browser that does not start through its usual `browser_failed` state, which now names the engine. |
