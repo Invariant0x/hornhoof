@@ -78,6 +78,11 @@ describe('Map', () => {
   });
 
   it("says in the line at the bottom what the orchestrator's program does, and the server's alarm in red, in each language", async () => {
+    /* The page's steady clock stands still, so 7 and 125 minutes stay what they are while the test runs. */
+    vi.useFakeTimers({ toFake: ['performance'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const now = Date.now();
     const at = (m: number) => now - m * 60_000;
     const thinking = { state: 'thinking' as const, since: at(7), tool: null, screenAt: at(0), signAt: null, retry: null, reportedAt: at(0) };
@@ -104,6 +109,12 @@ describe('Map', () => {
   });
 
   it("shows in the line at the bottom that the orchestrator waits for his plan's limit to reset, and not after", async () => {
+    /* The page's clock stands at noon, so the reset an hour on is today whenever the test runs. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 3, 12, 0));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const at = new Date(Date.now() + 3_600_000);
     mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, limitUntil: at.toISOString() } }] });
     const { container, unmount } = render(<MapScreen {...PROPS} />);
@@ -157,13 +168,23 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     const cells = await screen.findByRole('img', { name: 'working: 1, needs a decision: 1, free: 2' });
     expect([...cells.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell h', 'cell', 'cell']);
-    later = true;
-    stream.send({ type: 'task', id: 't1' });
-    /* The square whose employee changed flashes once, even when the company is fetched again meanwhile. */
-    await vi.waitFor(() => expect(container.querySelector('.cell.r.ping')).not.toBeNull());
-    stream.send({ type: 'org' });
-    await vi.waitFor(() => expect(container.querySelector('.cell.ping')).toBeNull(), { timeout: 2000 });
-    expect(container.querySelector('.cell.r')).not.toBeNull();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      later = true;
+      stream.send({ type: 'task', id: 't1' });
+      /* The company is fetched again once task changes settle, 400 ms on. */
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      /* The square whose employee changed flashes once, for 950 ms, even when the company is fetched again meanwhile. */
+      expect(container.querySelector('.cell.r.ping')).not.toBeNull();
+      stream.send({ type: 'org' });
+      await act(() => vi.advanceTimersByTimeAsync(949));
+      expect(container.querySelector('.cell.r.ping')).not.toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(container.querySelector('.cell.ping')).toBeNull();
+      expect(container.querySelector('.cell.r')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fills the half gauge one segment of 24 per share of working agents', async () => {
@@ -422,8 +443,6 @@ describe('Map', () => {
   });
 
   it.each(['task', 'requests'])('keeps work lines fresh while %s events keep arriving faster than the refresh delay', async type => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    onTestFinished(() => { vi.useRealTimers(); });
     const stream = fakeStream();
     let working = true;
     mockApi({ 'GET /api/org': () => [200, {
@@ -434,6 +453,9 @@ describe('Map', () => {
     }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
+    /* The refresh waits on its timer only as the test moves it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const line = () => container.querySelector('.wires path[data-work="d1"]');
     expect(line()).toHaveClass('c');
     working = false;
@@ -451,7 +473,8 @@ describe('Map', () => {
   });
 
   it('turns the line yellow over its whole length when the head gave a result back, for what is left of five minutes', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    /* Every clock of the page moves only when the test moves it. */
+    vi.useFakeTimers();
     onTestFinished(() => {
       vi.useRealTimers();
     });
@@ -465,7 +488,9 @@ describe('Map', () => {
     };
     mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('Sales');
+    /* The answer comes in without the clock moving: Testing Library's findBy* would wait on a timer of the held clock. */
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText('Sales')).toBeInTheDocument();
     const work = () => container.querySelector('.wires path[data-work="d1"]');
     /* Amber dashes and dots run back up the trace, from the card to the hub. */
     expect(work()).toHaveClass('tr', 'live', 'a');
@@ -612,7 +637,8 @@ describe('Map', () => {
     await vi.waitFor(() => expect(container.querySelector('.hub-num')).toHaveTextContent('1/1'));
     await act(async () => {
       late();
-      await new Promise(r => setTimeout(r, 50));
+      /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
+      await new Promise(r => setImmediate(r));
     });
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
   });

@@ -1,6 +1,6 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from './task-route';
-import { vi } from 'vitest';
+import { onTestFinished, vi } from 'vitest';
 import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
@@ -61,8 +61,20 @@ export const ORG_WITH_TEAMS: Org = {
   ],
 };
 
+/* When the fixtures below were made; a test that reads their exact age stands its clock here (fixedAt). */
+export const MADE_AT = Date.now();
+
+/* The page's clock stands at MADE_AT for the test; timers stay real. */
+export function fixedAt() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(MADE_AT);
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
 export const RUNNING_AGENTS: RunningAgent[] = [
-  { id: 'b1', canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: new Date(Date.now() - 12 * 60_000).toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
+  { id: 'b1', canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: new Date(MADE_AT - 12 * 60_000).toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
   { id: 'b2', canOpen: true, name: 'Vera', busy: false, title: { en: 'Reviewer', ru: 'Рецензент' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: null, task: null, withCeo: false },
 ];
 
@@ -92,7 +104,7 @@ export const MACHINES: MachineView[] = [
       agents: RUNNING_AGENTS,
       parts: [{ run: 3, kind: 'tests', task: 12, part: 1, parts: 2, agent: 'Bruno', startedAt: '2026-11-01T10:00:00.000Z' }],
     } },
-  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false,
+  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(MADE_AT - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false,
     running: { agents: [], parts: [] } },
 ];
 

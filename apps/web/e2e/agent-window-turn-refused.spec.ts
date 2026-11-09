@@ -40,15 +40,16 @@ for (const lang of ['en', 'ru'] as const) {
 }
 
 test('the note goes once a new turn began', async ({ page }) => {
-  test.setTimeout(60_000);
   const live = fixture('busy');
   await atSize(page, { lang: 'en', theme: 'light', width: 1440 });
   await serveAgentWindow(page, live);
+  await page.clock.install();
   const window = await open(page, 'b1', 'en');
   await expect(window.getByText(en.window.turnRefused.busy)).toBeVisible();
   live.turnRefused = null;
-  /* The window looks again every 15 s when no news comes. */
-  await expect(window.getByText(en.window.turnRefused.busy)).toHaveCount(0, { timeout: 25_000 });
+  /* The window looks again every 15 s when no news comes; the page's clock passes them at once. */
+  await page.clock.runFor(15_000);
+  await expect(window.getByText(en.window.turnRefused.busy)).toHaveCount(0);
 });
 
 test('keys typed while the view of the session connects again reach the program in order', async ({ page }) => {
@@ -58,23 +59,36 @@ test('keys typed while the view of the session connects again reach the program 
   await serveAgentWindow(page, live);
   const got: string[] = [];
   let connections = 0;
+  let dropped = false;
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
-    const at = ++connections;
+    connections++;
     ws.onMessage(message => {
       const { type, data } = JSON.parse(String(message)) as { type: string; data?: string };
       if (type === 'input') got.push(data!);
-      if (at === 1 && type === 'input') void ws.close({ code: 4410, reason: 'node_offline' });
+      /* The view that gets the first key goes away, as when the machine drops for a moment. In a dev build React opens
+         the first view twice, so that is not always the first view opened. */
+      if (!dropped && type === 'input') {
+        dropped = true;
+        void ws.close({ code: 4410, reason: 'node_offline' });
+      }
     });
     ws.send(JSON.stringify({ type: 'ready', write: true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
   });
+  const start = Date.parse('2026-11-09T10:00:00Z');
+  await page.clock.install({ time: start });
   const window = await open(page, 'b1', 'en');
   await window.locator('.xterm-screen').click();
+  /* From here the page's clock moves only when the test moves it. */
+  await page.clock.pauseAt(start + 60_000);
   await page.keyboard.type('x');
   await expect.poll(() => got.length).toBeGreaterThan(0);
+  /* The view went down: its loader is back, and it waits half a second on the page's clock before it connects again. */
+  await expect(window.locator('.t-load')).toBeVisible();
   await page.keyboard.type('queued');
   await page.keyboard.press('Enter');
-  await expect.poll(() => got.join(''), { timeout: 15_000 }).toBe('xqueued\r');
+  await page.clock.runFor(500);
+  await expect.poll(() => got.join('')).toBe('xqueued\r');
   expect(connections).toBeGreaterThan(1);
   expect(errors.filter(line => !line.includes('WebSocket'))).toEqual([]);
 });

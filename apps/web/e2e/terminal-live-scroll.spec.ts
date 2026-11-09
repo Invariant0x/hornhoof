@@ -6,14 +6,17 @@ import { expect, test } from '@playwright/test';
 import { Tmux } from '../../node/src/terminal/tmux';
 import { parentOf } from '../../node/src/terminal/host';
 import { sendTerminalOutput, ViewHistory } from '../../node/src/terminal/view-stream';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
-async function clientTty(tmux: Tmux, child: ReturnType<Tmux['attach']>) {
-  for (const end = Date.now() + 5000; Date.now() < end;) {
-    for (const client of await tmux.clients()) if ((await parentOf(client.pid)) === child.pid) return client.tty;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  return null;
+/* The terminal of the view's tmux client, which attaches a moment after the view opens; a view that ended has none. */
+async function clientTty(tmux: Tmux, child: ReturnType<Tmux['attach']>): Promise<string | null> {
+  let tty: string | null = null;
+  await eventually(async () => {
+    for (const client of await tmux.clients()) if ((await parentOf(client.pid)) === child.pid) tty = client.tty;
+    return tty !== null || child.exitCode !== null || child.signalCode !== null;
+  });
+  return tty;
 }
 
 async function streamView(tmux: Tmux, child: ReturnType<Tmux['attach']>, send: (data: string) => void) {
