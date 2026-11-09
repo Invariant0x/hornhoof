@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { box } from './api';
 import { fullDepartment, type Tree } from './full-department';
 import { serveTree } from './tree-api';
+import { taskRoute } from '../test/task-route';
 
 type TraceData = {
   functionName?: string;
@@ -62,8 +63,9 @@ export async function serveFullDepartment(page: Page): Promise<{ full: Tree; ren
     renameBrunoTask(title: string) {
       const departments = full.org.departments.map((department, index) => index ? department : {
         ...department,
+        /* Bruno has no current task: he gets his own task #62, whole as the server sends it, with the route the chip reads. */
         employees: department.employees.map(employee => employee.name === 'Bruno'
-          ? { ...employee, task: { ...employee.task!, title } }
+          ? { ...employee, task: { id: 't62', number: 62, title, echelons: taskRoute('development', employee.id) } }
           : employee),
       });
       shown = { ...full, org: { ...full.org, departments } };
