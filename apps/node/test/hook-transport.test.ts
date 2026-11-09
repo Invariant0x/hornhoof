@@ -2,9 +2,9 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { listenIn } from '../../../test-support/ports.mjs';
 const { sendHook } = createRequire(import.meta.url)('../hh-hook-send.cjs');
-const timeout = AbortSignal.timeout.bind(AbortSignal);
 const close: (() => void)[] = [];
 afterEach(() => { close.splice(0).forEach(fn => fn());vi.unstubAllEnvs();vi.restoreAllMocks(); });
 
@@ -39,7 +39,12 @@ describe('shared hook transport', () => {
   });
   it.each([403, 'disconnect', 'timeout'] as const)('reports a final %s failure and remains bounded', async status => {
     const calls = await bridge(status);
-    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(50));
+    /* No clock: a call's limit runs out once a bridge that never answers holds that call, and never while a bridge answers. */
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
+      const limit = new AbortController(), heard = calls.length;
+      if (status === 'timeout') void eventually(() => calls.length > heard).then(() => { limit.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')); });
+      return limit.signal;
+    });
     expect(await sendHook('stop', '{}')).toBeNull();
     expect(calls).toHaveLength(status === 403 ? 1 : 3);
   });
