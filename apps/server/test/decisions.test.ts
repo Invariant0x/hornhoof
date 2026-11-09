@@ -236,8 +236,8 @@ describe('telling screens that decisions changed', () => {
   it('tells people who see the whole company that the request for the computer changed, without what it says', async () => {
     const c = await company();
     await listen(c.app);
+    /* A stream hears from its headers on: the server listens to the bus in the same step as it sends them. */
     const streams = { ceo: await openStream(c.app, c.tokens.ceo), zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
-    await new Promise(r => setTimeout(r, 50));
     c.ctx.computer.ask('Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => streams.ceo.messages.some(m => m.type === 'computer'));
@@ -253,7 +253,6 @@ describe('telling screens that decisions changed', () => {
     expect((await c.app.inject({ url: '/api/computer', headers })).statusCode).toBe(403);
     const inside = await openStream(c.app, undefined, headers);
     expect(inside.res.status).toBe(200);
-    await new Promise(r => setTimeout(r, 50));
     c.ctx.computer.ask('Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     /* What comes after the change on the same stream shows the change itself went by. */
@@ -266,7 +265,6 @@ describe('telling screens that decisions changed', () => {
     const c = await company();
     await listen(c.app);
     const streams = { zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
-    await new Promise(r => setTimeout(r, 50));
     const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
     const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: card!.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.ceo) });
     expect(built.statusCode).toBe(201);
@@ -280,7 +278,6 @@ describe('telling screens that decisions changed', () => {
     const c = await company();
     await listen(c.app);
     const stream = await openStream(c.app, c.tokens.dan);
-    await new Promise(r => setTimeout(r, 50));
     expect((await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.olga}`, payload: { access: { departments: [c.dev.id], teams: [] } }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => stream.messages.some(m => m.type === 'org'));
   });

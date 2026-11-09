@@ -3,6 +3,10 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { BUILTIN, NodeHub } from '../src/modules/nodes/hub.js';
+import { until } from './helpers-basic.js';
+
+/* A ping round that never comes during a test, the longest a timer takes: no socket here answers pings. */
+const NO_PING_MS = 2_147_483_647;
 
 describe('the node hub', () => {
   it('keeps the server transport link across delivery and refuses an old connection after replacement', async () => {
@@ -10,7 +14,7 @@ describe('the node hub', () => {
     let acknowledge!: () => void;
     const delivered = () => new Promise<void>(resolve => { acknowledge = resolve; });
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: NO_PING_MS,
       onClose: async () => {},
       onConnected: async (_id, link) => { links.push(link); },
       onMessage: async (_id, _msg, transport?: { linkId: string }) => { seen.push(transport?.linkId); acknowledge(); },
@@ -47,7 +51,7 @@ describe('the node hub', () => {
     const said = new Promise<void>(done => (heard = done));
     const handled: string[] = [];
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: NO_PING_MS,
       onClose: async () => {},
       onMessage: async (_id, msg: NodeMessage) => {
         /* As a finished job waits for the words Hornhoof typed into another agent's turn. */
@@ -60,36 +64,40 @@ describe('the node hub', () => {
     hub.attach(BUILTIN, socket as unknown as WebSocket);
     socket.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
     socket.emit('message', JSON.stringify({ type: 'agent.said', ref: 'r1', ok: true }));
-    const late = new Promise<void>((_, fail) => setTimeout(() => fail(new Error('the word waited behind the message')), 2000));
-    await Promise.race([said, late]);
-    await new Promise(r => setTimeout(r, 20));
+    /* A word that waited behind the message would wait for ever, and the message with it. */
+    await said;
+    await until(() => handled.length === 2);
     expect(handled).toEqual(['agent.said', 'status']);
   });
 
   it('says since when a node is away: from its socket closing, else from the first time it is asked', () => {
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const hub = new NodeHub({ pingMs: NO_PING_MS, onClose: async () => {}, onMessage: async () => {} });
     const node = { kind: 'node' as const, nodeId: 'n1' };
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
     hub.attach(node, socket as unknown as WebSocket);
     expect(hub.awaySince(node)).toBeNull();
-    const before = Date.now();
+    const closedAt = Date.now();
     socket.readyState = 3;
     socket.emit('close');
-    const since = hub.awaySince(node)!;
-    expect(since).toBeGreaterThanOrEqual(before);
-    expect(hub.awaySince(node)).toBe(since);
+    vi.advanceTimersByTime(1000);
+    expect(hub.awaySince(node)).toBe(closedAt);
+    vi.advanceTimersByTime(1000);
+    expect(hub.awaySince(node)).toBe(closedAt);
     /* One Hornhoof never saw, as after its own restart, is away from the first question on. */
     const other = { kind: 'node' as const, nodeId: 'n2' };
-    const first = hub.awaySince(other)!;
-    expect(first).toBeGreaterThanOrEqual(since);
-    expect(hub.awaySince(other)).toBe(first);
+    const asked = Date.now();
+    expect(hub.awaySince(other)).toBe(asked);
+    vi.advanceTimersByTime(1000);
+    expect(hub.awaySince(other)).toBe(asked);
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.awaySince(node)).toBeNull();
     hub.stop();
   });
 
   it('keeps the build a node said in its hello, and says none for a node it does not know', () => {
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    const hub = new NodeHub({ pingMs: NO_PING_MS, onClose: async () => {}, onMessage: async () => {} });
     const node = { kind: 'node' as const, nodeId: 'n1' };
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.buildOf(node)).toBeNull();
@@ -106,7 +114,7 @@ describe('the node hub', () => {
     const terms: string[] = [];
     const errors: unknown[] = [];
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: NO_PING_MS,
       onClose: async () => {},
       onError: err => errors.push(err),
       onTerminal: (_id, msg) => {
@@ -142,7 +150,9 @@ describe('the node hub', () => {
     oldSocket.emit('message', JSON.stringify({ type: 'agent.said', ref: 'r1', ok: true }));
     oldSocket.emit('message', JSON.stringify({ type: 'term.data', termId: 't2', data: 'late' }));
     release();
-    await new Promise(r => setTimeout(r, 20));
+    /* The status queued behind the hello is taken up, and dropped, in the same turn as the hello ends: by the next look both
+       are done. */
+    await until(() => handled.includes('hello'));
     expect(handled).toEqual(['hello']);
     expect(terms).toEqual(['t1']);
 
@@ -158,7 +168,7 @@ describe('the node hub', () => {
 
 describe('live program metadata in the hub', () => {
   it('requires a greeting, keeps snapshots isolated and coalesces update commands', () => {
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    const hub = new NodeHub({ pingMs: NO_PING_MS, onClose: async () => {}, onMessage: async () => {} });
     onTestFinished(() => hub.stop());
     const sent: unknown[] = [];
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {}, send(text: string) { sent.push(JSON.parse(text)); } });
@@ -218,7 +228,7 @@ describe('live program metadata in the hub', () => {
   });
 
   it('tracks browser failure, noRuns and load across greeting, live status updates and closed sockets', () => {
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    const hub = new NodeHub({ pingMs: NO_PING_MS, onClose: async () => {}, onMessage: async () => {} });
     onTestFinished(() => hub.stop());
     const unknown = { kind: 'node' as const, nodeId: 'missing' };
     expect(hub.browserErrorOf(unknown)).toBeNull();

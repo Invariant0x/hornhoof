@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +19,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { departments, harnessBuilds, harnessProducts, jobs, machines, personAccess, subscriptions } from '../src/db/schema.js';
 import { harnessGreeted, harnessRound, harnessSynced } from '../src/modules/testruns/harness.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { nextOf, type FakeNode } from './helpers.js';
+import { nextOf, until, type FakeNode } from './helpers.js';
 import { company, gets } from './test-runs-company.js';
 
 const folders: string[] = [];
@@ -185,12 +185,19 @@ describe('harness access and attempt fences', () => {
   });
 });
 
+/* What the node said so far is handled: a mark it sends comes back after it, as the server handles a node's messages one
+   after another. */
+async function handled(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
 const takesHarnesses = (node: FakeNode) => { node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [], testHarness: 1 }); };
 /* A machine that says it takes harnesses. */
 async function capable(c: Shared, token: string, name: string) {
   const machine = await c.machine(token, name);
   takesHarnesses(machine.node);
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await handled(machine.node);
   return machine;
 }
 const atHead = (c: Shared, commitSha = COMMIT) => { c.app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : 'main', commitSha }); };
@@ -271,9 +278,11 @@ describe('one build of a harness unit for all machines', () => {
   it('keeps the claim of a machine that says it still builds', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one');
     await c.claim(one.key);
-    await c.db.update(harnessBuilds).set({ leaseUntil: new Date(Date.now() + 1000) });
+    /* Live for a minute more, longer than a test may take: the claim renews it for the build's whole lease past that. */
+    const live = new Date(Date.now() + 60_000);
+    await c.db.update(harnessBuilds).set({ leaseUntil: live });
     expect((await c.claim(one.key)).json().state).toBe('build');
-    expect((await c.db.select().from(harnessBuilds))[0]!.leaseUntil!.getTime()).toBeGreaterThan(Date.now() + 60_000);
+    expect((await c.db.select().from(harnessBuilds))[0]!.leaseUntil!.getTime()).toBeGreaterThan(live.getTime());
   });
 
   it('gives a stopped build to the next machine without calling it failed', async () => {
@@ -415,7 +424,8 @@ describe('the harness reaching every machine', () => {
     await c.claim(one.key); await c.uploaded(one.key, Buffer.from('bundle'));
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node)));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
+    await handled(one.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
     const [product] = await c.db.select().from(harnessProducts), [build] = await c.db.select().from(harnessBuilds);
     expect(Object.values(product!.machines)).toMatchObject([{ name: 'one', commitSha: COMMIT, problem: null }]);
     expect(build!.copies).toEqual([one.nodeId]);
@@ -427,13 +437,15 @@ describe('the harness reaching every machine', () => {
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node)));
     two.node.send(synced(await asked(two.node)));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
+    await handled(one.node); await handled(two.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
     atHead(c, NEXT);
     await harnessRound(c.app.ctx);
     const problem = { status: 'error' as const, problem: { code: 'environment_unsupported' as const, detail: 'This repository needs a Go toolchain.' } };
     one.node.send(synced(await asked(one.node), { result: problem }));
     two.node.send(synced(await asked(two.node), { result: problem }));
-    await expect.poll(async () => Object.values((await c.db.select().from(harnessProducts))[0]!.machines).filter(m => m.problem).length).toBe(2);
+    await handled(one.node); await handled(two.node);
+    expect(Object.values((await c.db.select().from(harnessProducts))[0]!.machines).filter(m => m.problem).length).toBe(2);
     const [product] = await c.db.select().from(harnessProducts);
     expect(product).toMatchObject({ goodCommit: COMMIT, problem: { code: 'environment_unsupported', commitSha: NEXT } });
     expect((await turnsOf(c, c.head.id)).filter(prompt => prompt.includes('Go toolchain'))).toHaveLength(1);
@@ -444,12 +456,14 @@ describe('the harness reaching every machine', () => {
     atHead(c);
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node), { result: { status: 'error', problem: { code: 'environment_unsupported', detail: 'Needs Go.' } } }));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.problem).toBeTruthy();
+    await handled(one.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.problem).toBeTruthy();
     await harnessRound(c.app.ctx);
     expect(await gets(c.app.ctx, one.node, 'tests.harness')).toBe(false);
     await harnessRound(c.app.ctx, new Date(Date.now() + 31 * 60_000));
     one.node.send(synced(await asked(one.node)));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.problem).toBeNull();
+    await handled(one.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.problem).toBeNull();
   });
 
   it('does not tell the head of a passing failure, and asks again', async () => {
@@ -457,7 +471,7 @@ describe('the harness reaching every machine', () => {
     atHead(c);
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node), { result: { status: 'error', problem: { code: 'timeout', detail: 'Too slow.' } } }));
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await handled(one.node);
     expect((await turnsOf(c, c.head.id)).join('\n')).not.toContain('Too slow');
     await harnessRound(c.app.ctx, new Date(Date.now() + 31 * 60_000));
     expect((await asked(one.node)).commitSha).toBe(COMMIT);
@@ -486,7 +500,7 @@ describe('the harness reaching every machine', () => {
     await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-python-ml', key: OTHER }); await c.uploaded(one.key, Buffer.from('another lock'), OTHER);
     expect(await gets(c.app.ctx, two.node, 'tests.harness')).toBe(false);
     two.node.send(synced(first));
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await handled(two.node);
     const third = 'd'.repeat(64);
     await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-web', key: third }); await c.uploaded(one.key, Buffer.from('a third lock'), third);
     expect((await asked(two.node)).commitSha).toBe(NEXT);
@@ -514,11 +528,12 @@ describe('the harness reaching every machine', () => {
     atHead(c);
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node)));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
+    await handled(one.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
     one.node.close();
     const back = await c.reconnect(one);
     takesHarnesses(back);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await handled(back);
     await harnessRound(c.app.ctx);
     expect((await asked(back)).commitSha).toBe(COMMIT);
   });
@@ -532,7 +547,8 @@ describe('what a person or a head sees of a harness', () => {
     await c.claim(one.key, { key: OTHER, platform: 'linux-x64' }); await c.failed(one.key, 'no such version', OTHER);
     await harnessRound(c.app.ctx);
     one.node.send(synced(await asked(one.node)));
-    await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
+    await handled(one.node);
+    expect((await c.db.select().from(harnessProducts))[0]?.goodCommit).toBe(COMMIT);
     const state = JSON.parse((await call('test_harness')).text) as { goodCommit: string; machines: { name: string }[]; builds: { platform: string; status: string; error: string | null }[] };
     expect(state.goodCommit).toBe(COMMIT);
     expect(state.machines.map(m => m.name)).toEqual(['one']);

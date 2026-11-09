@@ -6,7 +6,8 @@ import { as, connectNode, invitePerson, listen, setUpCompany, TEST_API_KEY, test
 const NODE_KEY = 'k'.repeat(40);
 
 async function liveCompany(env: NodeJS.ProcessEnv = {}) {
-  const { app, db } = await testApp({ NODE_PING_MS: '1000', ...env });
+  /* No ping comes in a test, so no stand-in node is dropped for a pong that came late on a busy machine. */
+  const { app, db } = await testApp({ NODE_PING_MS: '2147483647', ...env });
   const url = await listen(app);
   onTestFinished(() => app.close());
   const ceo = await setUpCompany(app);

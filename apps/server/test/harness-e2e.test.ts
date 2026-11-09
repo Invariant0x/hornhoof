@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -55,7 +56,16 @@ afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, {
 afterAll(() => { vi.restoreAllMocks(); });
 
 const sh = (code: string) => ({ program: 'node', args: ['-e', code], cwd: '.' });
-const running = async (root: string) => ({ cacheRoot: join(root, 'scratch'), deadline: Date.now() + 15_000, signal: new AbortController().signal, log: () => {} });
+/* A time limit of the node's code that never runs out during a test: the largest delay a timer takes. */
+const NEVER_MS = 2_147_483_647;
+const running = async (root: string) => ({ cacheRoot: join(root, 'scratch'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
+/* What the node said so far is handled: a mark it sends comes back after it, as the server handles a node's messages one
+   after another. */
+async function handled(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
 /* What a build does, in a file it appends to: the proof of how many times it ran, whichever machine ran it. */
 async function repository(root: string) {
   const source = join(root, 'source'), log = join(root, 'builds');
@@ -107,7 +117,7 @@ async function world() {
       }
     };
     void serve().catch(() => {});
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await handled(node);
     return { ...joined, options, nodeId: (joined as { nodeId: string }).nodeId };
   };
   const product = async () => (await c.db.select().from(harnessProducts).where(eq(harnessProducts.departmentId, c.dev.id)))[0];
@@ -134,7 +144,7 @@ describe('one harness for a product, across all its machines', () => {
     const c = await world(), one = await c.machine(c.ceo, 'manual-secret');
     const marker = 'synthetic-private-repository-token-696';
     const commitSha = await c.repo.commit({ '.hornhoof/test-environment.json': JSON.stringify(c.repo.manifest(`console.error('${marker}');process.exit(1)`)) });
-    const result = await runTests({ type: 'tests.run', partId: '33333333-3333-4333-8333-333333333333', repo: { url: c.repo.url, token: marker }, repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(c.repo.url) }, commitSha, branch: null, task: 1, command: 'true', part: 1, parts: 1, timeoutMs: 30_000 }, one.options);
+    const result = await runTests({ type: 'tests.run', partId: '33333333-3333-4333-8333-333333333333', repo: { url: c.repo.url, token: marker }, repositoryScope: { companyId: c.dev.companyId, repositoryOwnerId: c.dev.id, repoUrlHash: hashToken(c.repo.url) }, commitSha, branch: null, task: 1, command: 'true', part: 1, parts: 1, timeoutMs: NEVER_MS }, one.options);
     const failure = (await unitsOf(c)).find(build => build.status === 'failed')!.error!;
     const problem = (await c.product())!.problem!.detail;
     const prompts = (await turnsOf(c, c.head.id)).join('\n');
@@ -239,8 +249,9 @@ describe('one harness for a product, across all its machines', () => {
     Object.defineProperty(process, 'arch', { ...arch, value: other });
     try {
       const runtimes = await trustedTestRuntimes(await running(c.root)), different = await c.machine(c.ann, 'different');
-      (different as unknown as { node: FakeNode }).node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: runtimes, testHarness: 1 });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      const { node } = different as unknown as { node: FakeNode };
+      node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: runtimes, testHarness: 1 });
+      await handled(node);
       await harnessRound(c.app.ctx);
       await c.reached(c.repo.first, 2);
     } finally { Object.defineProperty(process, 'arch', arch); }

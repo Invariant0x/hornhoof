@@ -5,6 +5,8 @@ import { appendEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
+/* A ping that never comes during a test, the longest a timer takes: the stream follows a change at once or not at all. */
+const NO_PING_MS = '2147483647';
 
 async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp({ NODE_KEY, ...env });
@@ -24,9 +26,9 @@ describe('GET /api/stream', () => {
 
   it('sends the orchestrator\'s conversation to people who see the whole company', async () => {
     const { app, ceo, orchestrator, companyId } = await company();
+    /* A stream hears from its headers on: the server listens to the bus in the same step as it sends them. */
     const stream = await openStream(app, ceo);
     expect(stream.res.headers.get('content-type')).toContain('text/event-stream');
-    await new Promise(r => setTimeout(r, 50));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'text', data: { text: 'What does Acme sell?' } });
     await until(() => stream.messages.some(m => m.type === 'agent_event'));
     expect(stream.messages.find(m => m.type === 'agent_event')).toMatchObject({
@@ -50,7 +52,6 @@ describe('GET /api/stream', () => {
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
     const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
-    await new Promise(r => setTimeout(r, 50));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'text', data: { text: 'secret plans' } });
     app.ctx.bus.publish(companyId, { type: 'org' });
     await until(() => stream.messages.some(m => m.type === 'org'));
@@ -63,8 +64,8 @@ describe('GET /api/stream', () => {
     await listen(app);
     const ceo = await setUpCompany(app);
     const stream = await openStream(app, ceo);
-    const hung = new Promise((_, fail) => setTimeout(() => fail(new Error('close waited for the stream')), 2000));
-    await Promise.race([app.close(), hung]);
+    /* Were it to wait for the stream, which nothing else ends, the close would never come. */
+    await app.close();
     await until(() => stream.ended());
   });
 
@@ -79,26 +80,26 @@ describe('GET /api/stream', () => {
   });
 
   it('ends the stream of a person who was disabled at once, without waiting for the ping', async () => {
-    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '60000' });
+    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: NO_PING_MS });
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
     const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
-    await new Promise(r => setTimeout(r, 50));
     const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
     await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) });
     await until(() => stream.ended());
   });
 
   it("stops sending a department's news to a person at once when they no longer reach it", async () => {
-    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '60000' });
+    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: NO_PING_MS });
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
     const [support] = await db.insert(departments).values({ companyId, name: 'Support', roleCode: 'SUP' }).returning();
     const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
-    await new Promise(r => setTimeout(r, 50));
     const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
     await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { access: { departments: [support!.id] } }, ...as(ceo) });
-    await new Promise(r => setTimeout(r, 50));
+    /* The change's own word that the org changed comes once the stream looked at her again, so what follows goes by her new
+       reach. */
+    await until(() => stream.messages.some(m => m.type === 'org'));
     app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: sales!.id } });
     app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: support!.id } });
     await until(() => stream.messages.some(m => m.type === 'requests'));

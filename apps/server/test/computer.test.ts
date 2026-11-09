@@ -22,6 +22,8 @@ import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
 const DAY_MS = 24 * 60 * 60 * 1000;
+/* A wait for a command's answer that no test outlasts, for commands that are answered. */
+const NEVER_MS = 2_147_483_647;
 const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 
 /* A company whose server has an updater, and a running turn of the orchestrator that answers the CEO. */
@@ -185,14 +187,24 @@ describe('access to the computer the server runs on', () => {
   /* Codex gives up on a tool after a minute, so a long command answers that it runs, and its result comes later. */
   it('tells the orchestrator a long command still runs, and gives its result when asked for it', async () => {
     const { app, ceo, control } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 300 });
+    const computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 300 });
+    app.ctx.computer = computer;
+    const waits = vi.spyOn(computer, 'wait');
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     const client = await mcp(app, TOKEN);
-    const started = await call(client, 'computer', { command: 'apt-get upgrade -y', timeoutSeconds: 900 });
+    /* The wait for an answer runs on a clock that stands still until the test moves it past the wait, once that wait began. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const outwaited = async <T>(asked: Promise<T>, waited: number): Promise<T> => {
+      await until(() => waits.mock.calls.length === waited);
+      vi.advanceTimersByTime(300);
+      return asked;
+    };
+    const started = await outwaited(call(client, 'computer', { command: 'apt-get upgrade -y', timeoutSeconds: 900 }), 1);
     expect(started.isError).toBeFalsy();
     const id = text(started).match(/computer_result with id ([0-9a-f-]{36})/)![1]!;
     expect(text(started)).toMatch(/^Still running\./);
-    expect(text(await call(client, 'computer_result', { id }))).toMatch(/^Still running\./);
+    expect(text(await outwaited(call(client, 'computer_result', { id }), 2))).toMatch(/^Still running\./);
     await answerAs(control, 'Upgraded 3 packages.\n');
     expect(text(await call(client, 'computer_result', { id }))).toBe('Exit code 0.\nUpgraded 3 packages.\n');
     expect(readdirSync(join(control, 'computer'))).toEqual([]);
@@ -239,7 +251,7 @@ describe('access to the computer the server runs on', () => {
 
   it("lets the turn the CEO's click opens use the computer and nothing else only the CEO may, until a person without the right writes into it", async () => {
     const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 3000 });
+    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
     await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
@@ -263,7 +275,7 @@ describe('access to the computer the server runs on', () => {
 
   it('keeps computer access in a running turn when Hornhoof types improvement notices or an employee writes into it', async () => {
     const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 3000 });
+    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -307,7 +319,7 @@ describe('access to the computer the server runs on', () => {
 
   it('keeps the computer-opening click through retries without granting decision rights, while a plain notice retry grants neither', async () => {
     const { app, db, ceo, control, orchestrator, builtin } = await company();
-    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 3000 });
+    app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: NEVER_MS });
     const retryRun = async (failedJobId: string) => {
       builtin.send({ type: 'job.done', jobId: failedJobId, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Overloaded.', result: '', failure: { kind: 'overloaded', retryable: true, text: 'Provider overloaded.' } });
       await until(async () => (await db.select().from(jobs).where(eq(jobs.continueOf, failedJobId))).length === 1);
@@ -355,7 +367,7 @@ describe('access to the computer the server runs on', () => {
 
   it('refuses computer on a second retry after pending input was not kept on a click retry', async () => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: 100 });
+    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -380,7 +392,7 @@ describe('access to the computer the server runs on', () => {
 
   it.each(['unheard', 'queued'] as const)('refuses computer when saved marked words are replayed via %s after a non-CEO message', async mode => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: 100 });
+    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
@@ -402,7 +414,7 @@ describe('access to the computer the server runs on', () => {
 
   it.each(['unheard', 'queued'] as const)('refuses computer when live input lands between the %s replay read and its store', async mode => {
     const c = await company();
-    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: 100 });
+    c.app.ctx.computer = new ComputerAccess(c.control, c.app.ctx.updater, { waitMs: NEVER_MS });
     await invitePerson(c.app, c.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await c.db.select().from(people).where(eq(people.name, 'Zed'));
 
