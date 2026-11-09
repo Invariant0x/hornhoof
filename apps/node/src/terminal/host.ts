@@ -723,10 +723,13 @@ export class TerminalHost {
   /* Whether agy's screen as it is now, with its styles, shows what is asked within toolsMs, then waits settleMs; false once
      the turn is stopped or the program is gone. Dim words there are a suggestion, not input. */
   private async agyShows(a: Agent, shows: (screen: string) => boolean, signal?: AbortSignal, settleMs = 0): Promise<boolean> {
-    for (const end = Date.now() + this.toolsMs; Date.now() < end && !signal?.aborted && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
-      if (!shows(await this.opts.tmux.screen(a.name, 0, true))) continue;
-      await sleep(settleMs);
-      return true;
+    for (const end = Date.now() + this.toolsMs; !signal?.aborted && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
+      const late = Date.now() >= end;
+      if (shows(await this.opts.tmux.screen(a.name, 0, true))) {
+        await sleep(settleMs);
+        return true;
+      }
+      if (late) return false;
     }
     return false;
   }
@@ -931,6 +934,8 @@ export class TerminalHost {
     const lost = new LostWords(prompt, { enterMs: this.enterWaitMs, quietMs: this.wordsQuietMs }, Date.now());
     for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.pressPlainAgain(a, job, prompt, lost)) {
       if (Date.now() < end) continue;
+      this.drain(a);
+      if (a.took) break;
       a.busy = false;
       /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
       a.hash = null;
@@ -1640,14 +1645,16 @@ export class TerminalHost {
 
   /* Whether within enterWaitMs the program took the prompt Hornhoof typed, ended its turn or ended itself, or the turn
      was called off: the turn goes on from there without another Enter. */
+  /* It looks once more after its time is up: a slow look on a busy machine may have lasted while the program took the words. */
   private async tookPrompt(a: Agent, signal?: AbortSignal): Promise<boolean> {
     let ended = false;
     void a.ended?.promise.then(() => (ended = true));
-    for (const end = Date.now() + this.enterWaitMs; Date.now() < end; await sleep(this.pollMs)) {
+    for (const end = Date.now() + this.enterWaitMs; ; await sleep(this.pollMs)) {
+      const late = Date.now() >= end;
       this.drain(a);
       if (a.took || ended || signal?.aborted || !(await this.opts.tmux.alive(a.name))) return true;
+      if (late) return false;
     }
-    return false;
   }
 
   /* Claude Code says it started through its hook; the others are ready once their prompt shows. */

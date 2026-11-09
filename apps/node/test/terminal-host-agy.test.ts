@@ -14,7 +14,7 @@ const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {
 });
 const records = (log: string) => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 const opens = () => sent.filter(m => m.type === 'turn.open');
-const start = () => setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
+const start = () => setUp({ readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 100 });
 
 // The hooks keep the recorded transcript path, which belongs to another home. Only the computed path has these answers.
 describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
@@ -22,7 +22,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
 
   it('refuses live words while Antigravity runs without typing them', async () => {
     const log = vi.fn();
-    await setUp({ log, plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
+    await setUp({ log, plugins: [], readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 100 });
     const running = host.run(agyJob('live-refusal', 'HANG', { jobId: 'agy-live' }));
     /* Its turn counts as under way from when the prompt is on its way; here it works on it. */
     await until(() => host['agents'].get('live-refusal')?.took === true);
@@ -35,7 +35,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   });
 
   it('takes a program gone between two looks at it for gone, and does not fail on its screen', async () => {
-    await setUp({ plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 20 });
+    await setUp({ plugins: [], readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 20 });
     const running = host.run(agyJob('gone-look', 'HANG', { jobId: 'agy-gone-look' }));
     await until(() => host['agents'].get('gone-look')?.took === true);
     const looks = vi.spyOn(tmux, 'screen').mockRejectedValue(new Error('no server running'));
@@ -102,7 +102,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   });
 
   it.each(['WORK', 'WORK LAG_TEXT'])('opens a typed turn and its queued turn while settling %s', async prefix => {
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 100, pollMs: prefix.includes('LAG') ? 500 : 100 });
+    await setUp({ readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 100, pollMs: prefix.includes('LAG') ? 500 : 100 });
     expect(await host.run(agyJob('typed', ''))).toMatchObject({ ok: true, sessionId: null });
     await typeTurn('typed', 'wtyped', `${prefix} typed in agy`, 'job-first');
     expect(opens()[0]).toMatchObject({ agentKey: 'typed', text: `${prefix} typed in agy` });
@@ -158,7 +158,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   });
 
   it('keeps a lost Stop open beyond the former idle timeout until a person stops it', async () => {
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 50, reportMs: 100 });
+    await setUp({ readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 50, reportMs: 100 });
     const stop = new AbortController();
     let ended = false;
     const turn = agyJob('lost', 'NO_STOP', { jobId: 'job-lost', signal: stop.signal });
@@ -201,7 +201,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   });
 
   it('keeps an older interruption in the screen history from cancelling a later turn', async () => {
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
+    await setUp({ readyMs: 10_000, toolsMs: 5000, cols: 120, rows: 40, lookMs: 100 });
     expect(await host.run(agyJob('old-interruption', 'WORK', { env: { FAKE_OLD_INTERRUPTED: '1' } }))).toMatchObject({ ok: true, result: 'FINISHED' });
   });
 
