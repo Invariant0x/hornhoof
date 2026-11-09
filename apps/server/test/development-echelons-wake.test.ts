@@ -10,7 +10,7 @@ describe('required-route wake identity', () => {
     const task = await loadTask(f.db, f.task.id);
     const route = (await f.detail()).echelons;
     const wake = taskWakeOf(task, { why: 'review' }, route);
-    expect(wake).toMatchObject({ stage: 'review', candidateId: route.candidateId, version: task.version });
+    expect(wake).toMatchObject({ stage: 'review', candidateId: route.candidateId, status: task.status });
     expect(wake).not.toHaveProperty('merging');
   });
 });

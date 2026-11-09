@@ -239,7 +239,8 @@ describe('a task that comes after others', () => {
     expect(woken(await updateTask(ctx, head.id, tests.task.id, { after: [api.id] }))).toEqual([]);
     const ready = vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
     await pump(ctx, tess.id);
-    expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['obsolete', 'stale']]);
+    /* The assignment wake names no version, so the dispatcher holds the turn back unsent because the task now waits. */
+    expect((await turnsOf(tess.id)).map(j => [j.status, j.error, j.startedAt])).toEqual([['failed', 'waiting', null]]);
     ready.mockReturnValue(false);
     await wakeAll(ctx, (await complete(api.id)).wakes);
     expect((await turnsOf(tess.id)).filter(j => j.status === 'queued').map(j => j.taskId)).toEqual([tests.task.id]);

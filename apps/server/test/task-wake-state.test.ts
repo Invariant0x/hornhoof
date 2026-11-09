@@ -34,7 +34,7 @@ async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
     return t!;
   });
   const job = async (t: Task | null, agentId: string | null = worker!.id) => (await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId, taskId: t?.id ?? null, kind: 'conversation', prompt: 'Work.', timeoutMs: 1000 }).returning())[0]!;
-  const message = async (id: string, t: Task, why: WakeWhy, agentId = worker!.id) => db.insert(agentEvents).values({ companyId: company!.id, agentId, jobId: id, kind: 'message', data: { text: 'A task wake.', taskWake: taskWakeOf(t, { why }, routeSnapshot(await routeOf(db, t), t.assigneeAgentId)) } });
+  const message = async (id: string, t: Task, why: WakeWhy, agentId = worker!.id, version?: number) => db.insert(agentEvents).values({ companyId: company!.id, agentId, jobId: id, kind: 'message', data: { text: 'A task wake.', taskWake: taskWakeOf(t, { why, version }, routeSnapshot(await routeOf(db, t), t.assigneeAgentId)) } });
   return { db, owner: owner!, sub: sub!, head: head!, worker: worker!, reviewer: reviewer!, task, job, message, setRoute };
 }
 
@@ -72,13 +72,14 @@ describe('task wake policy in the database', () => {
 
   it('keeps current actions and rejects work for closed tasks, other holders, and other phases', async () => {
     const c = await fixture();
-    const cases: { why: WakeWhy; initial?: Partial<Task>; next?: Partial<Task>; nextRoute?: Partial<Route['state']>; receiver?: string; stale: boolean }[] = [
+    const cases: { why: WakeWhy; initial?: Partial<Task>; next?: Partial<Task>; nextRoute?: Partial<Route['state']>; receiver?: string; namedVersion?: true; stale: boolean }[] = [
       { why: 'assigned', stale: false },
       { why: 'assigned', initial: { status: 'working' }, stale: false },
       { why: 'assigned', next: { status: 'working' }, stale: true },
       { why: 'assigned', nextRoute: { stage: 'review' }, stale: true },
       { why: 'assigned', nextRoute: { candidateId: randomUUID() }, stale: true },
-      { why: 'assigned', next: { version: 2 }, stale: true },
+      /* A wake that names the task version expires when the version moves on. */
+      { why: 'assigned', next: { version: 2 }, namedVersion: true, stale: true },
       { why: 'assigned', next: { status: 'done', closedAt: new Date(), assigneeAgentId: null }, stale: true },
       { why: 'assigned', next: { status: 'cancelled', closedAt: new Date() }, stale: true },
       { why: 'assigned', next: { assigneeAgentId: c.head.id }, stale: true },
@@ -97,7 +98,7 @@ describe('task wake policy in the database', () => {
       const task = await c.task(test.initial);
       const receiver = test.receiver ?? c.worker.id;
       const job = await c.job(task, receiver);
-      await c.message(job.id, task, test.why, receiver);
+      await c.message(job.id, task, test.why, receiver, test.namedVersion ? task.version : undefined);
       if (test.next) await c.db.update(tasks).set(test.next).where(eq(tasks.id, task.id));
       if (test.nextRoute) await c.setRoute(task, test.nextRoute);
       expect(await discardStaleTurn(c.db, job), `${test.why} ${task.number}`).toBe(test.stale);

@@ -334,7 +334,7 @@ describe('task messages reach their recipient', () => {
   });
 
 
-  it('replaces an obsolete queued assignment with the comment that ends its external wait', async () => {
+  it('brings the comment that ends its external wait into the queued assignment turn, with no second turn', async () => {
     const c = await messaging();
     const task = await c.task();
     c.ctx.hub.isReady = () => false;
@@ -343,7 +343,8 @@ describe('task messages reach their recipient', () => {
     c.ctx.hub.isReady = () => true;
     await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.head.id }, task.id, 'Submit now.')).wakes);
     const turns = await c.turnsOf();
-    expect(turns[0]).toMatchObject({ status: 'obsolete', error: 'stale' });
+    /* The assignment wake names no version, so it stays current and the comment joins it rather than queueing another. */
+    expect(turns).toHaveLength(1);
     expect(turns.filter(turn => turn.status === 'running')).toEqual([expect.objectContaining({ taskId: task.id, prompt: expect.stringContaining('Submit now.') })]);
   });
 
