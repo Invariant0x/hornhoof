@@ -58,6 +58,9 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 
 - A test part keeps green results only where it ran on the runtimes its run's fingerprints name, so a later run skips
   unchanged files.
+- A test part goes only to a machine with the very runtimes that described its run, the ones Tests checks its receipt
+  against, so a run that passed is no longer refused for parts that ran on another architecture. A run whose describing
+  node lacks a runtime its profile needs ends at once and names the runtime.
 - Quality tools in a test part read the grammars the machine keeps, and a crapper failure says why.
 - A preparation step that hears nothing from Hornhoof for a minute stops, a part waits at most ten minutes for another
   machine's build and then builds it itself, and the part's log says each step.
@@ -126,6 +129,9 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   отдела с длинными ходами отвечают сразу; итог проверяющего отказывает, если его модель, подписка или навык сменились до
   записи; маршрут отмененной задачи показывается отмененным, каждая причина этапа названа, а сырой id владельца не
   показывается.
+- Исправлено: часть прогона уходит только машине с теми самыми средами, которые описали прогон и по которым Тесты
+  проверяют ее квитанцию, поэтому прошедший прогон больше не отвергается из-за частей на машине другой архитектуры.
+  Прогон, у описавшей ноды которого нет среды, нужной профилю, кончается сразу и называет эту среду.
 - Исправлено: нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
   функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
 - Исправлено: Тесты возвращают дефект кандидата, в том числе такой, из-за которого прогон не может начаться, автору на
