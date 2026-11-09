@@ -1,4 +1,4 @@
-import { PIPELINE_SECTIONS, type DepartmentPipeline, type DepartmentReport, type PipelineRow, type PipelineSection } from '@hornhoof/protocol/pipeline-report';
+import { FILE_BUDGET_MS, PIPELINE_SECTIONS, TEST_BUDGET_MS, type DepartmentPipeline, type DepartmentReport, type PipelineRow, type PipelineSection } from '@hornhoof/protocol/pipeline-report';
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
@@ -82,6 +82,16 @@ function TestTimes({ tests }: { tests: DepartmentReport['tests'] }) {
       {tests.slowestTests.length > 0 && (
         <TimeList title={P.slowTests}>
           {tests.slowestTests.map(s => <TimeLine key={`${s.package}/${s.file}/${s.name}`} name={s.name} ms={s.ms} lines={[`${s.package}/${s.file}`]} />)}
+        </TimeList>
+      )}
+      {tests.overBudgetFiles.length > 0 && (
+        <TimeList title={P.overFiles(msText(t, FILE_BUDGET_MS))}>
+          {tests.overBudgetFiles.map(f => <TimeLine key={`${f.package}/${f.file}`} name={`${f.package}/${f.file}`} ms={f.totalMs} path lines={[phasesText(t, f).join(', ')].filter(Boolean)} />)}
+        </TimeList>
+      )}
+      {tests.overBudgetTests.length > 0 && (
+        <TimeList title={P.overTests(msText(t, TEST_BUDGET_MS))}>
+          {tests.overBudgetTests.map(s => <TimeLine key={`${s.package}/${s.file}/${s.name}`} name={s.name} ms={s.ms} lines={[`${s.package}/${s.file}`]} />)}
         </TimeList>
       )}
     </>

@@ -1,7 +1,7 @@
 import { timingLine } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, TestRunner } from 'vitest';
-import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testPartTimings, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testPartTimings, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
 import { keepTimings, timingsOfLog } from '../src/modules/testruns/timings.js';
@@ -131,6 +131,24 @@ describe('keeping what the logs of a turn said', () => {
     expect(dev.tests.slowestTests[0]).toEqual({ package: 'apps/server', file: 'test/b.test.ts', name: 'slow in test/b.test.ts', ms: 150 });
     expect(dev.tests.packages[0]).toMatchObject({ tests: 40, medianTestMs: 2, slowerThanMedian: 19, medianFileMs: 200 });
     expect(await db.select({ n: sql<number>`count(*)::int` }).from(testPartTimings)).toEqual([{ n: 1 }]);
+  });
+
+  it('names the files over 30 s and the tests over 1 s, also for a turn kept before such lists', async () => {
+    const { db, companyId, run } = await runOf();
+    await run(1, 'tests', [file('test/a.test.ts', 100), file('test/b.test.ts', 40_000)].join('\n'));
+    const dev = (await pipelineReport(db, companyId, 7)).departments[0]!;
+    expect(dev.tests.overBudgetFiles.map(f => [f.file, f.totalMs])).toEqual([['test/b.test.ts', 40_000]]);
+    expect(dev.tests.overBudgetTests).toEqual([{ package: 'apps/server', file: 'test/b.test.ts', name: 'slow in test/b.test.ts', ms: 20_000 }]);
+
+    const [kept] = await db.select().from(turnSnapshots);
+    for (const d of kept!.facts.departments) {
+      delete d.tests.overBudgetFiles;
+      delete d.tests.overBudgetTests;
+    }
+    await db.update(turnSnapshots).set({ facts: kept!.facts });
+    const older = (await pipelineReport(db, companyId, 7)).departments[0]!;
+    expect(older.tests.overBudgetFiles.map(f => f.file)).toEqual(['test/b.test.ts']);
+    expect(older.tests.overBudgetTests.map(t => t.name)).toEqual(['slow in test/b.test.ts']);
   });
 });
 

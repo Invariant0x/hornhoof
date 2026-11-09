@@ -1,4 +1,4 @@
-import { AGENT_TIMES, EXTERNAL_WAITS, KIND_LINES, PIPELINE_STAGES, type AgentTimeKind, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
+import { AGENT_TIMES, EXTERNAL_WAITS, FILE_BUDGET_MS, KIND_LINES, PIPELINE_STAGES, TEST_BUDGET_MS, type AgentTimeKind, type DepartmentReport, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
 import type { TaskEventKind, TaskStatus, TestRunFileCache } from '../../db/schema.js';
 import type { AgentTime } from './tree.js';
 
@@ -284,24 +284,44 @@ function packagesOf(files: FileTime[], timings: FactsTimings[]): PackageTime[] {
 }
 
 const SHOWN_SLOWEST = 10;
+/* A suite far over the budget has hundreds of such tests; the slowest of them are where to start. */
+const SHOWN_OVER_BUDGET = 50;
 
-function slowestTestsOf(timings: FactsTimings[]): SlowTest[] {
+/* Each test the logs named, at its slowest, slowest first. */
+function namedTestsOf(timings: FactsTimings[]): SlowTest[] {
   const named = timings.flatMap(t => t.files.flatMap(f => f.slowest.map(s => ({ ...s, package: f.package, file: f.file }))));
   return [...groupBy(named, s => `${s.package}\n${s.file}\n${s.name}`).values()]
     .map(same => same.reduce((a, b) => (b.ms > a.ms ? b : a)))
-    .sort((a, b) => b.ms - a.ms)
-    .slice(0, SHOWN_SLOWEST);
+    .sort((a, b) => b.ms - a.ms);
 }
+
+/* Both take a list slowest first. */
+const filesOverBudget = (files: FileTime[]): FileTime[] => files.filter(f => f.totalMs > FILE_BUDGET_MS).slice(0, SHOWN_OVER_BUDGET);
+const testsOverBudget = (tests: SlowTest[]): SlowTest[] => tests.filter(t => t.ms > TEST_BUDGET_MS).slice(0, SHOWN_OVER_BUDGET);
 
 function testsFacts(timings: FactsTimings[]): TestsFacts {
   const rows = timings.flatMap(t => t.files);
-  const files = [...groupBy(rows, r => `${r.package}\n${r.file}`).values()].map(fileTime);
+  const files = [...groupBy(rows, r => `${r.package}\n${r.file}`).values()].map(fileTime).sort((a, b) => b.totalMs - a.totalMs);
+  const named = namedTestsOf(timings);
   return {
     files: files.length,
     ...phases(files),
     packages: packagesOf(files, timings),
-    slowestFiles: [...files].sort((a, b) => b.totalMs - a.totalMs).slice(0, SHOWN_SLOWEST),
-    slowestTests: slowestTestsOf(timings),
+    slowestFiles: files.slice(0, SHOWN_SLOWEST),
+    slowestTests: named.slice(0, SHOWN_SLOWEST),
+    overBudgetFiles: filesOverBudget(files),
+    overBudgetTests: testsOverBudget(named),
+  };
+}
+
+/* What a report shows of test times. An older snapshot kept no lists over the budget, so its slowest ones stand in. */
+export function testsShown(t: TestsFacts): DepartmentReport['tests'] {
+  return {
+    packages: t.packages,
+    slowestFiles: t.slowestFiles,
+    slowestTests: t.slowestTests,
+    overBudgetFiles: t.overBudgetFiles ?? filesOverBudget(t.slowestFiles),
+    overBudgetTests: t.overBudgetTests ?? testsOverBudget(t.slowestTests),
   };
 }
 
