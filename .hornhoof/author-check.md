@@ -36,7 +36,7 @@ The selection goes by the paths a change touches, and within a package by the im
 | Database | `apps/server/drizzle`, `apps/server/src/db/schema.ts` | `server` whole; a test of `server-postgres` runs no suite here: `NOTE runs in the final profile` says so |
 | The selection itself | `apps/node/src/test-impact*.ts`, `apps/node/src/test-environment.ts`, `apps/node/src/test-fingerprint.ts` | `node` and `release-scripts`, whole |
 | Templates and skills | `templates` | only the tests of `server` and `node` that read them, named by the rule |
-| Browser scenarios | `apps/web/e2e`, and the `.tsx` and `.css` files under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen, by the same rule a release uses to run them again, and says so when a screen has none |
+| Browser scenarios | `apps/web/e2e`, and the `.tsx` and `.css` files under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen, to look at first, and says so when a screen has none; a release runs every scenario again when any screen changed, as a scenario may pass any screen |
 | Build and release | `.github/workflows`, `scripts/install.sh`, `apps/updater`, `Dockerfile`, `compose.yaml`, `.dockerignore` | `release-scripts` and `server`, whole |
 | Everything | `package.json`, the lockfile, `tsconfig.base.json`, `eslint.config.js`, the test environment, the Vitest configs | `selection_is_whole_suite`, until `--allow-whole`, also beside a change of the protocol |
 

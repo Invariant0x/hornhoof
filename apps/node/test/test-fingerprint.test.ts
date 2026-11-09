@@ -506,7 +506,7 @@ describe('what the scanner follows', () => {
   });
 });
 
-describe('scenarios that drive a screen', () => {
+describe('scenarios that drive the app', () => {
   const browser = suite('browser', 'apps/web', { files: ['apps/web/e2e/**/*.spec.ts'], split: { kind: 'argv-files' }, scenarioSources: 'apps/web/src' });
   const web: Files = {
     'package.json': '{"name":"root","devDependencies":{"@playwright/test":"1"}}',
@@ -522,30 +522,19 @@ describe('scenarios that drive a screen', () => {
   };
   const value = manifest([browser]);
   const after = (path: string, text: string) => changed(input(web, value), input({ ...web, [path]: text }, value));
+  const every = ['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts', 'browser:apps/web/e2e/tree.spec.ts'];
 
-  it('a scenario named after a screen follows that screen, and all it imports', async () => {
-    expect(await after('apps/web/src/screens/TreeView.tsx', 'export const TreeView = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/tree.spec.ts']);
-    expect(await after('apps/web/src/ui/dot.ts', 'export const dot = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts']);
+  /* A scenario opens the app, and the app may show any screen on the way: one that reads another route breaks a scenario of another name. */
+  it('a scenario follows every screen of the app it opens, and all they import, whatever it is named after', async () => {
+    expect(await after('apps/web/src/screens/TreeView.tsx', 'export const TreeView = 2;\n')).toEqual(every);
+    expect(await after('apps/web/src/ui/dot.ts', 'export const dot = 2;\n')).toEqual(every);
+    expect(await after('apps/web/src/App.tsx', 'export const App = 2;\n')).toEqual(every);
   });
 
-  it('a scenario named after no screen follows them all', async () => {
-    expect(await after('apps/web/src/App.tsx', 'export const App = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts']);
-  });
-
-  it('a source a rule gives to every scenario counts by itself, and not by all it imports', async () => {
-    const files = { ...web, 'apps/web/src/App.tsx': "import { Tree } from './screens/Tree';\nexport const App = Tree;\n" };
-    const rule = manifest([browser], { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['apps/web/src/App.tsx'], suiteIds: ['browser'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
-    const edited = (path: string, text: string) => changed(input(files, rule), input({ ...files, [path]: text }, rule));
-    expect(await edited('apps/web/src/App.tsx', `${files['apps/web/src/App.tsx']}// more\n`)).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts', 'browser:apps/web/e2e/tree.spec.ts']);
-    expect(await edited('apps/web/src/ui/dot.ts', 'export const dot = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts']);
-  });
-
-  it('a scenario named for a family of screens follows that family', async () => {
-    const family: Files = { ...web, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 1;\n' };
-    delete family['apps/web/src/screens/Tree.tsx'];
-    const edited = await changed(input(family, value), input({ ...family, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 2;\n' }, value));
-    expect(edited).toContain('browser:apps/web/e2e/tree.spec.ts');
-    expect(await changed(input(family, value), input({ ...family, 'apps/web/src/ui/AgentCard.tsx': 'export const AgentCard = 2;\n' }, value))).not.toContain('browser:apps/web/e2e/tree.spec.ts');
+  it('a source a rule gives to every scenario changes every scenario and no other test', async () => {
+    const files = { ...web, 'apps/web/src/App.tsx': "import { Tree } from './screens/Tree';\nexport const App = Tree;\n", 'apps/web/test/app.test.ts': "import { it } from 'vitest';\nit('x', () => {});\n" };
+    const rule = manifest([browser, suite('web', 'apps/web/test', { files: ['apps/web/test/**/*.test.ts'] })], { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['apps/web/src/App.tsx'], suiteIds: ['browser'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
+    expect(await changed(input(files, rule), input({ ...files, 'apps/web/src/App.tsx': `${files['apps/web/src/App.tsx']}// more\n` }, rule))).toEqual(every);
   });
 
   it('a helper of a scenario changes those who import it', async () => {
