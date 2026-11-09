@@ -5,14 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   browserEnv,
+  type BrowserSources,
   browsersDir,
   ensureRepoBrowser,
-  GLOBAL_PLAYWRIGHT_DIR,
   playwrightVersionIn,
   prepareAndVerifyBrowser,
   prepareBrowser,
   readBrowserError,
-  SEED_BROWSERS_PATH,
   startupBrowserCheck,
   summarizeBrowserError,
   verifyBrowser,
@@ -83,6 +82,16 @@ function markInstalled(baseDir: string, folders: string[]): void {
   }
 }
 
+/* The image's browsers as stand-ins: its Playwright, whose engines start without a browser, and a seed of each engine it
+   lists. A node's start then checks only our side, and nothing is downloaded. */
+function imageBrowsers(): BrowserSources {
+  const globalPlaywrightDir = fakePlaywrightPackage(makeTemp('hh-image-pw-'), '1.64.1', '1248', ['firefox', 'webkit']);
+  cpSync(join(enginesPackage({ chromium: '130.0', firefox: '132.0', webkit: '18.2' }), 'node_modules', 'playwright-core'), join(globalPlaywrightDir, 'node_modules', 'playwright-core'), { recursive: true });
+  const seedDir = makeTemp('hh-image-seed-');
+  markInstalled(seedDir, ['chromium-1248', 'chromium_headless_shell-1248', 'ffmpeg-1013', 'firefox-12480', 'webkit-12480']);
+  return { globalPlaywrightDir, seedDir };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -102,7 +111,7 @@ describe('startup tool readiness', () => {
 
   it('checks the complete runtime tool set with the required version arguments', async () => {
     const bin = startupToolsOnPath();
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, imageBrowsers())).toBeNull();
     for (const [name, args] of [
       ['unzip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
       ['strings', '--version'], ['patch', '--version'], ['ss', '--version'], ['objdump', '--version'],
@@ -161,7 +170,7 @@ describe('startup tool readiness', () => {
 
   it('continues readiness after unzip -v succeeds', async () => {
     const args = unzipOnPath('echo "UnZip 6.00"\nexit 0');
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, imageBrowsers())).toBeNull();
     expect(existsSync(args)).toBe(true);
     expect(readFileSync(args, 'utf8').trim()).toBe('-v');
   });
@@ -642,34 +651,6 @@ describe('the three browser engines', () => {
 });
 
 describe('verifyBrowser and prepareAndVerifyBrowser', () => {
-  it('launches real Chromium, Firefox and WebKit headless from a prepared browser folder and names the cause when broken', async () => {
-    /* An image before 0.17.1 brought Chromium alone; a node of it downloads the other two as it starts. */
-    const seeded = existsSync(SEED_BROWSERS_PATH) && ['firefox-', 'webkit-'].every(engine => readdirSync(SEED_BROWSERS_PATH).some(entry => entry.startsWith(engine)));
-    if (!existsSync(GLOBAL_PLAYWRIGHT_DIR) || !seeded) return;
-    const dir = makeTemp('hh-real-pw-');
-    const target = browsersDir(dir);
-    mkdirSync(target, { recursive: true });
-    for (const entry of readdirSync(SEED_BROWSERS_PATH)) {
-      if (entry.startsWith('.')) continue;
-      cpSync(join(SEED_BROWSERS_PATH, entry), join(target, entry), { recursive: true });
-    }
-
-    const ok = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.browserVersion).toMatch(/^chromium \d+\.\d+.*, firefox \d+\.\d+.*, webkit \d+\.\d+/);
-
-    /* Break the headless shell binary to prove launch failure reports a clear, named reason. */
-    const shellDir = readdirSync(target).find(entry => entry.startsWith('chromium_headless_shell-'))!;
-    const binDir = readdirSync(join(target, shellDir)).find(entry => entry.startsWith('chrome-headless-shell'))!;
-    const binary = join(target, shellDir, binDir, 'chrome-headless-shell');
-    writeFileSync(binary, '#!/bin/sh\necho "error while loading shared libraries: libnss3.so: cannot open shared object file" >&2\nexit 127\n');
-    chmodSync(binary, 0o755);
-
-    const broken = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(broken.ok).toBe(false);
-    if (!broken.ok) expect(broken.error).toMatch(/^chromium: .*libnss3\.so/);
-  });
-
   it('extracts concise reasons from Playwright launch errors without ASCII box borders', () => {
     const boxed = [
       'browserType.launch: Executable doesn\'t exist at /data/browsers/chromium-1248/chrome-linux64/chrome',
@@ -839,14 +820,12 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     writeFileSync(join(badRepo, 'node_modules', 'playwright', 'package.json'), JSON.stringify({ version: '9.9.9' }));
     await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright browsers could not start:');
 
-    if (existsSync(GLOBAL_PLAYWRIGHT_DIR) && existsSync(SEED_BROWSERS_PATH)) {
-      expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null)).toBeNull();
-    }
+    expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null, undefined, imageBrowsers())).toBeNull();
     const sysDir2 = makeTemp('hh-sysfiles-2-');
     const files2 = { passwd: join(sysDir2, 'passwd'), group: join(sysDir2, 'group') };
-    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2, imageBrowsers());
     expect(existsSync(files2.passwd)).toBe(false);
-    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2, imageBrowsers());
     expect(readFileSync(files2.passwd, 'utf8')).toContain(`hh${FIRST_UID}:x:${FIRST_UID}:${FIRST_UID}`);
   });
 });

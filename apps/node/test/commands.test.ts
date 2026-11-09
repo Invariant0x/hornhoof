@@ -20,6 +20,13 @@ vi.mock('node:child_process', async importOriginal => {
   };
 });
 
+/* A started node checks its tools and browsers first; browser.test.ts checks that. Here it finds them ready, so no node
+   runs Playwright or downloads a browser. */
+vi.mock('../src/browser.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/browser.js')>(),
+  startupBrowserCheck: async () => null,
+}));
+
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const SERVER = 'https://hornhoof.example.test';
 const KEY = 'node-key-0123456789abcdef';

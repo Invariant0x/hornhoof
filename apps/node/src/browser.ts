@@ -534,12 +534,15 @@ async function startupToolError(bin: string, args: string[], verifyUser: JobUser
   return null;
 }
 
-async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+/* Where the node's browsers come from: the image's seed and Playwright unless a test gives stand-ins for them. */
+export type BrowserSources = Pick<PrepareBrowserOptions, 'seedDir' | 'globalPlaywrightDir'>;
+
+async function startupReadinessError(dir: string, verifyUser: JobUser | null, sources: BrowserSources): Promise<string | null> {
   for (const { bin, args } of STARTUP_TOOLS) {
     const error = await startupToolError(bin, args, verifyUser);
     if (error) return error;
   }
-  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
+  const res = await prepareAndVerifyBrowser({ dir, verifyUser, ...sources });
   return res.ok ? null : res.error;
 }
 
@@ -547,7 +550,8 @@ export async function startupBrowserCheck(
   dir: string,
   verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
+  sources: BrowserSources = {},
 ): Promise<string | null> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  return startupReadinessError(dir, verifyUser);
+  return startupReadinessError(dir, verifyUser, sources);
 }
