@@ -4,14 +4,15 @@ import type { Org, TaskDetail } from '../types';
 
 const STAGE_CLASS = { pending: 'next', active: 'current', complete: 'passed', skipped: 'skipped' };
 
-function ownerName(id: string, task: TaskDetail, org: Org | null): string {
+function ownerName(id: string, task: TaskDetail, org: Org | null): string | undefined {
   const employee = org?.departments.flatMap(department => department.employees).find(agent => agent.id === id);
-  return employee?.name ?? [task.assignee, task.executor].find(agent => agent?.id === id)?.name ?? id;
+  return employee?.name ?? [task.assignee, task.executor].find(agent => agent?.id === id)?.name;
 }
 
 /* Stage order and ownership are server facts, independent of an employee's role. */
 export function TaskWorkflow({ workflow, task, org }: { workflow: EchelonsSnapshot; task: TaskDetail; org: Org | null }) {
-  return <WorkflowStages workflow={workflow} resolveOwner={id => ownerName(id, task, org)} />;
+  const someone = useT().tasks.echelons.someone;
+  return <WorkflowStages workflow={workflow} resolveOwner={id => ownerName(id, task, org) ?? someone} />;
 }
 
 export function WorkflowStages({ workflow, resolveOwner }: { workflow: EchelonsSnapshot; resolveOwner(id: string): string }) {

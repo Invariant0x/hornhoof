@@ -1,6 +1,6 @@
 import { turnCleanupDefault } from './echelons-update.js';
 import type { EchelonsSnapshot, EchelonStep } from '@hornhoof/protocol/echelons';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { taskRoutes } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
@@ -65,6 +65,12 @@ export async function routeSnapshots(db: Db | Tx, rows: Pick<Task, 'id' | 'compa
     if (!route) throw new ApiError(409, 'conflict', 'A task has no required route. Complete the documented release data preparation.', 'task_invalid');
     return [task.id, routeSnapshot(route, task.assigneeAgentId)];
   }));
+}
+
+/* A cancelled task keeps its stages as they stood, and its phase says the work ended unfinished. */
+export async function cancelRoutes(tx: Tx, companyId: string, taskIds: string[]): Promise<void> {
+  await tx.update(taskRoutes).set({ state: sql`jsonb_set(${taskRoutes.state}, '{phase}', '"cancelled"')`, revision: sql`${taskRoutes.revision} + 1` })
+    .where(and(inArray(taskRoutes.taskId, taskIds), eq(taskRoutes.companyId, companyId)));
 }
 
 /* The task version and route revision are changed in the same transaction. */

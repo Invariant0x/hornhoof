@@ -7,7 +7,7 @@ import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.j
 import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
-import { createRoute, routeOf, changeRoute, type Route } from './echelons-store.js';
+import { createRoute, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -758,6 +758,7 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
       .update(requests)
       .set({ status: 'withdrawn', answeredAt: new Date() })
       .where(and(inArray(requests.taskId, [taskId, ...ended.map(t => t.id)]), eq(requests.status, 'open')));
+    await cancelRoutes(tx, task.companyId, [taskId, ...ended.map(t => t.id)]);
     const after = await afterCancelled(tx, actor, [row, ...ended]);
     wakes.push(...after.wakes);
     waiting = after.waiting;

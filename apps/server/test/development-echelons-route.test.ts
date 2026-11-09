@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { submit } from '../src/modules/tasks/engine.js';
+import { cancel, submit } from '../src/modules/tasks/engine.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 
 describe('the only Development work route', () => {
@@ -23,5 +23,12 @@ describe('the only Development work route', () => {
     expect(moved.task).toMatchObject({ status: 'review', assigneeAgentId: reviewer.id });
     expect(await detail()).toMatchObject({ echelons: { stage: 'review', ownerAgentId: reviewer.id } });
     expect(moved.wakes.map(wake => wake.agentId)).toEqual([reviewer.id]);
+  });
+
+  it('ends the route of a cancelled task and of the work under it as cancelled', async () => {
+    const { ctx, task, head, create, detail } = await fixture();
+    const { task: child } = await create({ title: 'Keep tax totals', parentId: task.id });
+    await cancel(ctx, { agentId: head.id }, task.id, 'Not needed any more.');
+    for (const id of [task.id, child.id]) expect((await detail(id)).echelons).toMatchObject({ phase: 'cancelled' });
   });
 });

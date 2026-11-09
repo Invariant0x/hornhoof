@@ -3,7 +3,7 @@ import { z } from 'zod';
 /* One ordered route and one current owner for executable work. */
 export const ECHELON_STAGES = ['architecture', 'development', 'review', 'cleanup', 'security', 'tests'] as const;
 export type EchelonStage = (typeof ECHELON_STAGES)[number];
-export type EchelonPhase = 'active' | 'waiting' | 'escalated' | 'ready' | 'done';
+export type EchelonPhase = 'active' | 'waiting' | 'escalated' | 'ready' | 'done' | 'cancelled';
 export type EchelonStep = {
   stage: EchelonStage;
   status: 'pending' | 'active' | 'complete' | 'skipped';
