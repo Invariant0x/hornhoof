@@ -22,7 +22,8 @@ type Res = { content: { text: string }[]; isError?: boolean };
 /* Development declared its repository's full test command, unless the test says otherwise, and Bruno works on a task
    there. The built-in node takes the parts. */
 async function company({ full = FULL as string | null, env = {} as NodeJS.ProcessEnv } = {}) {
-  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '50', ...env });
+  /* No ping comes in a test, so no stand-in node is dropped for a pong that came late on a busy machine. */
+  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647', ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const ctx = app.ctx;

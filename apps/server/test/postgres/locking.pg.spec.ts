@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { startRun } from '../../src/modules/testruns/runs.js';
 import { eq } from 'drizzle-orm';
 import { testParts, testRuns } from '../../src/db/schema.js';
+import { until } from '../helpers-basic.js';
 import { backendPid, FIXTURE_COMMIT, privatePostgres, runFixture } from './helpers.js';
 
 it('observes startRun blocked by the company row owner and commits exactly once after release', async () => {
@@ -19,7 +20,9 @@ it('observes startRun blocked by the company row owner and commits exactly once 
     await locker.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [fixture.companyId]);
     pending = startRun(actor.ctx, actor.job, { task: actor.task.number, command: 'lock-fixture', parts: 1 }).then(reply => { completions++; return reply; });
     void pending.catch(() => {});
-    await expect.poll(async () => (await pg.admin.query<{ blocked: boolean; query: string }>('SELECT $1::int = ANY(pg_blocking_pids(pid)) AS blocked, query FROM pg_stat_activity WHERE pid = $2', [owner, waiter])).rows[0], { timeout: 2000, interval: 10 }).toMatchObject({ blocked: true, query: expect.stringMatching(/companies.*for update/i) });
+    const waiting = async () => (await pg.admin.query<{ blocked: boolean; query: string }>('SELECT $1::int = ANY(pg_blocking_pids(pid)) AS blocked, query FROM pg_stat_activity WHERE pid = $2', [owner, waiter])).rows[0];
+    await until(async () => (await waiting())?.blocked === true);
+    expect(await waiting()).toMatchObject({ blocked: true, query: expect.stringMatching(/companies.*for update/i) });
     expect(completions).toBe(0);
     expect(await pg.db.select().from(testRuns)).toEqual([]);
     await locker.query('COMMIT');

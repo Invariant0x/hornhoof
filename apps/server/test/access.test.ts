@@ -123,8 +123,8 @@ describe('access by departments', () => {
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     const kate = await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [marketing.id] } });
     await ownPlan(db, 'maria@acme.com', seller!.id);
+    /* Each stream listens from the moment it answers: the server takes the bus in the same step it sends the headers. */
     const streams = await Promise.all([ceo, maria, kate].map(t => openStream(app, t)));
-    await new Promise(r => setTimeout(r, 50));
     await appendEvent(app.ctx, { companyId, agentId: seller!.id, kind: 'text', data: { text: 'Two schools signed.' } });
     app.ctx.bus.publish(companyId, { type: 'org' });
     await until(() => streams.every(s => s.messages.some(m => m.type === 'org')));

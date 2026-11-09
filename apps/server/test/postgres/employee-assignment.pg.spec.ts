@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import { agentChanges, agentEvents, agents, jobs } from '../../src/db/schema.js';
 import { setAssignment } from '../../src/modules/agents/assignment.js';
 import type { ToolJob } from '../../src/modules/tools/job.js';
+import { until } from '../helpers-basic.js';
 import { backendPid, privatePostgres, runFixture } from './helpers.js';
 
 it('commits both concurrent assignments by one head to different workers without losing either audit record', async () => {
@@ -28,10 +29,7 @@ it('commits both concurrent assignments by one head to different workers without
   try {
     await barrier.query('SELECT pg_advisory_lock(707, 707)');
     pending = Promise.allSettled(fixture.actors.map((actor, index) => setAssignment(actor.ctx, job, { employee: actor.job.agentId, assignment: `Assignment ${index + 1}` })));
-    await expect.poll(async () => {
-      const rows = await pg.admin.query<{ pid: number }>("SELECT pid FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock' AND wait_event = 'advisory'", [pids]);
-      return rows.rows;
-    }, { timeout: 3000, interval: 10 }).toHaveLength(2);
+    await until(async () => (await pg.admin.query<{ pid: number }>("SELECT pid FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock' AND wait_event = 'advisory'", [pids])).rows.length === 2);
     await barrier.query('SELECT pg_advisory_unlock(707, 707)');
     const results = await pending;
     expect(results).toEqual([{ status: 'fulfilled', value: undefined }, { status: 'fulfilled', value: undefined }]);

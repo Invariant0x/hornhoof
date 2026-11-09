@@ -65,8 +65,8 @@ describe('what waits for people', () => {
     expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.olga)).statusCode).toBe(403);
     const list = (await c.get('/api/tasks?status=all', c.tokens.olga)).body;
     expect(list).not.toContain(task.title);
+    /* The stream listens from the moment it answers: the server takes the bus in the same step it sends the headers. */
     const stream = await openStream(c.app, c.tokens.olga);
-    await new Promise(r => setTimeout(r, 60));
     const answered = await answer(c, request.id, c.tokens.olga, { approve: true });
     expect(answered.statusCode).toBe(200);
     expect(answered.json().request).toMatchObject({ id: request.id, status: 'approved' });

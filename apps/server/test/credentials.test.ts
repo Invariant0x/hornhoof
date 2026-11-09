@@ -1,13 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket from 'ws';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, companies, departments, machines, nodes, people, planCredentials, sessions, subscriptions } from '../src/db/schema.js';
 import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js';
 import { companyView } from '../src/modules/tools/company.js';
-import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, nextOf, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
@@ -46,15 +47,16 @@ async function plans(provider: 'claude' | 'kimi' | 'codex' = 'claude') {
   return { app, db, ceo, oleg, plan, olegsPlan: olegs.subscriptions[0].id as string, a, b, o, online, lines, url };
 }
 
-/* The next message of this type, past the others. */
-async function nextOf<T extends ServerMessage['type']>(node: FakeNode, type: T, ms = 2000): Promise<Extract<ServerMessage, { type: T }>> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const left = end - Date.now();
-    if (left <= 0) throw new Error(`No ${type} arrived.`);
-    const m = await Promise.race([node.next(), new Promise<null>(r => setTimeout(() => r(null), left))]);
-    if (m?.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
+/* Whether the node got a message of this type from everything the server sent it so far; what came meanwhile is taken. A
+   mark the node sends comes back after all of it, as one socket keeps their order, and after what the node said before was
+   handled: no clock decides it. */
+async function got(node: FakeNode, type: ServerMessage['type']): Promise<boolean> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+  let seen = false;
+  for (let n = node.queued(); n > 0; n--) if ((await node.next()).type === type) seen = true;
+  return seen;
 }
 
 const stored = async (db: Awaited<ReturnType<typeof plans>>['db'], plan: string) =>
@@ -132,7 +134,7 @@ describe("a plan's sign-in sealed to its nodes", () => {
     const again = await online(b, KEY('c'));
     expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('c') }] });
     expect(await stored(db, plan)).toEqual([{ nodeId: a.nodeId, version: 1, sealed: SEALED('a') }]);
-    await expect(nextOf(again, 'cred.put', 300)).rejects.toThrow();
+    expect(await got(again, 'cred.put')).toBe(false);
   });
 });
 
@@ -244,7 +246,7 @@ describe('signing a plan in from Hornhoof', () => {
     expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: false });
     const old = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { nodeId: a.nodeId, fresh: false }, ...as(ceo) });
     expect(old.statusCode).toBe(409);
-    await expect(nextOf(na, 'login.start', 300)).rejects.toThrow();
+    expect(await got(na, 'login.start')).toBe(false);
   });
 
   it('says whether no machine of the plan is online, or the online ones cannot run the sign-in', async () => {
@@ -369,16 +371,20 @@ describe('signing a plan in from Hornhoof', () => {
   it('passes no key of an owner whose session ended with nobody told, and closes', async () => {
     const { db, ceo, plan, a, online, url } = await plans();
     const na = await online(a, KEY('a'), false);
+    /* Typed keys look at their person again once a second has gone since the last look: here the clock moves only when the
+       test moves it. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const screen = await loginScreen(url, ceo, plan, a.nodeId);
     await nextOf(na, 'term.open');
     const closed = new Promise<number>(resolve => screen.ws.on('close', code => resolve(code)));
     screen.ws.send(JSON.stringify({ type: 'input', data: 'before' }));
     expect((await nextOf(na, 'term.input')).data).toBe('before');
     await db.delete(sessions);
-    await new Promise(resolve => setTimeout(resolve, 1100));
+    vi.advanceTimersByTime(60_000);
     screen.ws.send(JSON.stringify({ type: 'input', data: 'after' }));
     expect(await closed).toBe(4403);
-    await expect(nextOf(na, 'term.input', 200)).rejects.toThrow('No term.input');
+    expect(await got(na, 'term.input')).toBe(false);
   });
 
   it("tells the owner how it ended, seals the new sign-in for the plan's nodes and is ready once the node says so", async () => {
@@ -488,6 +494,10 @@ describe("a Codex plan's lease", () => {
     na.send({ type: 'cred.sealed', kind: 'codex_auth', version: 1, envelopes: [{ nodeId: p.a.nodeId, sealed: SEALED('a') }, { nodeId: p.b.nodeId, sealed: SEALED('b') }] });
     await until(async () => (await stored(p.db, p.plan)).length === 2);
     await p.db.update(subscriptions).set({ leaseNodeId: p.a.nodeId }).where(eq(subscriptions.id, p.plan));
+    /* The clock stands still from here: a machine is away from the moment Hornhoof saw it go, and each look at the leases
+       says how long after that it is. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     na.close();
     await until(() => !p.app.ctx.hub.isOnline({ kind: 'node', nodeId: p.a.nodeId }));
     const holder = async () => (await p.db.select({ lease: subscriptions.leaseNodeId }).from(subscriptions).where(eq(subscriptions.id, p.plan)))[0]!.lease;
@@ -498,7 +508,7 @@ describe("a Codex plan's lease", () => {
     const { app, a, nb, holder } = await codex();
     await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS - 60_000));
     expect(await holder()).toBe(a.nodeId);
-    await expect(nextOf(nb, 'cred.lease', 300)).rejects.toThrow();
+    expect(await got(nb, 'cred.lease')).toBe(false);
   });
 
   it('moves to a machine of the plan that is online once the holder has been away ten minutes, and the holder gives it up when back', async () => {
@@ -526,7 +536,7 @@ describe("a Codex plan's lease", () => {
     await until(async () => (await db.select({ status: nodes.status }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]!.status === 'needs_login');
     await moveLeases(app.ctx, new Date(Date.now() + 3 * LEASE_MOVE_MS));
     expect(await holder()).toBe(b.nodeId);
-    await expect(nextOf(nb, 'cred.lease', 300)).rejects.toThrow();
+    expect(await got(nb, 'cred.lease')).toBe(false);
     void a;
   });
 
@@ -545,7 +555,7 @@ describe("a Codex plan's lease", () => {
     const told = await nextOf(back, 'cred.seal');
     expect(told).toMatchObject({ kind: 'codex_auth', version: 1 });
     expect(told.recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
-    await expect(nextOf(back, 'cred.put', 300)).rejects.toThrow();
+    expect(await got(back, 'cred.put')).toBe(false);
     /* The laptop says hello again: it holds no lease, so it is told to give up any sign-in. */
     nb.close();
     const laptop = await connectNode(url, b.key);
