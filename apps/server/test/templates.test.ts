@@ -670,7 +670,7 @@ describe('templates', () => {
       const root = join(DIR, '..');
       const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
       const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-      expect(styleBook).toContain('Version 1.1, approved by the head of Design on 2026-11-06.');
+      expect(styleBook).toContain('Version 1.2, approved by the head of Design on 2026-11-07.');
       expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
       for (const heading of [
         '## 1. Colours',
@@ -693,7 +693,7 @@ describe('templates', () => {
       expect(materialsSection).toContain('The viewer covers the window, follows the theme and keeps its close button on screen. A document reads to its end');
       expect(materialsSection).toContain('A refused or failed material keeps its name and says why in words.');
       expect(materialsSection).toContain('A download mark appears only on what can be downloaded.');
-      expect(materialsSection).toContain('a field not in the code yet is marked as proposed.');
+      expect(materialsSection).toContain('Built with the classes `.mat*`, `.mv*`, `.opt*` and `.answer-zone`. What each field means is decided with Development.');
       expect(styleBook).toContain('| 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |');
       expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
       expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
