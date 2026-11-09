@@ -20,6 +20,10 @@ export interface ServiceContext {
   nodeOwner: JobUser; jobUser: JobUser; deadline: number; signal: AbortSignal;
   log: (line: string) => void; registerSecrets: (values: string[]) => void;
   env?: Record<string, string>; postgresBin?: string;
+  /* How long a stopped process (stopMs) or the rest of an exited one's group (exitMs) may take before it is forced, and how
+     long cleanup may take (cleanupMs). Omitted, the supervisor's own; a test passes graces that cannot run out, or one that
+     runs out at once. */
+  graces?: { stopMs?: number; exitMs?: number; cleanupMs?: number };
 }
 export interface ServicePrepareContext extends ServiceContext { cacheRoot: string; envKey: string; inputDigest: string }
 export interface ServicePartContext extends ServiceContext { attemptRoot: string; checkout: string }
@@ -28,13 +32,13 @@ export interface OpenedServices { env: Record<string, string>; close: () => Prom
 
 const FORMAT = 'hornhoof-services-v1';
 const PG_BIN = '/usr/lib/postgresql/17/bin';
-const GRACE_MS = 2000;
+const GRACES = { stopMs: 2000, exitMs: 2000, cleanupMs: 7000 };
 const preparationLeases = new WeakMap<ServiceContext, number>();
 // This literal runs as the node owner, outside the checkout. Job programs receive only descriptors 0, 1 and 2.
 const LEASE_GUARDIAN = String.raw`
 const {spawn}=require('node:child_process');
 const {readdirSync,readFileSync}=require('node:fs');
-let job, completed=false, disconnected=!process.connected, failed=false, code=1, hard, polling;
+let job, completed=false, disconnected=!process.connected, failed=false, code=1, hard, polling, exitGrace=2000;
 process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});
 function signal(value) {
   if(!job?.pid)return;
@@ -56,7 +60,7 @@ function reap() {
   try{if(alive())return}catch{failed=true;signal('SIGKILL');return}
   finish();
 }
-function escalation(graceMs=2000) {
+function escalation(graceMs=exitGrace) {
   hard??=setTimeout(()=>{failed=true;signal('SIGKILL')},graceMs);
 }
 function disconnect() {
@@ -78,6 +82,7 @@ function observeJob() {
 }
 function start(message) {
   if(job||disconnected||!process.connected)return disconnect();
+  exitGrace=message.exitGraceMs??exitGrace;
   job=spawn(message.program,message.args,{cwd:message.cwd,env:message.env,uid:message.uid,gid:message.gid,detached:true,stdio:['pipe','pipe','pipe']});
   observeJob();
   if(disconnected||!process.connected)disconnect();
@@ -161,6 +166,9 @@ async function waitGroup(pid: number | undefined, deadline: number): Promise<voi
     await pause(5);
   }
 }
+function graces(context: ServiceContext): typeof GRACES {
+  return { ...GRACES, ...context.graces };
+}
 function isSupervisionFailure(message: unknown): boolean {
   return typeof message === 'object' && message !== null && 'supervisionFailed' in message && message.supervisionFailed === true;
 }
@@ -178,7 +186,7 @@ function serviceProcess(program: string, args: string[], cwd: string, env: Recor
   child.on('message', message => {
     if (isSupervisionFailure(message)) supervisionFailed = true;
   });
-  if (fd !== undefined) send({ program, args, cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid });
+  if (fd !== undefined) send({ program, args, cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid, exitGraceMs: graces(context).exitMs });
   const { stdin, stdout, stderr } = child;
   if (!stdin || !stdout || !stderr) throw new Error('Service subprocess pipes are unavailable');
   return { child, stdin, stdout, stderr, stopChild, supervisionFailed: () => supervisionFailed };
@@ -187,6 +195,7 @@ function serviceProcess(program: string, args: string[], cwd: string, env: Recor
 function launch(program: string, args: string[], cwd: string, env: Record<string, string>, context: ServiceContext, hidden: string[], input = ''): Running {
   check(context);
   const { child, stdin, stdout, stderr, stopChild, supervisionFailed } = serviceProcess(program, args, cwd, env, context);
+  const { stopMs, exitMs } = graces(context);
   let output = '';
   let failure: Error | undefined;
   let ended = false;
@@ -199,8 +208,8 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   stdin.end(input);
   const interrupt = () => {
     interrupted = true;
-    stopChild('SIGTERM', GRACE_MS);
-    hard ??= setTimeout(() => stopChild('SIGKILL'), GRACE_MS);
+    stopChild('SIGTERM', stopMs);
+    hard ??= setTimeout(() => stopChild('SIGKILL'), stopMs);
   };
   const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
   context.signal.addEventListener('abort', interrupt, { once: true });
@@ -211,7 +220,7 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
       drain = setTimeout(() => {
         failure = new Error('Service descendants kept output open after leader exit');
         stopChild('SIGKILL'); stdout.destroy(); stderr.destroy();
-      }, GRACE_MS);
+      }, exitMs);
     });
     child.once('close', code => {
       ended = true; clearTimeout(timer); clearTimeout(hard); clearTimeout(drain); context.signal.removeEventListener('abort', interrupt);
@@ -225,7 +234,7 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   /* Long-lived services can exit before readiness observes them. Keep the rejection handled until their owner awaits it. */
   void result.catch(() => undefined);
   let closing: Promise<void> | undefined;
-  const stop = (signal: NodeJS.Signals = 'SIGTERM', graceMs = GRACE_MS) => closing ??= (async () => {
+  const stop = (signal: NodeJS.Signals = 'SIGTERM', graceMs = stopMs) => closing ??= (async () => {
     let forced = false;
     const deadline = Date.now() + graceMs;
     stopChild(signal, graceMs);
@@ -248,7 +257,7 @@ async function command(program: string, args: string[], cwd: string, env: Record
   } finally { await child.stop(); }
 }
 function cleanupContext(context: ServiceContext): ServiceContext {
-  const cleanup = { ...context, signal: new AbortController().signal, deadline: Date.now() + 7000 };
+  const cleanup = { ...context, signal: new AbortController().signal, deadline: Date.now() + graces(context).cleanupMs };
   const fd = preparationLeases.get(context);
   if (fd !== undefined) preparationLeases.set(cleanup, fd);
   return cleanup;
