@@ -61,14 +61,27 @@ test('a commit on main whose version is out already moves nothing and fails noth
   for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new' \}\}/, step.split('\n')[0]);
 });
 
-test('the publish job runs only for a push to main, after the tests', () => {
-  assert.match(images.publish, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && /);
-  assert.match(images.publish, /needs: \[mark, test\]/);
+test('the publish job runs only for a push to main, after the tests and the images of that push', () => {
+  assert.match(images.publish, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && needs\.images\.result == 'success' && /);
+  assert.match(images.publish, /needs: \[mark, test, images\]/);
 });
 
-test('images are built by hand only, under the tag of their commit alone', () => {
-  assert.match(images.images, /if: \$\{\{ !cancelled\(\) && github\.event_name == 'workflow_dispatch' && /);
+test('images are built by a push to main and by hand, under the tag of their commit alone', () => {
+  assert.match(images.images, /if: \$\{\{ !cancelled\(\) && \(github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'\)\) && /);
   assert.match(images.images, /tags: ghcr\.io\/invariant0x\/\$\{\{ matrix\.name \}\}:\$\{\{ github\.sha \}\}\n/);
+});
+
+test('a push to main builds the images of a new version only, and a run by hand always builds', () => {
+  const steps = images.images.split(/^ {6}- /m).slice(1);
+  const look = steps.findIndex(step => /id: fresh\n/.test(step));
+  assert.equal(look, 1, 'the images job looks right after its checkout');
+  assert.match(steps[look], /if \[ "\$EVENT" = push \] && gh api "repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/v\$version"/);
+  assert.match(steps[look], /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  for (const step of steps.slice(look + 1)) assert.match(step, /if: \$\{\{ steps\.fresh\.outputs\.version == 'new'/, step.split('\n')[0]);
+});
+
+test('one run at a time builds or moves the images of a branch, and none cancels another', () => {
+  assert.match(read('images.yml'), /\nconcurrency:\n  group: images-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false\n/);
 });
 
 test('a version is released only after its images went out', () => {

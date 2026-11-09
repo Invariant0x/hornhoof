@@ -16,13 +16,20 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/CODEOWNERS'
       - '.github/pull_request_template.md'
-  # Pull requests run the tests only. Images are built by hand, from any branch, under the tag of their commit alone. A push
-  # to main builds nothing: it moves the tags every machine reads onto exactly the images built for its commit, or stops.
+  # Pull requests run the tests only. A push to main of a new version builds its images under the tag of its commit, then
+  # moves the tags every machine reads onto exactly those images, or stops: a release needs nobody to start a build. A run by
+  # hand builds the images of any branch under the tag of its commit alone and moves nothing.
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# One run at a time for each branch, so two pushes to main never build or move the images of one version at once. A run
+# waits for the one before it rather than cancelling it.
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # A passed test run leaves the status hornhoof/tests on the commit it checked: Hornhoof's own, or GitHub's through the
@@ -164,7 +171,7 @@ jobs:
   images:
     needs: [mark, test]
     # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
     # While the repository is private, the repository variable BUILD_RUNS_ON can send the image, publish and release jobs
     # to our own runner, and BUILDKIT_ENDPOINT names the BuildKit those jobs build with there. Remove both before the
     # repository goes public, together with TESTS_RUNS_ON.
@@ -185,9 +192,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Most pushes to main carry no new version: one whose version is out already builds nothing. A run by hand builds.
+      - id: fresh
+        name: Look whether this version is out already
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$EVENT" = push ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2> /dev/null; then
+            echo "Version $version is out already, so this push builds no images."
+            echo "version=out" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=new" >> "$GITHUB_OUTPUT"
+          fi
       # The product version, the commit's title, how many database migrations the build carries, and the node build:
       # the last commit that changed the node image's files, which needs the whole history checked out above.
       - id: build
+        if: ${{ steps.fresh.outputs.version == 'new' }}
         run: |
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --format=%s | tr -d '\r"')" >> "$GITHUB_OUTPUT"
@@ -195,18 +217,21 @@ jobs:
           node=$(bash scripts/node-build.sh)
           echo "node=$node" >> "$GITHUB_OUTPUT"
       # Our own builder's machine runs other platforms' programs already.
-      - if: ${{ !vars.BUILDKIT_ENDPOINT }}
+      - if: ${{ steps.fresh.outputs.version == 'new' && !vars.BUILDKIT_ENDPOINT }}
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
           driver: ${{ vars.BUILDKIT_ENDPOINT && 'remote' || 'docker-container' }}
           endpoint: ${{ vars.BUILDKIT_ENDPOINT }}
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: ${{ steps.fresh.outputs.version == 'new' }}
         with:
           context: .
           file: ${{ matrix.file }}
@@ -237,14 +262,13 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/invariant0x/${{ matrix.name }}:buildcache
           cache-to: type=registry,ref=ghcr.io/invariant0x/${{ matrix.name }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
-  # The one way a build reaches machines. It takes the images built for this commit, as they are, by the digests their commit's
-  # tag points at: a build made again would have other digests. A commit with no images stops here, the tags stay where they
-  # are, and running this job again once they are built goes on. A merge commit is another commit: main takes a built commit by
-  # fast-forward.
+  # The one way a build reaches machines. It takes the images this push built for its commit, as they are, by the digests their
+  # commit's tag points at: a build made again would have other digests. A commit with no images stops here, the tags stay
+  # where they are, and running the images and this job again goes on.
   publish:
-    needs: [mark, test]
+    needs: [mark, test, images]
     # Tests the mark left out count as passed here too.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.images.result == 'success' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
     runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -290,7 +314,7 @@ jobs:
             image="ghcr.io/invariant0x/${part#*:}:$GITHUB_SHA"
             digest=$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$image" | jq -r '.digest // empty' || true)
             if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "There is no $image. Build the images of this commit by hand, then run this job again."
+              echo "There is no $image. Run the images job of this commit again, then this job."
               exit 1
             fi
             echo "${part%%:*}=$digest" >> "$GITHUB_OUTPUT"

@@ -83,8 +83,8 @@ A change to the database schema gets a new migration from `npx drizzle-kit gener
 
 A release needs no turns of the agent programs on real nodes: the tests are its check.
 
-1. After the owner approved the exact commit, run the Images workflow by hand on it. That pushes the app, node and updater images under the tag of the commit and moves nothing else.
-2. Move `main` to that commit by fast-forward: a merge commit is another commit, with no images of its own. Once the tests passed, the publish job finds the three images by the digests the commit's tag points at, moves the version and `latest` onto exactly those, the app image last, and checks that `latest` holds them. A commit with no images stops there and moves nothing: build them, then run the publish job again. A commit whose version is out already moves nothing.
+1. After the owner approved the exact commit, move `main` to it by fast-forward: a merge commit is another commit, which the owner did not approve.
+2. The push to `main` runs the Images workflow by itself. Once the tests passed, a commit with a new version builds the app, node and updater images under the tag of the commit; then the publish job finds the three images by the digests that tag points at, moves the version and `latest` onto exactly those, the app image last, and checks that `latest` holds them. A build that failed moves nothing: run the workflow's failed jobs again. A commit whose version is out already builds and moves nothing. A run of the workflow by hand builds the images of any branch under the tag of its commit and moves nothing else.
 3. The release job then tags the version. Servers offer it by themselves, and the nodes of each server follow its build as their work ends.
 
 ## Rules for the code and the words

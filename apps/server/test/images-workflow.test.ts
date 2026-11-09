@@ -268,11 +268,11 @@ const JOBS = (parse(WORKFLOW) as { jobs: Record<string, Job> }).jobs;
 const needsOf = (job: Job) => [job.needs ?? []].flat();
 
 type Results = Record<string, 'success' | 'failure' | 'skipped'>;
-type Scenario = { event?: string; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; cancelled?: boolean };
+type Scenario = { event?: string; ref?: string; proved?: boolean; markJob?: 'success' | 'failure'; tests?: 'success' | 'failure'; images?: 'success' | 'failure'; cancelled?: boolean };
 
 /* Which jobs run, from the workflow's own conditions, as GitHub reads them: a condition with no status function of its own
    runs only when every job before it, however far back, succeeded. Every job that runs ends as the scenario says. */
-function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', cancelled = false }: Scenario): Results {
+function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, markJob = 'success', tests = 'success', images = 'success', cancelled = false }: Scenario): Results {
   const results: Results = {};
   const ancestors = (name: string): string[] => needsOf(JOBS[name]!).flatMap(n => [n, ...ancestors(n)]);
   const context = () => ({
@@ -285,7 +285,7 @@ function runWorkflow({ event = 'push', ref = 'refs/heads/main', proved = false, 
     const ownStatus = /\b(always|cancelled|failure|success)\(\)/.test(expression);
     const allowed = ownStatus || (ancestors(name).every(n => results[n] === 'success') && !cancelled);
     const runs = allowed && Boolean(runInNewContext(expression, context()));
-    results[name] = !runs ? 'skipped' : name === 'mark' ? markJob : name === 'test' ? tests : 'success';
+    results[name] = !runs ? 'skipped' : name === 'mark' ? markJob : name === 'test' ? tests : name === 'images' ? images : 'success';
   }
   return results;
 }
@@ -296,18 +296,22 @@ describe('.github/workflows/images.yml', () => {
     expect(needsOf(JOBS.test!)).toEqual(['mark']);
     expect(needsOf(JOBS.passed!)).toEqual(['mark', 'test']);
     expect(needsOf(JOBS.images!)).toEqual(['mark', 'test']);
-    expect(needsOf(JOBS.publish!)).toEqual(['mark', 'test']);
+    expect(needsOf(JOBS.publish!)).toEqual(['mark', 'test', 'images']);
     expect(needsOf(JOBS.release!)).toEqual(['publish']);
   });
 
   const BY_HAND = { event: 'workflow_dispatch', ref: 'refs/heads/turn-8' };
 
-  it('skips the tests and goes straight to the publish job and the release when the mark proved the commit', () => {
-    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
+  it('skips the tests and goes straight to the images, the publish job and the release when the mark proved the commit', () => {
+    expect(runWorkflow({ proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'success', publish: 'success', release: 'success' });
   });
 
-  it('runs the tests before the publish job when the mark did not prove it', () => {
-    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', passed: 'success', images: 'skipped', publish: 'success', release: 'success' });
+  it('runs the tests before the images and the publish job when the mark did not prove it', () => {
+    expect(runWorkflow({ proved: false })).toEqual({ mark: 'success', test: 'success', passed: 'success', images: 'success', publish: 'success', release: 'success' });
+  });
+
+  it('moves nothing and releases nothing when the images of the push failed', () => {
+    expect(runWorkflow({ proved: false, images: 'failure' })).toEqual({ mark: 'success', test: 'success', passed: 'success', images: 'failure', publish: 'skipped', release: 'skipped' });
   });
 
   it('skips the tests and builds the images of a run by hand when the mark proved the commit', () => {
@@ -324,7 +328,7 @@ describe('.github/workflows/images.yml', () => {
   });
 
   it('runs the tests when the first job itself failed, and goes on from them only', () => {
-    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', passed: 'skipped', images: 'skipped', publish: 'success', release: 'success' });
+    expect(runWorkflow({ markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', passed: 'skipped', images: 'success', publish: 'success', release: 'success' });
     expect(runWorkflow({ ...BY_HAND, markJob: 'failure' })).toEqual({ mark: 'failure', test: 'success', passed: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
     expect(runWorkflow({ markJob: 'failure', tests: 'failure' })).toEqual({ mark: 'failure', test: 'failure', passed: 'skipped', images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
@@ -336,7 +340,7 @@ describe('.github/workflows/images.yml', () => {
 
   it('publishes and releases only for a push to main, not for a run by hand from main either', () => {
     expect(runWorkflow({ event: 'workflow_dispatch', ref: 'refs/heads/main', proved: true })).toEqual({ mark: 'success', test: 'skipped', passed: 'skipped', images: 'success', publish: 'skipped', release: 'skipped' });
-    expect(runWorkflow({ event: 'push', ref: 'refs/heads/turn-8', proved: true })).toMatchObject({ publish: 'skipped', release: 'skipped' });
+    expect(runWorkflow({ event: 'push', ref: 'refs/heads/turn-8', proved: true })).toMatchObject({ images: 'skipped', publish: 'skipped', release: 'skipped' });
   });
 
   it('builds and moves nothing once the run is cancelled', () => {
@@ -361,7 +365,7 @@ describe('.github/workflows/images.yml', () => {
     const buildx = (job: Job) => job.steps.filter(step => step.uses?.startsWith('docker/setup-buildx-action@'));
     for (const name of ['images', 'publish']) expect(buildx(JOBS[name]!).map(step => step.with)).toEqual([BUILDER]);
     const qemu = JOBS.images!.steps.filter(step => step.uses?.startsWith('docker/setup-qemu-action@'));
-    expect(qemu.map(step => step.if)).toEqual(['${{ !vars.BUILDKIT_ENDPOINT }}']);
+    expect(qemu.map(step => step.if)).toEqual(["${{ steps.fresh.outputs.version == 'new' && !vars.BUILDKIT_ENDPOINT }}"]);
   });
 
   it('gives the first job the whole history, the token, and only the rights to read', () => {
