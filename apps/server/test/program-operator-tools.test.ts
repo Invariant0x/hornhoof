@@ -36,7 +36,7 @@ async function fixture() {
   c.sent.mockImplementation((node, frame) => {
     if (!screen.answers) return false;
     if (frame.type === 'program.view_get') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.view', agentKey: frame.agentKey, request: frame.request, result: 'ok', reason: null, jobId: c.job.id, instance: c.fact.instance, snapshot, state: 'idle', tool: screen.tool, question: screen.question, input: 'hornhoof', undelivered: true, cols: 80, rows: 24, cells: screen.cells }));
-    if (frame.type === 'program.input_send') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.input_result', agentKey: frame.agentKey, action: frame.action, result: screen.input, reason: screen.input === 'refused' ? 'snapshot_stale' : null, jobId: c.job.id, instance: c.fact.instance, question: screen.question }));
+    if (frame.type === 'program.input_send') queueMicrotask(() => receiveOperatorReply(c.ctx, node, { type: 'program.input_result', agentKey: frame.agentKey, action: frame.action, result: screen.input, reason: screen.input === 'refused' ? 'snapshot_stale' : null, jobId: c.job.id, instance: c.fact.instance, question: screen.question, text: frame.text?.replaceAll(SECRET, '[hidden]') ?? null, auditReason: frame.auditReason.replaceAll(SECRET, '[hidden]') }));
     return true;
   });
   const input = { employee: c.agent.id, snapshot, reason: 'The program stands on its input line.' };
@@ -144,7 +144,7 @@ it('saves the masked actor and input intent before dispatch, then records its ma
     const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.job.id));
     const intents = events.map(event => event.data as { operatorInputIntent?: Record<string, unknown> }).filter(data => data.operatorInputIntent);
     expect(intents).toHaveLength(1);
-    expect(intents[0]!.operatorInputIntent).toMatchObject({ id: args[2].action, phase: 'requested', actor: { id: c.callers.operator.agentId }, operatorJobId: c.callers.operator.id, snapshot: c.snapshot, keys: ['Enter'], text: '[hidden]', reason: 'Use [hidden].' });
+    expect(intents[0]!.operatorInputIntent).toMatchObject({ id: args[2].action, phase: 'requested', actor: { id: c.callers.operator.agentId }, operatorJobId: c.callers.operator.id, snapshot: c.snapshot, keys: ['Enter'], text: null, reason: null, textProvided: true, reasonProvided: true });
     expect(JSON.stringify(intents)).not.toContain(SECRET);
     return original(...args);
   });
@@ -160,6 +160,23 @@ it('sends no input when its intent cannot be saved', async () => {
   onTestFinished(() => log.mockRestore());
   await expect(sendProgramInput(c.ctx, c.callers.operator, { ...c.input, keys: ['Enter'] })).rejects.toThrow('Audit unavailable');
   expect(c.frames()).toEqual([]);
+});
+
+it('never journals node-only secrets, even before dispatch or without a node answer', async () => {
+  const c = await fixture();
+  await c.db.update(subscriptions).set({ secretEnc: null }).where(eq(subscriptions.companyId, c.companyId));
+  const original = programRpc.requestProgramInput;
+  const send = vi.spyOn(programRpc, 'requestProgramInput').mockImplementation(async (...args) => {
+    const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.job.id));
+    expect(JSON.stringify(events)).not.toContain(SECRET);
+    return original(...args);
+  });
+  onTestFinished(() => send.mockRestore());
+  await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, keys: ['Enter'], text: SECRET, reason: `Use ${SECRET}.` });
+  c.screen.answers = false;
+  expect(await sendProgramInput(c.ctx, c.callers.operator, { ...c.input, keys: ['Enter'], text: SECRET, reason: `Use ${SECRET}.` })).toMatchObject({ result: 'unknown' });
+  const events = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.job.id));
+  expect(JSON.stringify(events)).not.toContain(SECRET);
 });
 
 it('keeps an employee of another department and the rest of Operations off another employee\'s program', async () => {

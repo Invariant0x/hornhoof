@@ -73,7 +73,7 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
     const view = sent.find(frame => frame.type === 'program.view' && frame.request === request);
     expect(view).toMatchObject({ result: 'ok', jobId, instance: identity.instance, cells: expect.stringContaining('Choose the new display theme') });
     if (view?.type !== 'program.view') throw new Error('The program view was not returned.');
-    await host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot: view.snapshot!, keys: ['Enter'], text: null });
+    await host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot: view.snapshot!, keys: ['Enter'], text: null, auditReason: 'Continue the program.' });
     expect(sent.find(frame => frame.type === 'program.input_result' && frame.action === action)).toMatchObject({ result: 'applied', reason: null });
   };
   await host.operatorMessage({ type: 'program.operator_case', ...identity, case: caseId, capability, disposition: 'open', remainingMs: 600000, revision: 1 });

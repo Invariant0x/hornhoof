@@ -27,7 +27,7 @@ it('keeps screen replies out of an evidence queue that waits for them and drops 
   hub.greet(node, true);
   expect(hub.hasProgramOperator(node)).toBe(true);
   first.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
-  first.emit('message', JSON.stringify({ type: 'program.input_result', agentKey: randomUUID(), action: randomUUID(), result: 'refused', reason: 'program_busy', jobId: null, instance: null, question: null }));
+  first.emit('message', JSON.stringify({ type: 'program.input_result', agentKey: randomUUID(), action: randomUUID(), result: 'refused', reason: 'program_busy', jobId: null, instance: null, question: null, text: null, auditReason: 'Continue.' }));
   await wait; await new Promise(done => setTimeout(done, 0));
   expect(seen).toEqual(['program.input_result', 'hello', 'status']);
   hub.attach(node, socket() as unknown as WebSocket); hub.greet(node, true);

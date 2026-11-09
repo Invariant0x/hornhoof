@@ -35,7 +35,7 @@ async function look(t: Live, sent: OperatorNodeMessage[], agentKey: string) {
 
 async function type(t: Live, sent: OperatorNodeMessage[], agentKey: string, snapshot: string, keys: string[]) {
   const action = randomUUID();
-  await t.host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot, keys, text: null });
+  await t.host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot, keys, text: null, auditReason: 'Continue the program.' });
   return sent.find(f => f.type === 'program.input_result' && f.action === action);
 }
 

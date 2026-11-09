@@ -71,7 +71,8 @@ export class ProgramAccess {
   }
 
   private finish(command: InputCommand, facts: ProgramFacts | null, result: ProgramInputResult['result'], reason: OperatorError | null): ProgramInputResult {
-    const reply: ProgramInputResult = { type: 'program.input_result', agentKey: command.agentKey, action: command.action, result, reason, jobId: facts?.jobId ?? null, instance: facts?.instance ?? null, question: maskedQuestion(facts?.question ?? null, this.source.secrets()) };
+    const secrets = this.source.secrets();
+    const reply: ProgramInputResult = { type: 'program.input_result', agentKey: command.agentKey, action: command.action, result, reason, jobId: facts?.jobId ?? null, instance: facts?.instance ?? null, question: maskedQuestion(facts?.question ?? null, secrets), text: command.text === null ? null : operatorCells(command.text, secrets), auditReason: operatorCells(command.auditReason, secrets) };
     if (this.done.size >= MAX_DONE) this.done.delete(this.done.keys().next().value!);
     this.done.set(command.action, reply);
     return reply;

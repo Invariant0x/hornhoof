@@ -40,28 +40,28 @@ it('never falls back to terminal input for an old node', async () => {
   const c = fixture();
   vi.spyOn(c.ctx.hub, 'hasProgramOperator').mockReturnValue(false);
   expect(await requestProgramView(c.ctx, c.program)).toBeNull();
-  expect(await requestProgramInput(c.ctx, c.program, { action: randomUUID(), snapshot: randomUUID(), keys: ['Enter'], text: null })).toBeNull();
+  expect(await requestProgramInput(c.ctx, c.program, { action: randomUUID(), snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue.' })).toBeNull();
   expect(c.sent).toEqual([]);
 });
 
 it('sends keys and text once, and ends an input the node does not answer without retrying it or taking a late result', async () => {
   vi.useFakeTimers(); onTestFinished(() => { vi.useRealTimers(); });
   const c = fixture();
-  const input = { action: randomUUID(), snapshot: randomUUID(), keys: ['C-u', 'Enter'], text: 'Go on.' };
+  const input = { action: randomUUID(), snapshot: randomUUID(), keys: ['C-u', 'Enter'], text: 'Go on.', auditReason: 'Continue.' };
   const pending = requestProgramInput(c.ctx, c.program, input);
   expect(c.sent).toEqual([{ type: 'program.input_send', agentKey: c.program.agentId, ...input }]);
   expect(await requestProgramInput(c.ctx, c.program, input)).toBeNull();
   expect(c.sent).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(3000);
   expect(await pending).toBeNull();
-  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.input_result', agentKey: c.program.agentId, action: input.action, result: 'applied', reason: null, jobId: null, instance: null, question: null })).toBe(false);
+  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.input_result', agentKey: c.program.agentId, action: input.action, result: 'applied', reason: null, jobId: null, instance: null, question: null, text: null, auditReason: 'Continue.' })).toBe(false);
 });
 
 it('takes the result of an input from its node for its agent', async () => {
   const c = fixture();
   const action = randomUUID();
-  const pending = requestProgramInput(c.ctx, c.program, { action, snapshot: randomUUID(), keys: ['Enter'], text: null });
-  const result = { type: 'program.input_result' as const, agentKey: c.program.agentId, action, result: 'applied' as const, reason: null, jobId: randomUUID(), instance: randomUUID(), question: null };
+  const pending = requestProgramInput(c.ctx, c.program, { action, snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue.' });
+  const result = { type: 'program.input_result' as const, agentKey: c.program.agentId, action, result: 'applied' as const, reason: null, jobId: randomUUID(), instance: randomUUID(), question: null, text: null, auditReason: 'Continue.' };
   expect(receiveOperatorReply(c.ctx, nodeIdentity(randomUUID()), result)).toBe(false);
   expect(receiveOperatorReply(c.ctx, c.node, { ...result, agentKey: randomUUID() })).toBe(false);
   expect(receiveOperatorReply(c.ctx, c.node, result)).toBe(true);

@@ -23,7 +23,7 @@ function fixture() {
     now: () => now,
   });
   const look = () => access.view({ type: 'program.view_get', agentKey, request: randomUUID() });
-  const type = (snapshot: string, keys: string[], text: string | null = null, action = randomUUID()) => access.input({ type: 'program.input_send', agentKey, action, snapshot, keys, text });
+  const type = (snapshot: string, keys: string[], text: string | null = null, action = randomUUID()) => access.input({ type: 'program.input_send', agentKey, action, snapshot, keys, text, auditReason: `Use ${SECRET}.` });
   return { agentKey, state, access, look, type, later: (ms: number) => { now += ms; } };
 }
 
@@ -43,7 +43,7 @@ it('masks node secrets in tool and question metadata before either reply leaves 
   const view = await c.look();
   const masked = { tool: '[hidden]', text: 'Use [hidden]', callId: '[hidden]' };
   expect(view).toMatchObject({ tool: '[hidden]', question: masked });
-  expect(await c.type(view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', question: masked });
+  expect(await c.type(view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', question: masked, auditReason: 'Use [hidden].' });
   expect(c.state.facts.question!.text).toBe(`Use ${SECRET}`);
 });
 
@@ -103,6 +103,18 @@ it('leaves an input it could not finish unknown, and gives the same answer for t
   expect(first).toMatchObject({ result: 'unknown', reason: 'action_unknown' });
   expect(await c.type(view.snapshot!, ['Enter'], null, action)).toEqual(first);
   expect(c.state.typed).toEqual(['keys:Enter']);
+});
+
+it('returns only masked input text and reason in applied, refused and unknown results', async () => {
+  const c = fixture();
+  for (const fail of [false, true]) {
+    c.state.fail = fail;
+    const view = await c.look();
+    const reply = await c.type(view.snapshot!, ['Enter'], SECRET);
+    expect(reply).toMatchObject({ result: fail ? 'unknown' : 'applied', text: '[hidden]', auditReason: 'Use [hidden].' });
+    expect(JSON.stringify(reply)).not.toContain(SECRET);
+  }
+  expect(await c.type(randomUUID(), ['Enter'], SECRET)).toMatchObject({ result: 'refused', text: '[hidden]', auditReason: 'Use [hidden].' });
 });
 
 it('says there is no program when none runs here, and opens or captures none', async () => {

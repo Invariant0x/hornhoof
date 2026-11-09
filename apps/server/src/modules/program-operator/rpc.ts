@@ -21,7 +21,7 @@ export async function requestProgramView(ctx: Channels, program: ProgramAt): Pro
 }
 
 /* Words and keys into the program a fresh view showed. A lost answer leaves the result unknown, and nothing sends it again. */
-export async function requestProgramInput(ctx: Channels, program: ProgramAt, input: { action: string; snapshot: string; keys: string[]; text: string | null }): Promise<ProgramInputResult | null> {
+export async function requestProgramInput(ctx: Channels, program: ProgramAt, input: { action: string; snapshot: string; keys: string[]; text: string | null; auditReason: string }): Promise<ProgramInputResult | null> {
   const reply = await requestReply(ctx, program, null, `input:${input.action}`, { type: 'program.input_send', agentKey: program.agentId, ...input });
   return reply?.type === 'program.input_result' ? reply : null;
 }

@@ -91,7 +91,7 @@ it('returns explicit no_program responses without creating a program for an unkn
   const agentKey = randomUUID(), request = randomUUID(), action = randomUUID();
   await c.runtime.message({ type: 'program.view_get', agentKey, request });
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.view', agentKey, request, result: 'refused', reason: 'no_program', snapshot: null, state: 'gone' });
-  await c.runtime.message({ type: 'program.input_send', agentKey, action, snapshot: randomUUID(), keys: ['Enter'], text: null });
+  await c.runtime.message({ type: 'program.input_send', agentKey, action, snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue the program.' });
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.input_result', agentKey, action, result: 'refused', reason: 'no_program' });
 });
 

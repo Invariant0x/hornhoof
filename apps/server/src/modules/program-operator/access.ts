@@ -99,9 +99,9 @@ export async function sendProgramInput(ctx: Ctx, caller: OperatorCaller, input: 
   const program = await programOf(ctx, me, input.employee);
   const action = randomUUID();
   const entry: Entry = { me, caller, program, input, typed, reply: null, outcome: { action, result: 'unknown', reason: 'action_unknown' } };
-  /* If the server or its journal fails after dispatch, this durable intent still identifies who sent what and why. */
+  /* Persist the actor, keys and snapshot before dispatch. Only the node's masked reply may supply the text and reason. */
   await record(ctx, entry, 'requested');
-  const reply = await requestProgramInput(ctx, program, { action, snapshot: input.snapshot, ...typed });
+  const reply = await requestProgramInput(ctx, program, { action, snapshot: input.snapshot, ...typed, auditReason: input.reason });
   const outcome = outcomeOf(action, reply);
   await record(ctx, { ...entry, reply, outcome }, 'finished');
   return outcome;
@@ -160,7 +160,10 @@ function actionOf({ me, caller, input, typed, reply, outcome }: Entry, secrets: 
   const question = maskedQuestion(reply?.question ?? null, secrets);
   return {
     id: outcome.action, operatorJobId: caller.id, instance: reply?.instance ?? null, snapshot: input.snapshot, at: new Date().toISOString(),
-    actor: { id: me.id, name: me.name }, keys: typed.keys, key: typed.keys.at(-1) ?? null, text: typed.text && masked(typed.text, secrets), reason: masked(input.reason, secrets), result: outcome.result, error: outcome.reason,
+    actor: { id: me.id, name: me.name }, keys: typed.keys, key: typed.keys.at(-1) ?? null,
+    /* Only the node knows every secret it runs with. No raw text or reason enters either journal before its masked reply. */
+    text: reply?.text == null ? null : masked(reply.text, secrets), reason: reply ? masked(reply.auditReason, secrets) : null,
+    textProvided: typed.text !== null, reasonProvided: Boolean(input.reason), result: outcome.result, error: outcome.reason,
     question, requestedDecision: input.decision, ...decided(input, question, outcome),
   };
 }
@@ -171,17 +174,27 @@ function decided(input: KeysInput, question: OperatorQuestion | null, outcome: O
 }
 
 function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf> & { phase: 'requested' | 'finished' }): string {
-  const said = [action.keys.length ? `keys ${action.keys.join(' ')}` : '', action.text ? `text "${action.text}"` : ''].filter(Boolean).join(' and ');
+  const said = [action.keys.length ? `keys ${action.keys.join(' ')}` : '', action.text ? `text "${action.text}"` : action.textProvided ? 'text [not recorded]' : ''].filter(Boolean).join(' and ');
   const choice = 'permissionDecision' in action ? ` Decision: ${input.decision}. Request: ${action.question!.text}.` : '';
   const result = action.phase === 'requested' ? 'requested' : `${action.result}${action.error ? ` (${action.error})` : ''}`;
-  return `${me.name}, ${said}: ${result}. Reason: ${action.reason}.${choice}`;
+  return `${me.name}, ${said}: ${result}. Reason: ${action.reason ?? '[not recorded]'}.${choice}`;
 }
 
 function masked(text: string, secrets: string[]): string {
   let out = text;
-  const forms = secrets.flatMap(secret => secret.length >= SECRET_MIN ? [secret, Buffer.from(secret).toString('base64'), Buffer.from(secret).toString('base64').replace(/=+$/, ''), Buffer.from(secret).toString('base64url')] : secret ? [secret] : []);
-  for (const secret of [...new Set(forms)].sort((a, b) => b.length - a.length)) out = out.replaceAll(secret, HIDDEN);
+  for (const secret of secretForms(secrets)) out = out.replaceAll(secret, HIDDEN);
   return out;
+}
+
+function secretForms(secrets: string[]): string[] {
+  const forms = new Set(secrets.filter(Boolean));
+  for (const secret of secrets.filter(value => value.length >= SECRET_MIN)) {
+    const base64 = Buffer.from(secret).toString('base64');
+    forms.add(base64);
+    forms.add(base64.replace(/=+$/, ''));
+    forms.add(Buffer.from(secret).toString('base64url'));
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {

@@ -52,8 +52,8 @@ export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.question'), ...evidence, question: OperatorQuestion, questionOrdinal: z.number().int().positive(), phase: z.enum(['asked', 'cleared']), elapsedMs: count }).strict(),
   /* An employee's program as it stands: its screen with only the values of secrets masked, and what Hornhoof knows of it. */
   z.object({ type: z.literal('program.view'), agentKey: z.uuid(), request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), jobId: z.uuid().nullable(), instance: z.uuid().nullable(), snapshot: opaque.nullable(), state: z.enum(['working', 'idle', 'gone']), tool: z.string().max(100).nullable(), question: OperatorQuestion.nullable(), input: ProgramInputLine, undelivered: z.boolean(), ...screenCells }).strict(),
-  /* With the turn, program and question the input went into, so its record says what was answered. */
-  z.object({ type: z.literal('program.input_result'), agentKey: z.uuid(), action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable(), jobId: z.uuid().nullable(), instance: z.uuid().nullable(), question: OperatorQuestion.nullable() }).strict(),
+  /* With the turn, program and question the input went into, and the text and reason masked with the node's secrets. */
+  z.object({ type: z.literal('program.input_result'), agentKey: z.uuid(), action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable(), jobId: z.uuid().nullable(), instance: z.uuid().nullable(), question: OperatorQuestion.nullable(), text: z.string().max(PROGRAM_INPUT_TEXT).nullable(), auditReason: z.string().max(1000) }).strict(),
   z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid(), owner: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: ProgramInputLine, wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
 ] as const;
@@ -69,7 +69,7 @@ export const OperatorServerMessages = [
   z.object({ type: z.literal('program.view_get'), agentKey: z.uuid(), request: z.uuid() }).strict(),
   z.object({ type: z.literal('program.recovery_state_get'), ...identity, request: z.uuid(), case: z.uuid() }).strict(),
   /* Text goes in first, as a paste, then the keys one after another, into the program the snapshot showed. */
-  z.object({ type: z.literal('program.input_send'), agentKey: z.uuid(), action: z.uuid(), snapshot: opaque, keys: z.array(ProgramKey).max(PROGRAM_INPUT_KEYS), text: z.string().min(1).max(PROGRAM_INPUT_TEXT).nullable() }).strict().refine(frame => frame.keys.length > 0 || frame.text !== null),
+  z.object({ type: z.literal('program.input_send'), agentKey: z.uuid(), action: z.uuid(), snapshot: opaque, keys: z.array(ProgramKey).max(PROGRAM_INPUT_KEYS), text: z.string().min(1).max(PROGRAM_INPUT_TEXT).nullable(), auditReason: z.string().trim().min(1).max(1000) }).strict().refine(frame => frame.keys.length > 0 || frame.text !== null),
   z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional(), reason: OperatorReason.optional(), questionId: z.uuid().nullable().optional(), closedBecause: z.string().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('program.evidence_ack'), evidenceId: z.uuid() }).strict(),
 ] as const;

@@ -27,7 +27,7 @@ describe('bounded program operator protocol', () => {
       { type: 'program.launch', ...evidence, phase: 'started', elapsedMs: 0 },
       { type: 'program.operator_needed', ...evidence, reason: 'startup_exit', deliveryId: null, evidenceKey: id, elapsedMs: 20, sinceLaunchMs: 20, exit: { code: 0, signal: null } },
       { type: 'program.recovery_ready', ...evidence, case: id },
-      { type: 'program.input_result', agentKey: id, action: id, result: 'unknown', reason: 'action_unknown', jobId: null, instance: null, question: null },
+      { type: 'program.input_result', agentKey: id, action: id, result: 'unknown', reason: 'action_unknown', jobId: null, instance: null, question: null, text: null, auditReason: '[hidden]' },
     ];
     for (const frame of frames) expect(OperatorNodeMessage.parse(frame)).toEqual(frame);
   });
@@ -45,11 +45,11 @@ describe('bounded program operator protocol', () => {
   });
 
   it('sends text and keys together, bounded, and never nothing', () => {
-    const command = { type: 'program.input_send', agentKey: id, action: id, snapshot: id, keys: ['C-u'], text: 'Go on.' };
+    const command = { type: 'program.input_send', agentKey: id, action: id, snapshot: id, keys: ['C-u'], text: 'Go on.', auditReason: 'Continue.' };
     expect(OperatorServerMessage.parse(command)).toEqual(command);
     expect(OperatorServerMessage.parse({ ...command, keys: [] })).toMatchObject({ keys: [] });
     expect(OperatorServerMessage.parse({ ...command, text: null })).toMatchObject({ text: null });
-    for (const wrong of [{ keys: [], text: null }, { keys: Array(PROGRAM_INPUT_KEYS + 1).fill('Enter') }, { text: 'a'.repeat(PROGRAM_INPUT_TEXT + 1) }, { text: '' }, { keys: ['-t'] }, { case: id }]) {
+    for (const wrong of [{ keys: [], text: null }, { keys: Array(PROGRAM_INPUT_KEYS + 1).fill('Enter') }, { text: 'a'.repeat(PROGRAM_INPUT_TEXT + 1) }, { text: '' }, { auditReason: '' }, { auditReason: 'x'.repeat(1001) }, { keys: ['-t'] }, { case: id }]) {
       expect(OperatorServerMessage.safeParse({ ...command, ...wrong }).success).toBe(false);
     }
   });
