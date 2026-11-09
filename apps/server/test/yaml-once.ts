@@ -2,8 +2,8 @@ import { vi } from 'vitest';
 
 /* Every server a test builds reads the role and skill templates again, and parsing their YAML was most of the time it
    took to build one. YAML is not our code, so each test file parses a text once and gives every reader its own copy; our
-   loader still reads, checks and assembles the templates for every server. Parsing with options or a reviver, and a text
-   that is no YAML, still goes to YAML each time. */
+   loader still reads, checks and assembles the templates each time it is asked to (templates-once.ts asks once a file).
+   Parsing with options or a reviver, and a text that is no YAML, still goes to YAML each time. */
 const parsed = new Map<string, unknown>();
 const reads = new Map<string, number>();
 

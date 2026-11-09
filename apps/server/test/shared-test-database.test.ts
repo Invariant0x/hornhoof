@@ -10,7 +10,7 @@ let lastShared: PGlite | undefined;
 afterAll(() => {
   expect(lastShared?.closed).toBe(true);
 });
-const { checkSharedDatabase, createTestDb, databasesOpened, fixture, shapeOf, sharedDatabase } = await import('./helpers-db.js');
+const { checkSharedDatabase, createTestDb, databasesOpened, fixture, shapeOf, sharedDatabase, truncatable } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
 afterAll(() => {
   lastShared = sharedDatabase();
@@ -202,6 +202,20 @@ describe('what a test leaves for the planner', { shuffle: false }, () => {
     const db = await createTestDb();
     await db.execute(sql`analyze`);
     await expect(checkSharedDatabase()).resolves.toBeUndefined();
+  });
+});
+
+/* A truncate empties a table for less than a rewrite does, but must name every table whose foreign keys point at the ones
+   it empties, and the tables a test left alone are many. */
+describe('the tables a test wrote', () => {
+  it('are truncated when only tables emptied with them point at them', () => {
+    const pointedAtBy = new Map([['agents', ['agent_events', 'agents', 'jobs']], ['jobs', ['agent_events']], ['companies', ['agents', 'people']]]);
+    expect(truncatable(['agent_events', 'agents', 'jobs', 'companies'], pointedAtBy)).toEqual(['agent_events', 'agents', 'jobs']);
+  });
+
+  it('are not truncated when a table left alone points at them, or at a table that points at them', () => {
+    const pointedAtBy = new Map([['agents', ['agent_events', 'jobs']], ['jobs', ['turns']]]);
+    expect(truncatable(['agent_events', 'agents', 'jobs'], pointedAtBy)).toEqual(['agent_events']);
   });
 });
 

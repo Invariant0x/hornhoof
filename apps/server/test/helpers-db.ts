@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { PGlite } from '@electric-sql/pglite';
+import { PGlite, types } from '@electric-sql/pglite';
 import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from 'vitest';
 import * as schema from '../src/db/schema.js';
 
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
-type Shared = { client: PGlite; shape: string; planner: string };
+type Shared = { client: PGlite; shape: string; planner: string; pointedAtBy: ReadonlyMap<string, readonly string[]> };
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
@@ -20,6 +20,26 @@ function copyOfMigrated(): PGlite {
 
 export const databasesOpened = () => opened;
 
+/* PGlite copies a database's parsers into a new map for each query it answers. With a parser for every array type of
+   Postgres in it, the copy took about half of what a small query cost outside Postgres. Postgres's own types are the same
+   in every database, so their array parsers, built as PGlite builds them, go once into the parsers PGlite falls back on,
+   and a test database keeps only those of the types of its own schema. Every value reads back as before. */
+const BUILT_IN_ARRAYS = `select b.oid, b.typarray from pg_type a join pg_type b on b.oid = a.typelem
+  where a.typcategory = 'A' and b.typarray < 16384 group by b.oid, b.typarray`;
+let builtIn: ReadonlySet<string> | undefined;
+
+async function withOwnParsers(client: PGlite): Promise<PGlite> {
+  await client.waitReady;
+  if (!builtIn) {
+    const { rows } = await client.query<{ oid: number; typarray: number }>(BUILT_IN_ARRAYS);
+    for (const { oid, typarray } of rows) types.parsers[typarray] = (value: string) => types.arrayParser(value, types.parsers[oid]!, typarray);
+    builtIn = new Set(rows.map(row => String(row.typarray)));
+  }
+  const own = client.parsers as Record<string, unknown>;
+  for (const oid of Object.keys(own)) if (builtIn.has(oid) || own[oid] === types.parsers[oid]) delete own[oid];
+  return client;
+}
+
 /* An unmigrated database, as new PGlite() gives, from a dump of one initdb, which costs several times as much. */
 let initdb: File | Blob | undefined;
 export async function freshPglite(): Promise<PGlite> {
@@ -30,7 +50,7 @@ export async function freshPglite(): Promise<PGlite> {
     initdb = await first.dumpDataDir('none');
     await first.close();
   }
-  return new PGlite({ loadDataDir: initdb });
+  return withOwnParsers(new PGlite({ loadDataDir: initdb }));
 }
 
 /* Opening a copy costs far more than emptying one, so the tests of a file share one, emptied before each of them. A file
@@ -79,10 +99,31 @@ export async function shapeOf(client: PGlite): Promise<string> {
 const PLANNER_VIEW = `select coalesce(json_agg(json_build_object('oid', c.oid, 'relpages', c.relpages, 'reltuples', c.reltuples, 'relallvisible', c.relallvisible)), '[]')::text as view
   from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'i')`;
 
+/* Each table, with the tables whose foreign keys point at it. */
+const POINTED_AT_BY = `select format('public.%I', t.relname) as table, format('public.%I', f.relname) as by
+  from pg_constraint c join pg_class t on t.oid = c.confrelid join pg_class f on f.oid = c.conrelid where c.contype = 'f'`;
+
 async function openShared(): Promise<Shared> {
-  const client = copyOfMigrated();
+  const client = await withOwnParsers(copyOfMigrated());
   const { rows } = await client.query<{ view: string }>(PLANNER_VIEW);
-  return { client, shape: await shapeOf(client), planner: rows[0]!.view };
+  const pointedAtBy = new Map<string, string[]>();
+  for (const { table, by } of (await client.query<{ table: string; by: string }>(POINTED_AT_BY)).rows) pointedAtBy.set(table, [...(pointedAtBy.get(table) ?? []), by]);
+  return { client, shape: await shapeOf(client), planner: rows[0]!.view, pointedAtBy };
+}
+
+/* Those of the tables a truncate may empty with them: it must name every table whose foreign keys point at one it
+   empties, and a table that stays out keeps out every table it points at. */
+export function truncatable(tables: readonly string[], pointedAtBy: ReadonlyMap<string, readonly string[]>): string[] {
+  const kept = new Set(tables);
+  for (let dropped = true; dropped; ) {
+    dropped = false;
+    for (const table of kept) {
+      if ((pointedAtBy.get(table) ?? []).every(by => kept.has(by))) continue;
+      kept.delete(table);
+      dropped = true;
+    }
+  }
+  return tables.filter(table => kept.has(table));
 }
 
 /* Only a table with pages can hold rows. */
@@ -99,20 +140,29 @@ const RESTART_NUMBERS = `select setval(format('%I.%I', schemaname, sequencename)
 
 const pagedTables = async (client: PGlite) => (await client.query<{ name: string }>(WITH_PAGES)).rows.map(t => t.name);
 
-/* Empties the tables a test wrote, and their numbers start over. A truncate of all of them took most of a test's time:
-   through the foreign keys it reaches every table, and each costs a new file for it and each of its indexes. Discarding
-   first clears what the connection holds: role, settings, temporary tables, prepared statements and locks, and waits
-   for any transaction the last test left running. */
-async function emptyRows({ client, planner }: Shared): Promise<void> {
+/* Empties the tables a test wrote, and their numbers start over; each table and index is left with the pages of a new
+   copy. A truncate of all of them took most of a test's time: through the foreign keys it reaches every table, and each
+   costs a new file for it and each of its indexes. So a truncate empties only the written tables it may, and the others
+   lose their rows to a delete, their pages to a vacuum and the pages their indexes grew to a reindex, which together cost
+   less than the rewrite of a vacuum full. Discarding first clears what the connection holds: role, settings, temporary
+   tables, prepared statements and locks, and waits for any transaction the last test left running. */
+async function emptyRows({ client, planner, pointedAtBy }: Shared): Promise<void> {
   await client.exec('discard all');
   const tables = await pagedTables(client);
   if (tables.length) {
+    const truncated = truncatable(tables, pointedAtBy);
+    const deleted = tables.filter(name => !truncated.includes(name));
     await client.transaction(async tx => {
       /* No trigger or foreign key has a say, as in a truncate. */
       await tx.exec('set local session_replication_role = replica');
-      for (const name of tables) await tx.exec(`delete from ${name}`);
+      for (const name of deleted) await tx.exec(`delete from ${name}`);
+      if (truncated.length) await tx.exec(`truncate ${truncated.join(', ')}`);
     });
-    await client.exec(`vacuum full ${tables.join(', ')}`);
+    if (deleted.length) {
+      /* Only a page whose dead rows left the indexes too is free to give back. */
+      await client.exec(`vacuum (index_cleanup on, truncate on) ${deleted.join(', ')}`);
+      await client.exec(deleted.map(name => `reindex table ${name}`).join(';\n'));
+    }
   }
   await client.query(NO_STATISTICS);
   await client.query(PLANNER_AS_OPENED, [planner]);
@@ -255,7 +305,7 @@ async function sharedForThisTest(): Promise<PGlite> {
 }
 
 export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
-  const client = ownEach || held ? copyOfMigrated() : await sharedForThisTest();
+  const client = ownEach || held ? await withOwnParsers(copyOfMigrated()) : await sharedForThisTest();
   const db = drizzle(client, { schema });
   return { client, db };
 }
