@@ -782,6 +782,8 @@ export const ru: Messages = {
         packages: 'По пакетам',
         slowFiles: 'Самые долгие файлы',
         slowTests: 'Самые долгие тесты',
+        overFiles: (limit: string) => `Файлы дольше ${limit}`,
+        overTests: (limit: string) => `Тесты дольше ${limit}`,
         phases: { setup: 'подготовка', tests: 'тесты', teardown: 'уборка' },
         fileCount: (n: number) => `${n} ${plural('ru', n, { one: 'файл', few: 'файла', many: 'файлов', other: 'файла' })}`,
         packageTests: (tests: number, median: string, slower: number) => `${tests} ${plural('ru', tests, { one: 'тест', few: 'теста', many: 'тестов', other: 'теста' })}, медиана ${median}, медленнее медианы: ${slower}`,

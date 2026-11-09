@@ -35,6 +35,8 @@ const DEV: DepartmentReport = {
     packages: [{ package: 'apps/server', files: 2, totalMs: 33_500, setupMs: 1400, testsMs: 32_000, teardownMs: 100, medianFileMs: 16_000, tests: 40, medianTestMs: 200, slowerThanMedian: 19 }],
     slowestFiles: [{ package: 'apps/server', file: 'test/a/very/long/path/of/a/test/file/that/has/to/wrap/on/a/phone/turns-and-reads.test.ts', totalMs: 33_500, setupMs: 1400, testsMs: 32_000, teardownMs: 100, parts: 2 }],
     slowestTests: [{ package: 'apps/server', file: 'test/turns.test.ts', name: 'closes a turn and keeps its snapshot', ms: 2204 }],
+    overBudgetFiles: [{ package: 'apps/server', file: 'test/a/very/long/path/of/a/test/file/that/has/to/wrap/on/a/phone/turns-and-reads.test.ts', totalMs: 33_500, setupMs: 1400, testsMs: 32_000, teardownMs: 100, parts: 2 }],
+    overBudgetTests: [{ package: 'apps/server', file: 'test/turns.test.ts', name: 'closes a turn and keeps its snapshot', ms: 2204 }],
   },
 };
 const REPORT: DepartmentPipeline = { turn: turn(9, 'live'), previous: turn(8), baseline: turn(7, 'rebuilt'), turns: [9, 8, 7], department: DEV };
@@ -174,6 +176,23 @@ describe('the report of a turn', () => {
     expect(slow).toHaveTextContent('2.2 s');
   });
 
+  it('names the files over 30 s and the tests over 1 s, and no such list when nothing is over', async () => {
+    show();
+    const tests = await screen.findByRole('region', { name: 'Test time' });
+    const files = within(tests).getByRole('list', { name: 'Files over 30 s' });
+    expect(files).toHaveTextContent('turns-and-reads.test.ts');
+    expect(files).toHaveTextContent('33.5 s');
+    const slow = within(tests).getByRole('list', { name: 'Tests over 1 s' });
+    expect(slow).toHaveTextContent('closes a turn and keeps its snapshot');
+    expect(slow).toHaveTextContent('apps/server/test/turns.test.ts');
+    cleanup();
+    show(ok({ ...REPORT, department: { ...DEV, tests: { ...DEV.tests, overBudgetFiles: [], overBudgetTests: [] } } }));
+    const none = await screen.findByRole('region', { name: 'Test time' });
+    expect(within(none).getByRole('list', { name: 'Slowest files' })).toBeInTheDocument();
+    expect(within(none).queryByRole('list', { name: 'Files over 30 s' })).not.toBeInTheDocument();
+    expect(within(none).queryByRole('list', { name: 'Tests over 1 s' })).not.toBeInTheDocument();
+  });
+
   it('leaves out what an older log did not say', async () => {
     show(ok({ ...REPORT, department: { ...DEV, tests: { ...DEV.tests, packages: [{ ...DEV.tests.packages[0]!, setupMs: null, testsMs: null, teardownMs: null, tests: null, medianTestMs: null, slowerThanMedian: null }] } } }));
     const pack = await screen.findByRole('list', { name: 'By package' });
@@ -183,7 +202,7 @@ describe('the report of a turn', () => {
   });
 
   it('says a turn has no test times', async () => {
-    show(ok({ ...REPORT, department: { ...DEV, rows: ROWS.filter(r => r.section !== 'tests'), tests: { packages: [], slowestFiles: [], slowestTests: [] } } }));
+    show(ok({ ...REPORT, department: { ...DEV, rows: ROWS.filter(r => r.section !== 'tests'), tests: { packages: [], slowestFiles: [], slowestTests: [], overBudgetFiles: [], overBudgetTests: [] } } }));
     const tests = await screen.findByRole('region', { name: 'Test time' });
     expect(tests).toHaveTextContent('No test times in this turn.');
     expect(within(tests).queryByRole('list')).not.toBeInTheDocument();

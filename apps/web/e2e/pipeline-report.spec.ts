@@ -61,6 +61,11 @@ const REPORT: DepartmentPipeline = {
         { package: 'apps/server', file: 'test/migrations.test.ts', totalMs: 41_200, setupMs: null, testsMs: null, teardownMs: null, parts: 1 },
       ],
       slowestTests: [{ package: 'apps/server', file: 'test/migrations.test.ts', name: 'migration 0062 fills the kind and risk class of open tasks from the first line of the body', ms: 9_800 }],
+      overBudgetFiles: [
+        { package: 'apps/server', file: 'test/modules/tasks/a-very-long-folder-name-that-goes-on-and-on/turns-and-their-reads-of-the-whole-department.test.ts', totalMs: 73_400, setupMs: 42_000, testsMs: 31_000, teardownMs: 400, parts: 2 },
+        { package: 'apps/server', file: 'test/migrations.test.ts', totalMs: 41_200, setupMs: null, testsMs: null, teardownMs: null, parts: 1 },
+      ],
+      overBudgetTests: [{ package: 'apps/server', file: 'test/migrations.test.ts', name: 'migration 0062 fills the kind and risk class of open tasks from the first line of the body', ms: 9_800 }],
     },
   },
 };
@@ -132,6 +137,7 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     await body.getByRole('heading', { level: 4, name: en ? 'Test time' : 'Время тестов' }).scrollIntoViewIfNeeded();
     await body.evaluate(element => element.scrollTo({ top: element.scrollHeight }));
     await expect(body).toContainText('turns-and-their-reads-of-the-whole-department.test.ts');
+    await expect(body).toContainText(en ? 'Files over 30 s' : 'Файлы дольше 30 с');
     await shoot(page, info, `report-${language}-${theme}-${width}-tests`);
     expect(problems).toEqual([]);
   });

@@ -165,6 +165,18 @@ describe('templates', () => {
     expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/i);
   });
 
+  it('sets a time budget for tests and puts an over-budget file in the scope of whoever touches it', () => {
+    const rule = (n: number) => body('dev-testing-policy').split('\n').find(line => line.startsWith(`- **T${n}:`))!;
+    expect(rule(5)).toMatch(/one test takes under 1 s, one test file under 30 s, and a whole run of the fast profile under 5 minutes of wall time/);
+    expect(rule(5)).toMatch(/file over budget is a defect like a failing test/);
+    expect(rule(5)).toMatch(/in scope for whoever touches it or is assigned it/);
+    expect(rule(5)).toMatch(/never checked inside a test/);
+    expect(rule(5)).not.toMatch(/mass-rewrite/);
+    expect(rule(7)).toMatch(/name each file and test over the T5 budget/);
+    expect(rule(7)).not.toMatch(/fixed-minute/);
+    expect(body('dev-release-improvements')).toMatch(/files and tests over the testing policy's time budget/);
+  });
+
   it('keeps Security and red-team scopes distinct and uses task-assigned review and acceptance', () => {
     expect(templates.roles.get('DEV-RED')!.skills.map(s => s.id)).not.toContain('dev-threat-model');
     for (const id of ['DEV-RED', 'DEV-SEC']) {

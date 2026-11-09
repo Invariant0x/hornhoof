@@ -754,6 +754,8 @@ export const en = {
         packages: 'By package',
         slowFiles: 'Slowest files',
         slowTests: 'Slowest tests',
+        overFiles: (limit: string) => `Files over ${limit}`,
+        overTests: (limit: string) => `Tests over ${limit}`,
         phases: { setup: 'setup', tests: 'tests', teardown: 'teardown' },
         fileCount: (n: number) => `${n} ${plural('en', n, { one: 'file', other: 'files' })}`,
         packageTests: (tests: number, median: string, slower: number) => `${tests} ${plural('en', tests, { one: 'test', other: 'tests' })}, median ${median}, ${slower} slower than the median`,
