@@ -48,7 +48,7 @@ export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.key_result'), ...identity, action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable() }).strict(),
   z.object({ type: z.literal('program.key_prepared'), ...identity, action: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), lease: z.uuid().nullable() }).strict(),
   z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid(), owner: z.boolean().optional() }).strict(),
-  z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: z.enum(['empty', 'words', 'unknown']), wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
+  z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: z.enum(['empty', 'hornhoof', 'words', 'unknown']), wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
 ] as const;
 
 export const OperatorNodeMessage = z.discriminatedUnion('type', OperatorNodeMessages);

@@ -18,16 +18,19 @@ type Source = {
   inputLine(key: string, cells: string): OperatorInputLine;
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
-  /* What the program shows now: its input, null when that cannot be read, and whether it works on a turn. */
-  recovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }>;
+  /* What the program shows now: its input, null when that cannot be read, whether that is only Hornhoof's own words it never
+     sent, and whether it works on a turn. */
+  recovery(key: string): Promise<{ alive: boolean; input: string | null; own: boolean; busy: boolean }>;
 };
 type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; sinceWords: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 const NO_PROGRAM = { program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false } as const;
 
-function inputShown(input: string | null): OperatorRecoveryState['input'] {
+/* Hornhoof's own words that never went are no person's: the words that go on take their place. */
+function inputShown(input: string | null, own: boolean): OperatorRecoveryState['input'] {
   if (input === null) return 'unknown';
-  return input ? 'words' : 'empty';
+  if (!input) return 'empty';
+  return own ? 'hornhoof' : 'words';
 }
 
 /* A wait the program shows is no free prompt, however harmless it looks to whoever passes it by hand. */
@@ -264,7 +267,7 @@ export class OperatorRuntime {
     const target = this.targets.get(agentKey);
     const shown = target?.physical ? await this.source.recovery(agentKey) : null;
     if (!target || !shown?.alive) return { ...reply, ...NO_PROGRAM };
-    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input), ...programAt(this.source.current(agentKey)), busy: shown.busy || target.sinceWords };
+    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input, shown.own), ...programAt(this.source.current(agentKey)), busy: shown.busy || target.sinceWords };
   }
 
   private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' | 'program.recovery_state_get' }>): void {

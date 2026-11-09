@@ -33,7 +33,7 @@ import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
-import { LostWords } from './lost-words.js';
+import { holdsWords, LostWords } from './lost-words.js';
 import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
 import type { OperatorProgram } from './operator-control.js';
@@ -454,10 +454,16 @@ export class TerminalHost {
     return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
   }
 
-  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }> {
+  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; own: boolean; busy: boolean }> {
     const a = this.agents.get(key);
-    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, busy: false };
-    return { alive: true, input: inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true)), busy: a.busy };
+    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, own: false, busy: false };
+    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
+    return { alive: true, input, own: Boolean(input) && this.ownWordsOnly(a, input!), busy: a.busy };
+  }
+
+  /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */
+  private ownWordsOnly(a: Agent, input: string): boolean {
+    return !this.stillTyping(a) && isOwnLeft(a.ownLeft, a.typedAt, input);
   }
 
   private async operatorPane(key: string): Promise<{ cols: number; rows: number; cells: string }> {
@@ -1450,8 +1456,11 @@ export class TerminalHost {
     await this.lookTyped(a, turn);
   }
 
+  /* A program at its prompt with nothing typed, or with only Hornhoof's own words that never went, waits for them: the words
+     that go on erase those and go in once. A person's words keep it waiting for them. */
   private async ownerRecoveryReady(a: Agent): Promise<void> {
-    const ready = atEmptyPrompt(a.program!.kind, await this.opts.tmux.screen(a.name, 0, true));
+    const input = inputOf(a.program!.kind, await this.opts.tmux.screen(a.name, 0, true));
+    const ready = input === '' || (input !== null && this.ownWordsOnly(a, input));
     if (ready) a.fresh = true;
     this.operator!.recoveryReady(a.key, ready);
   }
@@ -2653,9 +2662,24 @@ export class TerminalHost {
     a.took = false;
     a.typing = text;
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
+    const pastedAt = Date.now();
     await sleep(pasteWait(text));
     a.restarting = false;
     await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Enter'));
+    void this.enterUntilTaken(a, turn, text, pastedAt).catch(() => {});
+  }
+
+  /* A program that just started again can miss the Enter, as at its first start and more so on a busy machine: Enter again
+     while its input still holds these words, nothing shows it took them and nobody pressed a key since they went in. */
+  private async enterUntilTaken(a: Agent, turn: Turn, text: string, pastedAt: number): Promise<void> {
+    for (const end = Date.now() + this.readyMs; Date.now() < end;) {
+      await sleep(this.enterWaitMs);
+      this.drain(a);
+      if (a.turn !== turn || a.took || a.restarting || (a.typedAt ?? -Infinity) > pastedAt) return;
+      const input = await this.readInput(a);
+      if (!input || !holdsWords(input, text)) return;
+      await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Enter'));
+    }
   }
 
   private async eraseInput(a: Agent, receipt: WordReceipt): Promise<void> {

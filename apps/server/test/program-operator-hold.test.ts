@@ -384,6 +384,13 @@ it('lets the head of Operations do the same', async () => {
   expect(await c.call()).toMatchObject({ result: 'released' });
 });
 
+it("releases a hold whose input holds only Hornhoof's own words that never went: the saved words take their place once", async () => {
+  const c = await release({ input: 'hornhoof' });
+  expect(await c.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(await c.children()).toHaveLength(1);
+  expect(await c.audits()).toEqual([expect.objectContaining({ result: 'released', input: 'hornhoof' })]);
+});
+
 it('releases a hold whose program is gone', async () => {
   const c = await release({ program: 'gone', input: 'unknown' });
   expect(await c.call()).toMatchObject({ result: 'released' });

@@ -46,7 +46,8 @@ function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
   if (state.wait === 'protected') return 'protected_screen';
   if (state.wait) return 'input_not_proven';
   if (state.runningTool || state.retrying || state.busy) return 'program_busy';
-  return state.input === 'empty' ? null : 'input_not_proven';
+  /* Hornhoof's own words that never went are erased by the saved words, which go in once in their place. */
+  return state.input === 'empty' || state.input === 'hornhoof' ? null : 'input_not_proven';
 }
 
 const noHold = (row: Case): ReleaseResult => ({ result: 'no_hold', status: row.status, continuation: row.continuationJobId });
