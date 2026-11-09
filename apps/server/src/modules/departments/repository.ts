@@ -7,7 +7,7 @@ import { departments } from '../../db/schema.js';
 type Repo = NonNullable<Workspace['repo']>;
 
 /* The first of these departments and products that has a repository, with it. The token comes decrypted, for the node and for reading the repository's branches. */
-export async function repoAt(ctx: Pick<Ctx, 'db' | 'config'>, ids: (string | null)[]): Promise<{ department: typeof departments.$inferSelect; repo: Repo } | null> {
+export async function repoAt(ctx: { db: Pick<Ctx['db'], 'select'>; config: Ctx['config'] }, ids: (string | null)[]): Promise<{ department: typeof departments.$inferSelect; repo: Repo } | null> {
   for (const id of ids) {
     if (!id) continue;
     const [d] = await ctx.db.select().from(departments).where(eq(departments.id, id));

@@ -352,7 +352,7 @@ describe('a task that comes after others', () => {
     const { db, head, bruno, tess, member, tools } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, after: [api.number], independentNone: NONE });
+    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, after: [api.number], independentNone: NONE, paths: ['apps/**'] });
     expect(made.isError).toBeFalsy();
     expect(text(made)).toContain(`starts once #${api.number} is done`);
     const [tests] = await db.select().from(tasks).where(eq(tasks.title, 'End-to-end tests'));
@@ -360,7 +360,7 @@ describe('a task that comes after others', () => {
     const shown = JSON.parse(text(await call(await tools(tess), 'task', { task: tests!.number })));
     expect(shown.after).toEqual([{ id: api.id, number: api.number, title: 'Checkout API', status: 'open' }]);
     expect(shown.waitsFor).toEqual([api.number]);
-    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, after: [999], independentNone: NONE });
+    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, after: [999], independentNone: NONE, paths: ['apps/**'] });
     expect(unknown.isError).toBe(true);
   });
 });
@@ -394,7 +394,7 @@ describe('what a task comes after, as each one sees it', () => {
   it("is refused to a head for another department's task, as a parent is", async () => {
     const { head, tools, outside } = await company();
     const deal = await outside();
-    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, after: [deal.number], independentNone: NONE });
+    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, after: [deal.number], independentNone: NONE, paths: ['apps/**'] });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain(`There is no task ${deal.number} to come after`);
   });
@@ -423,7 +423,7 @@ describe('an independent part of a dependent task', () => {
     const api = (await member('Checkout API', bruno.id)).task;
     const moved = await createTaskEngine(ctx, { agentId: head.id }, {
       title: 'Full checkout', brief: 'All of it.', body: 'The dependent part.', departmentId: dev.id, parentId: parent.id,
-      assigneeAgentId: tess.id, executor: true, after: [api.id],
+      assigneeAgentId: tess.id, executor: true, after: [api.id], paths: ['apps/checkout/**'],
       independentPart: { title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.', executor: bruno.id },
     });
     expect(moved.task.after).toEqual([api.id]);
@@ -432,6 +432,7 @@ describe('an independent part of a dependent task', () => {
     expect(children).toHaveLength(1);
     expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id });
     expect((await taskDetail(ctx, children[0]!, () => true)).echelons).toMatchObject({ stage: 'architecture', phase: 'active', ownerAgentId: bruno.id });
+    expect((await routeOf(db, children[0]!)).paths).toEqual(['apps/checkout/**']);
     const detail = await taskDetail(ctx, moved.task, () => true);
     expect(detail.independentPart).toMatchObject({
       title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.',

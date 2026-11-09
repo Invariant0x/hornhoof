@@ -445,6 +445,8 @@ describe("Hornhoof's note that a task stands still", () => {
 
   it('goes away when the agent reports a task it owns', async () => {
     const c = await company();
+    /* Where the department keeps code, a worker closes such a task only on accepted subtasks; here it keeps none. */
+    await c.db.update(departments).set({ repoUrl: null }).where(eq(departments.id, c.dev.id));
     const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Plan the sprint', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id });
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.bruno.id);

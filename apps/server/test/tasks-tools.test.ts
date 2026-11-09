@@ -123,13 +123,13 @@ describe('task tools', () => {
   it('lets a head assign a current reviewer by identity only inside its department', async () => {
     const { db, head, bruno, rita, sam, tools } = await company();
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id, reviewerAgentId: rita.id });
+    const made = await call(client, 'create_task', { paths: ['apps/**'], title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id, reviewerAgentId: rita.id });
     expect(made.isError).toBeFalsy();
     const [task] = await db.select().from(tasks);
     expect(task).toMatchObject({ executorAgentId: bruno.id, createdByAgentId: head.id });
     const route = await routeOf(db, task!);
     expect(route.state.stages.find(step => step.stage === 'review')).toMatchObject({ ownerAgentId: rita.id, status: 'pending' });
-    const outside = await call(client, 'create_task', { title: 'Call leads', brief: '', body: '', executor: sam.id });
+    const outside = await call(client, 'create_task', { paths: ['apps/**'], title: 'Call leads', brief: '', body: '', executor: sam.id });
     expect(outside.isError).toBe(true);
   });
 
@@ -137,7 +137,7 @@ describe('task tools', () => {
     const { db, dev, head, bruno, rita, tools } = await company();
     const [sid] = await db.select().from(agents).where(eq(agents.id, rita.id));
     await db.insert(agents).values({ companyId: sid!.companyId, kind: 'worker', name: 'Sid', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sid!.subscriptionId });
-    const made = await call(await tools(head), 'create_task', { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id });
+    const made = await call(await tools(head), 'create_task', { paths: ['apps/**'], title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id });
     expect(made.isError).toBeFalsy();
     const [task] = await db.select().from(tasks);
     const snapshot = routeSnapshot(await routeOf(db, task!), task!.assigneeAgentId);
@@ -220,7 +220,7 @@ describe('a small task', () => {
   it('is set and read by the giver, never by its executor', async () => {
     const { app, db, ceoToken, head, bruno, orchestrator, tools } = await company();
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'Small copy', brief: '', body: '', executor: bruno.id, small: true });
+    const made = await call(client, 'create_task', { paths: ['apps/**'], title: 'Small copy', brief: '', body: '', executor: bruno.id, small: true });
     expect(made.isError).toBeFalsy();
     const [row] = await db.select().from(tasks);
     expect(row).toMatchObject({ small: true });
@@ -238,7 +238,7 @@ describe('a small task', () => {
 
   it('is not small by default', async () => {
     const { db, head, bruno, tools } = await company();
-    await call(await tools(head), 'create_task', { title: 'Ordinary', brief: '', body: '', executor: bruno.id });
+    await call(await tools(head), 'create_task', { paths: ['apps/**'], title: 'Ordinary', brief: '', body: '', executor: bruno.id });
     expect((await db.select().from(tasks))[0]).toMatchObject({ small: false });
   });
 });
@@ -249,7 +249,7 @@ describe("a task's kind and risk class", () => {
   it('are kept when a head gives the task out, and read back by tasks, task and the API', async () => {
     const { app, db, ceoToken, head, bruno, tools } = await company();
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'Fix login', brief: '', body: 'Fix it.', executor: bruno.id, workKind: 'bug', riskClass: 'access' });
+    const made = await call(client, 'create_task', { paths: ['apps/**'], title: 'Fix login', brief: '', body: 'Fix it.', executor: bruno.id, workKind: 'bug', riskClass: 'access' });
     expect(made.isError).toBeFalsy();
     const [row] = await db.select().from(tasks);
     expect(row).toMatchObject({ workKind: 'bug', riskClass: 'access' });
@@ -262,7 +262,7 @@ describe("a task's kind and risk class", () => {
   it('are empty until someone names them', async () => {
     const { db, head, bruno, tools } = await company();
     const client = await tools(head);
-    await call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    await call(client, 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id });
     const [row] = await db.select().from(tasks);
     expect(row).toMatchObject({ workKind: null, riskClass: null });
     expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ workKind: null, riskClass: null });
@@ -271,7 +271,7 @@ describe("a task's kind and risk class", () => {
   it('changes the work kind without waking whoever holds the task, and a log line says so', async () => {
     const { db, ctx, head, bruno, tools } = await company();
     const client = await tools(head);
-    await call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    await call(client, 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id });
     const [row] = await db.select().from(tasks);
     const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'legacy_code' });
     expect(moved.wakes).toEqual([]);
@@ -285,7 +285,7 @@ describe("a task's kind and risk class", () => {
 
   it('leaves the wait, task version and current route intact when only the work kind changes', async () => {
     const { db, ctx, head, bruno, tools } = await company();
-    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    await call(await tools(head), 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id });
     const until = new Date(Date.now() + 3_600_000).toISOString();
     const [row] = await db.update(tasks).set({ externalWait: { reason: 'A build', since: new Date().toISOString(), until } }).returning();
     const route = await routeOf(db, row!);
@@ -298,7 +298,7 @@ describe("a task's kind and risk class", () => {
 
   it('adds required Security and informs the current owner when the head changes the risk', async () => {
     const { db, ctx, head, bruno, tools } = await company();
-    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    await call(await tools(head), 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id });
     const [row] = await db.select().from(tasks);
     const before = await routeOf(db, row!);
     const moved = await updateTask(ctx, head.id, row!.id, { riskClass: 'data' });
@@ -311,7 +311,7 @@ describe("a task's kind and risk class", () => {
 
   it('still wake the holder when the body changes with them', async () => {
     const { db, ctx, head, bruno, tools } = await company();
-    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id });
+    await call(await tools(head), 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id });
     const [row] = await db.select().from(tasks);
     const moved = await updateTask(ctx, head.id, row!.id, { body: 'New truth.', workKind: 'bug' });
     expect(moved.wakes.map(w => w.agentId)).toEqual([bruno.id]);
@@ -335,7 +335,7 @@ describe("a task's kind and risk class", () => {
   it('refuses a kind or a risk class it does not know', async () => {
     const { db, head, bruno, tools } = await company();
     const client = await tools(head);
-    const asked = (labels: Record<string, string>) => call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, ...labels });
+    const asked = (labels: Record<string, string>) => call(client, 'create_task', { paths: ['apps/**'], title: 'Plain', brief: '', body: '', executor: bruno.id, ...labels });
     expect((await asked({ workKind: 'feature' })).isError).toBe(true);
     expect((await asked({ riskClass: 'fun' })).isError).toBe(true);
     expect(await db.select().from(tasks)).toEqual([]);
@@ -350,7 +350,7 @@ describe('dates through the tools', () => {
     finalReview: { headAgentId: c.head.id, anchorAt: later(4), intervalMs: 3_600_000 },
   });
   const strict = (c: Awaited<ReturnType<typeof company>>) => c.db.insert(waitPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: c.ceo.id });
-  const piece = (title: string, executor: string, more: object = {}) => ({ title, brief: '', body: '', executor, ...more });
+  const piece = (title: string, executor: string, more: object = {}) => ({ title, brief: '', body: '', executor, paths: ['apps/**'], ...more });
 
   it('takes a promise for one edge in create_task, and refuses what comes without one where dates are set', async () => {
     const c = await company();

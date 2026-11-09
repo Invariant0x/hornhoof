@@ -24,8 +24,10 @@ export async function agentIdentity(db: Reader['db'], companyId: string, agentId
   return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: row.model, provider: modelProvider(row.provider), capability };
 }
 
+/* A head checks only where it is named: picked by itself, it would take a stage from its department's employees. */
 function canCheckTask(agent: typeof agents.$inferSelect, task: Task, ability: string, named: string | null): boolean {
-  return !(named && agent.id !== named) && !(agent.productId && agent.productId !== task.productId) && agent.skills.includes(ability);
+  if (named ? agent.id !== named : agent.kind === 'head') return false;
+  return !(agent.productId && agent.productId !== task.productId) && agent.skills.includes(ability);
 }
 
 /* Selection never changes a subscription, model, employee or skill card. */

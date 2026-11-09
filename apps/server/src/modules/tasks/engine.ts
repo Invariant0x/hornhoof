@@ -410,7 +410,8 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     createdByAgentId: actor.agentId ?? null,
     updatedAt: new Date(),
   }).returning();
-  await createRoute(tx, child!, {});
+  /* A part of the same work may touch what its whole may, as the head approved it there. */
+  await createRoute(tx, child!, { paths: (await routeOf(tx, parent)).paths });
   const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
@@ -828,7 +829,8 @@ export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver
     const owner = await waitingRouteChecker(ctx, task, route);
     if (!owner) return null;
     const state = { ...route.state, phase: 'active' as const, assignment: owner, stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, ownerAgentId: owner.agentId, status: 'active' as const, reason: null } : step) };
-    const due: Wake[] = [{ agentId: owner.agentId, taskId: task.id, why: route.state.stage === 'tests' ? 'tests' : 'review' }];
+    /* An owner given a checking stage ran nothing yet, Tests included. */
+    const due: Wake[] = [{ agentId: owner.agentId, taskId: task.id, why: 'review' }];
     await move(ctx, task, { assigneeAgentId: owner.agentId, status: route.state.stage === 'tests' ? 'open' : 'review' }, { kind: 'updated', actor, text, data: { fields: ['owner'] } }, tx => changeRoute(tx, route, state), due);
     wakes.push(...due);
     return task;
@@ -1290,6 +1292,16 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
+/* What a task that waited on a person goes back to: the status of the stage its route is at. One whose route waits for an
+   owner stays waiting, where the next eligible owner is looked for. */
+async function statusAfterWait(tx: Tx, task: Task): Promise<Task['status'] | null> {
+  const route = await routeOf(tx, task);
+  if (route.state.resultKind !== 'code') return 'working';
+  if (route.state.phase === 'waiting') return null;
+  if (route.state.stage === 'tests') return 'open';
+  return route.state.stage && ['review', 'security', 'cleanup'].includes(route.state.stage) ? 'review' : 'working';
+}
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
@@ -1329,10 +1341,11 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
+    const back = current?.status === 'waiting' && !Number(left?.n ?? 0) ? await statusAfterWait(tx, task) : null;
+    if (back) {
       await tx
         .update(tasks)
-        .set({ status: 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+        .set({ status: back, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
         .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
     }
     const [after] = await tx.select().from(tasks).where(eq(tasks.id, task.id));

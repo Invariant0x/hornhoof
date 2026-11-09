@@ -3,10 +3,11 @@ import { AcceptanceInput } from './echelons-accept.js';
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
+import { repoAt } from '../departments/repository.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { replanWait } from './wait-state.js';
@@ -283,6 +284,19 @@ class TaskTools {
     if (!product) throw refuse(404, 'department_unknown', `${id} is not a product of your department.`);
   }
 
+  /* A code task names the paths its change may touch: without them every submit of it is refused as outside the scope. Where
+     only the department's products keep code, it names its product: without one it has no repository and closes by a report. */
+  private async checkCodeScope(agent: Agent, input: { product?: string; resultKind?: 'code' | 'coordination'; paths?: string[] }): Promise<void> {
+    if (input.resultKind === 'coordination') return;
+    if (await repoAt(this.ctx, [input.product ?? null, agent.departmentId])) {
+      if (!input.paths?.length) throw refuse(400, 'task_invalid', 'A code task needs the paths its change may touch, like ["apps/server/**"]: without them every submit of it is refused as outside the scope.');
+      return;
+    }
+    if (input.product) return;
+    const products = await this.db.select({ name: departments.name }).from(departments).where(and(eq(departments.parentId, agent.departmentId!), isNotNull(departments.repoUrl)));
+    if (products.length) throw refuse(400, 'task_invalid', `Name the product: the code of your department lives in the repositories of its products (${products.map(product => product.name ?? 'unnamed').join(', ')}). Without one the task has no repository and closes by a report.`);
+  }
+
   private async createdTaskText(task: Task, executor: Agent): Promise<string> {
     return `Created #${task.number} for ${executor.name}.${await this.waiting(task)}`;
   }
@@ -540,7 +554,7 @@ class TaskTools {
     this.server.registerTool(
       'create_task',
       {
-        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. Scope repository paths explicitly; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate.',
+        description: 'Assigns one whole result in your department. Code always follows Architecture (unless small), Development, Review, risk-based Security, then Tests on the final candidate. Coordination has only a checked report over accepted child results. Optional Cleanup is enabled only by the head and runs after Review. A code task needs its repository paths (paths), and where only the products of the department keep code, its product; checker ids are optional, otherwise eligible skill owners are selected. Without an explicit result kind, a repository means code; work without a repository finishes with a checked report and no invented Git candidate.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), resultKind: z.enum(['code', 'coordination']).optional(), reviewerAgentId: z.uuid().optional(), securityAgentId: z.uuid().optional(), testsAgentId: z.uuid().optional(), cleanup: z.boolean().optional(), paths: z.array(z.string().min(1).max(500)).max(100).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
@@ -552,6 +566,7 @@ class TaskTools {
           await this.checkProduct(agent, input.product);
           const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
           const after = await this.afterIds(input.after);
+          await this.checkCodeScope(agent, input);
           const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: input.resultKind !== 'coordination', resultKind: input.resultKind, reviewerAgentId: input.reviewerAgentId, securityAgentId: input.securityAgentId, testsAgentId: input.testsAgentId, cleanup: input.cleanup, paths: input.paths, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
           return { text: await this.createdTaskText(moved.task, executor), moved };
         }),

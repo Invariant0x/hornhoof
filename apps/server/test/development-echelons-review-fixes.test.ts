@@ -1,12 +1,13 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agents, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { candidateForRun } from '../src/modules/tasks/echelons-run.js';
-import { createTask, loadTask, report, submit } from '../src/modules/tasks/engine.js';
+import { agentIdentity, checkerFor } from '../src/modules/tasks/echelons-assign.js';
+import { answer, ask, createTask, loadTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, listen, mcp } from './helpers.js';
-import { BASE, fixture } from './development-echelons-fixture.js';
+import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 import { testsFixture } from './development-echelons-verification.js';
 
 const code = { summary: 'Keep totals.', evidence: 'Changed tests passed.', review: { baseCommit: BASE } };
@@ -73,6 +74,80 @@ describe('the accepted review fixes', () => {
     const result = await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Delivered the drawing and checked its labels.' });
     expect(result.task.status).toBe('done');
     expect((await f.detail(task.id)).echelons).toMatchObject({ phase: 'done', candidateId: null });
+  });
+
+  /* Where a department keeps code, a coordination task a worker holds closes only on accepted subtask results: a report of its
+     own would hand in work that no Review saw. Its head still closes a finding that has no code. */
+  it('refuses a worker the close of a coordination task without accepted subtasks where the department keeps code, and lets its head close one', async () => {
+    const f = await fixture();
+    const given = (assigneeAgentId: string) => createTask(f.ctx, { agentId: f.head.id }, { title: 'Look into the totals', brief: 'Why they differ.', body: 'Find why.', departmentId: f.task.departmentId, assigneeAgentId, executor: false, resultKind: 'coordination' });
+    const held = (await given(f.author.id)).task;
+    await expect(report(f.ctx, f.author.id, held.id, { done: true, summary: 'Fixed the totals.' })).rejects.toMatchObject({ status: 409, message: expect.stringContaining('accepted results of its subtasks') });
+    expect((await loadTask(f.db, held.id)).status).not.toBe('done');
+    const own = (await given(f.head.id)).task;
+    expect((await report(f.ctx, f.head.id, own.id, { done: true, summary: 'The totals differ by rounding; nothing to change.' })).task.status).toBe('done');
+  });
+
+  /* A code task without paths is made, and then every submit of it is refused as outside the head-approved scope until the head
+     sets them: create_task asks for them at once. */
+  it('refuses create_task a code task without the paths its change may touch', async () => {
+    const f = await fixture();
+    const api = await tools(f);
+    const made = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true } });
+    expect(made.isError).toBe(true);
+    expect((made.content as { text: string }[])[0]!.text).toContain('needs the paths its change may touch');
+    const scoped = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true, paths: ['logic/**'] } });
+    expect(scoped.isError).not.toBe(true);
+  });
+
+  /* Where only the department's products keep code, a task made without a product had no repository and closed by a report. */
+  it('refuses create_task a task without a product where only the products of the department keep code', async () => {
+    const f = await fixture();
+    const [department] = await f.db.select().from(departments).where(eq(departments.id, f.task.departmentId!));
+    const [product] = await f.db.insert(departments).values({ companyId: department!.companyId, templateKey: 'development', roleCode: 'DEV', parentId: department!.id, name: 'Shop', repoUrl: department!.repoUrl }).returning();
+    await f.db.update(departments).set({ repoUrl: null }).where(eq(departments.id, department!.id));
+    const api = await tools(f);
+    const made = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true, paths: ['logic/**'] } });
+    expect(made.isError).toBe(true);
+    expect((made.content as { text: string }[])[0]!.text).toContain('Name the product');
+    const named = await api.callTool({ name: 'create_task', arguments: { title: 'Fix the totals', brief: 'Totals add up.', body: 'Fix them.', executor: f.author.id, small: true, paths: ['logic/**'], product: product!.id } });
+    expect(named.isError).not.toBe(true);
+  });
+
+  /* A head who holds a checking ability checks only where it names itself: picked on its own, it would take a stage from the
+     employees of its department and leave the department without the one who gives the work out. */
+  it('never picks the head as a checker by itself, and lets a head that names itself check', async () => {
+    const f = await fixture();
+    const [head] = await f.db.select().from(agents).where(eq(agents.id, f.head.id));
+    await f.db.update(agents).set({ skills: [...head!.skills, 'dev-test-environment'] }).where(eq(agents.id, f.head.id));
+    await f.db.update(agents).set({ skills: [] }).where(eq(agents.id, f.tester.id));
+    const producer = (await agentIdentity(f.db, f.task.companyId, f.author.id))!;
+    const task = await loadTask(f.db, f.task.id);
+    expect(await checkerFor({ db: f.db }, task, producer, 'dev-test-environment', null)).toBeNull();
+    expect(await checkerFor({ db: f.db }, task, producer, 'dev-test-environment', f.head.id)).toMatchObject({ agentId: f.head.id });
+  });
+
+  /* The Tests owner a candidate comes to ran nothing yet: it is told the candidate is at its checking stage, not that its tests ended. */
+  it('wakes a new Tests owner as the owner of a checking stage, not as one whose tests ended', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Focused checks.', review: { baseCommit: BASE } });
+    const moved = await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Checked the candidate.', reviewedCommit: HEAD });
+    const wake = moved.wakes.find(each => each.agentId === f.tester.id)!;
+    expect(wake).toMatchObject({ taskId: f.task.id, why: 'review' });
+    const prompt = wakePrompt(f.tester, await loadTask(f.db, f.task.id), wake);
+    expect(prompt).toContain('is with you at its current checking stage');
+    expect(prompt).not.toContain('The tests you ran');
+  });
+
+  /* An answer gives a task back to the stage it waited at: a Review that asked a person goes on as a Review. */
+  it('gives a task back to the status of its stage once a person answered what its checker asked', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Focused checks.', review: { baseCommit: BASE } });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'review', assigneeAgentId: f.reviewer.id });
+    const asked = await ask(f.ctx, f.reviewer.id, f.task.id, { kind: 'question', text: 'Is rounding to cents meant?' });
+    expect((await loadTask(f.db, f.task.id)).status).toBe('waiting');
+    await answer(f.ctx, { personId: f.claude.ownerPersonId }, asked.request.id, { answer: 'Yes, to cents.' });
+    expect(await loadTask(f.db, f.task.id)).toMatchObject({ status: 'review', assigneeAgentId: f.reviewer.id });
   });
 
   it('uses the no-repository default through the public create_task tool too', async () => {

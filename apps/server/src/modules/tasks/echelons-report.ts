@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { taskEvents, tasks } from '../../db/schema.js';
+import { agents, taskEvents, tasks } from '../../db/schema.js';
+import { repoAt } from '../departments/repository.js';
 import { verifiedCandidateEvidence } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
 import type { Ctx } from '../../app.js';
@@ -81,6 +82,15 @@ async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportDat
   return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence };
 }
 
+/* Where the department keeps code, a worker's own report would hand in work no Review saw: a worker closes a coordination task
+   there only on accepted results of its subtasks. A head or the orchestrator still closes a finding that has no code. */
+async function closableBy(ctx: Reader, tx: Tx, task: Task, agentId: string, children: unknown[]): Promise<void> {
+  if (children.length || !ctx.config) return;
+  const [agent] = await tx.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  if (agent?.kind !== 'worker' || !(await repoAt({ db: tx, config: ctx.config }, [task.productId, task.departmentId]))) return;
+  throw refuse(409, 'task_invalid', `#${task.number} closes only on accepted results of its subtasks, as its department keeps code: hand in code through submit on a code task, or tell whoever gave you #${task.number} what you found with comment, and they close it.`);
+}
+
 /* The aggregate pins existing accepted results. It never manufactures a repository candidate for itself. */
 export async function coordinationReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string): Promise<Moved> {
   if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current coordination owner can close its report.');
@@ -91,6 +101,7 @@ export async function coordinationReport(ctx: Reader, task: Task, route: Route, 
     kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true }, returned: true,
   }, async tx => {
     const acceptedChildren = await acceptedUnder(tx, task);
+    await closableBy(ctx, tx, task, agentId, acceptedChildren);
     await changeRoute(tx, route, { ...route.state, phase: 'done' });
     await note(tx, task, { kind: 'report', actor: { agentId }, text: summary.trim(), data: { done: true, acceptedChildren, routeRevision: route.revision + 1 } });
   }, wakes);
