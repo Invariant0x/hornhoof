@@ -3,7 +3,7 @@ import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type 
 import type { TestPartPlan } from './plan.js';
 import type { ReuseDecision } from './reuse.js';
 
-export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[] }[]; estimate: TestPartPlan | null; reason: string };
+export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[]; computer?: string }[]; estimate: TestPartPlan | null; reason: string };
 
 function batchLeaves(input: PreparedEnvironmentPlanInput, plan: EnvironmentPartPlan | null, prepared: boolean): ProductPlan['leaves'] {
   return (plan?.parts ?? []).map(part => ({
@@ -11,6 +11,7 @@ function batchLeaves(input: PreparedEnvironmentPlanInput, plan: EnvironmentPartP
       selections: part.selections.map(selection => ({ ...selection, shard: part.suiteShards.find(shard => shard.suiteId === selection.suiteId)! })).map(selection => ({ ...selection, shard: { index: selection.shard.index, count: selection.shard.count } })),
     } }).selection,
     after: prepared ? [1] : [],
+    ...(part.machine ? { computer: part.machine.key } : {}),
   }));
 }
 function finalLeaves(leaves: ProductPlan['leaves'], suiteIds: string[], onceIds: string[]): ProductPlan['leaves'] {

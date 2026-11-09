@@ -1011,7 +1011,8 @@ export type TestEnvironmentRequest = {
   requestId: string | null; nodeId: string | null; builtin: boolean;
   sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
 };
-export type TestEnvironmentSelection = { selection: TestExecution['selection']; after: number[] };
+/* computer: the machine a part was laid out for by its pace; it goes there while that machine is online and may take it. */
+export type TestEnvironmentSelection = { selection: TestExecution['selection']; after: number[]; computer?: string };
 export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */

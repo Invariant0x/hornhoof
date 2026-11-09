@@ -29,6 +29,8 @@ export type PlanningHistory = {
   costBasis: { setup: 'historical' | 'fallback'; collection: 'historical' | 'fallback' };
   usedPartIds: string[];
   unmatchedFiles: number;
+  /* How long each computer takes for the same work against the middle one, from what its parts took. */
+  paces?: Map<string, number>;
 };
 
 type InventoryIndex = Map<string, TestUnit[]>;

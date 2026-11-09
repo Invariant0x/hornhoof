@@ -44,6 +44,12 @@ export function timingsOfLog(log: string): PartTimings {
   return said.files.length ? said : fromRunnerOutput(log);
 }
 
+/* What a part's log says of its test files, kept as the part ends, so the next plan knows what each file took on its machine. It is
+   what keepTimings would read later from the same log. */
+export async function keepPartTimings(db: Db | Tx, part: Pick<typeof testParts.$inferSelect, 'id' | 'companyId' | 'runId'>, log: string): Promise<void> {
+  await db.insert(testPartTimings).values({ partId: part.id, companyId: part.companyId, runId: part.runId, ...timingsOfLog(log) }).onConflictDoNothing();
+}
+
 /* Reads the log of each ended part of a test run of these tasks that was not read yet, once: what it said stays as it was
    read. A part whose log has not come yet waits for the next time. Runs of work print nothing of the kind. */
 export async function keepTimings(db: Db | Tx, companyId: string, taskIds: string[]): Promise<void> {

@@ -28,6 +28,7 @@ import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productRece
 import { checkNamedFiles } from './named-files.js';
 import { pickMachine } from './pick.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
+import { keepPartTimings } from './timings.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -278,10 +279,13 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   return places;
 }
 
-/* Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
+/* A part laid out for a computer by its pace waits for that computer while it is online and may take it; after a loss, or when it
+   cannot, any computer does. Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
 function placeFor(open: Place[], run: Run, part: Part, department: Department | null, reserved: Reservations): Place | null {
   const need = needOf(run, department) * GIB;
   const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: mayTake(p, run, department), busy: reserved.busy(p), load: p.load }));
+  const laidOut = part.lost.length ? [] : spots.filter(s => s.computer === part.environmentSelection?.computer && s.lent && s.reaches);
+  if (laidOut.length) { const own = pickMachine(laidOut, need); return own ? open.find(p => p.key === own.key) ?? null : null; }
   const lostOn = new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
   const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need) ?? pickMachine(spots, need);
   return spot ? open.find(p => p.key === spot.key) ?? null : null;
@@ -492,6 +496,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
+      if (ended && found.run.kind === 'tests') await keepPartTimings(ctx.db, ended, msg.log);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await settleRun(ctx, found.run.id);
     }

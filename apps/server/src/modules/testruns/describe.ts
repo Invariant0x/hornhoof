@@ -14,6 +14,7 @@ import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
 import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
+import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
 export { productReceipt } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
@@ -92,13 +93,14 @@ function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestE
   if (leaves.length > MAX_TEST_PARTS) throw new Error('The product plan exceeds the supported part count.');
   return leaves;
 }
-async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<number> {
+/* The computers free now that may run a part of the run. */
+async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<string[]> {
   const sources = planningSources.get(ctx);
-  if (!sources) return 0;
+  if (!sources) return [];
   const target = await sources.target(run), need = (run.memoryGb ?? target?.department?.repoTestMemoryGb ?? TEST_MEMORY_GB) * 1024 ** 3;
   const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need);
   const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
-  return new Set(free.map(computerKey)).size;
+  return [...new Set(free.map(computerKey))].sort();
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
   if (snapshot.candidate) return candidateTestUnits(snapshot);
@@ -114,10 +116,11 @@ async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, 
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
-  const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
+  const history = await (planningPorts.get(ctx)?.history ?? measuredHistory(ctx))(run, snapshot);
+  const free = await freeProductMachines(ctx, run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
     ...planningCosts(history),
-    availableMachines: await freeProductMachines(ctx, run, snapshot) });
+    availableMachines: free.length, machines: free.map(key => ({ key, pace: history?.paces?.get(key) ?? 1 })) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
   return { leaves: plan.leaves, plan };
 }
