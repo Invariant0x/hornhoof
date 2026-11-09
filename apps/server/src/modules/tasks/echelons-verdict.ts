@@ -20,10 +20,17 @@ function requireCheckingOwner(task: Task, route: Route, agentId: string): void {
   }
 }
 
-function verdictState(route: Route, verdict: Verdict, agentId: string): Route['state'] {
+/* A verdict says one thing: PASS, a defect the checker fixes, an escalation of a wrong goal, or Review's return of the
+   work to its author. */
+function refuseMixedVerdict(route: Route, verdict: Verdict): void {
   if (verdict.escalate && verdict.pass) throw refuse(400, 'task_invalid', 'An escalation cannot certify PASS.');
-  if (verdict.returnToAuthor && (verdict.pass || verdict.escalate)) throw refuse(400, 'task_invalid', 'A return to the author is a FAIL verdict, neither a PASS nor an escalation.');
-  if (verdict.returnToAuthor && route.state.stage !== 'review') throw refuse(400, 'task_invalid', 'Only Review returns a candidate to its author; fix it yourself or escalate a wrong goal.');
+  if (!verdict.returnToAuthor) return;
+  if (verdict.pass || verdict.escalate) throw refuse(400, 'task_invalid', 'A return to the author is a FAIL verdict, neither a PASS nor an escalation.');
+  if (route.state.stage !== 'review') throw refuse(400, 'task_invalid', 'Only Review returns a candidate to its author; fix it yourself or escalate a wrong goal.');
+}
+
+function verdictState(route: Route, verdict: Verdict, agentId: string): Route['state'] {
+  refuseMixedVerdict(route, verdict);
   const state = route.state;
   if (verdict.security === undefined) return state;
   if (state.stage !== 'review' || !verdict.security.trim()) throw refuse(400, 'task_invalid', 'Only Review adds Security with a concrete risk.');
@@ -41,6 +48,14 @@ function verdictData(route: Route, candidate: EchelonCandidate, identity: Checke
 }
 
 type VerdictNote = { kind: 'verdict'; actor: { agentId: string }; text: string; data: ReturnType<typeof verdictData> };
+
+/* A wrong goal goes to the head, and the route stands escalated at this stage. */
+async function escalation(ctx: Reader, task: Task, route: Route, state: Route['state'], n: VerdictNote, held: (tx: Tx) => Promise<void>): Promise<Moved> {
+  const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: n.text }];
+  const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
+  const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
+  return { task: row, wakes };
+}
 
 /* Work the author must do goes back to the author on Development; the next candidate is compared with this one. */
 async function authorReturn(ctx: Reader, task: Task, route: Route, n: VerdictNote, held: (tx: Tx) => Promise<void>): Promise<Moved> {
@@ -65,12 +80,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   const issues = await issuesForEchelon(ctx.db, task, route, candidate, identity, verdict.issues ?? [], verdict.pass);
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: verdictData(route, candidate, identity, verdict, issues, state) };
   const held = async (tx: Tx) => { if (!sameChecker(await heldCheckingIdentity(tx, task, route, candidate), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.'); };
-  if (verdict.escalate) {
-    const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: verdict.comment.trim() }];
-    const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
-    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
-    return { task: row, wakes };
-  }
+  if (verdict.escalate) return escalation(ctx, task, route, state, n, held);
   if (verdict.returnToAuthor) return authorReturn(ctx, task, { ...route, state }, n, held);
   if (!verdict.pass) {
     const row = await move(ctx, task, { status: 'working' }, n, async tx => { await held(tx); await changeRoute(tx, route, state); });

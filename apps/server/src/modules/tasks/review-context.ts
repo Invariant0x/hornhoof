@@ -100,8 +100,10 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: 
   return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
 }
 
-/* What each checking stage last decided on this task, in route order. */
-export async function lastVerdicts(db: Store, taskId: string): Promise<Checked[]> {
+/* What each checking stage last decided on this task, in route order. A checker's repair is no new candidate of the
+   author's, so it is compared with nothing. */
+export async function lastVerdicts(db: Store, taskId: string, repair = false): Promise<Checked[]> {
+  if (repair) return [];
   const rows = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'))).orderBy(desc(taskEvents.id));
   const last = new Map<Checked['stage'], Checked>();
   for (const { data } of rows) {
