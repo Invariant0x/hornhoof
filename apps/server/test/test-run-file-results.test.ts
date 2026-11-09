@@ -46,7 +46,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
   let number = 0;
 
   /* A run through the real path: requested, described by the node, planned, given out. It is of the turn's branch unless it says. */
-  const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`) => {
+  const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`, described = runtimes) => {
     const prints = given === undefined ? [...fingerprints(), ...(preparation ? [{ ...PREPARATION_UNIT, fingerprint: print('e') }] : [])] : given;
     number += 1;
     const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: 600_000,
@@ -54,7 +54,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
     const value = manifest(everyTurns, preparation), manifestSource = JSON.stringify(value);
-    const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: runtimes };
+    const description = { version: 1 as const, repositoryScope: scope, commitSha: TEST_COMMIT, manifestSource, manifest: value, manifestHash: await hashTestEnvironment(manifestSource), inputDigests: [], inventory: FILES.map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: described };
     const reply: TestsDescribed = { type: 'tests.described', requestId: stored!.environmentRequest!.requestId!, commitSha: TEST_COMMIT, result: { status: 'ready', description, ...(prints ? { fingerprints: prints } : {}) } };
     await acceptDescription(app.ctx, BUILTIN, reply);
     await pumpTests(app.ctx);
@@ -122,6 +122,8 @@ describe('reusing green test results', () => {
     await f.finish(first);
     expect((await f.greenRows()).map(row => row.file)).toEqual(FILES);
     expect((await f.runOf(first)).fileCache).toMatchObject({ verifiedFingerprints: fingerprints() });
+    const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 1);
+    expect(shown).toMatchObject({ reuse: { mode: 'cached', fingerprints: 3, kept: 3 } });
 
     const second = await f.start({ profile: 'final' });
     expect(await f.ranFiles(second)).toEqual([]);
@@ -194,6 +196,20 @@ describe('reusing green test results', () => {
     const next = await f.start({ profile: 'final' });
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
     expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
+  });
+
+  /* The fingerprints name the runtimes of the machine that described the run. A part that ran on a machine of other runtimes
+     proves its files there, not at those fingerprints. */
+  it('keeps no green result of a part that ran on a machine of other runtimes than the run was described on', async () => {
+    const f = await fixture();
+    const other = runtimes.map(runtime => (runtime.id === 'node' ? { ...runtime, fingerprint: 'c'.repeat(64) } : runtime));
+    const first = await f.start({ profile: 'final' }, undefined, undefined, other);
+    expect(await f.ranFiles(first)).toEqual(FILES);
+    await f.finish(first);
+    expect(await f.runOf(first)).toMatchObject({ status: 'passed' });
+    expect(await f.greenRows()).toEqual([]);
+    const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 1);
+    expect(shown).toMatchObject({ reuse: { mode: 'cached', fingerprints: 3, kept: 0 } });
   });
 
   it('takes back a green result when the file then fails at the same fingerprint, as in two runs at once', async () => {

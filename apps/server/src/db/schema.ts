@@ -1020,6 +1020,8 @@ export type TestRunFileCache = {
   mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
   reusedUnits?: ReusedTestUnit[];
   verifiedFingerprints?: UnitFingerprint[];
+  /* How many green results the run kept for later, once it ended. */
+  kept?: number;
   wouldSkip: TestFileKey[]; compared: number; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
 };
 

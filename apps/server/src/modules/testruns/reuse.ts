@@ -1,5 +1,5 @@
 import { KeptFiles, PREPARATION_UNIT, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { and, eq, inArray, isNotNull, isNull, lt, notExists, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, notExists, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
@@ -106,7 +106,9 @@ export function reuseLines(cache: TestRunFileCache | null, parts: Pick<Part, 'fa
 export function reuseView(cache: TestRunFileCache | null, parts: Pick<Part, 'failedFiles'>[]): object {
   if (!cache) return {};
   const failedFiles = [...new Set(parts.flatMap(part => part.failedFiles ?? []).map(file => file.file))];
-  return { reuse: { mode: cache.mode, turn: cache.turn, reused: cache.reused, preparationReused: cache.preparationReused, mismatches: cache.mismatches.map(file => file.file), failedFiles, notes: cache.notes } };
+  const fingerprints = (cache.verifiedFingerprints ?? cache.fingerprints).length;
+  return { reuse: { mode: cache.mode, turn: cache.turn, reused: cache.reused, preparationReused: cache.preparationReused, fingerprints, ...(cache.kept === undefined ? {} : { kept: cache.kept }),
+    mismatches: cache.mismatches.map(file => file.file), failedFiles, notes: cache.notes } };
 }
 
 /* The turn a run belongs to: its task's, or the one open now. */
@@ -219,13 +221,20 @@ async function forgetFailed(db: Db, cache: TestRunFileCache, scope: RepositorySc
 }
 
 type PartEnd = { ok: boolean; commit: string | null; files?: FileOutcome[] };
+/* The fingerprints name the runtimes of the machine that described the run. A part proves its files at them only where it ran on
+   those very runtimes; on others it proved them somewhere no fingerprint names. */
+function ranAsDescribed(snapshot: EnvironmentSnapshot, receipt: Part['environmentReceipt']): boolean {
+  const described = snapshot.description.runtimeCapabilities;
+  return Boolean(receipt) && receipt!.runtimes.every(actual => described.some(runtime => runtime.id === actual.id && runtime.version === actual.version && runtime.fingerprint === actual.fingerprint));
+}
+
 /* What a part that ended leaves behind. A part that lost its machine, checked another commit or passed without proof leaves nothing. */
-export async function recordPartFiles(ctx: Pick<Ctx, 'db'>, run: Run, part: Part, ended: Pick<Part, 'status'>, message: PartEnd): Promise<void> {
+export async function recordPartFiles(ctx: Pick<Ctx, 'db'>, run: Run, part: Part, ended: Pick<Part, 'status' | 'environmentReceipt'>, message: PartEnd): Promise<void> {
   const cache = run.fileCache, snapshot = run.environmentSnapshot, selection = part.environmentSelection?.selection;
   if (!cache || !snapshot || !selection || message.commit !== run.commitSha) return;
   if (message.ok && ended.status !== 'passed') return;
   const { green, failed } = partFileResults(snapshot, selection, message.ok, message.files);
-  await keepGreen(ctx.db, run, cache, snapshot.description.repositoryScope, green);
+  if (ranAsDescribed(snapshot, ended.environmentReceipt)) await keepGreen(ctx.db, run, cache, snapshot.description.repositoryScope, green);
   if (!failed.length) return;
   await forgetFailed(ctx.db, cache, snapshot.description.repositoryScope, failed);
   await ctx.db.update(testParts).set({ failedFiles: failed }).where(eq(testParts.id, part.id));
@@ -240,9 +249,9 @@ export async function closeFileCache(tx: Pick<Db, 'select' | 'update'>, run: Run
   const parts = await tx.select({ status: testParts.status, failedFiles: testParts.failedFiles }).from(testParts).where(eq(testParts.runId, run.id));
   const failed = new Set(parts.flatMap(part => part.failedFiles ?? []).map(keyOf));
   const toldAll = parts.every(part => part.status === 'passed' || part.failedFiles);
-  const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), eq(testFileResults.runId, run.id), isNotNull(testFileResults.note)));
-  const notes = [...cache.notes, ...ran.map(({ file, note }) => ({ file, note: note! }))].sort((a, b) => a.file.localeCompare(b.file));
-  const fileCache: TestRunFileCache = { ...cache, verifiedFingerprints: cache.verifiedFingerprints ?? cache.fingerprints, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
+  const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(testFileResults, scope), eq(testFileResults.runId, run.id)));
+  const notes = [...cache.notes, ...ran.flatMap(({ file, note }) => (note === null ? [] : [{ file, note }]))].sort((a, b) => a.file.localeCompare(b.file));
+  const fileCache: TestRunFileCache = { ...cache, kept: ran.length, verifiedFingerprints: cache.verifiedFingerprints ?? cache.fingerprints, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
   await tx.update(testRuns).set({ fileCache }).where(eq(testRuns.id, run.id));
   return { ...run, fileCache };
 }
