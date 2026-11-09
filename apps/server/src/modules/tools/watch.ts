@@ -1,11 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { wrote } from '../conversation/prompt.js';
+import { answerBy, wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import type { WithEvent } from '../events/store.js';
@@ -21,6 +21,7 @@ import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from 
 import { watchedTasks } from './watch-tasks.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
+type Agent = typeof agents.$inferSelect;
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
 export const TURN_NUDGES = 10;
@@ -303,7 +304,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         await enqueueTurn(ctx, {
           companyId: job.companyId,
           agentId: orchestrator.id,
-          prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+          prompt: `${wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text)}\n\n${answerBy(me)}`,
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
           withMessage: back.withMessage,
@@ -322,22 +323,43 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     const [d] = await db.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.id, departmentId));
     return d ? (d.parentId ?? d.id) : null;
   };
+  const inReach = async (me: Agent, target: Agent) =>
+    target.kind !== 'orchestrator' && (anywhere || (await topOf(target.departmentId)) === (await topOf(me.departmentId)));
+  /* Whoever wrote to me last, the orchestrator too, gets one answer wherever it works: an answer in my window reaches only
+     people, so an agent's question is answered with a message or not at all. Notices Hornhoof passes on ask nothing. */
+  const owesAnswer = async (me: Agent, target: Agent): Promise<boolean> => {
+    const by = target.kind === 'orchestrator'
+      ? sql`${agentEvents.data}->>'from' = 'orchestrator'`
+      : sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${target.id}`;
+    const [asked] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+      .where(and(eq(agentEvents.agentId, me.id), eq(agentEvents.kind, 'message'), by, sql`${agentEvents.data}->'notification' is null`))
+      .orderBy(desc(agentEvents.seq)).limit(1);
+    if (!asked) return false;
+    const [answered] = await db.select({ seq: agentEvents.seq }).from(agentEvents)
+      .where(and(eq(agentEvents.agentId, target.id), eq(agentEvents.kind, 'message'), gt(agentEvents.seq, asked.seq), sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'by' = ${me.id}`))
+      .limit(1);
+    return !answered;
+  };
   server.registerTool(
     'message_employee',
     {
       description: (anywhere
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
-        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) + MESSAGE_TASK_HINT,
+        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) +
+        ' It also answers the one who wrote to you last, in any department or the orchestrator, with one message: an answer in your window reaches only people, never an agent.' +
+        MESSAGE_TASK_HINT,
       inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: Text.trim().min(1), task: TaskReference.optional() },
     },
     async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
       const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
       const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
-      if (!me || !target || target.kind === 'orchestrator') return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);
+      if (!me || !target) return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);
       if (target.id === me.id) return say('That is you. Write to another employee.', true);
-      if (!anywhere && (await topOf(target.departmentId)) !== (await topOf(me.departmentId)))
-        return say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
+      if (!(await inReach(me, target)) && !(await owesAnswer(me, target)))
+        return target.kind === 'orchestrator'
+          ? say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true)
+          : say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
       if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
       const state = await agentState(ctx, target.id);
       if (!state.ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
@@ -346,14 +368,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
           companyId: job.companyId,
           agentId: target.id,
-          prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+          prompt: `${wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text)}\n\n${answerBy(me)}`,
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
           withMessage: back.withMessage,
         }).then(async id => {
         back.told();
         /* The map runs it between the two departments, or the card between the two agents of one. */
-        if (me.departmentId && target.departmentId) {
+        if (me.departmentId && target.kind === 'orchestrator') ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
+        else if (me.departmentId && target.departmentId) {
           const same = me.departmentId === target.departmentId;
           ctx.bus.publish(job.companyId, {
             type: 'pulse',
