@@ -13,6 +13,7 @@ import { contentText, isRecord } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
+import { machineLoad, programWorkers, type MachineLoad } from '../load.js';
 import { jobDone, tidy, type RunInput, type RunResult, type ProgramBinding } from '../runner.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
@@ -273,6 +274,9 @@ type Options = {
   /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
   user?: JobUser | null;
   fs?: AgentFs;
+  /* The machine the programs share, and the environment the node runs with, which they inherit. */
+  machine?: () => Pick<MachineLoad, 'cpus' | 'memTotal'>;
+  env?: NodeJS.ProcessEnv;
 };
 
 const WAITING = 'This agent starts with its next turn.';
@@ -840,7 +844,7 @@ export class TerminalHost {
   }
 
   private async launchAttempt(a: Agent, job: TermJob, spec: LaunchSpec): Promise<void> {
-    const env = { ...lasting(job.input.env), ...spec.env };
+    const env = { ...(await this.testShare(a)), ...lasting(job.input.env), ...spec.env };
     const scratch = this.opts.tmux.scratch();
     this.operator?.launch(a.key, 'attempt');
     try {
@@ -851,6 +855,14 @@ export class TerminalHost {
       this.operator?.exited(a.key, { code: null, signal: null });
       throw error;
     }
+  }
+
+  /* The Vitest workers of the program's share of the machine among the programs that run on the node, itself among them,
+     for its tests and its helpers' tests. Workers the machine's own settings give stay. */
+  private async testShare(a: Agent): Promise<Record<string, string>> {
+    if ((this.opts.env ?? process.env).VITEST_MAX_WORKERS?.trim()) return {};
+    const others = (await this.opts.tmux.livePrograms()).filter(key => key !== a.key);
+    return { VITEST_MAX_WORKERS: String(programWorkers((this.opts.machine ?? machineLoad)(), others.length + 1)) };
   }
 
   private async failedStart(a: Agent, job: TermJob): Promise<RunResult> {

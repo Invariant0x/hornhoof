@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { machineLoad } from '../src/load.js';
+import { machineLoad, programWorkers } from '../src/load.js';
 
 const GIB = 1024 ** 3;
 const files = (all: Record<string, string>) => (path: string) => all[path] ?? null;
@@ -82,5 +82,22 @@ describe("a node's machine load", () => {
     const withoutBootId = machineLoad({ read: files({ ...base, '/proc/sys/kernel/random/boot_id': '   \n' }), cpus: 4, load: 0.5, cpuModel: '', disk: () => null, env: {} });
     expect(withoutBootId).toEqual({ cpus: 4, load: 0.5, memFree: 3 * GIB, memTotal: 4 * GIB });
   });
+});
 
+describe("an agent program's share of its machine for tests", () => {
+  it('is the share of the processors each program running there gets', () => {
+    expect(programWorkers({ cpus: 10, memTotal: 32 * GIB }, 1)).toBe(10);
+    expect(programWorkers({ cpus: 10, memTotal: 32 * GIB }, 4)).toBe(2);
+  });
+
+  it('holds no more Vitest workers than its share of the memory keeps once the program and Vitest itself have theirs', () => {
+    expect(programWorkers({ cpus: 16, memTotal: 12 * GIB }, 2)).toBe(4);
+    /* Four programs on a machine of 12.5 GB, as on the one where the system killed a program. */
+    expect(programWorkers({ cpus: 10, memTotal: 12.5e9 }, 4)).toBe(1);
+  });
+
+  it('is one worker at least', () => {
+    expect(programWorkers({ cpus: 4, memTotal: 8 * GIB }, 20)).toBe(1);
+    expect(programWorkers({ cpus: 1, memTotal: 0 }, 1)).toBe(1);
+  });
 });

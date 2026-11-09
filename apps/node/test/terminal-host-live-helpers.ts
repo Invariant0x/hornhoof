@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]>; live?: string[] } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -61,6 +61,8 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'has').mockResolvedValue(true);
   vi.spyOn(tmux, 'clients').mockResolvedValue([]);
+  /* The agents whose programs run in the node's tmux before this one starts. */
+  if (options.live) vi.spyOn(tmux, 'livePrograms').mockResolvedValue(options.live);
   const views: { view: FakeView; name: string; cols: number; rows: number; write: boolean }[] = [];
   const attach = vi.spyOn(tmux, 'attach').mockImplementation((name, cols, rows, write) => {
     const view = fakeView();

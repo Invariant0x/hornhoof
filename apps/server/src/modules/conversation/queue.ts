@@ -14,6 +14,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
@@ -51,6 +52,9 @@ export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: strin
 export type AgentState = FailureState & {
   ready: boolean;
   machineDrain: MachineDrain | null;
+  /* Its turns would start its program on a machine short of free memory, so they wait and go on by themselves once the
+     memory frees up. */
+  memoryWait: boolean;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: workers' task turns wait, people's own messages still go. */
@@ -685,12 +689,13 @@ const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== '
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
-   node can take it. */
-async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeldFrom(ctx, BUILTIN, agent.roleKey, isLeader(agent)) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+   node can take it. A turn that would start a new program goes only to a machine with free memory for it; roomy: whether
+   a node has, which the agent's state also asks as if every node had. */
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE, roomy = (node: NodeIdentity) => roomFor(ctx, node, agent.id)): Promise<Placement | null> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeldFrom(ctx, BUILTIN, agent.roleKey, isLeader(agent)) && roomy(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need)));
+  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need, roomy)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
 
@@ -704,9 +709,9 @@ async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Pr
 
 /* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
    is one of those. */
-async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[]): Promise<NodeRow | null> {
+async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[], roomy: (node: NodeIdentity) => boolean): Promise<NodeRow | null> {
   if (!isLeader(agent)) return null;
-  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need));
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need) && roomy(nodeIdentity(n.id)));
   return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
@@ -1007,7 +1012,10 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */
     ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
   }
-  if (sent) return wentOut(ctx, job, along, taken.lines);
+  if (sent) {
+    turnSent(ctx, place.node, agentId);
+    return wentOut(ctx, job, along, taken.lines);
+  }
   if (operatorDelivery) await cancelUnsentDelivery(db, operatorDelivery);
   await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, sessionId: job.sessionId, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
@@ -1042,7 +1050,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, memoryWait: false, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -1104,6 +1112,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
+    memoryWait: !place && reason === null && Boolean(sub && agent && (await placement(ctx, agent, sub, CONVERSATION_NODE, () => true))),
     ...await planState(ctx, agent, sub),
     reason,
     browserError,

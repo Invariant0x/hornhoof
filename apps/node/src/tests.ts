@@ -14,7 +14,7 @@ import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContex
 import { EnvironmentFailure, MANIFEST, buildSharedTestInvocation, buildTestInvocation, sharedVitestCommand, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies, type SharedMember } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
-import { machineLoad } from './load.js';
+import { machineLoad, WORKER_BYTES } from './load.js';
 import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
@@ -384,8 +384,6 @@ export function partFolders(root: string, msg: TestRun): { own: string; user: st
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
-/* A Vitest worker of the product's tests takes up to about a gigabyte, and Vitest itself about as much again. */
-const WORKER_BYTES = 2 ** 30;
 /* Vitest's workers: the cores and memory the machine has free when the part starts, one core left for Vitest itself,
    and never fewer than half the cores. */
 function vitestWorkers(options: Pick<Options, 'cpus' | 'load' | 'memFree' | 'env'>): string {

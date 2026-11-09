@@ -233,6 +233,12 @@ export class Tmux {
       });
   }
 
+  /* The agents whose programs run in this server's sessions, one session each; none when the server runs none. */
+  async livePrograms(): Promise<string[]> {
+    const panes = await this.run(['list-panes', '-a', '-F', '#{session_name} #{pane_dead}']).catch(() => '');
+    return panes.split('\n').flatMap(line => /^a-(\S+) 0$/.exec(line)?.slice(1) ?? []);
+  }
+
   /* The program's process in the session's pane, or null when it ended. */
   async programPid(name: string): Promise<number | null> {
     if (!(await this.alive(name))) return null;

@@ -334,6 +334,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
   const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
+  /* The agents whose programs run in its terminals, as of the last look, for Hornhoof starts no new one on a machine short
+     of free memory. A node without terminals names none. */
+  let live = terminal ? await terminal.tmux.livePrograms() : null;
+  const lookLive = async () => {
+    if (terminal) live = await terminal.tmux.livePrograms();
+  };
+  const liveNow = () => (live ? { live } : {});
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
@@ -349,7 +356,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
       const noRuns = noRunsNow();
-      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), ...liveNow(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       testMessages.replay();
       for (const m of outbox.splice(0)) emit(m);
@@ -631,7 +638,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const checkingBrowser = setInterval(() => void recheckBrowser(), browserCheckMs);
   checkingBrowser.unref();
   /* An old figure says nothing, so one that cannot go out now is not kept for later. */
-  const reporting = setInterval(() => void send?.({ type: 'load', ...load() }), loadMs);
+  const reporting = setInterval(() => void lookLive().then(() => send?.({ type: 'load', ...load(), ...liveNow() })), loadMs);
   reporting.unref();
 
   function stop(reason: NodeStopReason = 'stopped') {
