@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { URL } from 'node:url';
 import { changedLines, countDuplicates, exitCodeOf, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from '../author-check/judge.mjs';
 import { buildPlan, grownFunctions, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus } from '../author-check/plan.mjs';
@@ -11,6 +11,7 @@ import { adapterOf, impactEnvironment, selectTests } from '../author-check/selec
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
 import { complexityAt, prepare, sourceDigest } from '../author-check/wired.mjs';
+import { cloneWithModules, shareModules } from '../author-check/modules.mjs';
 import { tracked } from './tracked-files.mjs';
 
 const SHA = '1'.repeat(40), BASE = '2'.repeat(40);
@@ -643,10 +644,11 @@ test('the real git port reads commits, a plan of a real repository included', { 
 test('preparing a run installs only what is missing and builds again what was built from other sources', async () => {
   const asked = [];
   const PROTOCOL = 'packages/protocol/dist/.built-from', NODE = 'apps/node/dist/.built-from';
-  const ports = ({ have = [], stamps = {}, sources = {}, code = 0 } = {}) => {
+  const ports = ({ have = [], stamps = {}, sources = {}, code = 0, shared = false } = {}) => {
     const files = { ...stamps };
     return {
       files,
+      shareModules: () => { if (shared) asked.push('shared'); return shared; },
       exists: path => have.includes(path),
       read: path => files[path] ?? null,
       write: (path, text) => { files[path] = text; },
@@ -659,6 +661,7 @@ test('preparing a run installs only what is missing and builds again what was bu
 
   const first = await preparing();
   assert.deepEqual(first.asked, ['npm ci --ignore-scripts', 'npm run -s prepare', ...builds]);
+  assert.deepEqual((await preparing({ shared: true })).asked, ['shared', 'npm run -s prepare', ...builds], 'a worktree takes the dependencies of its clone');
   const built = ['node_modules', 'packages/protocol/dist', 'apps/node/dist'];
   assert.deepEqual((await preparing({ have: built })).asked, builds, 'a build that does not say what it was built from');
   const fresh = { have: built, stamps: first.files };
@@ -736,4 +739,56 @@ test('moving a checked fixture to ordinary docs still checks its former readers'
   const ports = selector();
   const result = await selectTests({ changes: [{ path: 'docs/moved.md', previousPath: 'apps/node/test/fixtures/README.md', kind: 'renamed' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
   assert.ok(result.packages.length > 0);
+});
+
+/* A clone installed from a lockfile, and a worktree of it at the same lockfile: a package, a scope of packages, a link to a
+   workspace package, a command in .bin, a tool's cache and a workspace's own folder of packages. */
+function cloneAndWorktree({ sameLock = true } = {}) {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), 'hh-share-')));
+  const clone = join(top, 'clone'), tree = join(top, 'tree');
+  const make = (path, text = '') => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+  for (const root of [clone, tree]) {
+    make(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+    make(join(root, 'packages/protocol/index.js'), `export const where = '${root}';`);
+  }
+  make(join(clone, 'package-lock.json'), 'lock 1');
+  make(join(tree, 'package-lock.json'), sameLock ? 'lock 1' : 'lock 2');
+  make(join(clone, 'node_modules/.package-lock.json'), 'lock 1');
+  make(join(clone, 'node_modules/zod/index.js'), 'zod');
+  make(join(clone, 'node_modules/@types/node/index.d.ts'), 'types');
+  make(join(clone, 'node_modules/.vite/cache'), 'cache');
+  mkdirSync(join(clone, 'node_modules/@hornhoof'), { recursive: true });
+  symlinkSync('../../packages/protocol', join(clone, 'node_modules/@hornhoof/protocol'));
+  mkdirSync(join(clone, 'node_modules/.bin'), { recursive: true });
+  symlinkSync('../zod/index.js', join(clone, 'node_modules/.bin/zod'));
+  make(join(clone, 'packages/protocol/node_modules/left-pad/index.js'), 'nested');
+  return { top, clone, tree, git: () => `${clone}/.git\n` };
+}
+
+test('a worktree takes the packages its clone installed from the same lockfile, and its own workspace packages', () => {
+  const { top, clone, tree, git } = cloneAndWorktree();
+  try {
+    assert.equal(cloneWithModules(tree, git), clone);
+    assert.equal(shareModules(tree, git), true);
+    assert.equal(realpathSync(join(tree, 'node_modules/zod')), join(clone, 'node_modules/zod'));
+    assert.equal(realpathSync(join(tree, 'node_modules/@types/node')), join(clone, 'node_modules/@types/node'));
+    assert.equal(realpathSync(join(tree, 'node_modules/@hornhoof/protocol')), join(tree, 'packages/protocol'), 'its own protocol, not the clone\'s');
+    assert.equal(readlinkSync(join(tree, 'node_modules/.bin/zod')), '../zod/index.js');
+    assert.equal(realpathSync(join(tree, 'packages/protocol/node_modules/left-pad')), join(clone, 'packages/protocol/node_modules/left-pad'));
+    assert.ok(lstatSync(join(tree, 'node_modules')).isDirectory(), 'its own folder, so what a tool writes there stays in the worktree');
+    assert.throws(() => lstatSync(join(tree, 'node_modules/.vite')), /ENOENT/, 'a tool keeps its cache in each worktree apart');
+  } finally { rmSync(top, { recursive: true, force: true }); }
+});
+
+test('a worktree of another lockfile, a clone itself or one whose clone installed nothing installs on its own', () => {
+  const other = cloneAndWorktree({ sameLock: false });
+  const same = cloneAndWorktree();
+  try {
+    assert.equal(shareModules(other.tree, other.git), false);
+    assert.throws(() => lstatSync(join(other.tree, 'node_modules')), /ENOENT/);
+    assert.equal(cloneWithModules(same.clone, () => `${same.clone}/.git\n`), null, 'a clone is no worktree of itself');
+    assert.equal(cloneWithModules(same.tree, () => { throw new Error('not a git repository'); }), null);
+    rmSync(join(same.clone, 'node_modules/.package-lock.json'));
+    assert.equal(cloneWithModules(same.tree, same.git), null, 'a clone whose install did not finish');
+  } finally { for (const { top } of [other, same]) rmSync(top, { recursive: true, force: true }); }
 });
