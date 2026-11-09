@@ -3,10 +3,16 @@ import { join, relative, resolve } from 'node:path';
 import { MutationResult, FileNote, KEPT_BYTES, RepositoryPath, type FileOutcome } from '@hornhoof/protocol';
 import { z } from 'zod';
 
-/* What a suite's runner says of its files, in the file $HH_TEST_REPORT names: { files: [{ file, status, ms?, note? }] }, each file
-   absolute or from the repository root. A runner that writes none is judged as a whole, by its exit. */
+/* What a suite's runner says of its files, in the file $HH_TEST_REPORT names: { files: [{ file, status, ms?, note?, failures? }] }, each
+   file absolute or from the repository root, failures naming each test that failed and its error. A runner that writes none is judged
+   as a whole, by its exit. */
 export const REPORT_BYTES = 64 * 1024 * 1024;
-const Report = z.object({ files: z.array(z.object({ file: z.string().min(1).max(4096), status: z.enum(['passed', 'failed']), ms: z.number().nonnegative().optional(), note: FileNote.optional() })).max(10_000) });
+/* What a runner says of a failed test never keeps what it says of the files from being read. */
+const Failure = z.object({ name: z.string(), message: z.string() });
+const Report = z.object({ files: z.array(z.object({ file: z.string().min(1).max(4096), status: z.enum(['passed', 'failed']), ms: z.number().nonnegative().optional(), note: FileNote.optional(),
+  failures: z.unknown().optional() })).max(10_000) });
+/* A test that failed, by its file in the repository, its name and the first line of its error. */
+export type FailedTest = { file: string; name: string; message: string };
 type Kept = { path: string; text: string };
 
 /* A plain file only its job user can have left there. A link is not followed, and anything else reads as nothing. */
@@ -26,12 +32,23 @@ function readReport(text: string | null): z.infer<typeof Report>['files'] {
   try { return Report.parse(JSON.parse(text)).files; }
   catch { return []; }
 }
+const oneLine = (text: string): string => (text.split('\n').map(line => line.trim()).find(Boolean) ?? '').replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ');
+/* The tests of the selected files that the runner said failed. */
+export function parseFailedTests(text: string | null, context: { checkout: string; selected: string[] }): FailedTest[] {
+  const selected = new Set(context.selected);
+  return readReport(text).flatMap(({ file, failures }) => {
+    const path = relative(context.checkout, resolve(context.checkout, file));
+    const said = Array.isArray(failures) ? failures.flatMap(failure => Failure.safeParse(failure).data ?? []) : [];
+    return selected.has(path) ? said.map(failure => ({ file: path, name: oneLine(failure.name), message: oneLine(failure.message) })) : [];
+  });
+}
+
 /* A suite that failed with no file named failed cannot say whose failure it was, so it proves nothing of any of them. */
 export function parseFileReport(text: string | null, context: { checkout: string; suiteId: string; selected: string[]; suiteFailed: boolean }): FileOutcome[] {
   const selected = new Set(context.selected);
-  const files = readReport(text).flatMap(({ file, ...said }) => {
+  const files = readReport(text).flatMap(({ file, status, ms, note }) => {
     const path = relative(context.checkout, resolve(context.checkout, file));
-    return selected.has(path) ? [{ suiteId: context.suiteId, file: path, ...said }] : [];
+    return selected.has(path) ? [{ suiteId: context.suiteId, file: path, status, ...(ms === undefined ? {} : { ms }), ...(note === undefined ? {} : { note }) }] : [];
   });
   return context.suiteFailed && !files.some(file => file.status === 'failed') ? [] : files;
 }
