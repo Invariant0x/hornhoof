@@ -989,7 +989,7 @@ export const en = {
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
       phases: { active: 'In progress', waiting: 'Waiting for an owner', escalated: 'With the head for a decision', ready: 'Ready to merge', done: 'Completed', cancelled: 'Cancelled' },
       statuses: { pending: 'Pending', active: 'In progress', complete: 'Completed', skipped: 'Skipped' },
-      reasons: { small_task: 'Small task', no_declared_risk: 'Not required', eligible_owner_required: 'An eligible owner is needed', requested_by_head: 'The head asked for it', wrong_goal: 'Not what the task asked for', tests_failed: 'The tests failed', tests_found_defect: 'Tests found a defect: the author makes a new candidate' },
+      reasons: { small_task: 'Small task', no_declared_risk: 'Not required', eligible_owner_required: 'An eligible owner is needed', requested_by_head: 'The head asked for it', wrong_goal: 'Not what the task asked for', tests_failed: 'The tests failed' },
       owner: (name: string) => `Owner: ${name}`,
       someone: 'another employee',
     },

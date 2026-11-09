@@ -1024,7 +1024,7 @@ export const ru: Messages = {
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },
       phases: { active: 'В работе', waiting: 'Нужен исполнитель', escalated: 'У руководителя для решения', ready: 'Готово к слиянию', done: 'Завершено', cancelled: 'Отменено' },
       statuses: { pending: 'Ожидает', active: 'В работе', complete: 'Завершено', skipped: 'Пропущено' },
-      reasons: { small_task: 'Малая задача', no_declared_risk: 'Не требуется', eligible_owner_required: 'Нужен подходящий исполнитель', requested_by_head: 'Попросил руководитель', wrong_goal: 'Не то, что просила задача', tests_failed: 'Тесты не прошли', tests_found_defect: 'Тесты нашли дефект: автор делает нового кандидата' },
+      reasons: { small_task: 'Малая задача', no_declared_risk: 'Не требуется', eligible_owner_required: 'Нужен подходящий исполнитель', requested_by_head: 'Попросил руководитель', wrong_goal: 'Не то, что просила задача', tests_failed: 'Тесты не прошли' },
       owner: name => `Исполнитель: ${name}`,
       someone: 'другой сотрудник',
     },

@@ -75,24 +75,24 @@ describe('where change checks run and what proves them', () => {
 });
 
 describe('who repairs a finding', () => {
-  it('keeps the fix loop to defects a final check sends back and to work outside a route', () => {
+  it('keeps the fix loop to work outside a route, where each stage repairs its own findings and nothing goes back', () => {
     const loop = body('hh-fix-loop');
-    expect(loop).toMatch(/defect the final check of a candidate sends back to its author/);
+    expect(loop).not.toMatch(/sends back to its author/);
     expect(loop).toMatch(/work outside a route of checking stages/);
-    expect(loop).toMatch(/checking stage[^.]*repairs its own findings[^.]*not this loop/);
+    expect(loop).toMatch(/checking stage[^.]*repairs what it finds itself[^.]*forward/);
+    expect(loop).toMatch(/nothing goes back to an earlier stage/);
   });
 
-  it('sends the defects acceptance finds through the Tests report, not as new tasks', () => {
+  it('keeps acceptance findings with the head, never sending the candidate back to its author', () => {
     const acceptance = body('dev-qa-acceptance');
-    expect(acceptance).not.toMatch(/as tasks|fast path/);
-    expect(acceptance).toMatch(/done false[^.]*`verification\.defect` true[^.]*failed runs[^.]*back to its author/);
-    expect(acceptance).toMatch(/no failed run shows[^.]*"blocked"/);
+    expect(acceptance).not.toMatch(/as tasks|fast path|verification\.defect|back to its author/);
+    expect(acceptance).toMatch(/blocking finding[^.]*"blocked"/);
   });
 
-  it('checks a returned candidate again only for what changed since the last verdict', () => {
-    expect(body('dev-task-flow')).not.toMatch(/passes every check again/);
-    expect(body('dev-task-flow')).toMatch(/Review and Security check only what changed since their last verdict/);
-    for (const id of ['dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/only what changed since your last verdict/);
+  it('never sends a candidate back to an earlier stage, so nothing is checked again on its way back', () => {
+    for (const id of [...templates.skills.keys()].filter(key => /^(dev|hh)-/.test(key))) {
+      expect(body(id), id).not.toMatch(/verification\.defect|comes back (to you )?after your verdict|passes the route again|since (their|your) last verdict|sends? (it |the task |the candidate )?back to (its|the) author/);
+    }
   });
 });
 

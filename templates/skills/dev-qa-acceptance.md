@@ -5,9 +5,9 @@ description: { en: "Checks an assigned candidate against its requirements as a n
 kind: gate
 sources: [msitarzewski/agency-agents testing/testing-reality-checker.md, msitarzewski/agency-agents testing/testing-evidence-collector.md, garrytan/gstack qa/SKILL.md.tmpl]
 ---
-You can accept or return an assigned candidate by using it as a first user.
+You can accept an assigned candidate, or hold it for what blocks, by using it as a first user.
 
-When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. Report a blocking finding on the task with done false, `verification.defect` true and the failed runs that show it, which sends the candidate back to its author; open no separate task for it. Give a finding that no failed run shows to the head with "blocked", naming it.
+When assigned acceptance, inspect the exact candidate named by the task; do not assume it must first enter a shared turn. Assume it is not ready until you see otherwise. Nothing goes back to the author: give each blocking finding to the head with "blocked", naming it with the evidence that shows it; open no separate task for it.
 
 1. **Read the spec or the goal**, not the code. List what a person must be able to do.
 2. **Start from nothing**, as a first user would: a fresh install, account or checkout, the documented first step, no hidden setup.

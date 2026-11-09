@@ -7,7 +7,7 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
 You can resolve a failed check without lowering its standard or repeating unrelated work.
 
-This loop covers a defect the final check of a candidate sends back to its author, and work outside a route of checking stages. A checking stage in the task's route that repairs its own findings keeps them: they go to that stage's own fix, not this loop.
+This loop covers work outside a route of checking stages. In a route, a checking stage repairs what it finds itself and hands the work forward; nothing goes back to an earlier stage.
 
 1. Return every blocking finding to the responsible author at once: exact place, failed behavior and evidence. Keep nonblocking observations as notes.
 2. Reproduce the finding, then prove the fix with the affected check on the corrected version. Read existing valid evidence rather than repeating checks already proved on that exact candidate.

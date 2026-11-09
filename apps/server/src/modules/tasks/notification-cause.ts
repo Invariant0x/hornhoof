@@ -33,9 +33,7 @@ function verdictAction(note: ActionNote): string {
   return note.data.wrongGoal === true ? 'escalated work' : 'kept work for repair';
 }
 
-/* Tests that found a defect sends the work back to its author, which is neither done nor blocked. */
 function reportAction(note: ActionNote): string {
-  if ((note.data?.failedVerification as { defect?: boolean } | undefined)?.defect) return 'found a defect and sent work back';
   return note.data?.done === false ? 'reported blocked work' : 'reported work done';
 }
 
