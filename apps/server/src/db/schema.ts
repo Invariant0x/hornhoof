@@ -678,6 +678,24 @@ export const tasks = pgTable(
   ],
 );
 
+/* What people of a department put aside for a later turn: a proposal nobody holds, no agent reads as work and no turn
+   holds, until a person or the orchestrator puts it into a turn, where it becomes a task and leaves the list. */
+export const backlogItems = pgTable(
+  'backlog_items',
+  {
+    id: id(),
+    companyId: companyId(),
+    departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    text: text('text').notNull().default(''),
+    /* Its place in the department's list: the lower, the sooner it is meant to go. */
+    position: integer('position').notNull(),
+    createdByPersonId: uuid('created_by_person_id').notNull().references(() => people.id),
+    createdAt: createdAt(),
+  },
+  t => [index('backlog_items_department_position').on(t.departmentId, t.position)],
+);
+
 /* Required route state. Existing records need explicit release preparation, never a fallback route. */
 export const taskRoutes = pgTable('task_routes', {
   taskId: uuid('task_id').primaryKey().references(() => tasks.id),

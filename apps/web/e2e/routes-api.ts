@@ -40,7 +40,8 @@ export async function serveRoutes(page: Page, options: { signedOut?: boolean; pe
       '/api/machines/m1/connection-history': { events: [], summary: null },
     };
     if (path in replies) return route.fulfill({ json: replies[path] });
-    if (path === '/api/tasks' && url.searchParams.has('department')) return route.fulfill({ json: { tasks: [] } });
+    /* A department card lists none of its open tasks; the Tasks screen reads all of them from the shared fixture. */
+    if (path === '/api/tasks' && url.searchParams.get('status') !== 'all') return route.fulfill({ json: { tasks: [] } });
     return route.fallback();
   });
 }

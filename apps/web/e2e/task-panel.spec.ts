@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { box, detail, serveApi, TASKS } from './api';
+import { box, detail, openTaskRow as openTask, serveApi, TASKS } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its width and place, the panel runs to the bottom of the
    window, scrolls by itself and leaves the page scrolled where it was. */
@@ -12,7 +12,7 @@ test.use({ locale: 'en-US' });
 test('a tab closes the task, history restores it, and the agent window stays on the right', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTasks(page);
-  await row(page, 1).click();
+  await openTask(page, 1);
   expect((await box(panelOf(page, 1))).x).toBe(16);
   await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
@@ -44,13 +44,13 @@ async function openPage(page: Page, heading: string, ...buttons: (string | RegEx
 async function openTasks(page: Page) {
   await openPage(page, 'Tasks', /^Tasks/);
   await expect(page.getByText('Nothing waits for you.')).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Department' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Development' })).toBeChecked();
   await expect(row(page, 1)).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 const openImprovements = (page: Page) => openPage(page, 'Improvements', 'Account', 'Improvements');
 
-const row = (page: Page, n: number) => page.getByRole('button', { name: new RegExp(`^#${n} Checkout step ${n}(?!\\d)`) });
+const row = (page: Page, n: number) => page.getByRole('row', { name: `#${n} Checkout step ${n}`, exact: true });
 const panelOf = (page: Page, n: number) => page.getByRole('complementary', { name: `#${n} Checkout step ${n}` });
 
 /* What scrolls on a page is its main part under the header, not the document. */
@@ -67,7 +67,7 @@ const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page:
     go: openTasks,
     content: page => row(page, 1),
     open: async page => {
-      await row(page, 1).click();
+      await openTask(page, 1);
       await expect(panelOf(page, 1).getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
       return panelOf(page, 1);
     },
@@ -126,7 +126,7 @@ test.describe('scrolling', () => {
     const scrolled = await pageScroll(page);
     expect(scrolled).toBeGreaterThan(0);
     const n = 12;
-    await row(page, n).click();
+    await openTask(page, n);
     await expect(panelOf(page, n)).toBeVisible();
     expect(await pageScroll(page)).toBe(scrolled);
 
@@ -139,7 +139,7 @@ test.describe('scrolling', () => {
     await openTasks(page);
     await scrollPage(page, 900);
     const scrolled = await pageScroll(page);
-    await row(page, 12).click();
+    await openTask(page, 12);
     await expect(panelOf(page, 12)).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(panelOf(page, 12)).toHaveCount(0);
@@ -150,7 +150,7 @@ test.describe('scrolling', () => {
     await openTasks(page);
     await scrollPage(page, 300);
     const scrolled = await pageScroll(page);
-    await row(page, 5).click();
+    await openTask(page, 5);
     const panel = panelOf(page, 5);
     const heading = panel.getByRole('heading', { name: 'Checkout step 5' });
     await expect(heading).toBeVisible();
@@ -196,7 +196,7 @@ for (const lang of CHECKED_LOCALES) {
         }));
         await page.goto('/');
         await page.getByRole('button', { name: lang === 'ru' ? 'Задачи' : 'Tasks', exact: true }).click();
-        await page.getByRole('button', { name: /^#1 Checkout step 1/ }).click();
+        await openTask(page, 1);
         const panel = page.getByRole('complementary', { name: '#1 Checkout step 1' });
         const part = panel.getByRole('region', { name: MESSAGES[lang].tasks.independentPart });
         await expect(part).toBeVisible();

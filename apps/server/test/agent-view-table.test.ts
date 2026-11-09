@@ -91,7 +91,7 @@ const ALL_OK = { ann: 200, olga: 200, wes: 200, lisa: 200, ceo: 200 };
 const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, lisa: 200, ceo: 200 };
 const LISTS: Listed[] = [
   { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK },
-  { route: 'GET /api/tasks', url: () => '/api/tasks?status=all', statuses: ALL_OK },
+  { route: 'GET /api/tasks', url: c => `/api/tasks?status=all&department=${c.dev.id}`, statuses: ALL_OK },
   { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
   { route: 'GET /api/wait-cards', url: () => '/api/wait-cards', statuses: ALL_OK },
   { route: 'GET /api/turns', url: () => '/api/turns', statuses: ALL_OK },
@@ -123,6 +123,12 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
+  'GET /api/task-departments': 'backlog.test.ts: only the departments the person has',
+  'GET /api/departments/:id/backlog': 'backlog.test.ts: a person with the department, 403 for another one',
+  'POST /api/departments/:id/backlog': 'backlog.test.ts: a person with the department, 403 for another one',
+  'PUT /api/departments/:id/backlog/order': 'backlog.test.ts: a person with the department, 403 for another one',
+  'DELETE /api/departments/:id/backlog/:item': 'backlog.test.ts: a person with the department and an item of it, 403 or 404 otherwise',
+  'POST /api/departments/:id/backlog/schedule': 'backlog.test.ts: a person with the department and items of it, 403 or 409 otherwise',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
