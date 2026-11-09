@@ -159,7 +159,8 @@ async function documentReaders(documents, environment, { manifest, tracked }, po
   return { packages, left, unread };
 }
 
-export async function selectTests({ changes, manifest, tracked, allowWhole }, ports) {
+/* everyReached keeps every test the import graph reaches, for a check no full run follows, such as GitHub's tests of a commit. */
+export async function selectTests({ changes, manifest, tracked, allowWhole, everyReached = false }, ports) {
   const suites = fastSuites(manifest);
   const units = ports.listTestUnits(manifest, tracked);
   const environment = impactEnvironment(manifest, units);
@@ -176,7 +177,7 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   if (problem) return { unavailable: problem.code, notes };
   const reached = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
   if (isWholeSuite(reached, suites) && !allowWhole && !reachesEveryone(reached)) return { unavailable: 'selection_is_whole_suite', notes };
-  const near = nearTests(reached, changes, selection.reached ?? [], ports);
+  const near = everyReached ? { packages: reached, leftToFullRun: [] } : nearTests(reached, changes, selection.reached ?? [], ports);
   const packages = mergePackages([...near.packages, ...read.packages]);
   const selected = new Set(packages.flatMap(item => item.units.map(unit => unit.file)));
   const leftToFullRun = [...new Set([...near.leftToFullRun, ...read.left])].filter(file => !selected.has(file)).sort();

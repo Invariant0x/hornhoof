@@ -9,7 +9,7 @@ import { realPorts } from '../author-check/main.mjs';
 import { fastSuites, selectTests } from '../author-check/select.mjs';
 import { runStages } from '../author-check/stages.mjs';
 import { selectionPorts } from '../author-check/wired.mjs';
-import { chooseTests } from '../github-tests/choose.mjs';
+import { chooseTests, takesWhole } from '../github-tests/choose.mjs';
 import { trackedIn } from './tracked-files.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
@@ -192,6 +192,14 @@ test('on GitHub, a change of one file of the server runs the server tests the se
   /* A release where only our own versions moved leaves no change: the checks run, and no test. */
   const none = await chooseTests(base, [], root);
   assert.deepEqual(none.plan?.parts, [{}], none.why);
+});
+
+/* No full run follows GitHub's tests, so a test the selection would leave to one runs there, or the whole suite does. */
+test('on GitHub, a document some test reaches only through code takes the whole suite, and a plain selection does not', () => {
+  const suites = [{ id: 'server' }, { id: 'node' }];
+  assert.match(takesWhole({ packages: [], notes: [], leftToFullRun: ['apps/server/test/far.test.ts'] }, suites), /1 test file .*through/);
+  assert.equal(takesWhole({ packages: [{ packageId: 'server', mode: 'related', units: [{ file: 'apps/server/test/a.test.ts' }] }], notes: [], leftToFullRun: [] }, suites), null);
+  assert.match(takesWhole({ unavailable: 'selection_is_whole_suite', notes: [] }, suites), /selection_is_whole_suite/);
 });
 
 /* The script as a step of the workflow runs it, in this checkout, outside this test runner: a node --test it starts reports as its own. */

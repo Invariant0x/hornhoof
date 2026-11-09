@@ -528,6 +528,18 @@ test('the author runs the tests that import a changed file, are named after it o
   assert.deepEqual(result.leftToFullRun, [far.file]);
 });
 
+test('on GitHub, where no full run follows, the selection keeps every test the import graph reaches', async () => {
+  const ports = graphReaching([near, namedTest, far, changedTest], {
+    [near.file]: "import { a } from '../src/a.js';\nimport { helper } from './helper.js';",
+    [far.file]: "import { helper } from './helper.js';",
+    [changedTest.file]: "import { b } from '../src/b.js';",
+  });
+  const changes = [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: changedTest.file, kind: 'modified' }];
+  const result = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false, everyReached: true }, ports);
+  assert.deepEqual(result.packages[0].units.map(each => each.file).sort(), [near.file, namedTest.file, far.file, changedTest.file].sort());
+  assert.deepEqual(result.leftToFullRun, []);
+});
+
 test('a test a rule names for a change runs, however far it is from the change', async () => {
   const ruled = unit('apps/node/test/reads-templates.test.ts');
   const ports = graphReaching([near, far], { [near.file]: "import '../src/a.js';" }, [ruled]);
