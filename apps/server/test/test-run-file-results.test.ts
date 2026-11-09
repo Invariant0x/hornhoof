@@ -5,7 +5,7 @@ import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns,
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { verifiedReuse } from '../src/modules/tasks/review-reuse.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
-import { acceptDescription, newEnvironmentRequest, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
+import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
 import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { reusableUnits } from '../src/modules/testruns/reuse-evidence.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
@@ -67,7 +67,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
     return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : [];
   }).sort();
   /* The node's end of every open part of a run. */
-  const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string } = {}) => {
+  const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string; runtimes?: typeof runtimes } = {}) => {
     const { ok = true, commit = TEST_COMMIT } = how, run = await runOf(runId);
     for (const part of await partsOf(runId)) {
       if (part.status !== 'running') continue;
@@ -76,7 +76,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
       const count = selection.kind === 'batch' ? selection.selections.length : run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.commands.length + run.environmentSnapshot!.description.manifest.execution!.oncePreparation!.suiteIds.length;
       const message: Extract<NodeMessage, { type: 'tests.done' }> = { type: 'tests.done', partId: part.id, ok, error: ok ? null : 'failed', exitCode: ok ? 0 : 1, commit, log: 'Fixture result',
         ...(how.files ? { files: how.files } : {}),
-        environmentReceipt: { version: 2, profile: run.environmentSnapshot!.profile, selection, commitSha: TEST_COMMIT, manifestHash: run.environmentSnapshot!.description.manifestHash, runtimes,
+        environmentReceipt: { version: 2, profile: run.environmentSnapshot!.profile, selection, commitSha: TEST_COMMIT, manifestHash: run.environmentSnapshot!.description.manifestHash, runtimes: how.runtimes ?? runtimes,
           outcomes: Array.from({ length: count }, (_, index) => ok ? { index, status: 'passed' as const, exitCode: 0 } : { index, status: 'failed' as const, exitCode: 1 }),
           dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } } };
       await partDone(app.ctx, BUILTIN, message);
@@ -215,15 +215,21 @@ describe('reusing green test results', () => {
 
   /* The fingerprints name the runtimes of the machine that described the run. A part that ran on a machine of other runtimes
      proves its files there, not at those fingerprints. */
-  it('keeps no green result of a part that ran on a machine of other runtimes than the run was described on', async () => {
+  it('gives no part to a node of other runtimes than its run was described on, and keeps no green result from a receipt that names others', async () => {
     const f = await fixture();
     const other = runtimes.map(runtime => (runtime.id === 'node' ? { ...runtime, fingerprint: 'c'.repeat(64) } : runtime));
-    const first = await f.start({ profile: 'final' }, undefined, undefined, other);
-    expect(await f.ranFiles(first)).toEqual(FILES);
-    await f.finish(first);
-    expect(await f.runOf(first)).toMatchObject({ status: 'passed' });
+    const elsewhere = await f.start({ profile: 'final' }, undefined, undefined, other);
+    expect((await f.partsOf(elsewhere)).map(part => [part.status, part.nodeId])).toEqual((await f.partsOf(elsewhere)).map(() => ['queued', null]));
+    await f.app.ctx.db.update(testRuns).set({ status: 'stopped', finishedAt: new Date() }).where(eq(testRuns.id, elsewhere));
+    /* The node took a part on the described runtimes, then its Node changed: its receipt names runtimes the description does not. */
+    const changed = await f.start({ profile: 'final' });
+    expect(await f.ranFiles(changed)).toEqual(FILES);
+    noteTestCapabilities(f.app.ctx, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: other });
+    await f.finish(changed, { runtimes: other });
+    expect(await f.runOf(changed)).toMatchObject({ status: 'failed' });
+    expect((await f.partsOf(changed)).every(part => part.environmentReceipt === null)).toBe(true);
     expect(await f.greenRows()).toEqual([]);
-    const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 1);
+    const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 2);
     expect(shown).toMatchObject({ reuse: { mode: 'cached', fingerprints: 3, kept: 0 } });
   });
 

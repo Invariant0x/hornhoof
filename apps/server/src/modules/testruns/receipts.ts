@@ -21,8 +21,16 @@ function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironment
   if (message.commit !== receipt.commitSha || receipt.outcomes.length !== expectedOutcomes(snapshot, receipt)) return false;
   return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
 }
+const among = (known: RuntimeCapability[], actual: RuntimeCapability): boolean =>
+  known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version);
+/* A part proves its files only on the very runtimes that described its run: their fingerprints name them. The scheduler gives a part
+   only to a node whose runtimes pass this, and a receipt is accepted only when the runtimes it names pass it, so a part never goes
+   where its proof would be refused. */
+export function runsAsDescribed(snapshot: EnvironmentSnapshot, runtimes: RuntimeCapability[]): boolean {
+  return supportsTestProfile(snapshot, runtimes) && runtimes.every(actual => among(snapshot.description.runtimeCapabilities, actual));
+}
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
-  return supportsTestProfile(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version));
+  return runsAsDescribed(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => among(known, actual));
 }
 function requiredMutationSuites(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection) {
   const { mutation } = snapshot.description.manifest;

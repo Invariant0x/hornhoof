@@ -1,4 +1,4 @@
-import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -16,6 +16,7 @@ import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { runPurpose } from './purpose.js';
 export { productReceipt } from './receipts.js';
+import { runsAsDescribed } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
@@ -155,17 +156,29 @@ function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequ
 function candidateReuseMode(mode: RunMode, snapshot: EnvironmentSnapshot): RunMode {
   return mode && snapshot.candidate ? { ...mode, mode: 'cached', profile: snapshot.profile } : mode;
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<void> {
+/* A part runs only on the runtimes that described its run, so a run its describing node could not run itself runs nowhere: it ends
+   now with what it lacks, not at its queue deadline. */
+function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
+  const own = snapshot.description.runtimeCapabilities;
+  if (runsAsDescribed(snapshot, own)) return null;
+  const lacks = requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).filter(needed => !own.some(actual => actual.id === needed.id && runtimeVersionMatches(needed.version, actual.version)));
+  const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on the runtimes that described its run, so no node can run it.`;
+  return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
+}
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<EnvironmentProblem | null> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
   if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
   const supplied = snapshotFor(description, request, prints, base, mutation);
   const mode = await runModeOf(ctx, run, description.manifest, description.repositoryScope, prints.length > 0);
   const snapshot = runSnapshot(supplied, request, mode, prints, base, mutation);
+  const problem = unrunnable(snapshot);
+  if (problem) return problem;
   const reuseMode = candidateReuseMode(mode, snapshot);
   const reuse = await reuseFor(ctx, reuseMode, snapshot, reuseMode ? requestedUnits(snapshot, request.suite) : [], prints);
   const { leaves, plan } = await plannedLeaves(ctx, run, snapshot, reuse.decision);
   const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan, reuse.fileCache);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
+  return null;
 }
 export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<void> {
   const run = await assignedDescription(ctx, id, message);
@@ -174,8 +187,9 @@ export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: Tes
     if (await retryDescription(ctx, run, message, message.result.problem)) return;
     return descriptionProblem(ctx, run, message, message.result.problem);
   }
-  try { await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints, message.result.mutation); }
-  catch { await descriptionProblem(ctx, run, message, { code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }); }
+  const problem = await saveDescription(ctx, run, message, message.result.description, message.result.fingerprints ?? [], message.result.baseFingerprints, message.result.mutation)
+    .catch((): EnvironmentProblem => ({ code: 'description_mismatch', detail: 'The node returned invalid or incompatible pinned environment evidence.' }));
+  if (problem) await descriptionProblem(ctx, run, message, problem);
 }
 async function descriptionFailure(ctx: Ctx, run: Run, problem: EnvironmentProblem): Promise<void> {
   await ctx.db.transaction(async tx => {

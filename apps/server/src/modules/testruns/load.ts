@@ -1,7 +1,8 @@
-import { supportsTestProfile, type RepositoryScope, type RuntimeCapability, type NodeLoad } from '@hornhoof/protocol';
+import type { RepositoryScope, RuntimeCapability, NodeLoad } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { nodeHeld } from '../updates/drain.js';
 import { availableMemory } from './capacity.js';
+import { runsAsDescribed } from './receipts.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { nodes, subscriptions, testRuns } from '../../db/schema.js';
@@ -51,7 +52,7 @@ function productCapable(ctx: Ctx, place: RunPlace, run: Pick<ProductRun, 'enviro
   const capabilities = testCapabilities(ctx, place.node);
   if (capabilities.testEnvironmentVersion !== 1 || nodeHeld(ctx, place.node) || !ctx.hub.isReady(place.node) || ctx.hub.noRunsOf(place.node)) return false;
   if (!place.load || availableMemory(place.load) < need) return false;
-  return !run.environmentSnapshot || supportsTestProfile(run.environmentSnapshot, capabilities.testRuntimes ?? []);
+  return !run.environmentSnapshot || runsAsDescribed(run.environmentSnapshot, capabilities.testRuntimes ?? []);
 }
 async function siblingPlaces(ctx: Ctx, place: RunPlace): Promise<RunPlace[]> {
   if (place.builtin) return [place];

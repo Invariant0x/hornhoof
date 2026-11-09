@@ -1,7 +1,7 @@
 import type { ServerMessage } from '@hornhoof/protocol';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, departments, jobs, machines, pendingWakes, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agentEvents, departments, jobs, machines, nodes, pendingWakes, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
@@ -478,14 +478,54 @@ it('selects a capable sibling volume, holds no machine to where it ran before as
   await call('stop_tests', { run: 3 });
 });
 
-it('refuses product mode when pinning returns a non-40-character commit before creating a run', async () => {
-  const c = await company(), { call } = await c.turn(c.bruno);
-  vi.spyOn(c.app.ctx, 'readCommit').mockResolvedValue({ branch: 'task-1', commitSha: 'a'.repeat(64) });
-  const result = await call('run_tests', {});
-  expect(result.error).toBe(true); expect(result.text).toContain('40'); expect(await c.db.select().from(testRuns)).toEqual([]);
+it('gives a part only to a node with the very runtimes that described its run, the ones the part\'s receipt is checked against', async () => {
+  const c = await company();
+  const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
+  const code = connect.json().command.split('--join ')[1];
+  const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'runtime-match-0001', hostname: 'runtime-match', os: 'linux', arch: 'x86_64' } })).json();
+  const connected: { node: FakeNode; id: string }[] = [];
+  for (const entry of joined.nodes) {
+    const node = await connectNode(c.url, entry.key);
+    node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], tests: [], work: true, load: idle({ host: 'a'.repeat(64) }) });
+    await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null); connected.push({ node, id: entry.nodeId });
+  }
+  const { testCapabilities } = await import('../src/modules/testruns/describe.js');
+  const { passedProductPart, runsAsDescribed } = await import('../src/modules/testruns/receipts.js');
+  const runtimes = (fingerprint: string) => [{ id: 'node', version: '22.15.0', fingerprint }];
+  const advertise = async (entry: { node: FakeNode; id: string }, testRuntimes: { id: string; version: string; fingerprint: string }[]) => {
+    entry.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes });
+    await until(() => JSON.stringify(testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testRuntimes) === JSON.stringify(testRuntimes));
+  };
+  /* The machine gives a run without a snapshot to its first node, so that one describes it. */
+  const order = await c.db.select({ id: nodes.id }).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
+  const [describer, other] = order.map(row => connected.find(entry => entry.id === row.id)!) as [typeof connected[number], typeof connected[number]];
+  await advertise(describer, runtimes('b'.repeat(64)));
+  const { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
+  const request = await nextOf(describer.node, 'tests.describe');
+  /* The describer takes no part now. The other node has the same Node version from another build, as a machine of another
+     architecture has: a receipt from it names runtimes the description does not. */
+  await advertise(describer, []);
+  await advertise(other, runtimes('c'.repeat(64)));
+  describer.node.send(await productDescription(request));
+  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null, 15_000);
+  await pumpTests(c.app.ctx);
+  expect((await c.db.select().from(testParts)).map(part => [part.status, part.nodeId])).toEqual([['queued', null], ['queued', null]]);
+  const snapshot = (await c.db.select().from(testRuns))[0]!.environmentSnapshot!;
+  expect(runsAsDescribed(snapshot, runtimes('c'.repeat(64)))).toBe(false);
+  expect(runsAsDescribed(snapshot, runtimes('b'.repeat(64)))).toBe(true);
+  /* A node that has the described runtimes takes the parts, and the Tests report accepts what it proves. */
+  await advertise(other, runtimes('b'.repeat(64)));
+  const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first));
+  const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final));
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed', 15_000);
+  const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
+  expect(parts.map(part => part.nodeId)).toEqual([other.id, other.id]);
+  expect(parts.every(part => passedProductPart(snapshot, part))).toBe(true);
+  expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: runtimes('c'.repeat(64)) } })).toBe(false);
 });
 
-it('stores metadata independently of its reader runtime and queues until a capable execution node appears', async () => {
+it('fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
   expect((await call('run_tests', {})).error).toBe(false);
   const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
@@ -494,11 +534,16 @@ it('stores metadata independently of its reader runtime and queues until a capab
   reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
   const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
   node.send(reply);
-  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
-  expect((await c.db.select().from(testParts)).every(part => part.status === 'queued')).toBe(true);
-  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [...reply.result.description.runtimeCapabilities, { id: 'python', version: '3.12.8', fingerprint: 'e'.repeat(64) }] });
-  const part = await nextOf(node, 'tests.run'); expect(part.environment!.snapshot.description.manifest.runtimes).toContainEqual({ id: 'python', version: '3.12' });
-  await call('stop_tests', { run: 1 });
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed', 15_000);
+  expect((await c.db.select().from(testParts))).toMatchObject([{ status: 'failed', error: 'runtime_missing', tail: expect.stringContaining('python 3.12') }]);
+  expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ environmentStatus: 'failed', environmentProblem: { code: 'runtime_missing' } });
+});
+
+it('refuses product mode when pinning returns a non-40-character commit before creating a run', async () => {
+  const c = await company(), { call } = await c.turn(c.bruno);
+  vi.spyOn(c.app.ctx, 'readCommit').mockResolvedValue({ branch: 'task-1', commitSha: 'a'.repeat(64) });
+  const result = await call('run_tests', {});
+  expect(result.error).toBe(true); expect(result.text).toContain('40'); expect(await c.db.select().from(testRuns)).toEqual([]);
 });
 
 it('resends its persisted describe request after server state is recreated and ignores unknown request IDs', async () => {
@@ -530,15 +575,15 @@ it('fails an unanswered description once at its queue deadline and never passes 
 
 it('refuses to dispatch a pinned product snapshot after its repository configuration changes', async () => {
   const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  const { testCapabilities } = await import('../src/modules/testruns/describe.js');
   expect((await call('run_tests', {})).error).toBe(false);
   const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
-  reply.result.description.manifest.runtimes.push({ id: 'python', version: '3.12' });
-  reply.result.description.manifest.suites[0].finalChecks = [];
-  reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
-  const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
+  /* The node takes no part until the repository changed: it names no runtime for a while. */
+  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [] });
+  await until(() => testCapabilities(c.app.ctx, { kind: 'builtin' }).testRuntimes?.length === 0);
   node.send(reply); await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
   await c.db.update(departments).set({ repoUrl: 'https://example.test/replacement.git' }).where(eq(departments.id, c.dev.id));
-  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [...reply.result.description.runtimeCapabilities, { id: 'python', version: '3.12.8', fingerprint: 'e'.repeat(64) }] });
+  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: reply.result.description.runtimeCapabilities });
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
   expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'no_repository', nodeId: null });
   expect(await gets(node, 'tests.run', 30)).toBe(false);

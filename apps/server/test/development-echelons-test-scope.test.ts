@@ -23,6 +23,8 @@ async function fixture(suite?: string, options: { full?: boolean; profile?: stri
   const input = await planningEnvironment({ pythonFinalOnly: options.full }), description = input.snapshot.description;
   description.repositoryScope = request.repositoryScope;
   description.commitSha = f.finalCommit;
+  /* The node that describes a run names its own runtimes, which its parts then run on. */
+  description.runtimeCapabilities = [{ id: 'node', version: '22.15.0', fingerprint: 'e'.repeat(64) }, { id: 'python', version: '3.12.8', fingerprint: 'd'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'f'.repeat(64) }];
   description.manifest.execution = { version: 2, oncePreparation: { profiles: ['fast', 'final'], suiteIds: ['vitest'], commands: [] } };
   if (options.full) description.manifest.execution.fullRun = { everyTurns: 5, replaces: 'fast', profile: 'final' };
   description.manifestSource = JSON.stringify(description.manifest);
