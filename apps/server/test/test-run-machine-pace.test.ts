@@ -1,4 +1,4 @@
-import { hashTestEnvironment, timingLine, type ServerMessage } from '@hornhoof/protocol';
+import { hashTestEnvironment, type ServerMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { testPartTimings, testParts, testRuns } from '../src/db/schema.js';
@@ -43,13 +43,18 @@ it('lays a run out by what each machine took for the same files before, and give
   const [run] = await c.db.select().from(testRuns);
   const describer = (await c.db.select().from(testRuns))[0]!.environmentRequest!.nodeId === fast.nodeId ? fast : slow;
   const request = await nextOf(describer.node, 'tests.describe');
-  /* An earlier run of this repository: each machine ran two thirds of the files, a third of them on both. */
+  /* An earlier run of this repository: each machine ran two thirds of the files, a third of them on both. The slower machine took
+     2.3 times as long for each file and for its part, which ran four files at a time. */
   const [earlier] = await c.db.insert(testRuns).values({ companyId: run!.companyId, departmentId: run!.departmentId, taskId: run!.taskId, agentId: run!.agentId, jobId: run!.jobId, number: 99, command: '', commitSha: run!.commitSha, timeoutMs: 600_000, status: 'passed',
     environmentRequest: newEnvironmentRequest(request.repositoryScope, { mode: 'product' }) }).returning();
   const timings = (host: string, files: string[], pace: number) => files.map(file => ({ package: '.', file, totalMs: Math.round(msOf(file) * pace), setupMs: null, testsMs: null, teardownMs: null, slowest: [] }));
   const ranOn = [{ host: fastHost, files: FILES.filter((_, index) => index % 3 !== 0), pace: 1 }, { host: slowHost, files: FILES.filter((_, index) => index % 3 !== 1), pace: 2.3 }];
   for (const [index, { host, files, pace }] of ranOn.entries()) {
-    const [part] = await c.db.insert(testParts).values({ companyId: run!.companyId, runId: earlier!.id, part: index + 1, status: 'passed', computer: `host:${host}`, finishedAt: new Date() }).returning();
+    const commandMs = (files.reduce((sum, file) => sum + msOf(file), 0) * pace) / 4;
+    const phases = { checkoutMs: 1000, dependenciesMs: 1000, environmentMs: 1000, servicesMs: 1000, commandMs, cleanupMs: 1000 };
+    const environmentSelection = { selection: { kind: 'batch' as const, version: 2 as const, expectedCommitSha: run!.commitSha!, selections: [{ kind: 'suite' as const, suiteId: 'unit', files, shard: { index: 1, count: 1 } }] }, after: [] };
+    const [part] = await c.db.insert(testParts).values({ companyId: run!.companyId, runId: earlier!.id, part: index + 1, status: 'passed', computer: `host:${host}`, finishedAt: new Date(),
+      environmentSelection, environmentReceipt: { phases } as never }).returning();
     await c.db.insert(testPartTimings).values({ partId: part!.id, companyId: run!.companyId, runId: earlier!.id, files: timings(host, files, pace) });
   }
   describer.node.send(await described(request));
@@ -69,9 +74,8 @@ it('lays a run out by what each machine took for the same files before, and give
   slow.node.close(); await slow.node.closed;
   await checkTestTimes(c.app.ctx, new Date(Date.now() + AWAY_MS + 60_000));
   expect((await c.db.select().from(testParts).where(eq(testParts.id, onSlow.id)))).toEqual([]);
-  /* What its log says each file took is kept as the part ends, for the next plan. */
-  const said = timingLine({ kind: 'file', package: '.', file: 'test/00.ts', totalMs: 4100, setupMs: null, testsMs: null, teardownMs: null, slowest: [] });
-  fast.node.send(done(fastPart, { ok: false, error: 'failed', exitCode: 1, commit: run!.commitSha, log: `noise\n${said}\n` }));
+  /* What its runner said each file took is kept as the part ends, for the next plan. */
+  fast.node.send(done(fastPart, { ok: false, error: 'failed', exitCode: 1, commit: run!.commitSha, files: [{ suiteId: 'unit', file: 'test/00.ts', status: 'failed', ms: 4100 }] }));
   const moved = await nextOf(fast.node, 'tests.run');
   expect(moved.environment!.selection).toEqual(onSlow.environmentSelection!.selection);
   expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, fastPart.partId)))[0]?.files).toMatchObject([{ package: '.', file: 'test/00.ts', totalMs: 4100 }]);

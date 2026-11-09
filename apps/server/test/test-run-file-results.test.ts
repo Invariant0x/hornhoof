@@ -244,6 +244,9 @@ describe('reusing green test results', () => {
     await f.finish(first, { runtimes: arm64 });
     expect(await f.runOf(first)).toMatchObject({ status: 'passed' });
     expect((await f.greenRows()).map(row => row.file)).toEqual(FILES);
+    /* A candidate's run checks each reused result again at the part that proved it. */
+    const units = fingerprints().map(unit => ({ ...unit, runId: first, commitSha: TEST_COMMIT }));
+    expect(await reusableUnits(f.db, (await f.runOf(first)).environmentSnapshot!.description.repositoryScope, units)).toEqual(units);
     const second = await f.start({ profile: 'final' }, undefined, undefined, arm64);
     expect(await f.ranFiles(second)).toEqual([]);
     expect(await f.runOf(second)).toMatchObject({ status: 'passed', fileCache: { reused: 3 } });

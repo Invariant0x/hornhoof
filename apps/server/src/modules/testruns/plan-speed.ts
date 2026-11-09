@@ -37,3 +37,20 @@ export function machinePaces(times: FileTime[]): MachinePaces {
   const sizes = sizesAt(files, paces);
   return { paces, durations: [...files].map(([key, [first]]) => ({ suiteId: first!.suiteId, file: first!.file, ms: sizes.get(key)! })) };
 }
+
+/* How long a part ran, on which computer, and its files. */
+export type PartTime = { computer: string; ms: number; files: Pick<FileDuration, 'suiteId' | 'file'>[] };
+/* A machine's pace for a part is how long the part ran over how long its files take at the middle size: it counts how many files the
+   machine runs at once, which the time of each file does not show. A file no part measured counts at the middle size of the others.
+   The sizes come back in the time a part takes at pace 1. */
+export function partPaces(parts: PartTime[], sizes: FileDuration[]): MachinePaces {
+  const known = new Map(sizes.map(size => [fileKey(size), size.ms])), fallback = sizes.length ? median(sizes.map(size => size.ms)) : 1;
+  const valid = parts.filter(part => Number.isFinite(part.ms) && part.ms > 0 && part.files.length)
+    .sort((a, b) => lexical(a.computer, b.computer) || a.ms - b.ms || lexical(JSON.stringify(a.files), JSON.stringify(b.files)));
+  if (!valid.length) return { paces: new Map(), durations: sizes };
+  const work = (part: PartTime): number => part.files.reduce((sum, file) => sum + (known.get(fileKey(file)) ?? fallback), 0);
+  const computers = grouped(valid, part => part.computer);
+  const raw = new Map([...computers].map(([computer, own]) => [computer, own.reduce((sum, part) => sum + part.ms, 0) / own.reduce((sum, part) => sum + work(part), 0)]));
+  const middle = median([...raw.values()]);
+  return { paces: new Map([...raw].map(([computer, pace]) => [computer, pace / middle])), durations: sizes.map(size => ({ ...size, ms: size.ms * middle })) };
+}

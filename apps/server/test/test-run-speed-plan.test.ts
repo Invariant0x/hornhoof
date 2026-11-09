@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planTestParts, type TestPartPlanInput } from '../src/modules/testruns/plan.js';
-import { machinePaces, type FileTime } from '../src/modules/testruns/plan-speed.js';
+import { machinePaces, partPaces, type FileTime } from '../src/modules/testruns/plan-speed.js';
 
 const unit = (file: string) => ({ suiteId: 'server', file, selectionUnit: file });
 /* Forty files of uneven length, as the server suite has. */
@@ -30,6 +30,32 @@ describe('the pace of each machine from what its parts took before', () => {
   it('keeps a machine seen with no other at the middle pace', () => {
     const { paces } = machinePaces([...measured, { computer: 'host:mac', suiteId: 'server', file: 'test/elsewhere.test.ts', ms: 9000 }]);
     expect(paces.get('host:mac')).toBe(1);
+  });
+});
+
+describe('the pace of each machine from how long its parts ran', () => {
+  const sized = units.map((u, index) => ({ suiteId: u.suiteId, file: u.file, ms: sizes[index]! }));
+  const work = (files: typeof units) => files.reduce((sum, u) => sum + sizes[units.indexOf(u)]!, 0);
+  /* Each file took as long on both, but home-api runs fewer files at once: its parts took 2.3 times as long for as much work. */
+  const parts = [
+    { computer: 'host:a-host', ms: work(units.slice(0, 20)) / 4, files: units.slice(0, 20) },
+    { computer: 'host:home-api', ms: (work(units.slice(20)) / 4) * 2.3, files: units.slice(20) },
+    { computer: 'host:a-host', ms: work(units.slice(10, 30)) / 4, files: units.slice(10, 30) },
+  ];
+  it('finds how much longer a machine takes for its parts than their files take at the middle pace', () => {
+    const { paces, durations } = partPaces(parts, sized);
+    expect(paces.get('host:home-api')! / paces.get('host:a-host')!).toBeCloseTo(2.3, 5);
+    /* At the middle pace a part takes as long as its files together. */
+    const middle = paces.get('host:a-host')!, inParts = parts[0]!.ms / middle;
+    expect(parts[0]!.files.reduce((sum, u) => sum + durations.find(d => d.file === u.file)!.ms, 0)).toBeCloseTo(inParts, 3);
+  });
+  it('counts a file no part measured at the middle size of the others', () => {
+    const { paces } = partPaces([...parts, { computer: 'host:mac', ms: 10_000, files: [unit('test/new.test.ts')] }], sized);
+    expect(paces.get('host:mac')).toBeGreaterThan(0);
+    expect([...paces.keys()].sort()).toEqual(['host:a-host', 'host:home-api', 'host:mac']);
+  });
+  it('knows no pace without a part that ran', () => {
+    expect(partPaces([], sized).paces.size).toBe(0);
   });
 });
 

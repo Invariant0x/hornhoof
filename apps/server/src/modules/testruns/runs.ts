@@ -496,7 +496,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
-      if (ended && found.run.kind === 'tests') await keepPartTimings(ctx.db, ended, msg.log);
+      if (ended && found.run.kind === 'tests') await keepPartTimings(ctx.db, found.run, ended, msg);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await settleRun(ctx, found.run.id);
     }
