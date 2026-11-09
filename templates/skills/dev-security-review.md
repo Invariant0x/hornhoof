@@ -9,7 +9,9 @@ You can inspect the access, data and secret boundaries of an assigned change.
 
 Check that a change keeps the company's data, access and secrets protected. The check is the same for your own change and for someone else's. On your own change, read the diff cold: judge what the code does, not what you meant it to do.
 
-**Your program's own review on a first look only**, from inside the clone on the branch or slice under review: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
+Read the candidate's change from its base to its commit, both taken from task.review (`source.baseCommit` and `commit`); on your own change before you submit it, the base is the commit your branch started from.
+
+**Your program's own review on a first look only**, from inside the clone on the candidate or slice under review and against that same base: in Claude Code its security-review skill, in Codex `codex review --base` naming a local branch you make at the base commit, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
 
 Follow every input in the change from where it enters to where it is used, and check what the change touches of this list:
 

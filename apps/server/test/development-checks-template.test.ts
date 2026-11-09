@@ -48,6 +48,57 @@ describe('development check ownership', () => {
     for (const id of ['dev-language-rules', 'dev-browser-check']) expect(body(id), id).toContain('run_tests');
     expect(body('dev-review-diff')).not.toMatch(/developer runs them before submitting|one reviewer[^.]*runs mutator/);
     expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
-    expect(body('dev-qa-acceptance')).toMatch(/findings[\s\S]*authors[\s\S]*tasks[\s\S]*small[\s\S]*fast path/);
+  });
+});
+
+describe('where change checks run and what proves them', () => {
+  it('lets an assignment widen what is checked, never move change checks to run_tests', () => {
+    for (const id of ['dev-task-flow', 'dev-gates', 'hh-task-flow']) {
+      expect(body(id), id).not.toMatch(/stricter[^.]*assignment|assignment can require every check there|takes precedence/i);
+    }
+    for (const id of ['hh-run-checks', 'dev-task-flow', 'dev-gates', 'hh-task-flow']) {
+      expect(body(id), id).toMatch(/assignment can widen what is checked[^.]*never move[^.]*change checks to "?run_tests"?/i);
+    }
+    expect(body('hh-run-checks')).toMatch(/"run_tests"[^.]*only when your own workspace cannot run it[^.]*say what is missing/i);
+  });
+
+  it('tells whoever leads not to order change checks through run_tests', () => {
+    for (const id of ['hh-lead-tasks', 'dev-lead', 'hh-brief-members']) expect(body(id), id).toMatch(/never order[^.]*change checks[^.]*run_tests/i);
+  });
+
+  it('takes the author\'s check record for the exact commit and asks a run_tests receipt only for a whole suite', () => {
+    for (const id of ['dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/author's check record for the exact commit/);
+    for (const id of ['dev-review-verdict', 'dev-review-diff', 'dev-testing-policy']) {
+      expect(body(id), id).toMatch(/run_tests receipt is needed only for a whole suite or declared profile/);
+    }
+  });
+});
+
+describe('who repairs a finding', () => {
+  it('keeps the fix loop to defects a final check sends back and to work outside a route', () => {
+    const loop = body('hh-fix-loop');
+    expect(loop).toMatch(/defect the final check of a candidate sends back to its author/);
+    expect(loop).toMatch(/work outside a route of checking stages/);
+    expect(loop).toMatch(/checking stage[^.]*repairs its own findings[^.]*not this loop/);
+  });
+
+  it('sends the defects acceptance finds through the Tests report, not as new tasks', () => {
+    const acceptance = body('dev-qa-acceptance');
+    expect(acceptance).not.toMatch(/as tasks|fast path/);
+    expect(acceptance).toMatch(/done false[^.]*`verification\.defect` true[^.]*failed runs[^.]*back to its author/);
+    expect(acceptance).toMatch(/no failed run shows[^.]*"blocked"/);
+  });
+
+  it('checks a returned candidate again only for what changed since the last verdict', () => {
+    expect(body('dev-task-flow')).not.toMatch(/passes every check again/);
+    expect(body('dev-task-flow')).toMatch(/Review and Security check only what changed since their last verdict/);
+    for (const id of ['dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/only what changed since your last verdict/);
+  });
+});
+
+describe('the base a review compares with', () => {
+  it.each(['dev-review-diff', 'dev-security-review'])('%s compares the candidate with its own base, not the main line', id => {
+    expect(body(id)).not.toMatch(/<main line>/);
+    expect(body(id)).toMatch(/task\.review[^.]*`source\.baseCommit`[^.]*`commit`/);
   });
 });

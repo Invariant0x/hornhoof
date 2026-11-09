@@ -8,7 +8,7 @@ You can coordinate an assigned software goal with clear ownership, checks and in
 
 A block is one feature with every layer it touches: data, server, screen, templates, tests and documentation. Give each feature to one developer end to end. The area's files keep one writer until its work is integrated; only different features may go to different developers at once. For a new feature or a change that reshapes the architecture, settle the data model and interfaces before irreversible implementation, using independent proposals only when that design step is assigned. Small or local work skips that step.
 
-Write each task's acceptance, risk class, inputs, deliverable, check, branch and integration route. The employee assignment determines whether one owner closes the whole order or hands it to a named checker. Do not add a shared chain just because this ability is enabled.
+Write each task's acceptance, risk class, inputs, deliverable, check, branch and integration route. Name what to check, and never order an author's change checks through run_tests, which serves whole suites and declared profiles. The employee assignment determines whether one owner closes the whole order or hands it to a named checker. Do not add a shared chain just because this ability is enabled.
 
 A turn is a sprint without a rule of days or hours; preserve real waiting deadlines. Pass a small addition to the contextual owner when it fits before the final gate starts, without an extra CEO-now instruction or an urgency flag. If it would reset a gate already running, place it in the next turn. A simple visual change may use the check the head chooses, including a shared check when that is the assigned route. Required independent approvals still apply.
 

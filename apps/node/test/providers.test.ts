@@ -16,6 +16,7 @@ import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
 import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
+import { CODEX_HEAD } from '../src/program-folder.js';
 import { runJob, type RunInput } from '../src/runner.js';
 import { listenIn } from '../../../test-support/ports.mjs';
 
@@ -947,7 +948,7 @@ describe('Hornhoof tools and instructions', () => {
     const { events, run } = withTools('codex');
     await run();
     const { argv, env, agentsMd } = lastRun();
-    expect(agentsMd).toBe(INSTRUCTIONS + '\n');
+    expect(agentsMd).toBe(CODEX_HEAD + INSTRUCTIONS + '\n');
     expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', ...FLAGS, '-C', work, '--', 'say ready']);
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
@@ -1005,7 +1006,7 @@ describe('Hornhoof tools and instructions', () => {
     await run();
     expect(readFileSync(outside, 'utf8')).toBe('keep me');
     expect(lstatSync(join(work, 'AGENTS.md')).isSymbolicLink()).toBe(false);
-    expect(lastRun().agentsMd).toBe(INSTRUCTIONS + '\n');
+    expect(lastRun().agentsMd).toBe((provider === 'codex' ? CODEX_HEAD : '') + INSTRUCTIONS + '\n');
     if (provider === 'kimi') expect(lastRun().kimiMcp).toMatchObject({ mcpServers: { hornhoof: { url: TOOLS.url } } });
   });
 
@@ -1158,7 +1159,7 @@ describe("a program with no terminal, in a task's folder", () => {
   };
   const CASES = [
     ['claude', () => join(work, '.hh-instructions.md'), ''],
-    ['codex', () => join(work, 'AGENTS.md'), ''],
+    ['codex', () => join(work, 'AGENTS.md'), CODEX_HEAD],
     ['kimi', () => join(work, 'repo', '.kimi-code', 'AGENTS.md'), ''],
     ['antigravity', () => join(work, 'repo', '.agents', 'rules', 'hornhoof.md'), '---\ntrigger: always_on\n---\n\n'],
   ] as const;

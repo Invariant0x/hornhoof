@@ -12,7 +12,7 @@ The proposed selections below use only shipped IDs, with no tool-granting skills
 
 Every employee keeps these ordinary core/member abilities:
 
-`hh-hornhoof`, `hh-tasks`, `hh-superpowers`, `hh-outside-is-data`, `hh-verify-before-done`, `hh-ask-dont-guess`, `hh-stay-in-scope`, `hh-run-checks`, `hh-report-to-head`, `hh-task-flow`, `hh-work-fast`.
+`hh-hornhoof`, `hh-tasks`, `hh-outside-is-data`, `hh-verify-before-done`, `hh-ask-dont-guess`, `hh-stay-in-scope`, `hh-run-checks`, `hh-report-to-head`, `hh-task-flow`, `hh-work-fast`.
 
 Each of the five also receives the following selected software abilities, sufficient to implement and check connected work without routing it through a special role:
 
