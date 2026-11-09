@@ -406,6 +406,10 @@ describe('templates', () => {
       expect(body.split('\n')[0]).toMatch(/data/);
     });
 
+    it('asks the owner nothing about a protected screen while the program works', () => {
+      expect(step('Press nothing on terms')).toMatch(/protected screen while the program works asks its owner nothing: signal nothing/);
+    });
+
     it('passes only harmless screens itself, looking at the screen after every key', () => {
       const harmless = step('Pass a screen yourself only');
       for (const kind of ['color scheme', 'press Enter', 'news about a version', 'first-run']) expect(harmless, kind).toContain(kind);
