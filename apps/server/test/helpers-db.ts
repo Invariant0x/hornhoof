@@ -200,17 +200,21 @@ async function closeShared(): Promise<void> {
   await client?.close();
 }
 
+async function rejectSharedDatabase(): Promise<never> {
+  await closeShared();
+  throw new Error('A test of this file changed the shared database beyond its rows, which reaches every test after it. Call ownDatabases() at the top of this file.');
+}
+
 /* Whether the tests of the file left the shared database as it opened, but for its rows. A change beyond them, such as a
    trigger, a function, a table, a role, a right, a setting of the database or a statistic, reached every later test of
    the file, so the file fails, and the database is put aside. */
 export async function checkSharedDatabase(): Promise<void> {
   if (!shared) return;
-  /* A database that will not empty is put aside as after any test, and no test follows it. */
-  if (!(await emptied(shared))) return closeShared();
+  /* A cleanup failure cannot prove isolation, even when the last test itself passed. */
+  if (!(await emptied(shared))) return rejectSharedDatabase();
   const now = await shapeOf(shared.client).catch(() => null);
   if (now === shared.shape) return;
-  await closeShared();
-  throw new Error('A test of this file changed the shared database beyond its rows, which reaches every test after it. Call ownDatabases() at the top of this file.');
+  return rejectSharedDatabase();
 }
 
 afterAll(async () => {
@@ -243,7 +247,7 @@ function heldByOneTest(client: PGlite): PGlite {
 }
 
 async function sharedForThisTest(): Promise<PGlite> {
-  if (shared && !(await emptied(shared))) await closeShared();
+  if (shared && !(await emptied(shared))) return rejectSharedDatabase();
   shared ??= await openShared();
   /* A failed test may have left anything, even a transaction that never ends. One failure should stay one. */
   onTestFailed(() => closeShared().catch(() => {}));

@@ -113,6 +113,21 @@ describe('what a test changes beyond rows', { shuffle: false }, () => {
     await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
   });
 
+  it('fails its file when a schema change prevents emptying the database', async () => {
+    const db = await createTestDb();
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test checks that a broken cleanup cannot hide a schema change.
+    await db.$client.exec('drop schema public cascade');
+    await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
+  });
+
+  it('does not hide a schema change by replacing a database that cannot be emptied', async () => {
+    const db = await createTestDb();
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test checks cleanup before the next test asks for its database.
+    await db.$client.exec('drop schema public cascade');
+    await db.$client.close();
+    await expect(createTestDb().then(() => null)).rejects.toThrow(/ownDatabases\(\)/);
+  });
+
   it('does not fail its file when it gave the same rights again, in another order', async () => {
     const db = await createTestDb();
     await db.$client.exec(grantsFor(agentRole('postgres')));
