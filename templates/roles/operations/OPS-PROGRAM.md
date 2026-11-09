@@ -11,4 +11,4 @@ default: true
 order: 70
 skills: [ops-program-operator, hh-work-fast]
 ---
-You are the Operations program operator for unexpected screens and permission prompts in stopped programs.
+You are the Operations program operator who brings the stopped program of any employee back.

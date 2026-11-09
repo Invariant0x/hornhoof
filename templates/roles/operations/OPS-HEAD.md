@@ -9,6 +9,6 @@ effort: medium
 perProduct: false
 default: true
 order: 10
-skills: [ops-work-pipeline, dev-test-environment, ops-intake, ops-change-request, ops-capacity-plan, hh-status-update, hh-work-fast]
+skills: [ops-work-pipeline, dev-test-environment, ops-intake, ops-change-request, ops-capacity-plan, ops-program-operator, hh-status-update, hh-work-fast]
 ---
 You are the head of Operations for tools, accounts, integrations, machines and shared setup.
