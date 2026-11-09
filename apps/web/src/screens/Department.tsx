@@ -14,6 +14,7 @@ import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
+import { BriefingPanel } from '../ui/Briefing';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
@@ -568,6 +569,13 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                 <DeptEmployeeList department={d} company={company} />
                 <DeptSubUnits department={d} company={company} />
                 <DeptApprovals department={d} shown={canGive} />
+                {sees && (
+                  <section aria-labelledby={`${id}-briefing`}>
+                    <h3 id={`${id}-briefing`}>{t.briefing.title}</h3>
+                    <p className="muted">{t.briefing.intro}</p>
+                    <BriefingPanel placeId={d.id} />
+                  </section>
+                )}
                 {company && (
                   <section aria-labelledby={`${id}-repo`}>
                     <h3 id={`${id}-repo`}>{t.dept.repository}</h3>
@@ -582,6 +590,12 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                         <li key={p.id}>
                           <b>{p.name}</b>
                           {company && <RepoSettings placeId={p.id} repository={p.repository} compact />}
+                          {sees && (
+                            <section className="briefing-product" aria-label={`${t.briefing.title}: ${p.name}`}>
+                              <h4>{t.briefing.title}</h4>
+                              <BriefingPanel placeId={p.id} />
+                            </section>
+                          )}
                         </li>
                       ))}
                     </ul>

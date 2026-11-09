@@ -943,6 +943,13 @@ body:has(.dview) .version-mark { display: none; }
 .repo-command { overflow-wrap: anywhere; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
 .dv-side li .repo { margin-top: 6px; }
+.briefing, .briefing-form { display: grid; gap: 8px; justify-items: start; }
+.briefing-form { justify-items: stretch; }
+.briefing-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.briefing-repo { display: grid; gap: 8px; border: 1px solid var(--line); padding: 10px; margin: 0; }
+.briefing-repo legend, .briefing-product h4 { color: var(--muted); }
+.briefing-product { margin-top: 8px; }
+.briefing-product h4 { margin: 0 0 4px; }
 
 /* A department's owner and its approval rules, one framed line per channel. */
 .appr { display: grid; gap: 12px; min-width: 0; }

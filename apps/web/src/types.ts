@@ -187,6 +187,17 @@ export type ApprovalPolicyView = {
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
 export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null; testMemoryGb?: number; fullTestCommand?: string | null };
 
+/* What a department or a product keeps for its agents: its way of working and its repositories. connected: the one its
+   agents get cloned, as its repository settings name it. */
+export type BriefingRepository = { url: string; branch: string; rules: string; author: { name: string; email: string } | null };
+export type Briefing = {
+  text: string;
+  repositories: BriefingRepository[];
+  connected: { url: string; branch: string; author: { name: string; email: string } | null } | null;
+  updatedAt: string | null;
+  by: { name: string | null; byOrchestrator: boolean } | null;
+};
+
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
