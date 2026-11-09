@@ -25,7 +25,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { captureReview } from './review-context.js';
+import { captureReview, lastVerdicts } from './review-context.js';
 import { refusePaused } from './pause.js';
 import { repoAt } from '../departments/repository.js';
 import type { ReviewVerdict } from './review-verdict.js';
@@ -609,7 +609,9 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
   const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
-  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, inputCandidate?.branch);
+  /* After a return the author's new candidate is shown to each checking stage as the change since what it checked. */
+  const checked = inputCandidate ? [] : await lastVerdicts(ctx.db, task.id);
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, inputCandidate?.branch, checked);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.');
   if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);

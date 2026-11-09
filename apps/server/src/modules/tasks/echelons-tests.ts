@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { currentCandidate } from './echelons-candidates.js';
+import { returnedToAuthor } from './echelons-return.js';
 import { changeRoute, type Route } from './echelons-store.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
@@ -163,25 +164,32 @@ async function heldFailure(tx: Tx, task: Task, route: Route, ids: string[], kind
   if (await failureKind(tx, task, route, ids) !== kind) throw refuse(409, 'task_changed', 'The failed check changed.');
 }
 
-/* A defect Tests found goes back to its author: every check after Development runs again on the new candidate. */
-function returnedToAuthor(route: Route): Route['state'] {
-  const development = route.state.stages.findIndex(step => step.stage === 'development');
-  return { ...route.state, stage: 'development', phase: 'active', assignment: null, stages: route.state.stages.map((step, at) => {
-    if (at === development) return { ...step, status: 'active', reason: null };
-    if (at < development || step.status === 'skipped') return step;
-    return { ...step, status: 'pending', reason: step.stage === 'tests' ? 'tests_found_defect' : null, inputCandidateId: null, candidateId: null };
-  }) };
+type FailedRun = { id: string; number: number; failedFiles: string[] };
+
+/* The runs a defect names, by their numbers, with the test files their runner named as failed. */
+async function failedRuns(db: Ctx['db'], task: Task, ids: string[]): Promise<FailedRun[]> {
+  const runs = await db.select({ id: testRuns.id, number: testRuns.number }).from(testRuns).where(and(eq(testRuns.companyId, task.companyId), eq(testRuns.taskId, task.id), inArray(testRuns.id, ids))).orderBy(asc(testRuns.number));
+  if (!runs.length) return [];
+  const parts = await db.select({ runId: testParts.runId, failedFiles: testParts.failedFiles }).from(testParts).where(and(eq(testParts.companyId, task.companyId), inArray(testParts.runId, runs.map(run => run.id)))).orderBy(asc(testParts.part));
+  return runs.map(run => ({ ...run, failedFiles: [...new Set(parts.filter(part => part.runId === run.id).flatMap(part => part.failedFiles ?? []).map(file => file.file))] }));
+}
+
+/* Hornhoof's own words after the tester's: which runs failed and where, so the author starts from the record. */
+function failedRunsNote(runs: FailedRun[]): string {
+  const said = runs.map(run => run.failedFiles.length ? `run ${run.number} failed in ${run.failedFiles.join(', ')}` : `run ${run.number} failed without naming a failed test file`);
+  return `Hornhoof's record of the failed check: ${said.join('; ')}.`;
 }
 
 async function defectReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification, kind: 'content' | 'infrastructure'): Promise<Moved> {
   const author = route.state.stages.find(step => step.stage === 'development')?.ownerAgentId;
   if (!author) throw refuse(409, 'task_invalid', 'Development has no author to take the defect back. Ask the head to assign it.');
-  const wakes: Wake[] = [{ agentId: author, taskId: task.id, why: 'changes', text: summary }];
+  const runs = await failedRuns(ctx.db, task, input.runIds);
+  const wakes: Wake[] = [{ agentId: author, taskId: task.id, why: 'changes', text: summary, note: failedRunsNote(runs) }];
   const row = await move(ctx, task, { status: 'open', assigneeAgentId: author, silent: 0 }, {
-    kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, defect: true, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
+    kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, defect: true, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds, runs } },
   }, async tx => {
     await heldFailure(tx, task, route, input.runIds, kind);
-    await changeRoute(tx, route, returnedToAuthor(route));
+    await changeRoute(tx, route, returnedToAuthor(route, 'tests_found_defect'));
   }, wakes);
   return { task: row, wakes };
 }

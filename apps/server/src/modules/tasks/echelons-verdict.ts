@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
+import { returnedToAuthor } from './echelons-return.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './engine.js';
@@ -21,6 +22,8 @@ function requireCheckingOwner(task: Task, route: Route, agentId: string): void {
 
 function verdictState(route: Route, verdict: Verdict, agentId: string): Route['state'] {
   if (verdict.escalate && verdict.pass) throw refuse(400, 'task_invalid', 'An escalation cannot certify PASS.');
+  if (verdict.returnToAuthor && (verdict.pass || verdict.escalate)) throw refuse(400, 'task_invalid', 'A return to the author is a FAIL verdict, neither a PASS nor an escalation.');
+  if (verdict.returnToAuthor && route.state.stage !== 'review') throw refuse(400, 'task_invalid', 'Only Review returns a candidate to its author; fix it yourself or escalate a wrong goal.');
   const state = route.state;
   if (verdict.security === undefined) return state;
   if (state.stage !== 'review' || !verdict.security.trim()) throw refuse(400, 'task_invalid', 'Only Review adds Security with a concrete risk.');
@@ -33,7 +36,19 @@ function verdictData(route: Route, candidate: EchelonCandidate, identity: Checke
   const evidence = bindReviewEvidence(verdict.evidence ?? [], candidate.commit);
   return { issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity,
     ...(evidence.length ? { evidence } : {}), ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
+    ...(verdict.returnToAuthor ? { returnedToAuthor: true } : {}),
   };
+}
+
+type VerdictNote = { kind: 'verdict'; actor: { agentId: string }; text: string; data: ReturnType<typeof verdictData> };
+
+/* Work the author must do goes back to the author on Development; the next candidate is compared with this one. */
+async function authorReturn(ctx: Reader, task: Task, route: Route, n: VerdictNote, held: (tx: Tx) => Promise<void>): Promise<Moved> {
+  const author = route.state.stages.find(step => step.stage === 'development')?.ownerAgentId;
+  if (!author) throw refuse(409, 'task_invalid', 'Development has no author to take the work back. Ask the head to assign it.');
+  const wakes: Wake[] = [{ agentId: author, taskId: task.id, why: 'changes', text: n.text }];
+  const row = await move(ctx, task, { status: 'open', assigneeAgentId: author, silent: 0 }, n, async tx => { await held(tx); await changeRoute(tx, route, returnedToAuthor(route, 'review_returned')); }, wakes);
+  return { task: row, wakes };
 }
 
 export async function echelonVerdict(ctx: Reader, agentId: string, taskId: string, verdict: Verdict): Promise<Moved> {
@@ -56,6 +71,7 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
     const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
     return { task: row, wakes };
   }
+  if (verdict.returnToAuthor) return authorReturn(ctx, task, { ...route, state }, n, held);
   if (!verdict.pass) {
     const row = await move(ctx, task, { status: 'working' }, n, async tx => { await held(tx); await changeRoute(tx, route, state); });
     return { task: row, wakes: [] };

@@ -20,6 +20,17 @@ const Run = z.object({ id: z.string().uuid(), number: z.number().int(), authorId
 /* branch names where the work is when it is not on the task's own branch; commit, when given, must be its head. */
 export const ReviewSubmission = z.object({ baseCommit: ReviewSha, branch: Branch.optional(), commit: ReviewSha.optional() }).strict();
 const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative() });
+const CHECKED_STAGES = ['review', 'cleanup', 'security'] as const;
+/* A checking stage's last verdict on this task, and the change from the commit it checked to the one handed in now: the
+   paths the candidate changes that stayed as they were keep that verdict. With no comparison (a rewritten history, an
+   unreadable repository) there is no change to look at alone, and the stage checks the whole candidate again. */
+const Since = z.object({
+  stage: z.enum(CHECKED_STAGES), candidateId: z.string().uuid(), commit: ReviewSha, pass: z.boolean(),
+  delta: z.object({ paths: z.array(z.string()), changedLines: z.number().int().nonnegative(), unchangedPaths: z.array(z.string()) }).nullable(),
+  reason: z.string().nullable(),
+});
+export type Checked = Pick<z.infer<typeof Since>, 'stage' | 'candidateId' | 'commit' | 'pass'>;
+const LastVerdict = z.object({ stage: z.enum(CHECKED_STAGES), candidateId: z.string().uuid(), reviewedCommit: ReviewSha, pass: z.boolean() });
 export const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
   authorId: z.string().uuid(), authorVendor: z.string().nullable(),
@@ -28,6 +39,7 @@ export const ReviewRecord = z.object({
   quality: QualityEvidence.default(unavailableQuality),
   qualityTaskId: z.string().uuid().optional(),
   runs: z.array(Run), source: Source.nullable().default(null),
+  since: z.array(Since).default([]),
 });
 export type Review = z.infer<typeof ReviewRecord>;
 type Reader = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
@@ -88,6 +100,26 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: 
   return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
 }
 
+/* What each checking stage last decided on this task, in route order. */
+export async function lastVerdicts(db: Store, taskId: string): Promise<Checked[]> {
+  const rows = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'))).orderBy(desc(taskEvents.id));
+  const last = new Map<Checked['stage'], Checked>();
+  for (const { data } of rows) {
+    const verdict = LastVerdict.safeParse(data);
+    if (verdict.success && !last.has(verdict.data.stage)) last.set(verdict.data.stage, { stage: verdict.data.stage, candidateId: verdict.data.candidateId, commit: verdict.data.reviewedCommit, pass: verdict.data.pass });
+  }
+  return CHECKED_STAGES.flatMap(stage => last.get(stage) ?? []);
+}
+
+async function sinceChecked(ctx: Reader, repo: RepoAddress, source: NonNullable<Review['source']>, checked: Checked): Promise<Review['since'][number]> {
+  let compared: CompareResult | null = null;
+  try { compared = ctx.readCompare ? await ctx.readCompare(repo, { base: checked.commit, head: source.commit }, 10_000) : null; }
+  catch { /* An unread comparison shows no change, so nothing is taken over from the earlier verdict. */ }
+  if (!compared || !exactComparison(compared, checked.commit, source.commit)) return { ...checked, delta: null, reason: compared?.complete === false ? compared.reason : 'The change could not be compared.' };
+  const paths = [...new Set(compared.paths)];
+  return { ...checked, delta: { paths, changedLines: comparedLines(compared), unchangedPaths: source.paths.filter(path => !paths.includes(path)) }, reason: null };
+}
+
 async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts']> {
   const verdicts = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict')));
   return { source: 'review-lifecycle', passed: verdicts.filter(v => v.data.pass === true).length, returned: verdicts.filter(v => v.data.pass === false).length };
@@ -95,13 +127,15 @@ async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts
 
 /* Resolve the repository before a task transaction; an outage refuses the submission rather than record it without a
    commit. A repair keeps the branch of the candidate it repairs unless another is named. */
-export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typeof ReviewSubmission>, branch?: string): Promise<Review> {
+export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typeof ReviewSubmission>, branch?: string, checked: Checked[] = []): Promise<Review> {
   if (!ctx.config || !ctx.readCommit || !task.executorAgentId) throw refuse(409, 'repo_invalid', 'The repository cannot be read here, so the submission has no commit.');
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) throw refuse(409, 'repo_invalid', 'This task has no repository, so it has no code candidate. Report its result instead.');
   const named = input?.branch ?? branch;
   const pin = await readPin(ctx.readCommit, found.repo, named ? { branch: named } : { task: task.number }, input?.commit);
-  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
+  const source = await sourceAt(ctx, found.repo, pin.commit, input);
+  const since = await Promise.all(checked.map(stage => sinceChecked(ctx, found.repo, source, stage)));
+  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source, since };
 }
 
 /* Keep immutable submission facts separate from the consumer's current receipt validation. */

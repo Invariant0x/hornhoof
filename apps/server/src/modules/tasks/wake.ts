@@ -72,7 +72,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'wait_ended':
       return waitEndedPrompt(task, w.text);
     case 'review':
-      return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
+      return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. When task.review.since names your stage with a change, the author's new candidate came after a return: check that change, as your earlier verdict stands on its unchanged paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
       return `${ref} passed Tests on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
     case 'changes':

@@ -13,7 +13,8 @@ async function failedRun(f: Awaited<ReturnType<typeof testsFixture>>, error: 'fa
   const run = await f.run();
   await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, run.id));
   const content = error === 'failed';
-  await f.db.update(testParts).set({ status: 'failed', exitCode: content ? 1 : null, error, commit: content ? f.finalCommit : null, tail: content ? 'totals.test.ts failed' : 'Cannot find package typescript', finishedAt: new Date() }).where(eq(testParts.runId, run.id));
+  await f.db.update(testParts).set({ status: 'failed', exitCode: content ? 1 : null, error, commit: content ? f.finalCommit : null, tail: content ? 'totals.test.ts failed' : 'Cannot find package typescript',
+    failedFiles: content ? [{ suiteId: 'vitest', file: 'test/totals.test.ts' }, { suiteId: 'vitest', file: 'test/tax.test.ts' }] : null, finishedAt: new Date() }).where(eq(testParts.runId, run.id));
   return run;
 }
 
@@ -32,11 +33,13 @@ describe('Tests sends a defect of the candidate back to its author on Developmen
       step.stage, step.stage === 'development' ? 'active' : step.status === 'skipped' ? 'skipped' : 'pending', step.ownerAgentId, step.stage === 'development' || step.status === 'skipped' ? step.candidateId : null,
     ]));
     expect(route.stages.find(step => step.stage === 'tests')?.reason).toBe('tests_found_defect');
-    expect(moved.wakes).toEqual([{ agentId: f.author.id, taskId: f.task.id, why: 'changes', text: 'totals.test.ts fails: the total of an empty order is not zero.', cause: expect.objectContaining({
+    expect(moved.wakes).toEqual([{ agentId: f.author.id, taskId: f.task.id, why: 'changes', text: 'totals.test.ts fails: the total of an empty order is not zero.',
+      note: `Hornhoof's record of the failed check: run ${run.number} failed in test/totals.test.ts, test/tax.test.ts.`, cause: expect.objectContaining({
       actor: { agentId: f.tester.id }, action: 'found a defect and sent work back', report: 'totals.test.ts fails: the total of an empty order is not zero.',
     }) as unknown }]);
     expect(await taskForWake(f.db, moved.wakes[0]!)).toMatchObject({ id: f.task.id });
-    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'content', defect: true, candidateId: f.snapshot.candidateId, runIds: [run.id] } });
+    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'content', defect: true, candidateId: f.snapshot.candidateId, runIds: [run.id],
+      runs: [{ id: run.id, number: run.number, failedFiles: ['test/totals.test.ts', 'test/tax.test.ts'] }] } });
 
     f.atCommit('e'.repeat(40));
     const again = await submit(f.ctx, f.author.id, f.task.id, { summary: 'Empty orders total zero.', evidence: 'totals.test.ts passes.', review: { baseCommit: BASE } });
@@ -55,7 +58,8 @@ describe('Tests sends a defect of the candidate back to its author on Developmen
     const moved = await report(f.ctx, f.tester.id, f.task.id, defect(f, [run.id], 'The node cannot describe this candidate: it imports typescript, which the image does not install.'));
     expect(moved.task).toMatchObject({ status: 'open', assigneeAgentId: f.author.id });
     expect((await f.detail()).echelons).toMatchObject({ phase: 'active', stage: 'development' });
-    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'infrastructure', defect: true, runIds: [run.id] } });
+    expect((await f.detail()).log.findLast(event => event.kind === 'report')?.data).toMatchObject({ failedVerification: { kind: 'infrastructure', defect: true, runIds: [run.id], runs: [{ id: run.id, number: run.number, failedFiles: [] }] } });
+    expect(moved.wakes[0]?.note).toBe(`Hornhoof's record of the failed check: run ${run.number} failed without naming a failed test file.`);
   });
 
   it('gives the author the whole text of the defect, however long', async () => {
@@ -66,6 +70,7 @@ describe('Tests sends a defect of the candidate back to its author on Developmen
     const moved = await report(f.ctx, f.tester.id, f.task.id, defect(f, [run.id], text));
     const [author] = await f.db.select().from(agents).where(eq(agents.id, f.author.id));
     expect(wakePrompt(author!, moved.task, moved.wakes[0]!)).toContain(quote(text));
+    expect(wakePrompt(author!, moved.task, moved.wakes[0]!)).toContain(`run ${run.number} failed in test/totals.test.ts, test/tax.test.ts.`);
   });
 
   it('refuses a defect without a failed run of the current candidate, and leaves the candidate at Tests', async () => {

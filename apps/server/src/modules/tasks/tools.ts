@@ -654,16 +654,16 @@ class TaskTools {
       'verdict',
       {
         description:
-          'Records the current checker decision on an exact candidate. PASS hands it forward; a defect remains with this checker to fix. Wrong-goal escalate asks the head, without an author return. Review can add Security by naming a concrete risk. Structured issues record provenance; numeric counts are derived, never supplied.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), reviewedCommit: ReviewSha, issues: z.array(IssueInput).max(99).optional(), security: z.string().trim().min(1).max(2000).optional(), escalate: z.boolean().optional() },
+          'Records the current checker decision on an exact candidate. PASS hands it forward; a defect remains with this checker to fix. Review alone may return a FAIL to its author with returnToAuthor true when the work is the author\'s to do, not a repair; the comment goes to the author whole, and the next candidate reaches each checking stage with task.review.since: the change from the commit that stage checked, its earlier verdict standing on the unchanged paths. Wrong-goal escalate asks the head, without an author return. Review can add Security by naming a concrete risk. Structured issues record provenance; numeric counts are derived, never supplied.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), reviewedCommit: ReviewSha, issues: z.array(IssueInput).max(99).optional(), security: z.string().trim().min(1).max(2000).optional(), escalate: z.boolean().optional(), returnToAuthor: z.boolean().optional() },
       },
-      async ({ task: ref, pass, comment: why, reviewedCommit, issues, security, escalate }) =>
+      async ({ task: ref, pass, comment: why, reviewedCommit, issues, security, escalate, returnToAuthor }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, why);
           const review = await reviewContext(this.ctx.db, task.id);
           const evidence = bindReviewEvidence(await taskEvidence(this.ctx, task), review?.commit ?? null);
-          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, issues, security, escalate, evidence: keptEvidence(evidence) });
+          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, issues, security, escalate, returnToAuthor, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await this.where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );

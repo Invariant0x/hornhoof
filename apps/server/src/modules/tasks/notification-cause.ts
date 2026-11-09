@@ -30,6 +30,7 @@ function answerAction(note: ActionNote): string {
 
 function verdictAction(note: ActionNote): string {
   if (note.data?.pass !== false) return 'reviewed work';
+  if (note.data.returnedToAuthor === true) return 'sent work back to its author';
   return note.data.wrongGoal === true ? 'escalated work' : 'kept work for repair';
 }
 
