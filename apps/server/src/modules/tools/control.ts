@@ -95,7 +95,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'view',
-    'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/tasks?status=all, /api/tasks/<id>, ' +
+    'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/task-departments, /api/tasks?status=all&department=<department id, or none for your own>, /api/tasks/<id>, /api/departments/<id>/backlog, ' +
       '/api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), /api/agents/<id>/events (its conversation), ' +
       '/api/departments/<id>/roster, /api/updates, /api/link (the public link) and /api/link/names/<name> (whether a name for it is free).',
     { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },

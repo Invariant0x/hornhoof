@@ -378,7 +378,7 @@ describe('what a task comes after, as each one sees it', () => {
     const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
     expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });
     expect(await read(owner)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
-    const listed = (session: typeof owner) => app.inject({ url: '/api/tasks', ...as(session) }).then(r => r.json().tasks.find((t: { id: string }) => t.id === launch.id));
+    const listed = (session: typeof owner) => app.inject({ url: `/api/tasks?department=${dev.id}`, ...as(session) }).then(r => r.json().tasks.find((t: { id: string }) => t.id === launch.id));
     expect(await listed(dana)).toMatchObject({ waitsFor: [] });
     expect(await listed(owner)).toMatchObject({ waitsFor: [deal.number] });
   });

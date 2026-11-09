@@ -37,7 +37,7 @@ try {
   const appReadyMs = performance.now() - beforeApp;
   const coldReadyMs = process.uptime() * 1000;
   const requests: Snapshot['requests'] = [];
-  for (const url of ['/api/me', '/api/org', '/api/tasks']) {
+  for (const url of ['/api/me', '/api/org', '/api/tasks?department=none']) {
     const times: number[] = [];
     for (let i = 0; i < samples; i++) {
       const from = performance.now();

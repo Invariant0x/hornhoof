@@ -9,7 +9,7 @@ describe('one public task snapshot', () => {
     await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Changed source and tests.', review: { baseCommit: BASE } });
     const request = (url: string) => f.app.inject({ url, ...as(f.ceoToken) });
     const detail = (await request(`/api/tasks/${f.task.id}`)).json().task;
-    const line = (await request('/api/tasks')).json().tasks.find((t: { id: string }) => t.id === f.task.id);
+    const line = (await request(`/api/tasks?department=${f.task.departmentId}`)).json().tasks.find((t: { id: string }) => t.id === f.task.id);
     const org = (await request('/api/org')).json();
     const reviewer = org.departments.flatMap((d: { employees: { id: string; task: unknown }[] }) => d.employees).find((a: { id: string }) => a.id === f.reviewer.id);
     expect(detail.echelons).toMatchObject({ stage: 'review', ownerAgentId: f.reviewer.id });
@@ -21,7 +21,7 @@ describe('one public task snapshot', () => {
     await submit(f.ctx, f.author.id, f.task.id, { summary: 'Keep totals.', evidence: 'Changed tests.', review: { baseCommit: BASE } });
     const request = (url: string) => f.app.inject({ url, ...as(f.ceoToken) });
     const detail = (await request(`/api/tasks/${f.task.id}`)).json().task;
-    const line = (await request('/api/tasks')).json().tasks.find((row: { id: string }) => row.id === f.task.id);
+    const line = (await request(`/api/tasks?department=${f.task.departmentId}`)).json().tasks.find((row: { id: string }) => row.id === f.task.id);
     const org = (await request('/api/org')).json();
     const owner = org.departments.flatMap((d: { employees: { id: string; task: unknown }[] }) => d.employees).find((agent: { id: string }) => agent.id === f.reviewer.id);
     for (const projection of [detail, line, owner.task]) {

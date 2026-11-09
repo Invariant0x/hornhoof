@@ -63,7 +63,7 @@ describe('what waits for people', () => {
     expect((await c.get(`/api/tasks/${task.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.olga)).statusCode).toBe(403);
-    const list = (await c.get('/api/tasks?status=all', c.tokens.olga)).body;
+    const list = (await c.get(`/api/tasks?status=all&department=${c.dev.id}`, c.tokens.olga)).body;
     expect(list).not.toContain(task.title);
     const stream = await openStream(c.app, c.tokens.olga);
     await new Promise(r => setTimeout(r, 60));
@@ -234,7 +234,7 @@ describe('a wait on a task', () => {
   const reason = 'Waiting for the reply';
   const wait = (on?: { kind: 'employee'; employee: string; name: string } | { kind: 'external'; event: 'time' }) => ({ reason, since: '2026-01-01T00:00:00.000Z', until: '2026-01-01T01:00:00.000Z', ...(on ? { on } : {}) });
   type Line = { id: string; externalWait: { reason: string; on?: unknown } | null };
-  const readLines = async (c: AclCompany) => (await c.get('/api/tasks', c.tokens.ann)).json<{ tasks: Line[] }>().tasks;
+  const readLines = async (c: AclCompany) => (await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann)).json<{ tasks: Line[] }>().tasks;
 
   it('says whom it is on only when the person sees them, and an event always', async () => {
     const c = await aclCompany();
@@ -246,7 +246,7 @@ describe('a wait on a task', () => {
     await c.db.update(tasks).set({ externalWait: wait({ kind: 'employee', employee: c.crew.mine.id, name: c.crew.mine.name }) }).where(eq(tasks.id, onSeen.id));
     await c.db.update(tasks).set({ externalWait: wait({ kind: 'external', event: 'time' }) }).where(eq(tasks.id, onEvent.id));
     await c.db.update(tasks).set({ externalWait: wait() }).where(eq(tasks.id, onNobody.id));
-    const list = await c.get('/api/tasks', c.tokens.ann);
+    const list = await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann);
     expect(list.body).not.toContain(c.crew.other.id);
     expect(list.body).not.toContain(c.crew.other.name);
     const line = (id: string) => list.json<{ tasks: Line[] }>().tasks.find(t => t.id === id)!;

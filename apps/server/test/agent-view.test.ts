@@ -215,15 +215,16 @@ describe('tasks', () => {
     const own = await c.work('Own work', c.crew.mine);
     await c.work('Hidden work', c.crew.other);
     await c.work('Far work', c.crew.away, c.sales.id);
-    for (const query of ['', '?status=all', `?department=${c.dev.id}`, `?department=${c.sales.id}`]) {
+    for (const query of [`?department=${c.dev.id}`, `?status=all&department=${c.dev.id}`]) {
       const res = await c.get(`/api/tasks${query}`, c.tokens.ann);
       expect(res.statusCode).toBe(200);
       expect(res.body).not.toContain('Hidden work');
       expect(res.body).not.toContain('Far work');
-      expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual(query.includes(c.sales.id) ? [] : [own.id]);
+      expect(res.json().tasks.map((t: { id: string }) => t.id)).toEqual([own.id]);
       expect(leaks(res, [c.crew.other, c.crew.far, c.crew.head])).toEqual([]);
     }
-    expect((await c.get('/api/tasks', c.tokens.ceo)).json().tasks).toHaveLength(3);
+    expect((await c.get(`/api/tasks?department=${c.sales.id}`, c.tokens.ann)).statusCode).toBe(403);
+    expect((await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ceo)).json().tasks).toHaveLength(2);
   });
 
   it('names no hidden agent on a seen task: not its stage owners, log, requests or files', async () => {

@@ -106,6 +106,8 @@ export type ErrorReason =
   | 'request_closed'
   | 'improvement_unknown'
   | 'improvement_decided'
+  | 'backlog_unknown'
+  | 'backlog_changed'
   | 'improvement_not_requested'
   | 'no_head'
   | 'switched_off'
