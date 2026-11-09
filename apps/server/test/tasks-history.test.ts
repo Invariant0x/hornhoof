@@ -82,7 +82,7 @@ describe('the move path in a company with a long history', () => {
 
     /* Done: Docs waited for it alone and starts; the tests wait for the schema still. */
     const checked = await verdict(c.ctx, c.rita.id, api.id, { pass: true, comment: 'Good.', reviewedCommit: HEAD });
-    expect(checked.wakes.some(wake => wake.why === 'assigned')).toBe(false);
+    expect(checked.wakes.filter(wake => wake.why === 'assigned').map(wake => [wake.agentId, wake.taskId])).toEqual([[c.tess.id, api.id]]);
     expect(await c.started(docs.id)).toEqual([]);
     const passed = await c.accept(api.id);
     expect(passed.wakes.map(w => [w.agentId, w.taskId, w.why])).toContainEqual([c.tess.id, docs.id, 'assigned']);

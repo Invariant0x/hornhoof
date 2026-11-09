@@ -1292,9 +1292,12 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
-/* What a task that waited on a person goes back to: the status of the stage its route is at. One whose route waits for an
-   owner stays waiting, where the next eligible owner is looked for. */
-async function statusAfterWait(tx: Tx, task: Task): Promise<Task['status'] | null> {
+/* What a task that waited on a person goes back to once nothing more is asked of anyone: the status of the stage its route is
+   at. One whose route waits for an owner stays waiting, where the next eligible owner is looked for. Null leaves it as it is. */
+async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefined): Promise<Task['status'] | null> {
+  if (was !== 'waiting') return null;
+  const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  if (Number(left?.n ?? 0)) return null;
   const route = await routeOf(tx, task);
   if (route.state.resultKind !== 'code') return 'working';
   if (route.state.phase === 'waiting') return null;
@@ -1340,8 +1343,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
-    const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    const back = current?.status === 'waiting' && !Number(left?.n ?? 0) ? await statusAfterWait(tx, task) : null;
+    const back = await statusAfterWait(tx, task, current?.status);
     if (back) {
       await tx
         .update(tasks)
