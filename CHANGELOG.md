@@ -16,6 +16,8 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
   as it does for a large file such as a migration's snapshot. The file's path stays in the candidate and is checked
   against the task's paths as before, the diff names the file with its added and removed lines, and the count of changed
   lines includes them. A patch GitHub cut short, or a comparison of 300 files or more, is still refused.
+- A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
+  mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
 
 ### Russian
 
@@ -26,6 +28,8 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
   бывает с большим файлом вроде снимка миграции. Путь файла остается в кандидате и проверяется по путям задачи, как
   раньше, diff называет файл с числом добавленных и удаленных строк, а число измененных строк их учитывает. Patch, который
   GitHub урезал, и сравнение из 300 файлов и больше по-прежнему отказ.
+- Нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
+  функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
 
 ## [0.17.0] - 2026-11-09
 
