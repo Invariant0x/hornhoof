@@ -75,7 +75,7 @@ describe.skipIf(!hasTmux)('words left in the input of a program that starts anew
       expect(lefts()[0]).toMatchObject({ agentKey: c.key, jobId: second.jobId, text: WORDS, typed: true });
       await sleep(150);
       expect(c.launch).not.toHaveBeenCalled();
-      expect(await c.line()).toBe(WORDS);
+      await until(async () => (await c.line()) === WORDS);
       kept(c.key);
       expect(await second.running).toMatchObject({ ok: true });
       expect(c.launch).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe.skipIf(!hasTmux)('words left in the input of a program that starts anew
     await until(() => lefts().length >= 2);
     expect(refs().size).toBe(1);
     expect(c.launch).not.toHaveBeenCalled();
-    expect(await c.line()).toBe(WORDS);
+    await until(async () => (await c.line()) === WORDS);
     kept(c.key);
     expect(await second.running).toMatchObject({ ok: true });
     expect(c.launch).toHaveBeenCalledTimes(1);

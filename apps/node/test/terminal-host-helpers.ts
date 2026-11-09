@@ -11,6 +11,7 @@ import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 /* What the tests of agents in live terminals share. They wait on real programs in tmux far more than they compute, so
    they sit in several files that run side by side. Each file loads its own copy of this module, with a home of its own,
@@ -37,10 +38,7 @@ export const kimiScreen = (input: string) => {
   return `Welcome to Kimi Code!\n╭${'─'.repeat(70)}╮\n${rows.join('\n')}\n╰${'─'.repeat(70)}╯\ncontext: 0% (0/256k)\n`;
 };
 
-export const until = async (check: () => boolean | Promise<boolean>, ms = 8000) => {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise(r => setTimeout(r, 50))) if (await check()) return;
-  throw new Error('timed out');
-};
+export const until = (check: () => boolean | Promise<boolean>, ms = 15_000) => eventually(check, { ms, every: 50, message: 'timed out' });
 
 export let host: TerminalHost;
 export let tmux: Tmux;

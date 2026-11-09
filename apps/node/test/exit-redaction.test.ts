@@ -9,6 +9,7 @@ import { runJob, type ProviderAdapter } from '../src/runner.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 const CLI = String.raw`
 const dump = () => {
@@ -40,10 +41,7 @@ const cases = (['claude', 'codex', 'kimi'] as const).flatMap(provider => [
   { provider, mode: 'process' as const }, { provider, mode: 'terminal' as const },
 ]);
 
-async function until(check: () => boolean) {
-  for (const end = Date.now() + 8000; Date.now() < end; await new Promise(r => setTimeout(r, 20))) if (check()) return;
-  throw new Error('The synthetic terminal did not report its turn.');
-}
+const until = (check: () => boolean) => eventually(check, { message: 'The synthetic terminal did not report its turn.' });
 
 describe('redaction before the program output line boundary', () => {
   let dir: string;
