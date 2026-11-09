@@ -16,7 +16,7 @@ import { eventually } from '../../../test-support/eventually.mjs';
    tmux and the program's sign-in never run; the screens are written as Claude Code's setup-token prints them. */
 const TOKEN = 'sk-ant-oat01-' + 'Ab3_-x9q'.repeat(11);
 const CLAUDE = fileURLToPath(new URL('./fakes/claude', import.meta.url));
-const until = (check: () => boolean) => eventually(check, { message: 'The sign-in did not get there.' });
+const until = (check: () => boolean) => eventually(check);
 const wrapped = (width: number) => TOKEN.match(new RegExp(`.{1,${width}}`, 'g'))!.join('\n');
 const printed = (width: number) => `✓ Long-lived authentication token created successfully!\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m${wrapped(width)}\x1b[39m\n\nStore this token securely.\n`;
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { encryptSecret } from '../src/crypto/secrets.js';
@@ -5,6 +6,8 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { pumpTests } from '../src/modules/testruns/runs.js';
+import type { Ctx } from '../src/app.js';
 import { appFixture, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 export const GIB = 1024 ** 3;
@@ -110,9 +113,21 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   return { app, db, url, ceo, ann, bob, builtin, dev, sales, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
 }
 
-/* Whether a node got a message of this kind within a short wait; what came meanwhile is taken. */
-export async function gets(node: FakeNode, type: ServerMessage['type'], ms = 300): Promise<boolean> {
-  await new Promise(r => setTimeout(r, ms));
+/* The node's mark comes back after everything the server sent it before, as one socket keeps their order, and after every
+   message the node sent before it was handled. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
+
+/* Whether a node got a message of this kind from everything the server has given it so far; what came meanwhile is taken.
+   What the node said is handled first, then every round of giving out tests under way ends, and what it gave out has
+   arrived: no clock decides it. */
+export async function gets(ctx: Ctx, node: FakeNode, type: ServerMessage['type']): Promise<boolean> {
+  await marked(node);
+  await pumpTests(ctx);
+  await marked(node);
   let got = false;
   for (let n = node.queued(); n > 0; n--) if ((await node.next()).type === type) got = true;
   return got;

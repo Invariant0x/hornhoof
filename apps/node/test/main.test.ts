@@ -21,6 +21,7 @@ import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 import type { runTests } from '../src/tests.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:os', async importOriginal => {
@@ -54,11 +55,7 @@ async function fakeServer(grantChecks = true) {
       grantCheck(s, frame, grantChecks);
     });
   });
-  const wait = async (check: () => boolean, ms = 3000) => {
-    const end = Date.now() + ms;
-    while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
+  const wait = (check: () => boolean) => eventually(check);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
 }
 
@@ -82,13 +79,13 @@ describe('reporting the node lifecycle', () => {
       return child;
     };
     const first = start();
-    await server.wait(() => server.received.some(m => m.type === 'hello'), 6000);
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
     const boot = server.received[0]!.boot as { startedAt: string };
     const ended = once(first, 'exit');
     first.kill('SIGKILL');
     await ended;
     start();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ restart: { kind: 'unplanned', reason: 'unclean_exit', at: null, startedAt: boot.startedAt, log: expect.stringContaining(`Node started at ${boot.startedAt}.`) } });
     expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
   });
@@ -134,7 +131,7 @@ describe('reporting the node lifecycle', () => {
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const before = server.received[0]!;
     server.drop();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const after = server.received.findLast(m => m.type === 'hello')!;
     expect(after.boot).toEqual(before.boot);
     expect(after.restart).toMatchObject({ kind: 'unknown', reason: 'unknown' });
@@ -211,7 +208,7 @@ describe('reporting managed programs', () => {
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'delivered'));
     expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
     server.drop();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'reconnected' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'reconnected'));
     expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
@@ -230,7 +227,7 @@ describe('reporting managed programs', () => {
     for (const status of server.received.filter(m => m.type === 'status')) expect(status.programs).toEqual(snapshot);
     server.drop();
     await programs.update();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const hello = server.received.findLastIndex(m => m.type === 'hello');
     expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
     for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
@@ -303,7 +300,7 @@ describe('a node that runs agents in terminals', () => {
     server.drop();
     await server.wait(() => log.some(line => line.includes('Connection closed')));
     receipt(true);
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 5000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(server.received.filter(m => m.type === 'agent.said')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
   });
@@ -418,14 +415,14 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => dones().length === 1);
     server.drop();
-    await server.wait(() => dones().length === 2, 5000);
+    await server.wait(() => dones().length === 2);
     expect(hellos()[1]).toMatchObject({ running: ['j1'] });
     expect(dones()[1]).toMatchObject({ ok: true, result: 'ready' });
 
     server.send({ type: 'job.ack', jobId: 'j1' });
     await new Promise(r => setTimeout(r, 50));
     server.drop();
-    await server.wait(() => hellos().length === 3, 5000);
+    await server.wait(() => hellos().length === 3);
     await new Promise(r => setTimeout(r, 100));
     expect(hellos()[2]).toMatchObject({ running: [] });
     expect(dones()).toHaveLength(2);
@@ -552,7 +549,7 @@ describe('runNode', () => {
     const usage = (utilization: number) => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization, resetsAt: null }] });
     const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     const framesAfterHello = (received: { type: string; [k: string]: unknown }[]) => received.slice(received.findLastIndex(m => m.type === 'hello') + 1);
-    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
 
     it('keeps no reading in the queue, and says only the newest when it is back', async () => {
       const server = await fakeServer();
@@ -782,9 +779,9 @@ describe('runNode', () => {
     const hellos = () => server.received.filter(m => m.type === 'hello');
     await server.wait(() => hellos().length === 1);
     for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
-    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52, 15000);
+    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52);
     server.drop();
-    await server.wait(() => hellos().length === 2, 5000);
+    await server.wait(() => hellos().length === 2);
     const running = hellos()[1]!.running as string[];
     expect(running).toHaveLength(50);
     expect(running).not.toContain('j1');
@@ -1072,13 +1069,13 @@ describe('runNode', () => {
 
     const hellos = () => server.received.filter(m => m.type === 'hello');
     server.drop();
-    await server.wait(() => hellos().length === 2, 5000);
+    await server.wait(() => hellos().length === 2);
     expect(hellos()[1]).toMatchObject({ tests: ['p1'] });
     await server.wait(() => server.received.filter(m => m.type === 'tests.done').length === 2);
     server.send({ type: 'tests.ack', partId: 'p1' });
     await new Promise(r => setTimeout(r, 50));
     server.drop();
-    await server.wait(() => hellos().length === 3, 5000);
+    await server.wait(() => hellos().length === 3);
     expect(hellos()[2]).toMatchObject({ tests: [] });
 
     server.send({ ...part, partId: 'p2', command: 'slow' });
@@ -1247,7 +1244,7 @@ it('describes a product by itself with what lets the server reuse results', asyn
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   server.send({ type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', repo: { url, token: '' }, commitSha, repositoryScope });
-  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'), 15_000);
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
   expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'ready', fingerprints: [{ suiteId: 'unit', file: 'test/a.js' }] } });
 });
 

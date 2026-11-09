@@ -22,7 +22,7 @@ describe('parts on physical computers', () => {
     const parts = await c.db.select().from(testParts);
     expect(parts).toHaveLength(1);
     expect(parts[0]).toMatchObject({ nodeId: second.nodeId, status: 'running' });
-    expect(await gets(first.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, first.node, 'tests.run')).toBe(false);
   });
 
   it.each([
@@ -81,7 +81,7 @@ describe('parts on physical computers', () => {
     await call('run_tests', { command: 'make test' });
     const state = JSON.parse((await call('test_run', { run: 2 })).text);
     expect(state.parts).toMatchObject([{ status: 'running', machine: 'macbook' }]);
-    expect(await gets(two.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
   });
 
   it('keeps the next run queued until a part on the shared host ends', async () => {
@@ -96,7 +96,7 @@ describe('parts on physical computers', () => {
     const waits = await call('run_tests', { command: 'make test' });
     expect(waits.text).toMatch(/Test run 2.*waits for a free machine/);
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
-    expect(await gets(two.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
     const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json();
     expect(pool.waiting[0].why).toMatch(/Running another part/);
     one.node.send(done(first));
@@ -114,7 +114,7 @@ describe('parts on physical computers', () => {
     const container = await c.machine(c.ceo, 'container');
     reportHost(c, container.nodeId, 'linux');
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(container.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, container.node, 'tests.run')).toBe(false);
   });
 
   it('allows two places on one host when configured and queues the third', async () => {
@@ -197,7 +197,7 @@ describe('parts on physical computers', () => {
     one.node.close();
     await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(one.nodeId)));
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(two.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
   });
 
   it('tries another physical computer when a sibling container lost a part', async () => {
@@ -243,7 +243,7 @@ describe('parts on physical computers', () => {
     /* A new server context has the persisted database and the sibling's connection, without the old server's cache. */
     await pumpTests({ ...c.app.ctx });
     expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
-    expect(await gets(two.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.run')).toBe(false);
   });
 
   it('queues and explains a run whose host has memory but whose container does not', async () => {

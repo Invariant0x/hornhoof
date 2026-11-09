@@ -111,7 +111,7 @@ async function world() {
     return { ...joined, options, nodeId: (joined as { nodeId: string }).nodeId };
   };
   const product = async () => (await c.db.select().from(harnessProducts).where(eq(harnessProducts.departmentId, c.dev.id)))[0];
-  const reached = (commit: string, count: number) => until(async () => Object.values((await product())?.machines ?? {}).filter(m => m.commitSha === commit && m.at).length >= count, 30_000);
+  const reached = (commit: string, count: number) => until(async () => Object.values((await product())?.machines ?? {}).filter(m => m.commitSha === commit && m.at).length >= count);
   const moveHead = (commit: string) => { head = commit; };
   /* A run the way an agent starts it, with the result the server records. */
   const runOn = async (branch: string) => {
@@ -119,7 +119,7 @@ async function world() {
     const started = await call('run_tests', { branch });
     expect(started.error, started.text).toBe(false);
     const [run] = await c.db.select().from(testRuns).orderBy(testRuns.createdAt).then(rows => rows.slice(-1));
-    await until(async () => (await c.db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]!.status !== 'running', 30_000);
+    await until(async () => (await c.db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]!.status !== 'running');
     const [ended] = await c.db.select().from(testRuns).where(eq(testRuns.id, run!.id)), parts = await c.db.select().from(testParts).where(eq(testParts.runId, run!.id));
     return { status: ended!.status, parts };
   };

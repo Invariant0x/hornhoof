@@ -18,7 +18,7 @@ export const kimiScreen = (input: string) => {
   return `Welcome to Kimi Code!\n╭${'─'.repeat(70)}╮\n${rows.join('\n')}\n╰${'─'.repeat(70)}╯\ncontext: 0% (0/256k)\n`;
 };
 
-export const until = (check: () => boolean | Promise<boolean>, ms = 15_000) => eventually(check, { ms, every: 50, message: 'timed out' });
+export const until = (check: () => boolean | Promise<boolean>) => eventually(check);
 
 export const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
 import { markRemoved, readState } from '../src/state.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:child_process', async importOriginal => {
@@ -103,11 +104,7 @@ async function fakeServer() {
     headers.push(req.headers.authorization ?? '');
     s.on('message', d => received.push(JSON.parse(String(d))));
   });
-  const wait = async (check: () => boolean) => {
-    const end = Date.now() + 5000;
-    while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
+  const wait = (check: () => boolean) => eventually(check);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, headers, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
 }
 

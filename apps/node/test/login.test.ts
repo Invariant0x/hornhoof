@@ -8,6 +8,7 @@ import { CutAtToken, tokenIn } from '../src/login.js';
 import { runNode } from '../src/main.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 /* The sign-in to a plan that its owner does in Hornhoof: the node runs the program's sign-in in a terminal of its own,
@@ -16,10 +17,7 @@ import { testPort } from '../../../test-support/ports.mjs';
 
 const TOKEN = 'sk-ant-oat01-' + 'Ab3_-x9q'.repeat(11);
 
-const until = async (check: () => boolean | Promise<boolean>, ms = 10_000) => {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise(r => setTimeout(r, 50))) if (await check()) return;
-  throw new Error('timed out');
-};
+const until = (check: () => boolean | Promise<boolean>) => eventually(check);
 
 const adapter: ProviderAdapter = {
   install: async () => {},

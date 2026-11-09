@@ -71,7 +71,7 @@ describe('a test run', () => {
     const waits = await call('run_tests', { command: 'make test', branch: 'task-1-checkout' });
     expect(waits.text).toMatch(/waits for a free machine/);
     expect(JSON.parse((await call('test_run', { run: 2 })).text)).toMatchObject({ status: 'running', parts: [{ part: 1, status: 'queued', machine: null }] });
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send(done(one));
     const two = await nextOf(ivan.node, 'tests.run');
     expect(two.partId).not.toBe(one.partId);
@@ -83,7 +83,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ memFree: 6 * GIB }));
     const { call } = await c.turn(c.bruno);
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ memFree: 9 * GIB }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
   });
@@ -93,7 +93,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 7.6 }));
     const { call } = await c.turn(c.bruno);
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ load: 2 }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
   });
@@ -107,8 +107,8 @@ describe('a test run', () => {
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test -- {part}', parts: 3 });
     expect((await nextOf(ivan.node, 'tests.run')).part).toBe(1);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
-    expect(await gets(bob.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, bob.node, 'tests.run')).toBe(false);
     expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${ann.machineId}`, payload: { lendsTests: true }, ...as(c.ann) })).statusCode).toBe(200);
     expect((await nextOf(ann.node, 'tests.run')).part).toBe(2);
   });
@@ -121,7 +121,7 @@ describe('a test run', () => {
     const run = await nextOf(ivan.node, 'tests.run');
     expect(run.timeoutMs).toBe(5 * 60_000);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
-    expect(await gets(ivan.node, 'tests.cancel')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.cancel')).toBe(false);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
     expect(await nextOf(ivan.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: run.partId });
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*did not end within 5 min/);
@@ -199,7 +199,7 @@ describe('a test run', () => {
     const again = await nextOf(ivan.node, 'tests.run');
     expect(again).toMatchObject({ part: 1, command: 'make test' });
     expect(again.partId).not.toBe(lost.partId);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
     /* The lost run's end, should it still come, changes nothing, and its node hears to stop it. */
     ann.node.send(done(lost, { ok: false, exitCode: 1, error: 'failed' }));
     await nextOf(ann.node, 'tests.ack');
@@ -234,7 +234,7 @@ describe('a test run', () => {
     const result = JSON.parse((await call('test_run', { run: 1 })).text);
     expect(result).toMatchObject({ status: 'passed', parts: [{ status: 'passed' }] });
     expect(result.parts[0].ranAgain).toBeUndefined();
-    expect(await gets(back, 'tests.cancel')).toBe(false);
+    expect(await gets(c.app.ctx, back, 'tests.cancel')).toBe(false);
   });
 
   it('runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost', async () => {
@@ -259,7 +259,7 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(
       /Test run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:\n]*: its machine restarted and lost it\. It ran again after ivan-mac went offline, and again after ivan-mac restarted and lost it\./,
     );
-    expect(await gets(back, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, back, 'tests.run')).toBe(false);
   });
 
   it("does not count a turn that ended while its test run goes on as standing still", async () => {
@@ -309,7 +309,7 @@ describe('a test run', () => {
     expect(one.partId).not.toBe(first.partId);
     expect((await c.app.inject({ method: 'DELETE', url: `/api/subscriptions/${ann.subscriptionId}`, ...as(c.ann) })).statusCode).toBe(204);
     /* One part at a time on a machine: the second waits for the first to end there. */
-    expect(await gets(spare.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, spare.node, 'tests.run')).toBe(false);
     spare.node.send(done(one));
     const two = await nextOf(spare.node, 'tests.run');
     expect(two).toMatchObject({ part: 2 });
@@ -541,7 +541,7 @@ it('refuses to dispatch a pinned product snapshot after its repository configura
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [...reply.result.description.runtimeCapabilities, { id: 'python', version: '3.12.8', fingerprint: 'e'.repeat(64) }] });
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
   expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'no_repository', nodeId: null });
-  expect(await gets(node, 'tests.run', 30)).toBe(false);
+  expect(await gets(c.app.ctx, node, 'tests.run')).toBe(false);
 });
 
 it('retries interrupted metadata under new request IDs at the same pinned commit and fails once after three attempts', async () => {
@@ -577,7 +577,7 @@ it.each(['lending', 'access'])('rechecks a persisted metadata node after revokin
     await c.db.delete(personAccess).where(eq(personAccess.personId, owner!.id));
   }
   const restarted = { ...c.app.ctx }; noteTestCapabilities(restarted, id, capabilities); await pumpTests(restarted);
-  expect(await gets(machine.node, 'tests.describe')).toBe(false);
+  expect(await gets(c.app.ctx, machine.node, 'tests.describe')).toBe(false);
   expect((await c.db.select().from(testRuns))[0]!.environmentRequest!.requestId).toBeNull();
   const replacement = await productNode(c), next = await nextOf(replacement, 'tests.describe');
   expect(next.requestId).not.toBe(request.requestId); expect(next.commitSha).toBe(request.commitSha);

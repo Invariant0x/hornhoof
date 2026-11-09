@@ -1,9 +1,9 @@
-/* Waits for a state, not for a moment: it looks until the check holds, and once more after its time is up, as a slow look on
-   a busy machine can outlast that time. */
-export async function eventually(check, { ms = 15_000, every = 20, message = 'The state the test waits for did not come.' } = {}) {
-  for (const end = Date.now() + ms; ; await new Promise(resolve => { setTimeout(resolve, every); })) {
-    const late = Date.now() >= end;
-    if (await check()) return;
-    if (late) throw new Error(message);
-  }
+/* The event loop's own turn, taken when this file loads, so a test's fake clock never stops a wait. */
+const turn = setImmediate;
+
+/* Waits for a state, not for a moment: it looks again after every turn of the event loop, with no timer and no deadline, so
+   no verdict rests on how fast or how busy the machine is. A state that never comes ends at the runner's limit for the whole
+   test. */
+export async function eventually(check) {
+  while (!(await check())) await new Promise(resolve => { turn(resolve); });
 }

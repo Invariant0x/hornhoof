@@ -13,6 +13,7 @@ import { writeState } from '../src/state.js';
 import { planToken } from '../src/terminal/programs.js';
 import { readAccount } from '../src/account.js';
 import { claudeAdapter } from '../src/providers/claude.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 const TOKEN = 'sk-ant-oat01-' + 'a'.repeat(40);
@@ -36,11 +37,7 @@ async function fakeServer() {
     socket = s;
     s.on('message', data => received.push(JSON.parse(String(data))));
   });
-  const wait = async (check: () => boolean, ms = 3000) => {
-    const end = Date.now() + ms;
-    while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
+  const wait = (check: () => boolean) => eventually(check);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
 }
 
