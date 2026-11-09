@@ -46,7 +46,7 @@ describe('candidate source and quality regressions', () => {
     await submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Checks A', review: { baseCommit: BASE } });
     await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'A', reviewedCommit: FIRST, evidence: [{ run: 2, commitSha: SECOND, proves: true }] });
     expect((await f.event('verdict')).data).toMatchObject({ reviewedCommit: FIRST });
-    expect((await f.event('verdict')).data).not.toHaveProperty('evidence');
+    expect((await f.event('verdict')).data.evidence).toEqual([{ run: 2, commitSha: SECOND, proves: false, why: expect.stringContaining(FIRST) }]);
   });
 
   it('rejects blocking findings attached to PASS', async () => {

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, jobs, subscriptions } from '../src/db/schema.js';
 import { agentState, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 import { statements } from './helpers.js';
 
@@ -22,6 +24,11 @@ async function line(plan: 'limit' | 'spent' | 'free' = 'limit') {
   const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
   const waiting = async (at: Date, options: { task?: boolean; prompt?: string; report?: boolean } = {}) => {
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, kind: 'conversation', prompt: options.prompt ?? 'Go on.', taskId: options.task ? task.id : null, timeoutMs: 1000, status: 'queued', notBefore: at }).returning();
+    if (options.task) {
+      const route = routeSnapshot(await routeOf(c.db, task), task.assigneeAgentId);
+      await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.agent.id, jobId: job!.id, kind: 'message',
+        data: { text: job!.prompt, taskWake: taskWakeOf(task, { why: 'go_on' }, route) } });
+    }
     /* A report waits out its short window without holding the agent's line, unlike a delayed retry. */
     if (options.report) await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.agent.id, jobId: job!.id, kind: 'message', data: { text: 'Done.', report: 'Done.' } });
     return job!;

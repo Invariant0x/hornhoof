@@ -115,7 +115,9 @@ describe('sending what is due', () => {
     expect(sent.map(s => s.attemptId)).toEqual([(await attemptsOf(w, first.messageId))[0]!.id]);
     expect(await w.messageOf(first.messageId)).toMatchObject({ status: 'unknown', reasonCodes: ['delivery_unknown'] });
     expect(await w.messageOf(second.messageId)).toMatchObject({ status: 'reserved' });
-    expect(await bucketOf(w)).toMatchObject({ unknown: 1, reserved: 1 });
+    const buckets = await w.c.db.select().from(outboundDailyUsage).where(and(eq(outboundDailyUsage.scope, 'account'), eq(outboundDailyUsage.scopeKey, w.account.id)));
+    /* The six-minute retry can cross midnight; both daily places still belong to this account. */
+    expect(buckets.reduce((sum, bucket) => ({ unknown: sum.unknown + bucket.unknown, reserved: sum.reserved + bucket.reserved }), { unknown: 0, reserved: 0 })).toEqual({ unknown: 1, reserved: 1 });
   });
 
   it('takes a transport that throws for one that may have sent', async () => {

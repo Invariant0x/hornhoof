@@ -5,6 +5,8 @@ import { agents, companies, departments, jobs, machines, nodes, subscriptions, t
 import { agentState, enqueueTurn, orchestratorState } from '../src/modules/conversation/queue.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { pumpTests, startRun } from '../src/modules/testruns/runs.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
@@ -46,7 +48,9 @@ describe('browser launch readiness before handing out work', () => {
     expect(await agentState(app.ctx, bruno!.id)).toMatchObject({ ready: false, reason: 'machine_offline', browserError: null });
 
     const socket = await connectNode(url, key);
-    const turnId = await enqueueTurn(app.ctx, { companyId, agentId: bruno!.id, taskId: task.id, prompt: 'Implement backend', createdBy: null });
+    const route = routeSnapshot(await routeOf(db, task), task.assigneeAgentId);
+    const turnId = await enqueueTurn(app.ctx, { companyId, agentId: bruno!.id, taskId: task.id, prompt: 'Implement backend', createdBy: null,
+      message: { personId: null, text: 'Implement backend', taskWake: taskWakeOf(task, { why: 'assigned' }, route) } });
     expect((await db.select().from(agents).where(eq(agents.id, bruno!.id)))[0]!.nodeId).toBeNull();
     socket.send({
       type: 'hello',
@@ -139,7 +143,9 @@ describe('browser launch readiness before handing out work', () => {
     const [head] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '', subscriptionId }).returning();
     const task = (await createTask(app.ctx, { agentId: head!.id }, { title: 'Check', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: vera!.id, executor: true })).task;
     expect(await agentState(app.ctx, vera!.id)).toMatchObject({ ready: true, reason: null, browserError: 'libnss3.so missing' });
-    const veraTurn = await enqueueTurn(app.ctx, { companyId, agentId: vera!.id, taskId: task.id, prompt: 'Check', createdBy: null });
+    const route = routeSnapshot(await routeOf(db, task), task.assigneeAgentId);
+    const veraTurn = await enqueueTurn(app.ctx, { companyId, agentId: vera!.id, taskId: task.id, prompt: 'Check', createdBy: null,
+      message: { personId: null, text: 'Check', taskWake: taskWakeOf(task, { why: 'assigned' }, route) } });
     await until(async () => (await db.select().from(jobs).where(and(eq(jobs.id, veraTurn), eq(jobs.status, 'running')))).length === 1);
     expect((await db.select().from(jobs).where(eq(jobs.id, veraTurn)))[0]!.nodeId).toBe(brokenId);
 
