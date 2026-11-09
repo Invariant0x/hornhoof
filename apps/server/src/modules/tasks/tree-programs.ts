@@ -72,6 +72,44 @@ function covers(segment: TreeSegment, from: number, to: number, end: number): bo
   return Date.parse(segment.from) <= from && (segment.to ? Date.parse(segment.to) : end) >= to;
 }
 
+/* The segments that stand over a slice, the last one given first: a heap by their place among the segments. */
+class Standing {
+  private readonly heap: number[] = [];
+  constructor(private readonly ends: number[]) {}
+
+  add(index: number): void {
+    const heap = this.heap;
+    heap.push(index);
+    for (let at = heap.length - 1; at > 0;) {
+      const up = (at - 1) >> 1;
+      if (heap[up]! >= heap[at]!) break;
+      [heap[up], heap[at]] = [heap[at]!, heap[up]!];
+      at = up;
+    }
+  }
+
+  /* The last segment still standing at this moment; those that ended by then leave. */
+  lastAt(moment: number): number | undefined {
+    while (this.heap.length && this.ends[this.heap[0]!]! <= moment) this.drop();
+    return this.heap[0];
+  }
+
+  private drop(): void {
+    const heap = this.heap, last = heap.pop()!;
+    if (!heap.length) return;
+    heap[0] = last;
+    for (let at = 0; ;) {
+      const left = 2 * at + 1, right = left + 1;
+      let top = at;
+      if (left < heap.length && heap[left]! > heap[top]!) top = left;
+      if (right < heap.length && heap[right]! > heap[top]!) top = right;
+      if (top === at) return;
+      [heap[top], heap[at]] = [heap[at]!, heap[top]!];
+      at = top;
+    }
+  }
+}
+
 function sameDetails(a: TreeSegment, b: TreeSegment): boolean {
   return a.kind === b.kind && a.program === b.program && a.alarm === b.alarm && a.waitsForAgent === b.waitsForAgent && a.externalWait === b.externalWait;
 }
@@ -88,10 +126,17 @@ function partition(base: TreeSegment[], overlays: TreeSegment[], now: Date): Tre
   if (start === end) return [{ ...all.filter(s => covers(s, start, end, end)).at(-1)!, from: base[0]!.from, to: base.at(-1)!.to }];
   const bounds = [...new Set([start, end, ...all.flatMap(s => [Date.parse(s.from), Date.parse(s.to ?? now.toISOString())])])]
     .filter(at => start <= at && at <= end).sort((a, b) => a - b);
+  /* One sweep over the slices: a segment joins when the sweep reaches its start and leaves once it ended, and each slice
+     takes the last segment given that stands over it. One with no end stands to the end. */
+  const starts = all.map(s => Date.parse(s.from));
+  const ends = all.map(s => (s.to ? Date.parse(s.to) : Infinity));
+  const order = all.map((_, i) => i).sort((a, b) => starts[a]! - starts[b]!);
+  const standing = new Standing(ends);
   const out: TreeSegment[] = [];
-  for (let i = 0; i < bounds.length - 1; i++) {
+  for (let i = 0, next = 0; i < bounds.length - 1; i++) {
     const from = bounds[i]!, to = bounds[i + 1]!;
-    const source = all.filter(s => covers(s, from, to, end)).at(-1)!;
+    while (next < order.length && starts[order[next]!]! <= from) standing.add(order[next++]!);
+    const source = all[standing.lastAt(from)!]!;
     appendSegment(out, { ...source, from: new Date(from).toISOString(), to: to === end && source.to === null ? null : new Date(to).toISOString() });
   }
   return out;

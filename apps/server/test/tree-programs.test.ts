@@ -134,3 +134,45 @@ it.each([
     { state: next.state, tool: next.tool, since: date(next.since).getTime() },
   ]);
 });
+
+/* The partition as it stood before it swept: every slice looked through every segment. Kept as the answer the sweep must give. */
+function partitionOracle(base: { kind: string; from: string; to: string | null }[], overlays: typeof base, now: Date) {
+  const covers = (s: (typeof base)[number], from: number, to: number, end: number) => Date.parse(s.from) <= from && (s.to ? Date.parse(s.to) : end) >= to;
+  const start = Date.parse(base[0]!.from), end = Date.parse(base.at(-1)!.to ?? now.toISOString());
+  const all = [...base, ...overlays];
+  const bounds = [...new Set([start, end, ...all.flatMap(s => [Date.parse(s.from), Date.parse(s.to ?? now.toISOString())])])].filter(at => start <= at && at <= end).sort((a, b) => a - b);
+  const out: (typeof base)[number][] = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const from = bounds[i]!, to = bounds[i + 1]!;
+    const source = all.filter(s => covers(s, from, to, end)).at(-1)!;
+    const next = { ...source, from: new Date(from).toISOString(), to: to === end && source.to === null ? null : new Date(to).toISOString() };
+    const previous = out.at(-1);
+    if (previous && previous.to === next.from && previous.kind === next.kind) previous.to = next.to;
+    else out.push(next);
+  }
+  return out;
+}
+
+it('gives the same lines as looking through every segment, for many random segments', () => {
+  let seed = 7;
+  const random = (n: number) => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed % n; };
+  const kinds = ['stall', 'after', 'person', 'work', 'lost', 'alarm'] as const;
+  for (let round = 0; round < 50; round++) {
+    const segments = Array.from({ length: 40 }, () => {
+      const from = random(1000) * 1000;
+      const open = random(5) === 0;
+      return { kind: kinds[random(kinds.length)]!, from: iso(from), to: open ? null : iso(from + random(300) * 1000) };
+    });
+    const now = date(1_200_000);
+    expect(countedSegments(segments, now)).toEqual([...partitionOracle([{ kind: 'unknown', from: segments.map(s => s.from).sort()[0]!, to: segments.map(s => s.to ?? now.toISOString()).sort().at(-1)! }], [...segments].sort((a, b) => ['unknown', ...kinds].indexOf(a.kind) - ['unknown', ...kinds].indexOf(b.kind)), now)]);
+  }
+});
+
+it('lays out the segments of a long day of many turns in a moment', () => {
+  const kinds = ['stall', 'work', 'person', 'alarm'] as const;
+  const segments = Array.from({ length: 20_000 }, (_, i) => ({ kind: kinds[i % kinds.length]!, from: iso(i * 1000), to: iso(i * 1000 + 1500) }));
+  const started = performance.now();
+  const laid = countedSegments(segments, date(30_000_000));
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(laid.length).toBeGreaterThan(1000);
+});
