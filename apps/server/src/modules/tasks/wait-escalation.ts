@@ -66,6 +66,9 @@ async function recipientAt(tx: Tx, found: Found, level: number, route: WaitRoute
   return route.fallbackToCeo || !route.finalDecisionPersonId ? null : { personId: route.finalDecisionPersonId };
 }
 
+/* The holder who answers for its own wait has its own dates to wake it: nobody tells them they wait for themselves. */
+const holderItself = (found: Found, who: WaitOwnerBinding): boolean =>
+  'agentId' in who && who.agentId === found.task.assigneeAgentId && who.agentId === found.wait.ownerAgentId;
 const heardAlready = (wait: TaskWait, who: WaitOwnerBinding): boolean => ('agentId' in who ? wait.attentionAgentId === who.agentId : wait.attentionPersonId === who.personId);
 const attentionOf = (who: WaitOwnerBinding) => ('agentId' in who ? { attentionAgentId: who.agentId, attentionPersonId: null } : { attentionAgentId: null, attentionPersonId: who.personId });
 
@@ -112,7 +115,7 @@ async function raise(ctx: Ctx, tx: Tx, found: Found, now: Date): Promise<void> {
   await tx.update(taskWaits).set({ level, nextActionAt: nextOf(wait, level), ...route, routeRevision, ...(who ? attentionOf(who) : {}), updatedAt: now }).where(eq(taskWaits.id, wait.id));
   await dropPending(tx, wait.id, 'escalation', now);
   await ownNote(tx, task, { kind: 'wait_due', text: `A wait on this task passed its date and went up to level ${level}.`, data: { wait: { id: wait.id, kind: wait.kind, generation: wait.generation, level, routeRevision }, ...(collapsed ? { collapsed } : {}) } });
-  if (who && !collapsed) await keepNotice(ctx, tx, task, { id: wait.id, generation: wait.generation, routeRevision }, { who, purpose: 'escalation', level, words: lateWords(wait, task, level, now), guard: { level } });
+  if (who && !collapsed && !holderItself(found, who)) await keepNotice(ctx, tx, task, { id: wait.id, generation: wait.generation, routeRevision }, { who, purpose: 'escalation', level, words: lateWords(wait, task, level, now), guard: { level } });
 }
 
 async function stepWait(ctx: Ctx, id: string, now: Date): Promise<void> {

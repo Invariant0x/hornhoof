@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { agents, taskEvents, tasks, waitNotices } from '../src/db/schema.js';
 import { comment } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { ANSWERED_WAIT_MS, deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../src/modules/tasks/wait-notices.js';
+import { deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../src/modules/tasks/wait-notices.js';
 import type { mcp } from './helpers.js';
 import { waitCompany } from './wait-company.js';
 
 const later = (ms: number) => new Date(Date.now() + ms).toISOString();
+const told = async (c: Awaited<ReturnType<typeof waitCompany>>, agentId: string) =>
+  (await c.messages(agentId)).filter(m => (m.data as { notification?: { source?: string } }).notification?.source === 'wait_requested');
 const waitOn = (client: Awaited<ReturnType<typeof mcp>>, task: number, employee: string, reason: string, until = later(60_000)) =>
   client.callTool({ name: 'wait_for', arguments: { task, reason, until, on: { kind: 'employee', employee } } });
 
@@ -76,7 +78,7 @@ describe('wait recipient notices', () => {
     await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, task.id));
     const notice = (await requestedWaitNotice(c.ctx, { ...task, externalWait: wait }, c.agent.id))!;
     await recordWaitNotice(c.db, notice);
-    if (state === 'replaced') await c.db.update(tasks).set({ externalWait: { ...wait, reason: 'A different acceptance' }, version: task.version + 1 }).where(eq(tasks.id, task.id));
+    if (state === 'replaced') await c.db.update(tasks).set({ externalWait: { ...wait, on: { kind: 'employee', employee: c.watcher.id } }, version: task.version + 1 }).where(eq(tasks.id, task.id));
     if (state === 'changed') await c.db.update(tasks).set({ externalWait: null, version: task.version + 1 }).where(eq(tasks.id, task.id));
     await deliverWaitNotices(c.ctx, new Date(now.getTime() + (state === 'expired' ? 60_000 : 1)));
     expect(await c.messages(c.head.id)).toEqual([]);
@@ -107,17 +109,19 @@ describe('wait recipient notices', () => {
       expect(await c.messages(c.watcher.id)).toHaveLength(1);
     });
 
-    it('tells the employee again once the wait ended', async () => {
+    it('tells the employee nothing new when the holder ended the wait and waits on them again', async () => {
       const c = await waitCompany();
       const task = await c.task();
       const worker = await c.run();
       await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
-      expect((await worker.client.callTool({ name: 'end_wait', arguments: { task: task.number } })).isError).toBeFalsy();
-      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance of the second part')).isError).toBeFalsy();
-      expect(await c.messages(c.head.id)).toHaveLength(2);
+      for (const reason of ['Acceptance of the second part', 'Acceptance of the third part']) {
+        expect((await worker.client.callTool({ name: 'end_wait', arguments: { task: task.number } })).isError).toBeFalsy();
+        expect((await waitOn(worker.client, task.number, c.head.id, reason)).isError).toBeFalsy();
+      }
+      expect(await told(c, c.head.id)).toHaveLength(1);
     });
 
-    it('tells the employee again once the wait ran out', async () => {
+    it('tells the employee nothing new when the wait ran out and the holder waits on them again', async () => {
       const c = await waitCompany();
       const task = await c.task();
       const worker = await c.run();
@@ -125,7 +129,35 @@ describe('wait recipient notices', () => {
       const [row] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
       await c.db.update(tasks).set({ externalWait: { ...row!.externalWait!, until: new Date(Date.now() - 1).toISOString() } }).where(eq(tasks.id, task.id));
       expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance, asked again')).isError).toBeFalsy();
-      expect(await c.messages(c.head.id)).toHaveLength(2);
+      expect(await told(c, c.head.id)).toHaveLength(1);
+    });
+
+    it('tells the employee again once the work on the task moved', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const worker = await c.run(c.agent.id, task.id);
+      await waitOn(worker.client, task.number, c.head.id, 'Acceptance');
+      expect((await worker.client.callTool({ name: 'blocked', arguments: { task: task.number, why: 'The a-host key is gone.' } })).isError).toBeFalsy();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance with the new key')).isError).toBeFalsy();
+      const notes = await told(c, c.head.id);
+      expect(notes).toHaveLength(2);
+      expect(notes[1]!.data).toMatchObject({ text: expect.stringContaining('Acceptance with the new key') });
+    });
+
+    it('tells the employee once when a notice that never went out was dropped and the holder waits on them again', async () => {
+      const c = await waitCompany();
+      const task = await c.task();
+      const wait = { reason: 'Acceptance', since: new Date().toISOString(), until: later(60_000), on: { kind: 'employee' as const, employee: c.head.id, name: c.head.name } };
+      const [standing] = await c.db.update(tasks).set({ externalWait: wait, version: task.version + 1 }).where(eq(tasks.id, task.id)).returning();
+      await recordWaitNotice(c.db, (await requestedWaitNotice(c.ctx, standing!, c.agent.id))!);
+      await c.db.update(tasks).set({ externalWait: null, version: task.version + 2 }).where(eq(tasks.id, task.id));
+      await deliverWaitNotices(c.ctx);
+      expect(await told(c, c.head.id)).toHaveLength(0);
+      const worker = await c.run();
+      expect((await waitOn(worker.client, task.number, c.head.id, 'Acceptance, asked again')).isError).toBeFalsy();
+      const notes = await told(c, c.head.id);
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.data).toMatchObject({ text: expect.stringContaining('Acceptance, asked again') });
     });
 
     it('still tells the employee when the notice of the standing wait has not gone out', async () => {
@@ -169,21 +201,21 @@ describe('wait recipient notices', () => {
       expect((await c.db.select().from(tasks).where(eq(tasks.id, c.taskId)))[0]!.externalWait).toMatchObject({ reason: 'The report on a-host, read twice', on: { employee: c.head.id } });
     });
 
-    it('tells the employee again when their answer is older than the time it holds', async () => {
+    it('tells the employee nothing new however long ago they answered', async () => {
       const c = await answered('comment');
-      await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - ANSWERED_WAIT_MS - 1_000) }).where(and(eq(taskEvents.taskId, c.taskId), eq(taskEvents.kind, 'comment')));
+      await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - 3 * 3_600_000) }).where(and(eq(taskEvents.taskId, c.taskId), eq(taskEvents.kind, 'comment')));
       expect((await waitOn(c.worker.client, c.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
-      expect(await c.messages(c.head.id)).toHaveLength(2);
+      expect(await told(c, c.head.id)).toHaveLength(1);
     });
 
-    it('tells the employee again when someone else ended the wait', async () => {
+    it('tells the employee nothing new when someone else ended the wait', async () => {
       const c = await waitCompany();
       const task = await c.task();
       const worker = await c.run(c.agent.id, task.id);
       await waitOn(worker.client, task.number, c.head.id, 'The report on a-host');
       await wakeAll(c.ctx, (await comment(c.ctx, { agentId: c.watcher.id }, task.id, 'The alert on a-host is gone.')).wakes);
       expect((await waitOn(worker.client, task.number, c.head.id, 'The report on a-host, asked again')).isError).toBeFalsy();
-      expect(await c.messages(c.head.id)).toHaveLength(2);
+      expect(await told(c, c.head.id)).toHaveLength(1);
     });
 
     it('tells another employee the wait moved to after the answer', async () => {

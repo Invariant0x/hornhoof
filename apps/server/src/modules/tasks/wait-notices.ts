@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { accessOf, canReach } from '../../auth/access.js';
-import { agents, people, requests, taskEvents, tasks, taskWaits, waitNotices, type ExternalWait } from '../../db/schema.js';
+import { agents, people, requests, taskEvents, tasks, taskWaits, waitNotices, type TaskEventKind } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -18,51 +18,54 @@ export type NewWaitNotice = typeof waitNotices.$inferInsert;
 type Notice = typeof waitNotices.$inferSelect;
 const pending = and(isNull(waitNotices.deliveredAt), isNull(waitNotices.cancelledAt));
 const LEASE_MS = 2 * 60_000;
-/* How long an employee's own answer to a wait on them keeps them aware of it: the holder waiting on them again in this time
-   tells them nothing new. */
-export const ANSWERED_WAIT_MS = 10 * 60_000;
+/* What moves the work of a task on. Words on it, a wait said again or ended and a reminder do not. */
+const WORK_MOVES: TaskEventKind[] = ['created', 'assigned', 'started', 'submitted', 'verdict', 'report', 'blocked', 'answered', 'cancelled', 'done'];
 
 export async function recordWaitNotice(db: Writer, notice: NewWaitNotice): Promise<void> {
   await db.insert(waitNotices).values(notice).onConflictDoNothing({ target: [waitNotices.companyId, waitNotices.dedupKey] });
 }
 
-/* Nobody is told that they wait for themselves. */
+/* A task's waits on one employee are one episode until its work moves: the last work move names it. */
+async function waitEpisode(db: Pick<Db, 'select'>, taskId: string): Promise<number> {
+  const [last] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), inArray(taskEvents.kind, WORK_MOVES)))
+    .orderBy(desc(taskEvents.id)).limit(1);
+  return last?.id ?? 0;
+}
+
+/* One notice for the waits of one holder on one employee in one episode, whatever the holder says again, ends or lets run out
+   meanwhile. Nobody is told that they wait for themselves. */
 export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string): Promise<NewWaitNotice | null> {
   const wait = task.externalWait;
   if (wait?.on?.kind !== 'employee' || wait.on.employee === waiter) return null;
   const [employee] = await ctx.db.select().from(agents).where(eq(agents.id, waiter));
+  const episode = await waitEpisode(ctx.db, task.id);
   const text = `As of ${wait.since}, ${employee!.name} waits for you on #${task.number}: ${wait.reason}, until ${wait.until}. Check the task's current state and give the employee what they need.`;
   return {
-    companyId: task.companyId, agentId: wait.on.employee, dedupKey: `request:${task.id}:${task.version}`,
+    companyId: task.companyId, agentId: wait.on.employee, dedupKey: `request:${task.id}:${waiter}:${wait.on.employee}:${episode}`,
     message: await notificationMessage(ctx, task.companyId, 'wait_requested', text, { actor: { agentId: waiter }, tasks: [{ id: task.id, number: task.number }] }),
-    guard: { tasks: [{ id: task.id, version: task.version }] },
+    guard: { tasks: [], waitOn: { taskId: task.id, employee: wait.on.employee, episode } },
   };
 }
 
-/* Whether the employee a new wait names heard of it already. Either the task still waits on them, as only its holder can, and
-   the notice of that wait went out; or they ended the holder's last wait on them with their own words on the task lately.
-   Saying the wait again then changes only its words and date. */
-export async function heardOfWait(db: Pick<Db, 'select'>, task: Task, waiter: string, next: ExternalWait, now: Date): Promise<boolean> {
-  if (next.on?.kind !== 'employee') return false;
-  const employee = next.on.employee;
-  const before = task.externalWait;
-  if (!before) return answeredLately(db, task.id, waiter, employee, now);
-  if (before.on?.kind !== 'employee' || before.on.employee !== employee || new Date(before.until) <= now) return false;
-  const [unsent] = await db.select({ id: waitNotices.id }).from(waitNotices).where(and(
-    eq(waitNotices.companyId, task.companyId), eq(waitNotices.agentId, employee), like(waitNotices.dedupKey, `request:${task.id}:%`), pending,
-  )).limit(1);
-  return !unsent;
+/* The notice of the episode says the wait as it is now until it went out. One that was dropped unsent comes back free of its
+   old claim, as nobody heard it; one being sent keeps its claim. */
+export async function recordRequestedNotice(db: Writer, notice: NewWaitNotice): Promise<void> {
+  const dropped = sql`${waitNotices.cancelledAt} is not null`;
+  await db.insert(waitNotices).values(notice).onConflictDoUpdate({
+    target: [waitNotices.companyId, waitNotices.dedupKey], setWhere: isNull(waitNotices.deliveredAt),
+    set: {
+      message: notice.message, guard: notice.guard, cancelledAt: null,
+      leaseId: sql`case when ${dropped} then null else ${waitNotices.leaseId} end`, leaseUntil: sql`case when ${dropped} then null else ${waitNotices.leaseUntil} end`,
+    },
+  });
 }
 
-/* The task's last two changes of its wait: the employee's comment or message on it that ended the wait, and before it the
-   waiter's wait on that employee. */
-async function answeredLately(db: Pick<Db, 'select'>, taskId: string, waiter: string, employee: string, now: Date): Promise<boolean> {
-  const [ended, placed] = await db.select({ kind: taskEvents.kind, agentId: taskEvents.agentId, data: taskEvents.data, createdAt: taskEvents.createdAt }).from(taskEvents)
-    .where(and(eq(taskEvents.taskId, taskId), sql`${taskEvents.data} -> 'externalWait' is not null`)).orderBy(desc(taskEvents.id)).limit(2);
-  if (ended?.kind !== 'comment' || ended.agentId !== employee || ended.data.externalWait !== null) return false;
-  if (now.getTime() - ended.createdAt.getTime() > ANSWERED_WAIT_MS) return false;
-  const wait = placed?.data.externalWait as ExternalWait | null | undefined;
-  return placed?.agentId === waiter && wait?.on?.kind === 'employee' && wait.on.employee === employee;
+/* A request holds while its task still waits on that employee in that episode. */
+async function waitOnStands(db: Pick<Db, 'select'>, companyId: string, guard: NonNullable<WaitNoticeGuard['waitOn']>, now: Date): Promise<boolean> {
+  const [task] = await db.select({ externalWait: tasks.externalWait }).from(tasks).where(and(eq(tasks.id, guard.taskId), eq(tasks.companyId, companyId)));
+  const wait = task?.externalWait;
+  if (wait?.on?.kind !== 'employee' || wait.on.employee !== guard.employee || new Date(wait.until) <= now) return false;
+  return (await waitEpisode(db, guard.taskId)) === guard.episode;
 }
 
 /* A notice about a wait holds while that wait stands as it was written for. A task moving on does not spoil it, and a date
@@ -75,6 +78,7 @@ async function waitStands(db: Pick<Db, 'select'>, guard: NonNullable<WaitNoticeG
 
 async function stillCurrent(ctx: Ctx, notice: Notice, now: Date): Promise<boolean> {
   if (notice.guard.wait) return waitStands(ctx.db, notice.guard.wait);
+  if (notice.guard.waitOn) return waitOnStands(ctx.db, notice.companyId, notice.guard.waitOn, now);
   if (notice.guard.goal) return goalStands(ctx.db, notice.guard.goal);
   const expected = notice.guard.tasks;
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, notice.companyId), inArray(tasks.id, expected.map(t => t.id))));

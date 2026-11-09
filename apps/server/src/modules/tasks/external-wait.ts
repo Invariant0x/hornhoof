@@ -11,7 +11,7 @@ import { wakeAll } from './wake.js';
 import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
-import { heardOfWait, recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
+import { recordRequestedNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
 import { bindSource } from './wait-producers.js';
 import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
@@ -91,8 +91,8 @@ async function unreadMessage(ctx: Ctx, agentId: string, taskId: string): Promise
 }
 
 /* The notice the wait asks for, kept in the same write as the wait. */
-const keepNotice = (notice: Awaited<ReturnType<typeof requestedWaitNotice>>) => async (tx: Parameters<typeof recordWaitNotice>[0]) => {
-  if (notice) await recordWaitNotice(tx, notice);
+const keepNotice = (notice: Awaited<ReturnType<typeof requestedWaitNotice>>) => async (tx: Parameters<typeof recordRequestedNotice>[0]) => {
+  if (notice) await recordRequestedNotice(tx, notice);
 };
 
 async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitAsked, now: Date): Promise<Moved> {
@@ -103,7 +103,7 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: WaitA
   const wait = waitOf(input, now);
   const run = input.run ? { run: await namedRun(ctx, task, agentId, input.run) } : {};
   const externalWait = { ...wait, ...run, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
-  const notice = (await heardOfWait(ctx.db, task, agentId, externalWait, now)) ? null : await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
+  const notice = await requestedWaitNotice(ctx, { ...task, externalWait }, agentId);
   const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => {
     await keepNotice(notice)(tx);
     await keepWaitRecord(tx, task, externalWait, input.plan, agentId);

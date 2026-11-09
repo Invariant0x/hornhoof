@@ -64,6 +64,20 @@ describe('a wait past its dates', () => {
     expect(await c.audit(task.id)).toMatchObject([{ data: { wait: { id: wait.id, level: 1, generation: 1 } } }]);
   });
 
+  it('tells nobody at the owner level when the holder waits on itself, and still goes up to its head', async () => {
+    const c = await company();
+    await c.policy();
+    const before = await c.first();
+    const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Own follow', brief: '', body: 'Private words of the work.', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, after: [before.id], independentNone: 'One piece.' })).task;
+    const [wait] = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, task.id));
+    expect(wait).toMatchObject({ ownerAgentId: c.agent.id });
+    await sweepWaits(c.ctx, at(wait!.ownerDueAt));
+    expect(await c.row(wait!.id)).toMatchObject({ level: 1 });
+    expect(await c.noticesOf(wait!.id)).toEqual([]);
+    await sweepWaits(c.ctx, at(wait!.headDueAt));
+    expect(await c.noticesOf(wait!.id)).toMatchObject([{ agentId: c.head.id, level: 2 }]);
+  });
+
   it('goes up one level in each sweep however late it is, and no date moves', async () => {
     const c = await company();
     const { wait, task } = await c.waiting();
@@ -178,7 +192,7 @@ describe('a wait past its dates', () => {
     const c = await company();
     await c.policy();
     const held = await c.task(c.head.id);
-    const task = await c.follow(held);
+    const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Follow', brief: '', body: 'Private words of the work.', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, after: [held.id], independentNone: 'One piece.' })).task;
     const [wait] = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, task.id));
     await sweepWaits(c.ctx, at(wait!.decisionDueAt));
     await sweepWaits(c.ctx, at(wait!.decisionDueAt));
