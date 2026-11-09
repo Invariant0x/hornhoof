@@ -482,6 +482,8 @@ function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commi
 async function keepPartResults(ctx: Ctx, run: Run, part: Part, ended: Part, msg: TestsDone): Promise<void> {
   try { await recordPartFiles(ctx, run, part, ended, msg); await rememberKept(ctx, run, msg); }
   catch (err) { ctx.log.error({ error: loggable(err), runId: run.id }, 'The results of a test part could not be kept.'); }
+  try { if (run.kind === 'tests') await keepPartTimings(ctx.db, run, ended, msg); }
+  catch (err) { ctx.log.error({ error: loggable(err), runId: run.id }, 'The file times of a test part could not be kept.'); }
 }
 
 /* The node's end of a part: its result, and its log on the task, also for a part that ended here first. */
@@ -496,7 +498,6 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
-      if (ended && found.run.kind === 'tests') await keepPartTimings(ctx.db, found.run, ended, msg);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await settleRun(ctx, found.run.id);
     }
