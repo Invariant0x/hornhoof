@@ -29,6 +29,8 @@ export async function atWork(takePrompt = true) {
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
     mkdirSync(logs, { recursive: true });
     appendFileSync(log, JSON.stringify({ type: 'session_meta', payload: { id: SESSION, cwd: workDir } }) + '\n');
+    /* Codex lists its tools as it starts. */
+    host['bridge']['heardList']('say', Date.now());
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();

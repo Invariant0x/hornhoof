@@ -162,6 +162,24 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen).toHaveLength(1);
   });
 
+  it('remembers a program it turned away as it connected between turns, until the program lists its tools', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const since = Date.now();
+    const post = (method: string) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method }) });
+    await post('tools/call');
+    expect(bridge.lostTools('agent-1', since)).toBe(false);
+    expect(await (await post('initialize')).json()).toMatchObject({ error: { code: -32001 } });
+    expect(bridge.lostTools('agent-1', since)).toBe(true);
+    expect(bridge.lostTools('agent-1', Date.now() + 1)).toBe(false);
+    bridge.setToken('agent-1', 'tok-turn');
+    await post('tools/list');
+    expect(bridge.lostTools('agent-1', since)).toBe(false);
+  });
+
   it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});

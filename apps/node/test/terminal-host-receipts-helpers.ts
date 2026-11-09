@@ -44,6 +44,8 @@ export async function atWork(kind: Kind, mode: Mode) {
     if (kind === 'codex') record({ type: 'session_meta', payload: { id: SESSION, cwd: workDir } });
     else record({ type: 'metadata' });
     if (kind !== 'codex') await host['hook']('receipt', 'start', { session_id: SESSION });
+    /* The program lists its tools as it starts, as each of these does with a session. */
+    host['bridge']['heardList']('receipt', Date.now());
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();

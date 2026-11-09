@@ -276,6 +276,7 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
+const TOOLS_LOST = "could not reach Hornhoof's tools when its program connected, so the program starts again in its session.";
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -558,10 +559,20 @@ export class TerminalHost {
     a.signedOut = job.signedOut;
     const launch = await this.launchFor(a, job);
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
+    this.toolsLost(a, job);
     const goesOn = await this.goesOn(a, job, launch.hash);
     if (!goesOn && (await this.asksPerson(a))) return this.leftAsking(a, job);
     a.launch = { job, spec: launch.spec };
     return this.turnOn(a, job, launch, goesOn);
+  }
+
+  /* A program turned away as it connected to its tools has none for the rest of its session, so it starts again in that
+     session for this turn, which says so. */
+  private toolsLost(a: Agent, job: TermJob): void {
+    if (!connectsAtStart(job) || !this.bridge.lostTools(job.key, a.startedAt)) return;
+    a.hash = null;
+    this.log(`Agent ${job.key} (${job.program.kind}) ${TOOLS_LOST}`);
+    job.input.onEvent?.({ kind: 'text', text: `This agent ${TOOLS_LOST}` });
   }
 
   /* How this turn would start its program, in folders ready for it. */
@@ -583,9 +594,23 @@ export class TerminalHost {
     try {
       const failed = goesOn ? null : await this.startAnew(a, job, launch);
       if (failed) return failed;
-      return await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
+      const done = await this.runRequested(a, job, turn, tools, goesOn, a.ended!);
+      if (!goesOn && !tools && done.ok) await this.toolsConnected(a, job);
+      return done;
     } finally {
       this.closesTurn(a, job, turn, starting);
+    }
+  }
+
+  /* Claude Code and Codex connect to their tools on their own time after they start, and one that connects with no turn
+     open gets an error and no tools for the rest of its session. So the turn that started one and typed its prompt ends
+     once the program has listed its tools, or once toolsMs have passed after the program's own end of the turn. A program
+     gone or a turn stopped meanwhile waits no longer. */
+  private async toolsConnected(a: Agent, job: TermJob): Promise<void> {
+    if (!connectsAtStart(job)) return;
+    const over = this.bridge.listed(job.key, this.toolsMs, a.startedAt).then(() => true);
+    while (!job.input.signal?.aborted && (await this.opts.tmux.alive(a.name))) {
+      if (await Promise.race([over, sleep(this.pollMs).then(() => false)])) return;
     }
   }
 
@@ -880,13 +905,14 @@ export class TerminalHost {
   }
 
   /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
-     Antigravity, reaches its tools a moment before Hornhoof opens their turn. */
+     Antigravity, reaches its tools a moment before Hornhoof opens their turn. Claude Code or Codex may still connect
+     after a turn called off as it started them, and the next turn opens soon after. */
   private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
     const programDir = programDirOf(input);
     if (program.kind === 'claude') await acceptClaudeDialogs(home, programDir, this.fs);
     if (program.kind === 'kimi') await prepareKimi(home, programDir, urls.mcpUrl, this.fs);
     if (program.kind === 'antigravity') await prepareAgy(programDir, urls.mcpUrl, this.fs);
-    this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
+    this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : this.toolsMs);
   }
 
   /* What a new Claude Code session was told from before goes with it to every resume. */
@@ -3078,9 +3104,15 @@ type TurnLaunch = { spec: LaunchSpec; urls: AgentUrls; hash: string };
 /* What a program that just started shows after its prompt is its own, not words anybody left. */
 const typedSinceStart = (a: Agent): boolean => (a.typedAt ?? -Infinity) >= a.startedAt;
 
-function initialToolsNeeded({ program, input }: TermJob, goesOn: boolean): boolean {
+/* Whether a program with Hornhoof's tools connects to them as it starts. A new Kimi session connects with its first
+   message, and Antigravity once it takes a message or opens its MCP panel. */
+function connectsAtStart({ program, input }: TermJob): boolean {
   const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
-  return !goesOn && !input.prompt && Boolean(input.tools) && !lazy;
+  return Boolean(input.tools) && !lazy;
+}
+
+function initialToolsNeeded(job: TermJob, goesOn: boolean): boolean {
+  return !goesOn && !job.input.prompt && connectsAtStart(job);
 }
 
 function assignmentOutlastsTurn(a: Agent): boolean {

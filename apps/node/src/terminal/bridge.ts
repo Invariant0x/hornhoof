@@ -31,6 +31,9 @@ export class Bridge {
   private readonly listing = new Map<string, Set<(asked: number) => void>>();
   /* When each agent's program last asked for the list of its tools that the bridge then handed it. */
   private readonly listedAt = new Map<string, number>();
+  /* When each agent's program was last turned away as it connected to its tools, with no turn open: an MCP client then
+     keeps no tools for the rest of its session. */
+  private readonly turnedAway = new Map<string, number>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
@@ -119,6 +122,12 @@ export class Bridge {
     return (this.listedAt.get(key) ?? -Infinity) >= since;
   }
 
+  /* Whether the agent's program was turned away as it connected to its tools since then, and has listed none after. */
+  lostTools(key: string, since: number): boolean {
+    const at = this.turnedAway.get(key);
+    return at !== undefined && at >= since && !this.listedSince(key, at);
+  }
+
   /* Resolves true once the agent's program has listed its tools through the bridge, asking for them since the time given
      (from now on by default), at once if it did, or false after ms. A program connects to its tools on its own time
      after it starts, and Hornhoof answers only while a turn runs. */
@@ -203,6 +212,7 @@ export class Bridge {
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
+    if (!token && kind === 'mcp' && (asks(body, 'initialize') || asks(body, 'tools/list'))) this.turnedAway.set(key, asked);
     if (!token) return kind === 'mcp' ? noTurn(res, body) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {
