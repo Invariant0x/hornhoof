@@ -189,12 +189,20 @@ describe('a part of a test run on a node', () => {
     expect(existsSync(join(dir, 'runs', 'part-1'))).toBe(false);
   });
 
-  it("caps Vitest workers at half the machine's cores unless already set", async () => {
+  it("gives Vitest the cores and memory the machine has free, at least half of its cores, unless already set", async () => {
     const { url } = origin();
-    const command = 'echo "workers=$VITEST_MAX_WORKERS"';
-    const sixteen = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: {} });
-    expect(sixteen.log).toContain('workers=8\n');
-    const one = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 1, env: {} });
+    const command = 'echo "workers=$VITEST_MAX_WORKERS"', gib = 2 ** 30;
+    const idle = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 64 * gib, env: {} });
+    expect(idle.log).toContain('workers=15\n');
+    const some = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 4.5, memFree: 64 * gib, env: {} });
+    expect(some.log).toContain('workers=11\n');
+    const busy = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 12, memFree: 64 * gib, env: {} });
+    expect(busy.log).toContain('workers=8\n');
+    const memory = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 11.5 * gib, env: {} });
+    expect(memory.log).toContain('workers=10\n');
+    const short = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, load: 0, memFree: 2 * gib, env: {} });
+    expect(short.log).toContain('workers=8\n');
+    const one = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 1, load: 0, memFree: 64 * gib, env: {} });
     expect(one.log).toContain('workers=1\n');
     const presetEnv = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: { VITEST_MAX_WORKERS: '3' } });
     expect(presetEnv.log).toContain('workers=3\n');
