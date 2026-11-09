@@ -887,14 +887,15 @@ describe("working in the product's repository", () => {
     /* The repository as the company's registry of what is built knows it, so the agent's worktree gets its dependencies from there. */
     const scope = (ownerId: string, url: string) => ({ companyId, repositoryOwnerId: ownerId, repoUrlHash: hashToken(url) });
     expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null }, repositoryScope: scope(shop.id, 'https://github.com/acme/shop.git') });
-    expect(first.prompt).toContain('https://github.com/acme/shop.git');
-    expect(first.prompt).toContain('./shop');
+    /* Where it is and how it is worked in the agent reads with its briefing tool: the message is the message alone. */
+    expect(first.prompt).not.toContain('https://github.com/acme/shop.git');
+    expect(first.prompt).not.toContain('./shop');
     expect(first.prompt).not.toContain('ghp_');
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
     expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null }, repositoryScope: scope(dev.id, 'https://github.com/acme/platform.git') });
   });
 
-  it('tells the agent who its commits are by, and to add no co-author lines', async () => {
+  it('gives the clone who its commits are by, and puts it in no message', async () => {
     const { ctx, builtin, dev, hire, repository, task } = await withRepositories();
     const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
     await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', author });
@@ -902,25 +903,27 @@ describe("working in the product's repository", () => {
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
     const run = await nextRun(builtin);
     expect(run.workspace?.repo?.author).toEqual(author);
-    expect(run.prompt).toContain('Commit as Ivan Korol <ivan@acme.dev>');
-    expect(run.prompt).toContain('Co-Authored-By');
+    for (const words of ['Ivan Korol', 'Commit as', 'Co-Authored-By', 'read its own rules first', 'a branch per task']) expect(run.prompt).not.toContain(words);
   });
 
-  it('tells an agent started for its window where its repository is, with its instructions', async () => {
+  it('starts an agent for its window with its instructions alone, telling it nothing of its repository', async () => {
     const { builtin, dev, hire, repository } = await withRepositories();
     await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
     const pia = await hire('Pia', null);
     builtin.send({ type: 'agent.start', agentKey: pia.id });
-    const start = (await nextRun(builtin)) as Run & { context?: string | null; guidance?: string | null };
+    const start = (await nextRun(builtin)) as Run & { context?: string | null };
     expect(start.prompt).toBe('');
-    /* Apart from the conversation, which the node keeps with the session: the repository can change. */
-    expect(start.guidance).toContain('https://github.com/acme/platform.git');
-    expect(start.guidance).toContain('./platform');
-    expect(start.guidance).toContain('read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md)');
-    /* Anyone who can push to a branch writes those files, so they never stand above Hornhoof's rules. */
-    expect(start.guidance).not.toContain('come before your skills');
-    expect(start.guidance).toContain('never rank above your skills');
+    expect(start).not.toHaveProperty('guidance');
     expect(start.context ?? '').not.toContain('platform');
+    expect(start.workspace?.repo?.url).toBe('https://github.com/acme/platform.git');
+  });
+
+  it.each(['unblocked', 'reminder', 'go_on', 'tests', 'work'] as const)('wakes the holder on %s with the news alone, not the rules its skills keep', why => {
+    const task = { id: 't-7', number: 7, title: 'Checkout API', assigneeAgentId: 'a-1', executorAgentId: 'a-1' } as unknown as Parameters<typeof wakePrompt>[1];
+    const prompt = wakePrompt({ kind: 'worker' }, task, { agentId: 'a-1', taskId: 't-7', why, text: 'Current news.' });
+    expect(prompt).toContain('#7 "Checkout API"');
+    expect(prompt).not.toContain('task.echelons');
+    expect(prompt).toMatch(/If you (still )?cannot go on, use blocked/);
   });
 
   it('sends a turn without a repository with the agent folder alone', async () => {

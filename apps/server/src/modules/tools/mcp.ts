@@ -20,6 +20,7 @@ import { registerTaskTools } from '../tasks/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
+import { registerBriefingTool } from '../briefings/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
 import { registerOutboundTools } from '../outbound/tools.js';
 import { registerOutboundControlTools } from '../outbound/tools-control.js';
@@ -55,6 +56,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
+    registerBriefingTool(server, ctx, job);
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
     registerTestTools(server, ctx, job);

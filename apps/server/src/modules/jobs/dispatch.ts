@@ -34,8 +34,6 @@ type JobToSend = {
   workspace?: Workspace | null;
   /* The conversation from before, for a program that starts a new session on a turn that types nothing. */
   context?: string | null;
-  /* Where the agent works, for such a turn too. */
-  guidance?: string | null;
   /* The agent's skills, which the node writes as files. */
   skills?: SkillFile[];
   operatorDelivery?: OperatorDelivery;
@@ -49,7 +47,6 @@ const jobExtras = (job: JobToSend) => ({
   ...(job.operatorSourceDelivery ? { operatorSourceDelivery: job.operatorSourceDelivery } : {}),
   ...(job.workspace ? { workspace: job.workspace } : {}),
   ...(job.context ? { context: job.context } : {}),
-  ...(job.guidance ? { guidance: job.guidance } : {}),
   ...(job.skills ? { skills: job.skills } : {}),
 });
 

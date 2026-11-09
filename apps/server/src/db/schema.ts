@@ -1231,6 +1231,28 @@ export const notebookNotes = pgTable(
   t => [unique('notebook_notes_book_number').on(t.companyId, t.departmentId, t.number).nullsNotDistinct()],
 );
 
+/* A repository a product or a department works in, as its people describe it: where it is, its branch, its own rules of
+   work and who commits to it. Only the one connected with set_repository is cloned for the agents. */
+export type BriefingRepository = { url: string; branch: string; rules: string; author: { name: string; email: string } | null };
+
+/* What a department or a product keeps for its agents, one record each: its own way of working and, for a product, its
+   repositories. People write it on the department's screen; an agent reads its own department's and product's when it
+   decides to, and nothing of it goes into the agents' messages. */
+export const briefings = pgTable(
+  'briefings',
+  {
+    departmentId: uuid('department_id').primaryKey(),
+    companyId: companyId(),
+    text: text('text').notNull().default(''),
+    repositories: jsonb('repositories').$type<BriefingRepository[]>().notNull().default([]),
+    /* Who wrote it last: a person, or the orchestrator for the person its turn answered. */
+    personId: uuid('person_id').references(() => people.id),
+    byOrchestrator: boolean('by_orchestrator').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [foreignKey({ name: 'briefings_department', columns: [t.companyId, t.departmentId], foreignColumns: [departments.companyId, departments.id] }).onDelete('cascade')],
+);
+
 /* open: waits for the CEO. taken: the CEO gave it to the orchestrator. done: the orchestrator did it. dismissed: the CEO
    set it aside. */
 export const IMPROVEMENT_STATUSES = ['open', 'taken', 'done', 'dismissed'] as const;

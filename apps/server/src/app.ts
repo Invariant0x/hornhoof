@@ -9,6 +9,7 @@ import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
 import { conversationRoutes } from './modules/conversation/routes.js';
 import { notebookRoutes } from './modules/notebook/routes.js';
+import { briefingRoutes } from './modules/briefings/routes.js';
 import { startTimers } from './modules/agents/timers.js';
 import { departmentRoutes } from './modules/departments/routes.js';
 import { EventBus } from './modules/events/bus.js';
@@ -143,6 +144,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   mcpRoutes(app, ctx);
   conversationRoutes(app, ctx);
   notebookRoutes(app, ctx);
+  briefingRoutes(app, ctx);
   improvementRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);

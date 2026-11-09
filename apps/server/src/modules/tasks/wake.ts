@@ -95,15 +95,15 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'answered':
       return `An answer arrived on ${ref}${said}Go on with it.`;
     case 'unblocked':
-      return `Whoever gave you ${ref} answered what blocked it${said}Go on with the work, then ${finish}. If you still cannot go on, ${stuck}.`;
+      return `Whoever gave you ${ref} answered what blocked it${said}Go on with the work. If you still cannot go on, ${stuck}.`;
     case 'comment':
       return `A person commented on ${ref}${said}Take it into account and go on.`;
     case 'updated':
       return `${ref} was rewritten. Read it again with the task tool and go on from its new body.`;
     case 'reminder':
-      return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+      return `You ended your last turn on ${ref} without moving it. Go on with the work. If you cannot go on, ${stuck}.`;
     case 'go_on':
-      return `Your last turn on ${ref} ended before the work did. Go on with the work from where you left off, then ${finish}. If you cannot go on, ${stuck}.`;
+      return `Your last turn on ${ref} ended before the work did. Go on with the work from where you left off. If you cannot go on, ${stuck}.`;
     case 'subtasks':
       return `No work under ${ref} is open any more. ${read} Then go on with it and ${finish}.`;
     case 'turn':
@@ -113,10 +113,10 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `${ref}, which you gave out, has nobody on to go on with it${w.text ? `:\n\n${w.text}` : '. Give it to someone who is on with update_task, or tell the CEO it waits.'}`;
     case 'tests':
       /* Its text is Hornhoof's account of the run, or who stopped it. */
-      return `The tests you ran on ${ref} ended${said}Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+      return `The tests you ran on ${ref} ended${said}Go on with the work. If you cannot go on, ${stuck}.`;
     case 'work':
       /* Its text is Hornhoof's account of the run, or who stopped it. */
-      return `The work you ran on ${ref} ended${said}Go on with the task, then ${finish}. If you cannot go on, ${stuck}.`;
+      return `The work you ran on ${ref} ended${said}Go on with the task. If you cannot go on, ${stuck}.`;
     case 'explain':
       /* Hornhoof writes this turn itself, from the request. */
       return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;

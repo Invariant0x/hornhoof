@@ -764,7 +764,7 @@ export class TerminalHost {
   private async toldOf({ program, input }: TermJob): Promise<string> {
     const kept = program.kind !== 'codex' && input.sessionId ? await keptContext(this.fs, input.workDir, input.sessionId) : null;
     const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
-    return [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
+    return [input.instructions, context].filter(Boolean).join('\n\n');
   }
 
   /* Claude Code reads what it is told from the file it starts with, which this returns. Codex, Kimi Code and Antigravity

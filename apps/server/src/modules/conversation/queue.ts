@@ -17,7 +17,7 @@ import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
-import { repoAt, repoFor, repoLine } from '../departments/repository.js';
+import { repoAt, repoFor } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
@@ -964,9 +964,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const on = { subscriptionId: sub.id, nodeId: place.nodeId };
   const { sessionId, catchUp, originalPrompt, prompts } = await queuedSession(ctx, agent, on, runHash, job, along);
   const asked = along.length ? [ALONG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
-  const said = repo ? `${withOriginal(asked, originalPrompt)}\n\n${repoLine(repo)}` : withOriginal(asked, originalPrompt);
-  /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
-     repository is go with its instructions instead. */
+  const said = withOriginal(asked, originalPrompt);
+  /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
+     instructions instead. Where the agent works it reads with its briefing tool, so no message carries it. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
   const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf })) : '';
   const token = newToken();
@@ -998,7 +998,6 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       ...(operatorDelivery ? { operatorDelivery } : {}),
       operatorSourceDelivery: await sourceDeliveryMetadataForJob(db, agentId, job.id),
       context: job.prompt ? null : catchUp,
-      guidance: job.prompt || !repo ? null : repoLine(repo),
       /* Each agent keeps one folder on the node, with its repository's clone inside, which gets the dependencies the
          company's machines built for its commit. */
       workspace: { key: agent.id, repo, ...(at ? { repositoryScope: repositoryScope(at.department.companyId, at.department.id, at.repo.url) } : {}) },

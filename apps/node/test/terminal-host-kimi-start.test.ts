@@ -49,22 +49,19 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       expect(auths).toEqual(['Bearer tok-turn']);
     }));
 
-  it('gives Kimi its instructions, the conversation from before and where it works, also when it resumes the session', async () => {
+  it('gives Kimi its instructions and the conversation from before, also when it resumes the session', async () => {
     await setUp();
-    await host.run(kimiJob('k8', '', { context: 'Earlier: Ivan said we sell software.', guidance: 'Your repository is ./shop.' }));
+    await host.run(kimiJob('k8', '', { context: 'Earlier: Ivan said we sell software.' }));
     const agents = () => readFileSync(join(home, 'work', 'k8', 'AGENTS.md'), 'utf8');
     expect(agents()).toContain('Be brief.');
     expect(agents()).toContain('we sell software');
-    expect(agents()).toContain('./shop');
     await typeTurn('k8', 'w8', 'hello', 'job-k8');
     await until(() => Boolean(done('job-k8')));
     const { sessionId } = done('job-k8') as { sessionId: string };
     await host.run(kimiJob('k8', 'EXIT', { sessionId }));
-    expect(await host.run(kimiJob('k8', '', { sessionId, guidance: 'Your repository is ./platform.' }))).toMatchObject({ ok: true });
+    expect(await host.run(kimiJob('k8', '', { sessionId }))).toMatchObject({ ok: true });
     expect(await host.screen('k8')).toContain(`fake kimi resumed ${sessionId}`);
     expect(agents()).toContain('we sell software');
-    expect(agents()).toContain('./platform');
-    expect(agents()).not.toContain('./shop');
   });
 
   it('follows the new session when a person starts one in Kimi', async () => {

@@ -654,8 +654,6 @@ const ServerMessage = z.discriminatedUnion('type', [
     /* The conversation from before, for a program that starts a new session on a turn that types nothing: it goes with
        the instructions when the program starts and is no change of them. */
     context: z.string().max(64 * 1024).nullable().optional(),
-    /* Where the agent works, for such a turn too; it comes again with each start, as it can change. */
-    guidance: z.string().max(16 * 1024).nullable().optional(),
     /* The agent's own folder on the node and the repository it works in; a test job has none. */
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */

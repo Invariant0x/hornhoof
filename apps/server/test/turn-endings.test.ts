@@ -101,13 +101,13 @@ describe("a turn whose program ended without the work done", () => {
     expect(more.prompt).toContain('without recording');
   });
 
-  it.each([null, 'bruno-session'])('adds current queue context once when continuing work from session %s anew', async sessionId => {
+  it.each([null, 'bruno-session'])('adds current queue context once when continuing work from session %s anew, and no repository', async sessionId => {
     const c = await company();
     await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId!));
     await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, kind: 'text', data: { text: 'Earlier checkout discussion.' } });
     const work = await c.brunoAtWork();
     expect(work.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
-    expect(work.prompt.match(/Your repository /g)).toHaveLength(1);
+    expect(work.prompt).not.toContain('checkout.git');
     await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId!));
     await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));
 
@@ -116,9 +116,8 @@ describe("a turn whose program ended without the work done", () => {
 
     expect(more.sessionId).toBeNull();
     expect(more.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
-    expect(more.prompt.match(/Your repository /g)).toHaveLength(1);
-    expect(more.prompt).toContain('(branch checkout)');
-    expect(more.prompt).not.toContain('(branch main)');
+    expect(more.prompt).not.toContain('checkout.git');
+    expect(more.prompt).not.toContain('(branch');
     expect(more.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
     expect(await c.jobOf(more.jobId)).toMatchObject({ prompt: more.prompt, continueOf: work.jobId });
   });

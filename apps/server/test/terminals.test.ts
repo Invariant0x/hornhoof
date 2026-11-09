@@ -605,7 +605,6 @@ describe('opening a terminal while the plan is at its limit', () => {
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
       expect(start.context ?? '').not.toContain(prompt);
       expect(start.instructions ?? '').not.toContain(prompt);
-      expect(start.guidance ?? '').not.toContain(prompt);
     }
     for (let i = 0; i < 8; i++) back.send({ type: 'agent.start', agentKey: orchestratorId });
     for (const open of opens) {
@@ -656,7 +655,6 @@ describe('opening a terminal while the plan is at its limit', () => {
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
       expect(start.context ?? '').not.toContain(prompt);
       expect(start.instructions ?? '').not.toContain(prompt);
-      expect(start.guidance ?? '').not.toContain(prompt);
     }
     for (let i = 0; i < 8; i++) plan.send({ type: 'agent.start', agentKey: orchestratorId });
     plan.send({ type: 'status', loggedIn: true, limits: { status: 'allowed', windows: [] } });

@@ -78,20 +78,16 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
 
   it('gives a Claude session it resumes the conversation from before that the session was started with', async () => {
     await setUp();
-    await host.run(job('a44', '', { context: 'Earlier: Ivan said we sell software.', guidance: 'Your repository is ./shop.' }));
-    expect(readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8')).toContain('./shop');
+    await host.run(job('a44', '', { context: 'Earlier: Ivan said we sell software.' }));
     await typeTurn('a44', 't44', 'hello', 'job-44');
     await until(() => Boolean(done('job-44')));
     const { sessionId } = done('job-44') as { sessionId: string };
     await host.run(job('a44', 'EXIT', { sessionId }));
-    /* Hornhoof goes on with the session and sends nothing from before: Claude Code's log has only what was said in it.
-       Where the repository is comes fresh with each start, as it can change. */
-    expect(await host.run(job('a44', '', { sessionId, guidance: 'Your repository is ./platform.' }))).toMatchObject({ ok: true });
+    /* Hornhoof goes on with the session and sends nothing from before: Claude Code's log has only what was said in it. */
+    expect(await host.run(job('a44', '', { sessionId }))).toMatchObject({ ok: true });
     expect(await host.screen('a44')).toContain(`fake claude resumed ${sessionId}`);
     const told = readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8');
     expect(told).toContain('we sell software');
-    expect(told).toContain('./platform');
-    expect(told).not.toContain('./shop');
   });
 
   it('tells Hornhoof of turns typed while the program starts one by one, in order, each after the last one ended', async () => {
