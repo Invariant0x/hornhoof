@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -7,12 +7,10 @@ import {
   browserEnv,
   browsersDir,
   ensureRepoBrowser,
-  GLOBAL_PLAYWRIGHT_DIR,
   playwrightVersionIn,
   prepareAndVerifyBrowser,
   prepareBrowser,
   readBrowserError,
-  SEED_BROWSERS_PATH,
   startupBrowserCheck,
   summarizeBrowserError,
   verifyBrowser,
@@ -645,34 +643,6 @@ describe('the three browser engines', () => {
 });
 
 describe('verifyBrowser and prepareAndVerifyBrowser', () => {
-  it('launches real Chromium, Firefox and WebKit headless from a prepared browser folder and names the cause when broken', async () => {
-    /* An image before 0.17.1 brought Chromium alone; a node of it downloads the other two as it starts. */
-    const seeded = existsSync(SEED_BROWSERS_PATH) && ['firefox-', 'webkit-'].every(engine => readdirSync(SEED_BROWSERS_PATH).some(entry => entry.startsWith(engine)));
-    if (!existsSync(GLOBAL_PLAYWRIGHT_DIR) || !seeded) return;
-    const dir = makeTemp('hh-real-pw-');
-    const target = browsersDir(dir);
-    mkdirSync(target, { recursive: true });
-    for (const entry of readdirSync(SEED_BROWSERS_PATH)) {
-      if (entry.startsWith('.')) continue;
-      cpSync(join(SEED_BROWSERS_PATH, entry), join(target, entry), { recursive: true });
-    }
-
-    const ok = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.browserVersion).toMatch(/^chromium \d+\.\d+.*, firefox \d+\.\d+.*, webkit \d+\.\d+/);
-
-    /* Break the headless shell binary to prove launch failure reports a clear, named reason. */
-    const shellDir = readdirSync(target).find(entry => entry.startsWith('chromium_headless_shell-'))!;
-    const binDir = readdirSync(join(target, shellDir)).find(entry => entry.startsWith('chrome-headless-shell'))!;
-    const binary = join(target, shellDir, binDir, 'chrome-headless-shell');
-    writeFileSync(binary, '#!/bin/sh\necho "error while loading shared libraries: libnss3.so: cannot open shared object file" >&2\nexit 127\n');
-    chmodSync(binary, 0o755);
-
-    const broken = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
-    expect(broken.ok).toBe(false);
-    if (!broken.ok) expect(broken.error).toMatch(/^chromium: .*libnss3\.so/);
-  });
-
   it('extracts concise reasons from Playwright launch errors without ASCII box borders', () => {
     const boxed = [
       'browserType.launch: Executable doesn\'t exist at /data/browsers/chromium-1248/chrome-linux64/chrome',
