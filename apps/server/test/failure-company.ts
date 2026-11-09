@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { vi } from 'vitest';
 import { agents, departments, jobs, subscriptions, taskEvents } from '../src/db/schema.js';
+import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { Failure } from '@hornhoof/protocol';
@@ -17,7 +18,12 @@ export async function failureCompany(env: NodeJS.ProcessEnv = {}) {
   vi.spyOn(ctx.hub, 'isOnline').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(true);
   vi.spyOn(ctx.hub, 'takesSkillFiles').mockReturnValue(true);
-  const sent = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
+  /* A node answers the words it is given to type into a running turn. This one says they did not go in, as when the
+     program could not take them, so they wait for the next turn at once and no test waits out a silent node. */
+  const sent = vi.spyOn(ctx.hub, 'send').mockImplementation((node, message) => {
+    if (message.type === 'agent.say') queueMicrotask(() => said(ctx, node, message.ref, false));
+    return true;
+  });
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [ops] = await db.insert(departments).values({ companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
   const hire = async (name: string, kind: 'worker' | 'head', roleKey: string, departmentId: string) =>

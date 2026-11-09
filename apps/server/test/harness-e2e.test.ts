@@ -33,7 +33,18 @@ type Describe = Extract<ServerMessage, { type: 'tests.describe' }>;
 type NodeOptions = { dir: string; proc: string; user: { uid: number; gid: number }; hidden: string[]; prepareRepoBrowser: () => Promise<void>; harness: unknown };
 const from = (path: string) => new URL(`../../node/src/${path}`, import.meta.url).href;
 const { runTests, syncHarness } = await import(/* @vite-ignore */ from('tests.ts')) as { runTests: (message: Run, options: NodeOptions) => Promise<Done>; syncHarness: (message: Sync, options: NodeOptions) => Promise<Synced> };
-const { harnessRemote } = await import(/* @vite-ignore */ from('test-harness.ts')) as { harnessRemote: (server: string, key: string) => unknown };
+type Claim = { state: string; afterMs?: number };
+type Remote = { claim: (unit: unknown, signal: AbortSignal) => Promise<Claim> };
+const { harnessRemote } = await import(/* @vite-ignore */ from('test-harness.ts')) as { harnessRemote: (server: string, key: string) => Remote };
+/* While one machine builds, the server tells the others to wait five seconds and ask again. They still wait and ask again
+   here, but for a moment: a build of these few files is done by then, and the seconds were most of these tests' time. */
+const askingSoon = (remote: Remote): Remote => ({
+  ...remote,
+  claim: async (unit, signal) => {
+    const answer = await remote.claim(unit, signal);
+    return answer.state === 'wait' ? { ...answer, afterMs: 50 } : answer;
+  },
+});
 const { readTestEnvironment, trustedTestRuntimes } = await import(/* @vite-ignore */ from('test-environment.ts')) as {
   readTestEnvironment: (repo: Describe['repo'], scope: Describe['repositoryScope'], sha: string, context: object) => Promise<object>;
   trustedTestRuntimes: (context: object) => Promise<RuntimeCapability[]>;
@@ -82,7 +93,7 @@ async function world() {
   const stops: (() => void)[] = [];
   /* A machine: the real node code behind a connection to the real server, with a folder of its own. */
   const machine = async (token: string, name: string, connect = c.machine) => {
-    const joined = await connect(token, name), options: NodeOptions = { dir: join(root, name), proc: join(root, 'proc'), user: { uid: ids.jobUid, gid: ids.jobUid }, hidden: [], prepareRepoBrowser: async () => {}, harness: harnessRemote(new URL(c.url.replace(/^ws/, 'http')).origin, 'key' in joined ? joined.key : '') };
+    const joined = await connect(token, name), options: NodeOptions = { dir: join(root, name), proc: join(root, 'proc'), user: { uid: ids.jobUid, gid: ids.jobUid }, hidden: [], prepareRepoBrowser: async () => {}, harness: askingSoon(harnessRemote(new URL(c.url.replace(/^ws/, 'http')).origin, 'key' in joined ? joined.key : '')) };
     const { node } = joined as { node: FakeNode };
     node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: runtimes, testHarness: 1 });
     let stopped = false;
