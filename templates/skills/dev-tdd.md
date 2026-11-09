@@ -9,6 +9,8 @@ You can establish a behavior with a failing test and a minimal verified change.
 
 **The first rule: we test our program, not the operating system and not other programs.** Where our code drives another program, a test checks only our side: we started it correctly, passed it the input and parsed its output correctly, that output coming from a recorded sample. A test never waits for another program's work and never depends on machine speed, the clock, a random port or unsorted order.
 
+**The second rule: time in a test is virtual only.** No test waits for or measures real time: not one deadline, wait or pause on the real clock, and no check of elapsed time. A test drives time with a controlled clock (fake timers or the code's injected clock), calls the step directly, or waits for an event or a state with no deadline; the runner's limit on a whole test is the only limit. A test gives the same verdict on any machine at any load. These two rules rank above superpowers. Where its test-driven-development skill (SKILL.md and writing-good-tests.md) says to exercise the real thing and use real code, and where its systematic-debugging/condition-based-waiting.md says to wait on the real clock with a timeout (waitFor with timeoutMs), our rule applies here: other programs and the system appear in a test only as recorded samples or fakes, time is only virtual, and nothing waits on the real clock.
+
 Use the check assigned by the head under the shared small-task rule. The cycle below applies when that requires a separate test.
 
 Every task is one of four task kinds, and the kind chooses the cycle:

@@ -1,16 +1,17 @@
 ---
 id: dev-testing-policy
 title: { en: "Testing policy", ru: "Политика тестирования" }
-description: { en: "We test our program, not the operating system and not other programs. Who runs which check on which commit, T1 to T11 for any project and language, and how the company applies the engineering rules.", ru: "Мы тестируем нашу программу, а не операционную систему и не чужие программы. Кто и на каком коммите запускает каждую проверку, правила T1-T11 для любого проекта и языка и как компания применяет инженерные правила." }
+description: { en: "We test our program, not the operating system and not other programs, and only on virtual time. Who runs which check on which commit, T1 to T11 for any project and language, and how the company applies the engineering rules.", ru: "Мы тестируем нашу программу, а не операционную систему и не чужие программы, и только на виртуальном времени. Кто и на каком коммите запускает каждую проверку, правила T1-T11 для любого проекта и языка и как компания применяет инженерные правила." }
 kind: checklist
 sources: [unclebob/crapper README.md, unclebob/dryer README.md, unclebob/mutator README.md]
 ---
 You can plan and read proportionate verification for an assigned software candidate.
 
-**The first rule: we test our program, not the operating system and not other programs.** Every rule below follows it.
+**The first rule: we test our program, not the operating system and not other programs.** **The second rule: time in a test is virtual only.** No test waits for or measures real time: not one deadline, wait or pause on the real clock, and no check of elapsed time. A test drives time with a controlled clock (fake timers or the code's injected clock), calls the step directly, or waits for an event or a state with no deadline; the runner's limit on a whole test is the only limit. A test gives the same verdict on any machine at any load. Every rule below follows these two. These two rules rank above superpowers. Where its test-driven-development skill (SKILL.md and writing-good-tests.md) says to exercise the real thing and use real code, and where its systematic-debugging/condition-based-waiting.md says to wait on the real clock with a timeout (waitFor with timeoutMs), our rule applies here: other programs and the system appear in a test only as recorded samples or fakes, time is only virtual, and nothing waits on the real clock.
 
 - **Our side only.** For another program (an agent program such as Claude Code, Codex, Kimi Code or Antigravity, tmux, a package manager, a test runner, a linter, a browser driver) or the operating system, test only our side: we started it correctly, passed it the input and parsed its output correctly, that output coming from a recorded sample. Delete a test that checks or waits for another program's work or output; we do not test or guarantee that another program works.
-- **Same result on any machine.** Keep out of tests what does not depend on our code: machine speed, the clock, random ports and unsorted data order. Take ports only from the project's narrow test port range. A release test gives the same result on any machine.
+- **Virtual time only.** A deadline of our code that a test needs to run out runs out on the controlled clock; one that must not run out never runs on the real clock in the test. A pause in a test is replaced by waiting for the state, an event or a direct call of the step.
+- **Same result on any machine.** Keep out of tests what does not depend on our code: machine speed, the real clock, random ports and unsorted data order. Take ports only from the project's narrow test port range. A release test gives the same result on any machine.
 - **Unstable tests.** Weaken or delete an unstable test quickly; do not spend long diagnosing it.
 - **Delete, never skip.** A deleted test is never replaced by a skip. Delete it with the code only it needs, and keep our code it checked covered by an our-side test on a recorded sample where one can be written.
 - **Our screens stay.** Browser tests of our own web screens in three engines stay: that is our program.

@@ -398,7 +398,8 @@ describe('the orchestrator\'s conversation', () => {
     expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
     const old = await nextRun(mac);
     expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-tdd')!.body);
-    expect(old.instructions).not.toContain('superpowers');
+    expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
+    expect(old.instructions).not.toContain(app.ctx.templates.skills.get('hh-superpowers')!.body);
     expect(old.skills).toBeUndefined();
     const fresh = await onMac('0.5.0');
     await until(async () => (await state(fresh.app, fresh.ceo)).ready);
