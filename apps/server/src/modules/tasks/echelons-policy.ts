@@ -10,13 +10,13 @@ const CAPABILITY: Readonly<Record<string, number>> = {
   'gpt-6.1-sol': 2,
   'gpt-6.1-terra': 2,
   'gpt-6-astra': 2,
+  'gemini-4-argon': 2,
+  'kimi-code/k3.1-pro': 2,
 };
 
 const CLAUDE_PLAN_CAPABILITY: Readonly<Record<string, number>> = { opus: 2, fable: 2, sonnet: 1, haiku: 0 };
-/* Temporary bands set by the head of Development until the CEO decides them. */
-const INTERIM_CAPABILITY: Readonly<Record<string, number>> = { 'gemini-4-argon': 1, 'kimi-code/k3.1-pro': 1 };
 export const modelCapability = (model: string, provider?: string): number | null =>
-  (provider === 'claude' ? CLAUDE_PLAN_CAPABILITY[model] : undefined) ?? CAPABILITY[model] ?? INTERIM_CAPABILITY[model] ?? null;
+  (provider === 'claude' ? CLAUDE_PLAN_CAPABILITY[model] : undefined) ?? CAPABILITY[model] ?? null;
 const PROVIDERS: Readonly<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
 export const modelProvider = (provider: string): string => PROVIDERS[provider] ?? provider;
 export type CheckerIdentity = EchelonModel;

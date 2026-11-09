@@ -24,8 +24,8 @@ describe('pure checker policy', () => {
     expect(modelCapability(model, 'anthropic_api')).toBeNull();
   });
 
-  it.each([['gemini-4-argon', 'antigravity'], ['kimi-code/k3.1-pro', 'kimi']] as const)('puts %s in the middle band until the CEO decides', (model, provider) => {
-    expect(modelCapability(model, provider)).toBe(1);
+  it.each([['gemini-4-argon', 'antigravity'], ['kimi-code/k3.1-pro', 'kimi']] as const)('puts the flagship %s in the strong band', (model, provider) => {
+    expect(modelCapability(model, provider)).toBe(2);
   });
 
   it('does not classify Claude Default or an unknown alias from a catalog comment', () => {
