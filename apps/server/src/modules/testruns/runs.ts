@@ -25,6 +25,7 @@ import { computerKey, computerState, Reservations, type ComputerPlace } from './
 import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
+import { checkNamedFiles } from './named-files.js';
 import { pickMachine } from './pick.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 
@@ -670,10 +671,11 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   await checkRunCapacity(ctx, job);
   const setup = await prepareRun(ctx, job, task, input, kind, mode, found);
   if (binding && setup.pin.commitSha !== binding.commit) throw refuse(409, 'task_changed', 'Tests must pin the exact current candidate commit.');
+  const unchecked = await checkNamedFiles(ctx, found, mode, setup.pin);
   const run = await createRun(ctx, job, task, input, kind, mode, found, setup, files, parts, binding);
   await pumpTests(ctx);
   if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;
-  return startedRunSummary(ctx, run, task, found, setup.department);
+  return (await startedRunSummary(ctx, run, task, found, setup.department)) + unchecked;
 }
 
 /* A run the agent may see and stop: its own, or one on a task it works on. */

@@ -47,19 +47,43 @@ function parsedComparison(body: unknown): CompareResult {
   return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(f => f.patch).join('\n') };
 }
 
-/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
-   missing lines mean unknown, never a clean diff. No redirect or remote error text
-   can carry the repository token into a message. */
-export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
+/* A GitHub API answer for this repository, or null where it has none to give. No redirect or remote error text can carry the
+   repository token into a message. */
+async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): Promise<{ body: unknown } | null> {
   const name = githubName(repo.url);
-  if (!name) return { complete: false, reason: 'unsupported-repository' };
+  if (!name) return null;
+  const response = await fetch(`https://api.github.com/repos/${name}/${path}`, {
+    redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'hornhoof', 'x-github-api-version': '2022-11-28', ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}) },
+  });
+  if (!response.ok) { await response.body?.cancel(); throw new Error('unavailable'); }
+  return { body: await response.json() };
+}
+
+/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
+   missing lines mean unknown, never a clean diff. */
+export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
   try {
-    const response = await fetch(`https://api.github.com/repos/${name}/compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}`, {
-      redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
-      headers: { accept: 'application/vnd.github+json', 'user-agent': 'hornhoof', 'x-github-api-version': '2022-11-28', ...(repo.token ? { authorization: `Bearer ${repo.token}` } : {}) },
-    });
-    if (!response.ok) { await response.body?.cancel(); return { complete: false, reason: 'compare-unavailable' }; }
-    return parsedComparison(await response.json());
+    const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}`, timeoutMs);
+    return answer ? parsedComparison(answer.body) : { complete: false, reason: 'unsupported-repository' };
   } catch { return { complete: false, reason: 'compare-unavailable' }; }
 };
 
+/* The files of a commit, every one: GitHub cuts a long list short and says so, and a cut list is no list. */
+export type TreeAt = { complete: true; paths: string[] } | { complete: false; reason: string };
+export type TreeReader = (repo: RepoAddress, commitSha: string, timeoutMs?: number) => Promise<TreeAt>;
+const Tree = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string().min(1), type: z.string() })) });
+
+export function treePaths(body: unknown): TreeAt {
+  const parsed = Tree.safeParse(body);
+  if (!parsed.success || parsed.data.truncated) return { complete: false, reason: 'incomplete-tree' };
+  return { complete: true, paths: parsed.data.tree.filter(entry => entry.type === 'blob').map(entry => entry.path) };
+}
+
+export const readTree: TreeReader = async (repo, commitSha, timeoutMs = 10_000) => {
+  if (!Sha.safeParse(commitSha).success) return { complete: false, reason: 'incomplete-tree' };
+  try {
+    const answer = await githubJson(repo, `git/trees/${commitSha}?recursive=1`, timeoutMs);
+    return answer ? treePaths(answer.body) : { complete: false, reason: 'unsupported-repository' };
+  } catch { return { complete: false, reason: 'tree-unavailable' }; }
+};

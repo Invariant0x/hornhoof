@@ -56,10 +56,10 @@ import { fromOwnPages } from './auth/origin.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-import { readCompare, type CompareReader } from './modules/testruns/compare.js';
+import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -92,7 +92,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, readTree, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
