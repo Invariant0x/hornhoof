@@ -13,9 +13,9 @@ import { scopeKey } from '../testruns/load.js';
 import { passedProductPart } from '../testruns/receipts.js';
 import { reusableUnits } from '../testruns/reuse-evidence.js';
 import { unitKey } from '../testruns/plan-environment.js';
-import { move, refuse, type Moved, type Task, type Tx } from './engine.js';
+import { move, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 
-export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100) }).strict();
+export const Verification = z.object({ candidateId: z.uuid(), revision: z.number().int().positive(), runIds: z.array(z.uuid()).min(1).max(100), defect: z.literal(true).optional() }).strict();
 export type Verification = z.infer<typeof Verification>;
 const Verified = z.object({ candidateId: z.uuid(), commit: ReviewSha, routeRevision: z.number().int().positive(), testedRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: ReviewSha })).min(1) });
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
@@ -157,29 +157,65 @@ async function failureKind(db: Ctx['db'] | Tx, task: Task, route: Route, ids: st
   return failures.includes('content') ? 'content' : 'infrastructure';
 }
 
+/* The failure a Tests owner reports is still the one its runs recorded, under the same checking assignment. */
+async function heldFailure(tx: Tx, task: Task, route: Route, ids: string[], kind: 'content' | 'infrastructure'): Promise<void> {
+  await heldCheckingIdentity(tx, task, route, await currentCandidate(tx, task, route));
+  if (await failureKind(tx, task, route, ids) !== kind) throw refuse(409, 'task_changed', 'The failed check changed.');
+}
+
+/* A defect Tests found goes back to its author: every check after Development runs again on the new candidate. */
+function returnedToAuthor(route: Route): Route['state'] {
+  const development = route.state.stages.findIndex(step => step.stage === 'development');
+  return { ...route.state, stage: 'development', phase: 'active', assignment: null, stages: route.state.stages.map((step, at) => {
+    if (at === development) return { ...step, status: 'active', reason: null };
+    if (at < development || step.status === 'skipped') return step;
+    return { ...step, status: 'pending', reason: step.stage === 'tests' ? 'tests_found_defect' : null, inputCandidateId: null, candidateId: null };
+  }) };
+}
+
+async function defectReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification, kind: 'content' | 'infrastructure'): Promise<Moved> {
+  const author = route.state.stages.find(step => step.stage === 'development')?.ownerAgentId;
+  if (!author) throw refuse(409, 'task_invalid', 'Development has no author to take the defect back. Ask the head to assign it.');
+  const wakes: Wake[] = [{ agentId: author, taskId: task.id, why: 'changes', text: summary }];
+  const row = await move(ctx, task, { status: 'open', assigneeAgentId: author, silent: 0 }, {
+    kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, defect: true, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
+  }, async tx => {
+    await heldFailure(tx, task, route, input.runIds, kind);
+    await changeRoute(tx, route, returnedToAuthor(route));
+  }, wakes);
+  return { task: row, wakes };
+}
+
 async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, input: Verification): Promise<Moved> {
   const kind = await failureKind(ctx.db, task, route, input.runIds);
+  if (input.defect) return defectReport(ctx, task, route, agentId, summary, input, kind);
   const headId = kind === 'content' ? await departmentHead(ctx.db, task) : null;
   const wakes = headId ? [{ agentId: headId, taskId: task.id, why: 'blocked' as const, text: summary }] : [];
   const state: Route['state'] = { ...route.state, phase: 'escalated', stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, reason: 'tests_failed' } : step) };
   const row = await move(ctx, task, { status: kind === 'content' ? 'blocked' : 'working', assigneeAgentId: kind === 'content' ? null : agentId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
   }, async tx => {
-    await heldCheckingIdentity(tx, task, route, await currentCandidate(tx, task, route));
-    if (await failureKind(tx, task, route, input.runIds) !== kind) throw refuse(409, 'task_changed', 'The failed check changed.');
+    await heldFailure(tx, task, route, input.runIds, kind);
     if (kind === 'content') await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };
 }
 
-export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
-  if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
+/* The report names the current candidate and revision; a defect is a failed check, never a done one. */
+function boundVerification(route: Route, value: Verification | undefined, done: boolean): Verification {
   const input = Verification.safeParse(value);
   if (!input.success || input.data.candidateId !== route.state.candidateId || input.data.revision !== route.revision) throw refuse(409, 'task_changed', 'Name the exact current candidate and route revision.');
+  if (done && input.data.defect) throw refuse(400, 'task_invalid', 'A defect of the candidate is a failed check: report it with done false.');
+  return input.data;
+}
+
+export async function testsReport(ctx: Reader, task: Task, route: Route, agentId: string, summary: string, value: Verification | undefined, done = true): Promise<Moved> {
+  if (task.assigneeAgentId !== agentId || route.state.phase !== 'active') throw refuse(403, 'task_not_yours', 'Only the current Tests owner can verify this candidate.');
+  const input = boundVerification(route, value, done);
   await requireTestsIdentity(ctx.db, task, route);
-  if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input.data);
+  if (!done) return failedTestsReport(ctx, task, route, agentId, summary, input);
   const headId = await departmentHead(ctx.db, task);
-  const evidence = await candidateRunEvidence(ctx.db, task, route, input.data.runIds);
+  const evidence = await candidateRunEvidence(ctx.db, task, route, input.runIds);
   const candidate = await currentCandidate(ctx.db, task, route);
   const wakes = [{ agentId: headId, taskId: task.id, why: 'reviewed' as const }];
   const state: Route['state'] = { ...route.state, phase: 'ready', assignment: null, stages: route.state.stages.map(step => step.stage === 'tests' ? { ...step, status: 'complete', candidateId: candidate.id } : step) };
@@ -187,7 +223,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
     kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } },
   }, async tx => {
     await heldCheckingIdentity(tx, task, route, candidate);
-    await candidateRunEvidence(tx, task, route, input.data.runIds);
+    await candidateRunEvidence(tx, task, route, input.runIds);
     await changeRoute(tx, route, state);
   }, wakes);
   return { task: row, wakes };

@@ -18,9 +18,10 @@ afterEach(cleanup);
 describe('task workflow', () => {
   it('names every reason a stage can carry in plain words', () => {
     render(<LanguageProvider><WorkflowStages resolveOwner={id => id} workflow={workflow([
-      step('review', 'complete', 'wrong_goal'), step('cleanup', 'pending', 'requested_by_head'), step('tests', 'active', 'tests_failed'),
+      step('review', 'complete', 'wrong_goal'), step('cleanup', 'pending', 'requested_by_head'), step('security', 'pending', 'tests_found_defect'), step('tests', 'active', 'tests_failed'),
     ])} /></LanguageProvider>);
-    for (const raw of ['wrong_goal', 'requested_by_head', 'tests_failed']) expect(screen.queryByText(raw)).toBeNull();
+    for (const raw of ['wrong_goal', 'requested_by_head', 'tests_found_defect', 'tests_failed']) expect(screen.queryByText(raw)).toBeNull();
+    expect(screen.getByText('Tests found a defect: the author makes a new candidate')).toBeTruthy();
     expect(screen.getByText('The head asked for it')).toBeTruthy();
     expect(screen.getByText('Not what the task asked for')).toBeTruthy();
     expect(screen.getByText('The tests failed')).toBeTruthy();

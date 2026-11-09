@@ -67,7 +67,7 @@ A coordination task with no executable result closes with a checked report and v
 4. The current stage owner checks and repairs the same branch, records its findings and exact candidate, then passes the task forward.
 5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. Main and release still require the authorized person's approval of the exact commit.
 
-Review and Security keep their own repairs. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair.
+Review and Security keep their own repairs. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair. When Tests finds a defect of the candidate, also one that keeps its run from starting, it sends the task back to the author on Development with the failed runs, and the author's new candidate passes Review, Security and Tests again.
 
 ## When does the head report?
 

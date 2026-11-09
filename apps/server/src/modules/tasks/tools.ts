@@ -588,7 +588,7 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; the accepting head names the ready candidate/revision and observed integration commit. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids, and with done false and verification.defect true sends a defect of the candidate, also one that keeps its run from starting, back to its author on Development, whose new candidate passes every check again; the accepting head names the ready candidate/revision and observed integration commit. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance }) =>

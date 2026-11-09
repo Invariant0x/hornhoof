@@ -27,6 +27,7 @@ it('keeps the recorded decision and never turns ordinary action text into a repo
     { note: { kind: 'verdict', data: { pass: true } }, action: 'reviewed work' },
     { note: { kind: 'verdict' }, action: 'reviewed work' },
     { note: { kind: 'report', data: { done: false } }, action: 'reported blocked work' },
+    { note: { kind: 'report', text: 'A test fails.', data: { failedVerification: { kind: 'content', defect: true } } }, action: 'found a defect and sent work back', report: 'A test fails.' },
     { note: { kind: 'report', data: { done: true } }, action: 'reported work done' },
     { note: { kind: 'report' }, action: 'reported work done' },
     { note: { kind: 'submitted' }, action: 'handed in work' },
