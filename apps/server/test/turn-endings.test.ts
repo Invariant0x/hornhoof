@@ -1,7 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { GONE_ALONG } from '../src/modules/conversation/queue.js';
+import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
+import { REPORT_WINDOW_MS } from '../src/modules/conversation/report-notices.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
@@ -74,7 +75,19 @@ async function company() {
   /* What Bruno hands in while his turn runs, and the wakes it brings. */
   const handIn = async () => wakeAll(ctx, (await submit(ctx, bruno.id, task.id, { summary: 'POST /checkout works.', evidence: 'Changed total tests.', review: { baseCommit: BASE } })).wakes);
   const settle = () => new Promise(r => setTimeout(r, 150));
-  return { app, db, ctx, companyId, sub: sub!, node, hana, bruno, rita, rob, task, turnsOf, jobOf, taskNow, runOf, nextTurn, failed, ended, brunoAtWork, handIn, settle };
+  /* A turn that brings a report waits a short while for other reports to join it: here the server's pump runs past that
+     window at once, instead of the test waiting it out. */
+  const pastReportWindow = async (agentId: string) => {
+    await until(async () => (await turnsOf(agentId)).length > 0);
+    const now = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + REPORT_WINDOW_MS + 1);
+    try {
+      await pump(ctx, agentId);
+    } finally {
+      clock.mockRestore();
+    }
+  };
+  return { app, db, ctx, companyId, sub: sub!, node, hana, bruno, rita, rob, task, turnsOf, jobOf, taskNow, runOf, nextTurn, failed, ended, brunoAtWork, handIn, settle, pastReportWindow };
 }
 
 describe("a turn whose program ended without the work done", () => {
@@ -128,6 +141,7 @@ describe("a turn whose program ended without the work done", () => {
     const work = await c.brunoAtWork();
     await c.handIn();
     await c.ended(work);
+    await c.pastReportWindow(c.rita.id);
     const check = await c.nextTurn(c.rita.id);
     await wakeAll(c.ctx, (await verdict(c.ctx, c.rita.id, c.task.id, { pass: true, comment: 'Looks right.', reviewedCommit: HEAD })).wakes);
     await c.failed(check, { code: 1, signal: null }, { tail: 'Verdict pass: true recorded.\n› ' });
