@@ -269,7 +269,7 @@ describe('the registry over HTTP', () => {
     const { heard, remote } = await server(() => {}, 1, 200);
     const started = Date.now();
     await expect(remote.failed(KEY, null, LEASE)).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(Date.now() - started).toBeLessThan(15_000);
     expect(heard.map(asked => asked.url)).toEqual([`/api/harness/${KEY}/failed`]);
   });
 

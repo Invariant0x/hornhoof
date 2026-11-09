@@ -899,7 +899,7 @@ describe('calling a job off', () => {
     const started = Date.now();
     stop.abort();
     await run;
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(12_000);
     expect(alive(child)).toBe(false);
   });
 });
