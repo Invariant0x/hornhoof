@@ -1,0 +1,92 @@
+import { randomUUID } from 'node:crypto';
+import { OPERATOR_CELLS_BYTES, OPERATOR_SNAPSHOT_MS, ProgramKey, type OperatorError, type OperatorQuestion, type OperatorServerMessage, type ProgramInputLine, type ProgramInputResult, type ProgramView } from '@hornhoof/protocol/program-operator';
+import { operatorCells } from './operator-control.js';
+import { redact } from '../redact.js';
+
+type ViewCommand = Extract<OperatorServerMessage, { type: 'program.view_get' }>;
+type InputCommand = Extract<OperatorServerMessage, { type: 'program.input_send' }>;
+/* What the host knows of an agent's program that runs here now, or null when none does. */
+export type ProgramFacts = { jobId: string | null; instance: string; working: boolean; tool: string | null; question: OperatorQuestion | null; input: ProgramInputLine; undelivered: boolean };
+type Pane = { cols: number; rows: number; cells: string };
+type Source = {
+  facts(key: string): Promise<ProgramFacts | null>;
+  capture(key: string): Promise<Pane>;
+  paste(key: string, text: string): Promise<void>;
+  press(key: string, keys: string[]): Promise<void>;
+  lane<T>(key: string, run: () => Promise<T>): Promise<T>;
+  secrets(): string[];
+  now(): number;
+};
+type Snapshot = { token: string; instance: string; at: number };
+const MAX_DONE = 1024;
+
+/* The orchestrator and Operations look at any employee's program here and type into it, as the server allows them. It opens no
+   program and selects no tmux target of its own: a look and the input after it go to the agent's existing one, through the
+   same lane as Hornhoof's own keys. Only the values of secrets are masked, and nothing on the screen stops the input. */
+export class ProgramAccess {
+  private readonly snapshots = new Map<string, Snapshot>();
+  private readonly done = new Map<string, ProgramInputResult>();
+
+  constructor(private readonly source: Source) {}
+
+  view(command: ViewCommand): Promise<ProgramView> {
+    return this.source.lane(command.agentKey, async () => {
+      const facts = await this.source.facts(command.agentKey);
+      if (!facts) return this.noView(command, 'no_program');
+      let pane: Pane;
+      try { pane = await this.source.capture(command.agentKey); } catch { return this.noView(command, 'node_unavailable'); }
+      if (!bounded(pane)) return this.noView(command, 'input_not_proven');
+      const snapshot = { token: randomUUID(), instance: facts.instance, at: this.source.now() };
+      this.snapshots.set(command.agentKey, snapshot);
+      const secrets = this.source.secrets();
+      return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'ok', reason: null, jobId: facts.jobId, instance: facts.instance, snapshot: snapshot.token, state: facts.working ? 'working' : 'idle', tool: facts.tool === null ? null : redact(facts.tool, secrets).slice(0, 100), question: maskedQuestion(facts.question, secrets), input: facts.input, undelivered: facts.undelivered, cols: pane.cols, rows: pane.rows, cells: operatorCells(pane.cells, secrets) };
+    });
+  }
+
+  /* One snapshot takes one input: whoever types sees what it did with a fresh look first. An action told twice goes once. */
+  input(command: InputCommand): Promise<ProgramInputResult> {
+    const old = this.done.get(command.action);
+    if (old) return Promise.resolve(old);
+    return this.source.lane(command.agentKey, async () => {
+      const facts = await this.source.facts(command.agentKey);
+      const refusal = this.refusal(command, facts);
+      if (refusal) return this.finish(command, facts, 'refused', refusal);
+      this.snapshots.delete(command.agentKey);
+      try {
+        if (command.text !== null) await this.source.paste(command.agentKey, command.text);
+        if (command.keys.length) await this.source.press(command.agentKey, command.keys);
+        return this.finish(command, facts, 'applied', null);
+      } catch {
+        return this.finish(command, facts, 'unknown', 'action_unknown');
+      }
+    });
+  }
+
+  private refusal(command: InputCommand, facts: ProgramFacts | null): OperatorError | null {
+    if (!command.keys.every(key => ProgramKey.safeParse(key).success)) return 'operator_forbidden';
+    if (!facts) return 'no_program';
+    const snapshot = this.snapshots.get(command.agentKey);
+    if (!snapshot || snapshot.token !== command.snapshot || this.source.now() - snapshot.at >= OPERATOR_SNAPSHOT_MS) return 'snapshot_stale';
+    return facts.instance === snapshot.instance ? null : 'snapshot_stale';
+  }
+
+  private finish(command: InputCommand, facts: ProgramFacts | null, result: ProgramInputResult['result'], reason: OperatorError | null): ProgramInputResult {
+    const secrets = this.source.secrets();
+    const reply: ProgramInputResult = { type: 'program.input_result', agentKey: command.agentKey, action: command.action, result, reason, jobId: facts?.jobId ?? null, instance: facts?.instance ?? null, question: maskedQuestion(facts?.question ?? null, secrets), text: command.text === null ? null : operatorCells(command.text, secrets), auditReason: operatorCells(command.auditReason, secrets) };
+    if (this.done.size >= MAX_DONE) this.done.delete(this.done.keys().next().value!);
+    this.done.set(command.action, reply);
+    return reply;
+  }
+
+  private noView(command: ViewCommand, reason: OperatorError): ProgramView {
+    return { type: 'program.view', agentKey: command.agentKey, request: command.request, result: 'refused', reason, jobId: null, instance: null, snapshot: null, state: 'gone', tool: null, question: null, input: 'unknown', undelivered: false, cols: 1, rows: 1, cells: '' };
+  }
+}
+
+function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
+  return question ? { ...question, tool: question.tool && redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
+}
+
+function bounded(pane: Pane): boolean {
+  return Buffer.byteLength(pane.cells) <= OPERATOR_CELLS_BYTES && Number.isInteger(pane.cols) && pane.cols >= 1 && pane.cols <= 512 && Number.isInteger(pane.rows) && pane.rows >= 1 && pane.rows <= 256;
+}

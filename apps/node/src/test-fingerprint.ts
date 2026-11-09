@@ -3,7 +3,7 @@ import { builtinModules } from 'node:module';
 import { matchesGlob, posix } from 'node:path';
 import { PREPARATION_UNIT, runtimeClass, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
-import { matchesPattern, NAMED_TESTS, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
+import { matchesPattern, NAMED_TESTS, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
 import { readCommit, readMutationDelta, type GitEntry } from './test-mirror.js';
 import type { MutationDelta, MutationSelection } from './test-impact-mutation.js';
 
@@ -44,7 +44,6 @@ const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
 const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+(?=\s+from\b))\s*from\s*(['"])[^'"\n]+\1;?/gm;
-const SCREEN = /\.[jt]sx$/;
 const LONGEST_PATH = 300;
 /* What takes a package whole because it runs around its tests, so what it imports does too. */
 const RUNS_AROUND_TESTS = new Set(['configuration', 'full_package_rule', NAMED_TESTS]);
@@ -291,6 +290,8 @@ class Graph {
     if (!scan) { scan = scanFile(this.tree, path); this.scans.set(path, scan); }
     return scan;
   }
+  /* What a file reads itself. */
+  reads(path: string): string[] { return this.scan(path).edges; }
   async scanAll(pause: Pause): Promise<void> {
     for (const [index, path] of this.tree.paths.entries()) {
       this.scan(path);
@@ -337,6 +338,21 @@ export function testGraph(input: FingerprintInput): { closure: (starts: string |
   return new Graph(new Tree(input));
 }
 
+export type Readers = { named: string[]; reached: string[] };
+/* The tests that read each of these files, as a fingerprint follows them: those that name it themselves, and all that reach it
+   through what they run. A document leads nowhere, but a test that names one by its path reads it. */
+export function readersOf(input: FingerprintInput, paths: string[], tests: string[]): Map<string, Readers> {
+  const graph = new Graph(new Tree(input)), found = new Map(paths.map(path => [path, { named: [], reached: [] } as Readers]));
+  for (const test of tests) {
+    const named = graph.reads(test), reached = graph.closure(test);
+    for (const [path, readers] of found) {
+      if (named.includes(path)) readers.named.push(test);
+      if (reached.has(path)) readers.reached.push(test);
+    }
+  }
+  return found;
+}
+
 /* Suites of one folder share a package: what the selector takes whole for it, it takes whole for each of them. */
 function packagesOf(manifest: Manifest): ImpactPackage[] {
   const packages = new Map<string, ImpactPackage>();
@@ -371,8 +387,8 @@ function verdictOn(environment: ImpactEnvironment, path: string): Verdict {
 
 /* What runs around a package's tests counts with what it runs: a file of the repository's own, or of that package. A rule may also
    give a package a file of another one, and that file then counts by itself, or a tool of one package would tie all the others to
-   what it imports. So does a source given to every scenario: a scenario follows its own screen, and all the screens that source
-   imports would make each follow all of them. */
+   what it imports. So does a source given to every scenario: the scenarios follow every screen already, and all the screens that
+   source imports would tie any other suite of its folder to all of them. */
 function countsWith(graph: Graph, units: ReadonlySet<string>): (path: string, verdict: Verdict, id: string) => string[] {
   const { tree } = graph, scenarios = tree.input.description.manifest.suites.flatMap(suite => suite.scenarioSources ?? []);
   return (path, verdict, id) => {
@@ -432,11 +448,6 @@ function madeFor(manifest: Manifest, suite: Suite): unknown {
   };
 }
 
-function screensFor(tree: Tree, sources: string, spec: string): string[] {
-  const named = tree.under(sources).filter(path => SCREEN.test(path) && namedAfter(spec, path));
-  return named.length ? named : tree.under(sources);
-}
-
 /* What a test file reads, and where it reaches something it cannot follow, the whole of its package and of that file's. */
 function inputsOf(graph: Graph, suite: Suite, starts: string[]): unknown {
   const { digest: reached, opaque } = graph.reachOf(starts);
@@ -445,7 +456,8 @@ function inputsOf(graph: Graph, suite: Suite, starts: string[]): unknown {
 function testInputs(graph: Graph, suite: Suite, file: string): unknown {
   const { tree } = graph;
   if (!CODE.test(file) || suite.split.kind === 'whole-package') return tree.folderDigest(suite.root);
-  return inputsOf(graph, suite, suite.scenarioSources ? [file, ...screensFor(tree, suite.scenarioSources, file)] : [file]);
+  /* A scenario opens the app and drives it, so whatever screen the app may show on the way can break it, whatever it is named after. */
+  return inputsOf(graph, suite, suite.scenarioSources ? [file, ...tree.under(suite.scenarioSources)] : [file]);
 }
 
 type Supported = Extract<Manifest['mutation'], { status: 'supported' }>;

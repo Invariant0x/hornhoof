@@ -512,7 +512,7 @@ describe('continuation source activity ownership', () => {
 
 describe('a look at the program before telling of a turn', () => {
   const needed = (c: ReturnType<typeof fixture>) => c.alarms();
-  const looking = (check: Promise<OperatorCheck> | OperatorCheck = { input: 'text', screen: { protected: false, cols: 80, rows: 24, cells: 'The whole screen.' } }) => {
+  const looking = (check: Promise<OperatorCheck> | OperatorCheck = { input: 'text', screen: { cols: 80, rows: 24, cells: 'The whole screen.' } }) => {
     const c = fixture();
     const look = vi.fn(() => Promise.resolve(check));
     const observer = new OperatorObserver({ ...c.options, look });
@@ -531,7 +531,7 @@ describe('a look at the program before telling of a turn', () => {
     expect(c.look).toHaveBeenCalledWith(identity);
     expect(needed(c)).toEqual([]);
     await settled();
-    expect(needed(c)).toEqual([expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'text', screen: { protected: false, cols: 80, rows: 24, cells: 'The whole screen.' } } })]);
+    expect(needed(c)).toEqual([expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'text', screen: { cols: 80, rows: 24, cells: 'The whole screen.' } } })]);
     c.observer.tick();
     await settled();
     expect(c.look).toHaveBeenCalledTimes(1);

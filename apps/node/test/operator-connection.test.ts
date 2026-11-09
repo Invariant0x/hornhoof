@@ -8,9 +8,10 @@ import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 it('accepts bounded operator messages and keeps legacy transport compatible', () => {
-  const frame = { type: 'program.screen_get', agentKey: randomUUID(), jobId: randomUUID(), instance: randomUUID(), case: randomUUID(), capability: randomUUID(), request: randomUUID() };
+  const frame = { type: 'program.view_get', agentKey: randomUUID(), request: randomUUID() };
   expect(parseOperatorServerMessage(JSON.stringify(frame))).toEqual(frame);
-  expect(parseOperatorServerMessage(JSON.stringify({ ...frame, capability: '' }))).toBeNull();
+  expect(parseOperatorServerMessage(JSON.stringify({ ...frame, request: '' }))).toBeNull();
+  expect(parseOperatorServerMessage(JSON.stringify({ ...frame, case: randomUUID() }))).toBeNull();
   expect(parseOperatorServerMessage('{broken')).toBeNull();
   expect(parseOperatorServerMessage(JSON.stringify({ type: 'job.cancel', jobId: 'legacy' }))).toEqual({ type: 'job.cancel', jobId: 'legacy' });
 });
@@ -29,7 +30,7 @@ it('preserves operator frames and delivery metadata through reconnect while clos
   onTestFinished(() => server.close());
   await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const identity = { agentKey: randomUUID(), jobId: randomUUID(), instance: randomUUID() };
-  const request = { type: 'program.screen_get' as const, ...identity, case: randomUUID(), capability: randomUUID(), request: randomUUID() };
+  const request = { type: 'program.view_get' as const, agentKey: identity.agentKey, request: randomUUID() };
   const words = { type: 'agent.say' as const, agentKey: identity.agentKey, text: 'Exact words.', ref: 'live', operatorDelivery: { id: randomUUID(), ordinal: 2 }, operatorSourceDelivery: { id: randomUUID(), ordinal: 1 } };
   const evidence: ProgramNodeMessage = { type: 'program.launch', ...identity, evidenceId: randomUUID(), ordinal: 0, phase: 'attempt', elapsedMs: 0 };
   const received: ProgramServerMessage[] = [], sent: { connection: number; value: unknown }[] = [];

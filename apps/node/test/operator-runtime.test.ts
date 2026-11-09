@@ -13,7 +13,7 @@ function fixture(shown: Partial<RecoverySource> = {}) {
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   let now = 0;
   const sent: OperatorNodeMessage[] = [];
-  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [], recovery: async () => ({ alive: true, input: '', busy: false }), ...shown });
+  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), facts: async () => null, paste: async () => {}, press: async () => {}, secrets: () => [], recovery: async () => ({ alive: true, input: '', own: false, busy: false }), ...shown });
   const agentKey = randomUUID(), jobId = randomUUID();
   const assignment = { id: randomUUID(), ordinal: 1 };
   runtime.begin(agentKey, jobId, assignment, 'Words.', false);
@@ -33,7 +33,7 @@ const program = { agentProgram: true, alive: true, pasted: false, turnStarted: f
 
 it('says a program is gone when it knows no such agent, or its program ended, and asks nothing of it', async () => {
   const asked: string[] = [];
-  const c = fixture({ recovery: async key => { asked.push(key); return { alive: false, input: null, busy: false }; } });
+  const c = fixture({ recovery: async key => { asked.push(key); return { alive: false, input: null, own: false, busy: false }; } });
   expect(await stateOf(c, randomUUID())).toMatchObject({ program: 'gone', current: null, generation: 0, input: 'unknown', wait: null });
   expect(asked).toEqual([]);
   expect(await stateOf(c)).toMatchObject({ program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, busy: false });
@@ -42,9 +42,9 @@ it('says a program is gone when it knows no such agent, or its program ended, an
 
 it.each<[string, Partial<RecoverySource>, Record<string, unknown>]>([
   ['an empty prompt', {}, { input: 'empty', wait: null, runningTool: false, retrying: false, busy: false }],
-  ['words in its input', { recovery: async () => ({ alive: true, input: 'a draft', busy: false }) }, { input: 'words' }],
-  ['an input it cannot read', { recovery: async () => ({ alive: true, input: null, busy: false }) }, { input: 'unknown' }],
-  ['a turn it works on', { recovery: async () => ({ alive: true, input: '', busy: true }) }, { input: 'empty', busy: true }],
+  ['words in its input', { recovery: async () => ({ alive: true, input: 'a draft', own: false, busy: false }) }, { input: 'words' }],
+  ['an input it cannot read', { recovery: async () => ({ alive: true, input: null, own: false, busy: false }) }, { input: 'unknown' }],
+  ['a turn it works on', { recovery: async () => ({ alive: true, input: '', own: false, busy: true }) }, { input: 'empty', busy: true }],
   ['a protected question', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'protected' } }) }, { wait: 'protected' }],
   ['a menu', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'menu' } }) }, { wait: 'menu' }],
   ['a wait that looks harmless, which is no free prompt either', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'harmless' } }) }, { wait: 'unknown' }],
@@ -88,13 +88,11 @@ it('counts what a program does for its words only from the moment they go in', (
 
 it('returns explicit no_program responses without creating a program for an unknown target', async () => {
   const c = fixture();
-  const command = { ...c.identity, agentKey: randomUUID(), case: randomUUID(), capability: randomUUID() };
-  await c.runtime.message({ type: 'program.screen_get', ...command, request: randomUUID() });
-  expect(c.sent.at(-1)).toMatchObject({ type: 'program.screen', result: 'refused', reason: 'no_program' });
-  await c.runtime.message({ type: 'program.key_send', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter', lease: randomUUID() });
-  expect(c.sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'refused', reason: 'no_program' });
-  await c.runtime.message({ type: 'program.key_prepare', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter' });
-  expect(c.sent.at(-1)).toMatchObject({ type: 'program.key_prepared', result: 'refused', reason: 'no_program', lease: null });
+  const agentKey = randomUUID(), request = randomUUID(), action = randomUUID();
+  await c.runtime.message({ type: 'program.view_get', agentKey, request });
+  expect(c.sent.at(-1)).toMatchObject({ type: 'program.view', agentKey, request, result: 'refused', reason: 'no_program', snapshot: null, state: 'gone' });
+  await c.runtime.message({ type: 'program.input_send', agentKey, action, snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue the program.' });
+  expect(c.sent.at(-1)).toMatchObject({ type: 'program.input_result', agentKey, action, result: 'refused', reason: 'no_program' });
 });
 
 it('inherits recorded source words without treating an unrecorded live attempt as taken', () => {
@@ -173,18 +171,6 @@ it('binds an early typed-turn question to the new confirmed job without restarti
   c.runtime.begin(key, jobId, undefined, '', true); c.runtime.tick();
   expect(c.sent.filter(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toEqual([expect.objectContaining({ jobId, questionId: question.id, elapsedMs: 30000 })]);
   expect(c.sent.filter(f => f.type === 'program.question')).toEqual([expect.objectContaining({ jobId, question })]);
-});
-
-it('uses native completion to give the next assignment its own pre-work state', async () => {
-  const c = fixture(), key = c.identity.agentKey;
-  c.runtime.started(key); c.runtime.activity(key); c.runtime.intentional(key, 'completed');
-  c.runtime.begin(key, randomUUID(), { id: randomUUID(), ordinal: 2 }, 'Next assignment.', true);
-  const identity = c.runtime.identity(key)!;
-  const incident = { ...identity, case: randomUUID(), capability: randomUUID() };
-  await c.runtime.message({ type: 'program.operator_case', ...incident, disposition: 'open', revision: 1, remainingMs: 600000, reason: 'assignment_unrecorded' });
-  const request = randomUUID();
-  await c.runtime.message({ type: 'program.screen_get', ...incident, request });
-  expect(c.sent.find(f => f.type === 'program.screen' && f.request === request)).toMatchObject({ state: 'pre_work', keysAllowed: true });
 });
 
 it.each([['bound', false, false], ['pending', true, false], ['late receipt', false, true], ['pending and late receipt', true, true]] as const)('credits exact source activity after continuation binding: %s', (_name, pending, lateReceipt) => {

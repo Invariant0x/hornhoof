@@ -76,6 +76,19 @@ describe('task messages reach their recipient', () => {
     expect((await c.db.select().from(tasks).where(eq(tasks.id, child.id)))[0]!.externalWait).toMatchObject({ reason: 'Registry' });
   });
 
+  it('lets an employee answer the orchestrator on the task it asked about, though the task is not with the employee', async () => {
+    const c = await messaging();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const release = (await createTask(c.ctx, { agentId: orchestrator!.id }, { title: 'Release', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
+    const asker = await c.run(orchestrator!.id);
+    const worker = await c.run(c.agent.id);
+    const asked = await asker.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: release.number, text: 'Do the images look right?' } });
+    expect(asked.isError).toBeFalsy();
+    const answer = await worker.client.callTool({ name: 'message_employee', arguments: { employee: orchestrator!.id, task: release.number, text: 'Yes.' } });
+    expect(answer.isError).toBeFalsy();
+    expect((await c.messages(orchestrator!.id)).find(e => e.message?.direction === 'in')).toMatchObject({ data: { text: 'Yes.', task: { id: release.id } } });
+  });
+
   it.each([{ bound: true }, { bound: false }])('returns an error when a live message cannot reach the terminal: %j', async ({ bound }) => {
     const c = await messaging();
     const task = await c.task();
