@@ -6,6 +6,7 @@ import { checkSlotWaiting } from '../check-queue.js';
 import type { OperatorCheck, OperatorDelivery, OperatorInputLine, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorRecoveryState, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
+import { ProgramAccess, type ProgramFacts } from './program-access.js';
 
 export type OperatorOptions = { dir: string; send(frame: OperatorNodeMessage): boolean; connected(): boolean; now?(): number; lookMs?: number };
 /* A look at a screen waits its turn among the keys, and the tmux behind it can hang. Neither may hold back telling of a turn. */
@@ -16,7 +17,10 @@ type Source = {
   current(key: string): Omit<OperatorProgram, keyof OperatorIdentity | 'generation'> | null;
   capture(key: string): Promise<Pane>;
   inputLine(key: string, cells: string): OperatorInputLine;
-  press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
+  /* What an agent's program here shows and does now, for whoever the server lets look at it, and their keys and words. */
+  facts(key: string): Promise<ProgramFacts | null>;
+  press(key: string, keys: string[]): Promise<void>;
+  paste(key: string, text: string): Promise<void>;
   secrets(): string[];
   /* What the program shows now: its input, null when that cannot be read, whether that is only Hornhoof's own words it never
      sent, and whether it works on a turn. */
@@ -42,6 +46,7 @@ function programAt(program: ReturnType<Source['current']>): Pick<OperatorRecover
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
   private readonly observer: OperatorObserver;
+  private readonly access: ProgramAccess;
   private readonly targets = new Map<string, Target>();
   private readonly lanes = new Map<string, Promise<unknown>>();
   private readonly now: () => number;
@@ -50,6 +55,7 @@ export class OperatorRuntime {
     this.now = options.now ?? (() => performance.timeOrigin + performance.now());
     this.observer = new OperatorObserver({ file: join(options.dir, 'evidence.json'), send: options.send, connected: options.connected, now: this.now, look: identity => this.look(identity.agentKey) });
     this.observer.retire();
+    this.access = new ProgramAccess({ facts: key => this.source.facts(key), capture: key => this.source.capture(key), paste: (key, text) => this.source.paste(key, text), press: (key, keys) => this.source.press(key, keys), lane: (key, run) => this.serial(key, run), secrets: () => this.source.secrets(), now: this.now });
   }
 
   begin(key: string, jobId: string | null, metadata: OperatorDelivery | undefined, words: string, reuse: boolean, source?: OperatorDelivery): void {
@@ -86,7 +92,7 @@ export class OperatorRuntime {
 
   private createTarget(key: string, jobId: string | null, reuse: boolean): Target {
     const identity = { agentKey: key, jobId, instance: randomUUID() };
-    const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
+    const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, capture: () => this.source.capture(key), lane: run => this.serial(key, run), secrets: this.source.secrets });
     return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, sinceWords: reuse, recorded: false, taken: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
   }
 
@@ -247,18 +253,10 @@ export class OperatorRuntime {
   async message(frame: OperatorServerMessage): Promise<void> {
     if (frame.type === 'program.evidence_ack') { this.observer.ack(frame.evidenceId); return; }
     if (frame.type === 'program.recovery_state_get') { this.options.send(await this.recoveryState(frame)); return; }
+    if (frame.type === 'program.view_get') { this.options.send(await this.access.view(frame)); return; }
+    if (frame.type === 'program.input_send') { this.options.send(await this.access.input(frame)); return; }
     const target = this.targets.get(frame.agentKey);
-    if (!target) {
-      this.missingProgram(frame);
-      return;
-    }
-    if (frame.type === 'program.operator_case') {
-      this.updateCase(target, frame);
-      return;
-    }
-    if (frame.type === 'program.key_prepare') this.options.send(target.control.prepare(frame));
-    else if (frame.type === 'program.screen_get') this.options.send(await target.control.screen(frame));
-    else this.options.send(await target.control.key(frame));
+    if (target) this.updateCase(target, frame);
   }
 
   /* What the node sees of an agent's program right now, whichever program that is by now. */
@@ -268,13 +266,6 @@ export class OperatorRuntime {
     const shown = target?.physical ? await this.source.recovery(agentKey) : null;
     if (!target || !shown?.alive) return { ...reply, ...NO_PROGRAM };
     return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input, shown.own), ...programAt(this.source.current(agentKey)), busy: shown.busy || target.sinceWords };
-  }
-
-  private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' | 'program.recovery_state_get' }>): void {
-    const identity = { agentKey: frame.agentKey, jobId: frame.jobId, instance: frame.instance };
-    if (frame.type === 'program.screen_get') this.options.send({ type: 'program.screen', ...identity, request: frame.request, result: 'refused', reason: 'no_program', snapshot: null, generation: 0, state: 'unknown', keysAllowed: false, protected: false, cols: 1, rows: 1, cells: '' });
-    if (frame.type === 'program.key_send') this.options.send({ type: 'program.key_result', ...identity, action: frame.action, result: 'refused', reason: 'no_program' });
-    if (frame.type === 'program.key_prepare') this.options.send({ type: 'program.key_prepared', ...identity, action: frame.action, result: 'refused', reason: 'no_program', lease: null });
   }
 
   private updateCase(target: Target, frame: Extract<OperatorServerMessage, { type: 'program.operator_case' }>): void {

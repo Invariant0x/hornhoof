@@ -36,6 +36,7 @@ import { envFile, type Tmux } from './tmux.js';
 import { holdsWords, LostWords } from './lost-words.js';
 import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
+import type { ProgramFacts } from './program-access.js';
 import type { OperatorProgram } from './operator-control.js';
 import { operatorQuestion } from './operator-question.js';
 
@@ -433,7 +434,10 @@ export class TerminalHost {
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
-    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), recovery: key => this.operatorRecovery(key), secrets: opts.secrets }) : null;
+    return opts.operator ? new OperatorRuntime(opts.operator, {
+      current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), recovery: key => this.operatorRecovery(key), secrets: opts.secrets,
+      facts: key => this.programFacts(key), press: (key, keys) => this.opts.tmux.keys(this.agents.get(key)!.name, ...keys), paste: (key, text) => this.opts.tmux.paste(this.agents.get(key)!.name, text),
+    }) : null;
   }
 
   private operatorTicks(): NodeJS.Timeout | null {
@@ -459,6 +463,18 @@ export class TerminalHost {
     if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, own: false, busy: false };
     const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
     return { alive: true, input, own: Boolean(input) && this.ownWordsOnly(a, input!), busy: a.busy };
+  }
+
+  /* What the orchestrator and Operations see of an agent's program besides its screen: the turn, whether it works and on what,
+     its question, what its input holds and whether Hornhoof's words wait to go in. */
+  private async programFacts(key: string): Promise<ProgramFacts | null> {
+    const a = this.agents.get(key);
+    if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
+    this.drain(a);
+    const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
+    /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
+    const instance = this.operator?.identity(key)?.instance ?? a.instance;
+    return { jobId: a.turn?.jobId ?? null, instance, working: a.busy, tool: [...a.calls.values()][0]?.name ?? null, question: a.operatorQuestion ?? null, input: inputLine(input, input ? this.ownWordsOnly(a, input) : false), undelivered: wordsUndelivered(a) };
   }
 
   /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */
@@ -3144,6 +3160,18 @@ function kimiSignedOut(job: TermJob, kind: keyof typeof READY, screen: string): 
 
 function stopsAtSetup(step: Awaited<ReturnType<typeof pastColors>>, stuck: boolean): boolean {
   return step === 'terms' || stuck;
+}
+
+/* Nothing typed, Hornhoof's own words that never went, anyone else's words, or an input nobody can read. */
+function inputLine(input: string | null, own: boolean): ProgramFacts['input'] {
+  if (input === null) return 'unknown';
+  if (!input) return 'empty';
+  return own ? 'hornhoof' : 'words';
+}
+
+/* Hornhoof's words wait to go in: they stand unsent in the input, are typed and not taken yet, or wait for the turn. */
+function wordsUndelivered(a: Agent): boolean {
+  return Boolean(a.ownLeft) || (a.typing != null && !a.took) || Boolean(a.turn?.words.pending().length);
 }
 
 function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {

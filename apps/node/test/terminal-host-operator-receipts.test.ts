@@ -55,7 +55,7 @@ it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow
   await until(async () => (await tmux.screen(`a-${key}`)).includes('Choose your color scheme'));
   now = 60000; host.operatorTick();
   await until(() => frames.some(frame => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded'));
-  const needed = frames.find(frame => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded');
+  const needed = frames.find((frame): frame is Extract<typeof frame, { type: 'program.operator_needed' }> => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded');
   expect(needed).toBeDefined();
   if (!needed) throw new Error('No assignment operator case evidence.');
   const incident = { agentKey: key, jobId, instance: needed.instance, case: randomUUID(), capability: randomUUID() };

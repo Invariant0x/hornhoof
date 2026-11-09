@@ -8,14 +8,17 @@ export const FIRST_ACTIVITY_MS = 300_000;
 export const STARTUP_EXIT_MS = 60_000;
 export const QUESTION_WAIT_MS = 30_000;
 export const OPERATOR_SNAPSHOT_MS = 30_000;
-export const OPERATOR_KEY_MS = 2000;
-export const OPERATOR_PROTECTED_SCREEN = 'Protected program screen [hidden]. While the program works it asks nothing; only the subscription owner answers its sign-in, consent, payment or secrets.';
-export const OPERATOR_MAX_KEYS = 20;
 export const OPERATOR_CELLS_BYTES = 65_536;
 export const OPERATOR_PICTURE_BYTES = 1_048_576;
+/* What one look at an employee's program lets its viewer press and type, at most. */
+export const PROGRAM_INPUT_KEYS = 32;
+export const PROGRAM_INPUT_TEXT = 4000;
 
-export const OperatorKey = z.enum(['Enter', 'Up', 'Down', 'Left', 'Right', 'Tab']);
-export type OperatorKey = z.infer<typeof OperatorKey>;
+/* A key by its tmux name, with Ctrl, Alt or Shift before it: Enter, Escape, C-u, M-b, S-Tab, F5, a letter or a digit. Nothing
+   else is a key, so no word can reach tmux as one of its own options. */
+const KEY_NAMES = 'Enter|Escape|Tab|BTab|BSpace|Space|Up|Down|Left|Right|Home|End|PageUp|PageDown|PPage|NPage|DC|IC|F(?:[1-9]|1[0-2])|[A-Za-z0-9]';
+export const ProgramKey = z.string().regex(new RegExp(`^(?:[CMS]-)*(?:${KEY_NAMES})$`));
+export type ProgramKey = z.infer<typeof ProgramKey>;
 export const OperatorReason = z.enum(['assignment_unrecorded', 'recorded_no_activity', 'live_words_not_taken', 'startup_exit', 'question_waiting']);
 export type OperatorReason = z.infer<typeof OperatorReason>;
 export const OperatorError = z.enum(['operator_forbidden', 'case_closed', 'program_busy', 'input_not_proven', 'snapshot_stale', 'node_unavailable', 'unsupported_node', 'no_program', 'protected_screen', 'action_unknown']);
@@ -34,9 +37,12 @@ export type OperatorQuestion = z.infer<typeof OperatorQuestion>;
 export const OperatorExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() }).strict();
 const screenCells = { cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) };
 export const OperatorInputLine = z.enum(['empty', 'text', 'unknown']);
+/* What the input row holds: nothing, only Hornhoof's own words that never went, anyone else's words, or what nobody can read. */
+export const ProgramInputLine = z.enum(['empty', 'hornhoof', 'words', 'unknown']);
+export type ProgramInputLine = z.infer<typeof ProgramInputLine>;
 export type OperatorInputLine = z.infer<typeof OperatorInputLine>;
 /* What the node saw as it stopped waiting: whether the program's input line held text, and its screen, if it could look. */
-export const OperatorCheck = z.object({ input: OperatorInputLine, screen: z.object({ protected: z.boolean(), ...screenCells }).strict().nullable() }).strict();
+export const OperatorCheck = z.object({ input: OperatorInputLine, screen: z.object(screenCells).strict().nullable() }).strict();
 export type OperatorCheck = z.infer<typeof OperatorCheck>;
 
 export const OperatorNodeMessages = [
@@ -44,28 +50,26 @@ export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.launch'), ...evidence, phase: z.enum(['attempt', 'started', 'failed']), elapsedMs: count }).strict(),
   z.object({ type: z.literal('program.operator_needed'), ...evidence, reason: OperatorReason, deliveryId: z.uuid().nullable(), questionId: z.uuid().nullable().optional(), evidenceKey: z.string().min(1).max(128), elapsedMs: count, sinceLaunchMs: count.nullable(), exit: OperatorExit.nullable(), check: OperatorCheck.optional() }).strict().refine(frame => frame.reason !== 'question_waiting' || Boolean(frame.questionId && frame.evidenceKey === frame.questionId)),
   z.object({ type: z.literal('program.question'), ...evidence, question: OperatorQuestion, questionOrdinal: z.number().int().positive(), phase: z.enum(['asked', 'cleared']), elapsedMs: count }).strict(),
-  z.object({ type: z.literal('program.screen'), ...identity, request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), snapshot: opaque.nullable(), generation: count, state: z.enum(['pre_work', 'working', 'awaiting_input', 'gone', 'unknown']), keysAllowed: z.boolean(), protected: z.boolean(), ...screenCells }).strict(),
-  z.object({ type: z.literal('program.key_result'), ...identity, action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable() }).strict(),
-  z.object({ type: z.literal('program.key_prepared'), ...identity, action: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), lease: z.uuid().nullable() }).strict(),
+  /* An employee's program as it stands: its screen with only the values of secrets masked, and what Hornhoof knows of it. */
+  z.object({ type: z.literal('program.view'), agentKey: z.uuid(), request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), jobId: z.uuid().nullable(), instance: z.uuid().nullable(), snapshot: opaque.nullable(), state: z.enum(['working', 'idle', 'gone']), tool: z.string().max(100).nullable(), question: OperatorQuestion.nullable(), input: ProgramInputLine, undelivered: z.boolean(), ...screenCells }).strict(),
+  /* With the turn, program and question the input went into, so its record says what was answered. */
+  z.object({ type: z.literal('program.input_result'), agentKey: z.uuid(), action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable(), jobId: z.uuid().nullable(), instance: z.uuid().nullable(), question: OperatorQuestion.nullable() }).strict(),
   z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid(), owner: z.boolean().optional() }).strict(),
-  z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: z.enum(['empty', 'hornhoof', 'words', 'unknown']), wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
+  z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: ProgramInputLine, wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
 ] as const;
 
 export const OperatorNodeMessage = z.discriminatedUnion('type', OperatorNodeMessages);
 export type OperatorNodeMessage = z.infer<typeof OperatorNodeMessage>;
 export type OperatorEvidence = Extract<OperatorNodeMessage, { evidenceId: string }>;
-export type OperatorScreen = Extract<OperatorNodeMessage, { type: 'program.screen' }>;
-export type OperatorKeyResult = Extract<OperatorNodeMessage, { type: 'program.key_result' }>;
-export type OperatorKeyPrepared = Extract<OperatorNodeMessage, { type: 'program.key_prepared' }>;
+export type ProgramView = Extract<OperatorNodeMessage, { type: 'program.view' }>;
+export type ProgramInputResult = Extract<OperatorNodeMessage, { type: 'program.input_result' }>;
 export type OperatorRecoveryState = Extract<OperatorNodeMessage, { type: 'program.recovery_state' }>;
 
-const keyInput = { ...identity, case: z.uuid(), capability: opaque, snapshot: opaque, generation: count, action: z.uuid(), key: OperatorKey };
-
 export const OperatorServerMessages = [
-  z.object({ type: z.literal('program.screen_get'), ...identity, request: z.uuid(), case: z.uuid(), capability: opaque }).strict(),
+  z.object({ type: z.literal('program.view_get'), agentKey: z.uuid(), request: z.uuid() }).strict(),
   z.object({ type: z.literal('program.recovery_state_get'), ...identity, request: z.uuid(), case: z.uuid() }).strict(),
-  z.object({ type: z.literal('program.key_prepare'), ...keyInput }).strict(),
-  z.object({ type: z.literal('program.key_send'), ...keyInput, lease: z.uuid(), withinMs: z.number().int().min(1).max(OPERATOR_KEY_MS).optional() }).strict(),
+  /* Text goes in first, as a paste, then the keys one after another, into the program the snapshot showed. */
+  z.object({ type: z.literal('program.input_send'), agentKey: z.uuid(), action: z.uuid(), snapshot: opaque, keys: z.array(ProgramKey).max(PROGRAM_INPUT_KEYS), text: z.string().min(1).max(PROGRAM_INPUT_TEXT).nullable() }).strict().refine(frame => frame.keys.length > 0 || frame.text !== null),
   z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional(), reason: OperatorReason.optional(), questionId: z.uuid().nullable().optional(), closedBecause: z.string().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('program.evidence_ack'), evidenceId: z.uuid() }).strict(),
 ] as const;

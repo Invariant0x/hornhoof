@@ -7,7 +7,7 @@ import { agentEvents, agents, programOperatorCases } from '../../db/schema.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { authorizeOperator, operatorRefused, type OperatorCaller } from './authorization.js';
 import { escalateCase, syncOperatorCases } from './cases.js';
-import { readProgramScreen } from './pictures.js';
+import { refreshCasePicture } from './pictures.js';
 import { operatorTransaction } from './transactions.js';
 import { agentParty } from '../events/parties.js';
 import { operatorNotification } from './notifications.js';
@@ -15,11 +15,11 @@ import { operatorNotification } from './notifications.js';
 export type ReportInput = { case: string; outcome: 'needs_owner' | 'failed' | 'denied'; text: string };
 
 export async function reportOperatorCase(ctx: Ctx, caller: OperatorCaller, input: ReportInput): Promise<{ outcome: string; case: string; pictureId: string | null }> {
-  const checked = await authorizeOperator(ctx, caller, input.case, undefined, true);
+  const checked = await authorizeOperator(ctx, caller, input.case);
   if (checked.row.escalationJobId) return { outcome: checked.row.resolution!.outcome, case: checked.row.id, pictureId: checked.row.pictureId };
   if (checked.row.status === 'open') {
-    try { await readProgramScreen(ctx, caller, { case: input.case, employee: checked.target.id }); }
-    catch { /* The last safe picture remains useful if the program or its node has just gone away. */ }
+    try { await refreshCasePicture(ctx, checked.row); }
+    catch { /* The last picture remains useful if the program or its node has just gone away. */ }
   }
   const result = await operatorTransaction(ctx, (tx, inside) => recordReport(tx, inside, caller, input, checked.target.id));
   await syncOperatorCases(ctx, result.agentId);
@@ -30,7 +30,7 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 async function recordReport(tx: Tx, inside: Ctx, caller: OperatorCaller, input: ReportInput, targetId: string) {
   await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, targetId)).for('update');
-  const current = await authorizeOperator(inside, caller, input.case, undefined, true, true);
+  const current = await authorizeOperator(inside, caller, input.case, undefined, true);
   if (current.row.escalationJobId) return current.row;
   const decision = input.outcome === 'denied' ? await deniedDecision(inside, caller, current.row) : null;
   if (input.outcome === 'denied' && !decision) throw operatorRefused();

@@ -4,10 +4,25 @@ import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasTmux, home, host, job, setUp, tmux, until } from './terminal-host-helpers.js';
 
+/* What Operations see of the program, and what came of the keys they gave it after that look. */
+async function look(sent: OperatorNodeMessage[], agentKey: string) {
+  const request = randomUUID();
+  await host.operatorMessage({ type: 'program.view_get', agentKey, request });
+  const view = sent.find(f => f.type === 'program.view' && f.request === request);
+  if (view?.type !== 'program.view' || !view.snapshot) throw new Error('No view of the program.');
+  return view;
+}
+
+async function type(sent: OperatorNodeMessage[], agentKey: string, snapshot: string, keys: string[]) {
+  const action = randomUUID();
+  await host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot, keys, text: null });
+  return sent.find(f => f.type === 'program.input_result' && f.action === action);
+}
+
 describe.skipIf(!hasTmux)('operator questions from the program', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
-  it.each([true, false])('binds a permission capability to its current event (assignment metadata: %s)', async metadata => {
+  it.each([true, false])('shows the permission question the program asks and takes one input for each look (assignment metadata: %s)', async metadata => {
     const sent: OperatorNodeMessage[] = []; let now = 0;
     const key = randomUUID(), jobId = randomUUID();
     await setUp({ operator: { dir: join(home, `operator-${key}`), now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } } });
@@ -28,24 +43,13 @@ describe.skipIf(!hasTmux)('operator questions from the program', () => {
       const identity = { agentKey: key, jobId, instance: needed.instance };
       const incident = { ...identity, case: randomUUID(), capability: randomUUID() };
       await host.operatorMessage({ type: 'program.operator_case', ...incident, revision: 1, disposition: 'open', remainingMs: 600000, reason: 'question_waiting', questionId: needed.questionId });
-      const request = randomUUID();
-      await host.operatorMessage({ type: 'program.screen_get', ...incident, request });
-      const screen = sent.find(f => f.type === 'program.screen' && f.request === request);
-      expect(screen).toMatchObject({ keysAllowed: true, state: 'awaiting_input' });
-      if (screen?.type !== 'program.screen') throw new Error('Screen is missing.');
+      const view = await look(sent, key);
+      expect(view).toMatchObject({ result: 'ok', jobId, instance: needed.instance, question: { id: needed.questionId, kind: 'permission', tool: 'Bash' } });
       const press = vi.spyOn(tmux, 'keys').mockResolvedValue();
-      const input = { ...incident, generation: screen.generation, snapshot: screen.snapshot!, action: randomUUID(), key: 'Enter' as const };
-      await host.operatorMessage({ type: 'program.key_prepare', ...input });
-      const prepared = sent.find(f => f.type === 'program.key_prepared' && f.action === input.action);
-      expect(prepared).toMatchObject({ result: 'ok' });
-      if (prepared?.type !== 'program.key_prepared') throw new Error('Key preparation is missing.');
-      const command = { type: 'program.key_send' as const, ...input, lease: prepared.lease! };
-      await host.operatorMessage(command);
-      expect(sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'applied' });
+      expect(await type(sent, key, view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', reason: null, question: { id: needed.questionId } });
       expect(press).toHaveBeenCalledTimes(1);
       await host['hook'](key, 'tooldone', { tool_use_id: 'permission-1', tool_name: 'Bash' });
-      await host.operatorMessage({ ...command, action: randomUUID() });
-      expect(sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'refused' });
+      expect(await type(sent, key, view.snapshot!, ['Enter'])).toMatchObject({ result: 'refused', reason: 'snapshot_stale' });
       expect(press).toHaveBeenCalledTimes(1);
       expect(sent).toContainEqual(expect.objectContaining({ type: 'program.question', phase: 'cleared', question: expect.objectContaining({ id: needed.questionId }) }));
     } finally { abort.abort(); await running; }
@@ -83,18 +87,9 @@ describe.skipIf(!hasTmux)('operator questions from the program', () => {
       if (needed?.type !== 'program.operator_needed') throw new Error('No question case.');
       const incident = { agentKey: key, jobId, instance: needed.instance, case: randomUUID(), capability: randomUUID() };
       await host.operatorMessage({ type: 'program.operator_case', ...incident, disposition: 'open', revision: 1, remainingMs: 600000, reason: 'question_waiting', questionId: needed.questionId });
-      for (const keyPress of decision === 'denied' ? ['Down', 'Enter'] as const : ['Enter'] as const) {
-        const request = randomUUID();
-        await host.operatorMessage({ type: 'program.screen_get', ...incident, request });
-        const screen = sent.find(f => f.type === 'program.screen' && f.request === request);
-        expect(screen).toMatchObject({ keysAllowed: true });
-        if (screen?.type !== 'program.screen') throw new Error('No current screen.');
-        const input = { ...incident, snapshot: screen.snapshot!, generation: screen.generation, action: randomUUID(), key: keyPress };
-        await host.operatorMessage({ type: 'program.key_prepare', ...input });
-        const prepared = sent.find(f => f.type === 'program.key_prepared' && f.action === input.action);
-        if (prepared?.type !== 'program.key_prepared' || !prepared.lease) throw new Error('Key preparation refused.');
-        await host.operatorMessage({ type: 'program.key_send', ...input, lease: prepared.lease });
-        expect(sent).toContainEqual(expect.objectContaining({ type: 'program.key_result', action: input.action, result: 'applied' }));
+      for (const keyPress of decision === 'denied' ? ['Down', 'Enter'] : ['Enter']) {
+        const view = await look(sent, key);
+        expect(await type(sent, key, view.snapshot!, [keyPress])).toMatchObject({ result: 'applied' });
         if (keyPress === 'Down') { await until(async () => (await tmux.screen(`a-${key}`)).includes('> No')); now += 1001; }
       }
       expect(await running).toMatchObject({ ok: true, result: `echo: Permission ${decision}.` });

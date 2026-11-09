@@ -17,7 +17,7 @@ it('keeps screen replies out of an evidence queue that waits for them and drops 
   let release!: () => void;
   const wait = new Promise<void>(done => { release = done; });
   const seen: string[] = [];
-  const hub = new NodeHub({ pingMs: 60000, onClose: async () => {}, onMessage: async (_id, frame) => { if (frame.type === 'status') await wait; if (frame.type === 'program.key_result') release(); seen.push(frame.type); } });
+  const hub = new NodeHub({ pingMs: 60000, onClose: async () => {}, onMessage: async (_id, frame) => { if (frame.type === 'status') await wait; if (frame.type === 'program.input_result') release(); seen.push(frame.type); } });
   onTestFinished(() => hub.stop());
   const node = nodeIdentity(randomUUID());
   const socket = () => Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
@@ -27,9 +27,9 @@ it('keeps screen replies out of an evidence queue that waits for them and drops 
   hub.greet(node, true);
   expect(hub.hasProgramOperator(node)).toBe(true);
   first.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
-  first.emit('message', JSON.stringify({ type: 'program.key_result', agentKey: randomUUID(), jobId: randomUUID(), instance: randomUUID(), action: randomUUID(), result: 'refused', reason: 'program_busy' }));
+  first.emit('message', JSON.stringify({ type: 'program.input_result', agentKey: randomUUID(), action: randomUUID(), result: 'refused', reason: 'program_busy', jobId: null, instance: null, question: null }));
   await wait; await new Promise(done => setTimeout(done, 0));
-  expect(seen).toEqual(['program.key_result', 'hello', 'status']);
+  expect(seen).toEqual(['program.input_result', 'hello', 'status']);
   hub.attach(node, socket() as unknown as WebSocket); hub.greet(node, true);
   expect(hub.hasProgramOperator(node)).toBe(false);
 });

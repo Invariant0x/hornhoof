@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OPERATOR_CELLS_BYTES, OperatorDelivery, OperatorKey, OperatorNodeMessage, OperatorServerMessage, PROGRAM_OPERATOR_ROLE } from '../src/program-operator.js';
+import { OPERATOR_CELLS_BYTES, OperatorDelivery, OperatorNodeMessage, OperatorServerMessage, PROGRAM_INPUT_KEYS, PROGRAM_INPUT_TEXT, PROGRAM_OPERATOR_ROLE, ProgramKey } from '../src/program-operator.js';
 
 const id = '10000000-0000-4000-8000-000000000001';
 const identity = { agentKey: id, jobId: id, instance: id };
@@ -27,24 +27,31 @@ describe('bounded program operator protocol', () => {
       { type: 'program.launch', ...evidence, phase: 'started', elapsedMs: 0 },
       { type: 'program.operator_needed', ...evidence, reason: 'startup_exit', deliveryId: null, evidenceKey: id, elapsedMs: 20, sinceLaunchMs: 20, exit: { code: 0, signal: null } },
       { type: 'program.recovery_ready', ...evidence, case: id },
-      { type: 'program.key_result', ...identity, action: id, result: 'unknown', reason: 'action_unknown' },
+      { type: 'program.input_result', agentKey: id, action: id, result: 'unknown', reason: 'action_unknown', jobId: null, instance: null, question: null },
     ];
     for (const frame of frames) expect(OperatorNodeMessage.parse(frame)).toEqual(frame);
   });
 
   it('carries the existing pane and rejects oversized or executable additions', () => {
-    const screen = { type: 'program.screen', ...identity, request: id, result: 'ok', reason: null, snapshot: id, generation: 1, state: 'pre_work', keysAllowed: true, protected: false, cols: 160, rows: 48, cells: 'Press Enter.\nНажмите Enter.' };
+    const screen = { type: 'program.view', agentKey: id, request: id, result: 'ok', reason: null, jobId: id, instance: id, snapshot: id, state: 'idle', tool: null, question: null, input: 'hornhoof', undelivered: true, cols: 160, rows: 48, cells: 'Press Enter.\nНажмите Enter.' };
     expect(OperatorNodeMessage.parse(screen)).toEqual(screen);
     expect(OperatorNodeMessage.safeParse({ ...screen, cells: 'a'.repeat(65537) }).success).toBe(false);
     expect(OperatorNodeMessage.safeParse({ ...screen, command: 'shell' }).success).toBe(false);
   });
 
-  it('permits one menu key and forbids Escape, control chords, text and paste', () => {
-    for (const key of ['Enter', 'Up', 'Down', 'Left', 'Right', 'Tab']) expect(OperatorKey.parse(key)).toBe(key);
-    for (const key of ['Escape', 'C-c', 'C-d', 'Ctrl-C', 'hello', '\n', ['Enter', 'Tab']]) expect(OperatorKey.safeParse(key).success).toBe(false);
-    const command = { type: 'program.key_send', ...identity, case: id, capability: id, snapshot: id, generation: 1, action: id, key: 'Enter', lease: id };
+  it('takes any key by its tmux name, Ctrl, Alt and Shift too, and nothing that could become a tmux option', () => {
+    for (const key of ['Enter', 'Escape', 'Tab', 'BTab', 'BSpace', 'Up', 'PageDown', 'F5', 'F12', 'a', 'Z', '1', 'C-u', 'C-c', 'M-b', 'S-Tab', 'C-M-x']) expect(ProgramKey.parse(key)).toBe(key);
+    for (const key of ['-t', 'Enter;kill-server', 'Ctrl+U', 'C-', 'F13', 'hello', '\n', ' Enter', '', ['Enter', 'Tab']]) expect(ProgramKey.safeParse(key).success).toBe(false);
+  });
+
+  it('sends text and keys together, bounded, and never nothing', () => {
+    const command = { type: 'program.input_send', agentKey: id, action: id, snapshot: id, keys: ['C-u'], text: 'Go on.' };
     expect(OperatorServerMessage.parse(command)).toEqual(command);
-    expect(OperatorServerMessage.safeParse({ ...command, text: 'accept' }).success).toBe(false);
+    expect(OperatorServerMessage.parse({ ...command, keys: [] })).toMatchObject({ keys: [] });
+    expect(OperatorServerMessage.parse({ ...command, text: null })).toMatchObject({ text: null });
+    for (const wrong of [{ keys: [], text: null }, { keys: Array(PROGRAM_INPUT_KEYS + 1).fill('Enter') }, { text: 'a'.repeat(PROGRAM_INPUT_TEXT + 1) }, { text: '' }, { keys: ['-t'] }, { case: id }]) {
+      expect(OperatorServerMessage.safeParse({ ...command, ...wrong }).success).toBe(false);
+    }
   });
 
   it('bounds capability lifetimes and revisions and acknowledges individual evidence facts', () => {
@@ -70,7 +77,7 @@ describe('bounded program operator protocol', () => {
   });
   describe('what the node saw as it stopped waiting', () => {
     const needed = { type: 'program.operator_needed', ...evidence, reason: 'assignment_unrecorded', deliveryId: id, evidenceKey: id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null };
-    const screen = { protected: false, cols: 80, rows: 24, cells: 'Screen.' };
+    const screen = { cols: 80, rows: 24, cells: 'Screen.' };
 
     it('is optional, and takes the input line with or without a screen', () => {
       expect(OperatorNodeMessage.safeParse(needed).success).toBe(true);
