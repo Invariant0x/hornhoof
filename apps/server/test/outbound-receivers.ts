@@ -1,9 +1,9 @@
-import { once } from 'node:events';
 import { createServer as createHttp, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createHttps, type Server as HttpsServer } from 'node:https';
 import { createServer as createPlain, type AddressInfo, type Socket } from 'node:net';
 import { createServer as createTls, type TLSSocket } from 'node:tls';
 import { SMTPServer, type SMTPServerAuthentication, type SMTPServerSession } from 'smtp-server';
+import { listenIn, testPort } from '../../../test-support/ports.mjs';
 
 /* Certificates made for these tests only, for localhost until 2126. They protect nothing: nothing outside these tests
    trusts them. STRANGER is another certificate for the same name, which a client that trusts CERT must refuse. */
@@ -100,8 +100,7 @@ export async function smtpReceiver(given: SmtpOptions = {}) {
     },
   });
   server.on('error', () => undefined);
-  server.listen(0, '127.0.0.1');
-  await once(server.server, 'listening');
+  await listenIn(server.server);
   return { port: portOf(server.server), seen, close: () => new Promise<void>(resolve => server.close(() => resolve())) };
 }
 
@@ -158,8 +157,7 @@ export async function scriptedSmtp(name: Script) {
     socket.write(script.greeting);
     script.atStart(socket);
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await listenIn(server);
   return { port: portOf(server), seen, close: () => closeTls(server) };
 }
 
@@ -191,8 +189,7 @@ export async function hookReceiver(answer: (request: HookRequest) => HookAnswer,
       respond(answer(heard), request, response);
     });
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await listenIn(server);
   return { port: portOf(server), url: `https://localhost:${portOf(server)}/hook`, seen, close: () => closeHttps(server) };
 }
 
@@ -200,8 +197,7 @@ export async function hookReceiver(answer: (request: HookRequest) => HookAnswer,
 export async function silentPort() {
   const sockets: Socket[] = [];
   const server = createPlain(socket => sockets.push(socket.on('error', () => undefined)));
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await listenIn(server);
   const close = () => {
     sockets.forEach(socket => socket.destroy());
     return closeTls(server);
@@ -211,12 +207,7 @@ export async function silentPort() {
 
 /* The first free port found and let go again: nothing listens there. */
 export async function closedPort(): Promise<number> {
-  const server = createTls(keysOf());
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const port = portOf(server);
-  await closeTls(server);
-  return port;
+  return testPort();
 }
 
 /* The part of a raw message after its headers, as the words it carries. */
@@ -254,8 +245,7 @@ export async function vendorApi(answer: VendorAnswer) {
       answer(response, call);
     });
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await listenIn(server);
   const close = async () => {
     server.closeAllConnections();
     server.close();

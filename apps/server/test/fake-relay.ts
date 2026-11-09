@@ -2,6 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import Fastify from 'fastify';
 import { onTestFinished } from 'vitest';
+import { listenAt } from '../../../test-support/ports.mjs';
 
 export type FakeRelay = {
   /* The address to give Hornhoof as RELAY_URL. */
@@ -60,7 +61,7 @@ export async function fakeRelay(): Promise<FakeRelay> {
     relay.bindings.delete(req.params.name);
     return reply.code(204).send();
   });
-  await app.listen({ host: '127.0.0.1', port: 0 });
+  await listenAt(port => app.listen({ host: '127.0.0.1', port }));
   relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   onTestFinished(() => app.close());
   return relay;

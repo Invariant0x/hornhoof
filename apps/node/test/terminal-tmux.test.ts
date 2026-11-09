@@ -1,121 +1,167 @@
-import { execFileSync } from 'node:child_process';
-import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RESET_AGENT_ENV } from '../src/agent-env.js';
 import { envFile, Tmux } from '../src/terminal/tmux.js';
 
-const hasTmux = (() => {
-  try {
-    execFileSync('tmux', ['-V']);
-    return true;
-  } catch {
-    return false;
-  }
-})();
+/* What the node asks of tmux, and what it makes of tmux's answers. tmux itself is never started: its answers are recorded. */
+const spawned = vi.hoisted(() => [] as { bin: string; args: string[]; env: NodeJS.ProcessEnv }[]);
+vi.mock('node:child_process', async original => ({
+  ...(await original<typeof import('node:child_process')>()),
+  spawn: (bin: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
+    spawned.push({ bin, args, env: options.env });
+    return new EventEmitter();
+  },
+}));
 
-const until = async (check: () => Promise<boolean>, ms = 5000) => {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise(r => setTimeout(r, 50))) if (await check()) return;
-  throw new Error('timed out');
-};
+type Call = { args: string[]; input?: string };
 
-describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
-  const socket = `hh-test-${process.pid}`;
-  const tmux = new Tmux({ socket, env: { PATH: process.env.PATH ?? '', HOME: tmpdir(), NODE_KEY: 'leak' } });
-  afterEach(async () => tmux.stopAll());
+/* A Tmux whose every command is written down and answered as the recorded tmux answered it. */
+function recorded(answer: (args: string[]) => string | Error = () => '', env: NodeJS.ProcessEnv = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
+  const tmux = new Tmux({ socket: 'hh-test', env: { PATH: '/usr/bin', HOME: home, NODE_KEY: 'node-own-key', HORNHOOF_URL: 'http://hh', ...env }, recordingsDir: join(home, 'recordings') });
+  const calls: Call[] = [];
+  vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {
+    calls.push({ args, ...(input === undefined ? {} : { input }) });
+    const out = answer(args);
+    if (out instanceof Error) throw out;
+    return out;
+  });
+  return { tmux, calls, home };
+}
+const named = (calls: Call[], command: string) => calls.filter(c => c.args.includes(command));
 
-  async function pasted(text: string): Promise<unknown[]> {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    const file = join(dir, 'keys.jsonl');
-    const reader = fileURLToPath(new URL('./fakes/paste-reader.mjs', import.meta.url));
-    await tmux.launch('paste', { cwd: dir, command: [process.execPath, reader, file], cols: 80, rows: 24 });
-    await until(async () => (await tmux.screen('paste')).includes('ready'));
-    await tmux.paste('paste', text);
-    await tmux.keys('paste', 'Enter');
-    await until(async () => (await tmux.screen('paste')).includes('received'));
-    return readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  }
+afterEach(() => {
+  spawned.length = 0;
+  vi.restoreAllMocks();
+});
 
-  it('leaves the server and every other program running when a paste meets a program that ended', async () => {
-    await tmux.launch('ended', { cwd: tmpdir(), command: ['sh', '-c', 'exit 3'], cols: 80, rows: 24 });
-    await tmux.launch('other', { cwd: tmpdir(), command: ['sleep', '60'], cols: 80, rows: 24 });
-    await until(async () => !(await tmux.alive('ended')));
-    await tmux.paste('ended', 'words');
-    expect(await tmux.alive('other')).toBe(true);
-    expect(await tmux.run(['list-buffers'])).toBe('');
+describe('starting a program in tmux', () => {
+  it('starts a new session in one command line: its options, the program, then the keys that leave watchers none', async () => {
+    const { tmux, calls } = recorded(args => (args[0] === 'has-session' ? new Error("can't find session") : ''));
+    await tmux.launch('a-1', { cwd: '/work', command: ['claude', '--model', 'opus'], cols: 100, rows: 30 });
+    const line = named(calls, 'start-server')[0]!.args;
+    const commands = line.join(' ').split(' ; ');
+    expect(commands.slice(0, 9)).toEqual([
+      'start-server', 'set-option -g status off', 'set-option -g mouse on', 'set-option -g focus-events on', 'set-option -g window-size smallest',
+      'set-option -g escape-time 0', 'set-option -g history-limit 50000', 'set-option -g default-terminal tmux-256color', 'set-option -g remain-on-exit on',
+    ]);
+    const start = line.indexOf('new-session');
+    expect(line.slice(start, start + 10)).toEqual(['new-session', '-d', '-s', 'a-1', '-x', '100', '-y', '30', '-c', '/work']);
+    expect(line.slice(start + 10, start + 13)).toEqual(['sh', '-c', `${RESET_AGENT_ENV}; exec "$@"`]);
+    expect(line.slice(start + 13, start + 17)).toEqual(['hh-program', 'claude', '--model', 'opus']);
+    /* The keys come last, so they hold only once the program has started; no prefix, no key but the wheel. */
+    expect(commands.slice(-5, -1)).toEqual([
+      expect.stringMatching(/hh-program claude --model opus$/), 'set-option -g prefix None', 'set-option -g prefix2 None', 'unbind-key -a -T root',
+    ]);
+    expect(line.slice(line.lastIndexOf(';') + 1)).toEqual(['bind-key', '-n', 'WheelUpPane', 'if-shell', '-F', '#{||:#{alternate_on},#{||:#{pane_in_mode},#{mouse_any_flag}}}', 'send-keys -M', 'copy-mode -e']);
+    expect(commands.filter(c => c.startsWith('bind-key'))).toHaveLength(1);
   });
 
-  it('keeps an embedded paste terminator and the following lines inside one paste', async () => {
-    expect(await pasted('before\x1b[201~after\nnext')).toEqual([{ text: 'before[201~after\nnext' }, 'enter']);
+  it('puts the env in a file the program reads and removes, never on the command line, after clearing what the machine set', async () => {
+    const { tmux, calls, home } = recorded(args => (args[0] === 'has-session' ? new Error('no session') : ''));
+    const file = envFile(home, { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-secret', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '500000' });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    await tmux.launch('a-2', { cwd: '/work', command: ['claude'], cols: 80, rows: 24, envFile: file });
+    const line = named(calls, 'start-server')[0]!.args;
+    const at = line.indexOf('new-session') + 10;
+    expect(line.slice(at, at + 4)).toEqual(['sh', '-c', `${RESET_AGENT_ENV}; set -a; . "$0"; set +a; rm -f "$0"; exec "$@"`, file]);
+    expect(line.join(' ')).not.toContain('sk-ant-oat01-secret');
+    for (const key of ['NODE_KEY', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'ANTHROPIC_API_KEY', 'CODEX_API_KEY', 'KIMI_MODEL_NAME', 'AGY_ADC_AUTH']) expect(RESET_AGENT_ENV.split(' ')).toContain(key);
   });
 
-  it('removes control characters from pasted text while keeping newlines, tabs and Unicode', async () => {
-    const controls = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0d\x0e\x0f'
-      + '\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f'
-      + '\x7f\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f'
-      + '\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f';
-    expect(await pasted(`a\x1b[31mred\x1b[0m\x1b[2J\x1b[3;4H${controls}\n\tz\u00a0🙂`))
-      .toEqual([{ text: 'a[31mred[0m[2J[3;4H\n\tz\u00a0🙂' }, 'enter']);
+  it('starts the program again in the same session after reading how the last one ended', async () => {
+    const { tmux, calls } = recorded(args => (args.join(' ').includes('#{pane_dead}|') ? '0|||' : ''));
+    await tmux.launch('a-4', { cwd: '/work', command: ['codex'], cols: 80, rows: 24 });
+    const line = named(calls, 'start-server')[0]!.args;
+    const start = line.indexOf('respawn-pane');
+    expect(line.slice(start, start + 6)).toEqual(['respawn-pane', '-k', '-c', '/work', '-t', 'a-4']);
+    expect(line).not.toContain('new-session');
+    expect(calls.findIndex(c => c.args[0] === 'has-session')).toBeLessThan(calls.indexOf(named(calls, 'start-server')[0]!));
   });
 
-  it('preserves dim input placeholders when a styled screen is requested', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    await tmux.launch('styled', { cwd: dir, command: ['sh', '-c', 'printf "\\033[1m›\\033[0m \\033[2mAsk Codex to do anything\\033[0m\\n"; sleep 30'], cols: 80, rows: 24 });
-    await until(async () => (await tmux.screen('styled')).includes('Ask Codex'));
-    expect(await tmux.screen('styled', 0, true)).toMatch(/\x1b\[[0-9;]*2mAsk Codex/);
-    expect(await tmux.screen('styled', 0)).not.toContain('\x1b');
+  it("keeps the node's own key and Hornhoof's settings out of the env tmux and its programs start from", () => {
+    recorded();
+    const { tmux } = recorded();
+    tmux.attach('a-1', 80, 24, true);
+    expect(spawned[0]!.env).not.toHaveProperty('NODE_KEY');
+    expect(spawned[0]!.env).not.toHaveProperty('HORNHOOF_URL');
+    expect(spawned[0]!.env).toMatchObject({ PATH: '/usr/bin', LANG: 'C.UTF-8', TERM: 'xterm-256color' });
+  });
+});
+
+describe('typing into a program in tmux', () => {
+  it('pastes text as one bracketed paste with its control characters taken out, and only into a live pane', async () => {
+    const { tmux, calls } = recorded();
+    const controls = '\x00\x01\x07\x08\x0b\x0c\x0d\x0e\x1b\x1f\x7f\x80\x9b\x9f';
+    await tmux.paste('a-1', `a\x1b[31mred\x1b[0m\x1b[201~after${controls}\n\tz\u00a0🙂`);
+    expect(calls).toHaveLength(2);
+    const [load, paste] = calls;
+    expect(load!.args.slice(0, 2)).toEqual(['load-buffer', '-b']);
+    expect(load!.args.at(-1)).toBe('-');
+    expect(load!.input).toBe('a[31mred[0m[201~after\n\tz\u00a0🙂');
+    const buffer = load!.args[2]!;
+    expect(paste!.args).toEqual(['if-shell', '-F', '-t', 'a-1', '#{pane_dead}', `delete-buffer -b ${buffer}`, `paste-buffer -p -d -b ${buffer} -t 'a-1'`]);
   });
 
-  it('starts a program in its own session, pastes a prompt into it and reads its screen', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    await tmux.launch('a-1', { cwd: dir, command: ['sh', '-c', 'printf "ready\\n"; read line; printf "got:%s\\n" "$line"; sleep 30'], cols: 80, rows: 24 });
-    await until(async () => (await tmux.screen('a-1')).includes('ready'));
-    await tmux.paste('a-1', 'hello there');
-    await tmux.keys('a-1', 'Enter');
-    await until(async () => (await tmux.screen('a-1')).includes('got:hello there'));
-    expect(await tmux.alive('a-1')).toBe(true);
+  it('sends keys by their names to the session it was asked to', async () => {
+    const { tmux, calls } = recorded();
+    await tmux.keys('a-1', 'C-u', 'Enter');
+    expect(calls).toEqual([{ args: ['send-keys', '-t', 'a-1', 'C-u', 'Enter'] }]);
+  });
+});
+
+describe('reading a program in tmux', () => {
+  it('reads the screen with its history, styles only when asked, and nothing when tmux cannot answer', async () => {
+    const { tmux, calls } = recorded(args => (args.includes('gone') ? new Error("can't find pane") : 'Ask Codex\n'));
+    expect(await tmux.screen('a-1')).toBe('Ask Codex\n');
+    expect(await tmux.screen('a-1', 0, true)).toBe('Ask Codex\n');
+    expect(await tmux.screen('gone')).toBe('');
+    expect(calls.map(c => c.args)).toEqual([
+      ['capture-pane', '-p', '-J', '-S', '-200', '-t', 'a-1'],
+      ['capture-pane', '-p', '-e', '-J', '-S', '0', '-t', 'a-1'],
+      ['capture-pane', '-p', '-J', '-S', '-200', '-t', 'gone'],
+    ]);
   });
 
-  it("keeps the node's own key out of the session, and the screen after the program ends", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    await tmux.launch('a-2', { cwd: dir, command: ['sh', '-c', 'printf "key=%s done\\n" "${NODE_KEY:-none}"; sleep 0.3'], cols: 80, rows: 24 });
-    await until(async () => (await tmux.screen('a-2')).includes('key=none done'));
-    await until(async () => !(await tmux.alive('a-2')));
-    expect(await tmux.screen('a-2')).toContain('key=none done');
-    expect(await tmux.has('a-2')).toBe(true);
-    expect(await tmux.has('a-3')).toBe(false);
+  it('tells a live program from one that ended or a session that is gone', async () => {
+    const { tmux } = recorded(args => (args.includes('live') ? '0\n' : args.includes('ended') ? '1\n' : new Error('no session')));
+    expect(await tmux.alive('live')).toBe(true);
+    expect(await tmux.alive('ended')).toBe(false);
+    expect(await tmux.alive('gone')).toBe(false);
   });
 
-  it('gives the people watching no tmux keys: no prefix, no menus, only the wheel to scroll', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    await tmux.launch('a-5', { cwd: dir, command: ['sh', '-c', 'sleep 30'], cols: 80, rows: 24 });
-    await tmux.launch('a-6', { cwd: dir, command: ['sh', '-c', 'sleep 30'], cols: 80, rows: 24 });
-    expect(await tmux.run(['show-options', '-g', 'prefix'])).toBe('prefix None\n');
-    expect(await tmux.run(['show-options', '-g', 'prefix2'])).toBe('prefix2 None\n');
-    const root = (await tmux.run(['list-keys', '-T', 'root'])).trim().split('\n');
-    expect(root).toHaveLength(1);
-    expect(root[0]).toContain('WheelUpPane');
+  it('names the native exit of a program that ended, and the time tmux saw it', async () => {
+    const { tmux } = recorded(args => (args.join(' ').includes('#{pane_dead}|') ? '1|3||1762689600' : args[0] === 'capture-pane' ? 'boom\n' : ''));
+    const end = await tmux.exitSnapshot('a-1');
+    expect(end).toMatchObject({ complete: true, programOutput: { code: 3, signal: null, at: '2025-11-09T12:00:00.000Z' } });
+    expect(end!.output).toContain('boom');
   });
 
-  /* The install command's own terminal shows agy's terms to the person who runs it. A session that is gone by then leaves
-     that terminal at once, untouched. */
-  it("lets go of the node's own terminal at once when the session it would show is gone", async () => {
-    await tmux.launch('shown', { cwd: tmpdir(), command: ['sleep', '30'], cols: 80, rows: 24 });
-    const [code] = await once(tmux.attachHere('gone'), 'exit');
-    expect(code).toBe(1);
-    expect(await tmux.alive('shown')).toBe(true);
+  it('reads the pid of a live program only', async () => {
+    const { tmux } = recorded(args => (args.includes('#{pane_dead}') ? (args.includes('live') ? '0' : '1') : '4242\n'));
+    expect(await tmux.programPid('live')).toBe(4242);
+    expect(await tmux.programPid('ended')).toBeNull();
+  });
+});
+
+describe('people watching a program in tmux', () => {
+  it('gives a watcher who may not type a read-only client of its own size, and one who may type a writing one', () => {
+    const { tmux } = recorded();
+    tmux.attach('a-1', 120, 40, false);
+    tmux.attach('a-1', 90, 30, true);
+    const [watcher, writer] = spawned.map(s => (process.platform === 'darwin' ? s.args.at(-1)! : s.args[1]!));
+    expect(watcher).toBe(`stty cols 120 rows 40; exec tmux -u -f /dev/null -L hh-test set-option -s 'terminal-overrides[9]' 'xterm-256color:smcup@:rmcup@:csr@' \\; attach -r -t '=a-1'`);
+    expect(writer).toBe(`stty cols 90 rows 30; exec tmux -u -f /dev/null -L hh-test set-option -s 'terminal-overrides[9]' 'xterm-256color:smcup@:rmcup@:csr@' \\; attach -t '=a-1'`);
   });
 
-  it('starts the program again in the same session, with the env from a file it removes', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
-    await tmux.launch('a-4', { cwd: dir, command: ['sh', '-c', 'echo first; sleep 30'], cols: 80, rows: 24 });
-    await until(async () => (await tmux.screen('a-4')).includes('first'));
-    const file = envFile(dir, { HH_SECRET_THING: "it's a 'quoted' value" });
-    await tmux.launch('a-4', { cwd: dir, command: ['sh', '-c', 'echo "second $HH_SECRET_THING"; sleep 30'], cols: 80, rows: 24, envFile: file });
-    await until(async () => (await tmux.screen('a-4')).includes("second it's a 'quoted' value"));
-    expect(existsSync(file)).toBe(false);
+  it('ends a session only after reading how its program ended, and forgets its recording', async () => {
+    const { tmux, calls } = recorded(args => (args.join(' ').includes('#{pane_dead}|') ? '' : ''));
+    await tmux.kill('a-1');
+    expect(calls.at(-1)!.args).toEqual(['kill-session', '-t', '=a-1']);
+    expect(calls.some(c => c.args.join(' ').includes('#{pane_dead}|'))).toBe(true);
   });
 });
 
@@ -124,7 +170,6 @@ describe('env files for a program', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-env-'));
     const file = envFile(dir, { A: "x'y", B: 'line $HOME `cmd`' });
     expect(readFileSync(file, 'utf8')).toBe("A='x'\\''y'\nB='line $HOME `cmd`'\n");
-    const out = execFileSync('sh', ['-c', `set -a; . "${file}"; printf '%s|%s' "$A" "$B"`]).toString();
-    expect(out).toBe("x'y|line $HOME `cmd`");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 });

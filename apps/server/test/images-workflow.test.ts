@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parse } from 'yaml';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const SCRIPT = join(ROOT, 'scripts/tests-mark.mjs');
@@ -58,7 +59,7 @@ async function github(marks: Marks, answer?: (res: ServerResponse) => void) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ state: 'whatever', statuses: marks[sha] ?? [] }));
   });
-  await new Promise<void>(ready => server.listen(0, '127.0.0.1', ready));
+  await listenIn(server);
   onTestFinished(() => new Promise<void>(done => {
     server.closeAllConnections();
     server.close(() => done());

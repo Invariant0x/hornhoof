@@ -6,7 +6,8 @@ import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync,
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openServices, prepareServiceArtifacts, type ServiceCommand, type ServiceContext, type ServiceDefinitions } from '../src/test-services.js';
+import { openServices, prepareServiceArtifacts, type ServiceCommand, type ServiceContext, type ServiceDefinitions, type ServicePrepareContext } from '../src/test-services.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 const procVisibility = vi.hoisted(() => ({ readable: true }));
 vi.mock('node:fs', async importOriginal => {
@@ -16,6 +17,12 @@ vi.mock('node:fs', async importOriginal => {
     return Reflect.apply(target, receiver, args);
   } }) };
 });
+
+/* No verdict here rests on the real clock. Every deadline and grace is the largest timer delay, so none runs out during a
+   test. A grace of 1 ms is given only where it must run out at once, to a process that never stops by itself, or where our
+   code must not use it at all. A lock's deadline comes on a fake clock. */
+const NEVER = 2_147_483_647;
+const LASTING = { stopMs: NEVER, exitMs: NEVER, cleanupMs: NEVER };
 
 const roots: string[] = [];
 let root: string;
@@ -51,7 +58,7 @@ beforeEach(() => {
   const uid = process.getuid!(); const gid = process.getgid!();
   vi.spyOn(process, 'getuid').mockReturnValue(0);
   context = { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid }, signal: new AbortController().signal,
-    deadline: Date.now() + 15_000, log: line => log.push(line), registerSecrets: values => secrets.push(...values), postgresBin: bin };
+    deadline: Date.now() + NEVER, graces: LASTING, log: line => log.push(line), registerSecrets: values => secrets.push(...values), postgresBin: bin };
   fakePostgres();
 });
 afterEach(() => { vi.restoreAllMocks(); for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -173,7 +180,7 @@ describe('prepared native services', () => {
     executable('postgres', `${version}const fs=require('node:fs'),p=require('node:path');const a=process.argv.slice(2);fs.writeFileSync(p.join(a[a.indexOf('-D')+1],'postmaster.pid'),String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},100);`);
     executable('pg_ctl', `${version}process.exit(1);`);
     const trace = join(root, 'socket');
-    await expect(prepareServiceArtifacts(definitions, root, { ...context, env: { SOCKET_TRACE: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/stop|cleanup|failed/i);
+    await expect(prepareServiceArtifacts(definitions, root, { ...context, graces: { ...LASTING, stopMs: 1 }, env: { SOCKET_TRACE: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/stop|cleanup|failed/i);
     expect(existsSync(readFileSync(trace, 'utf8'))).toBe(false);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
@@ -203,7 +210,7 @@ describe('prepared native services', () => {
 });
 
 describe('managed process services', () => {
-  function processDefinitions(graceMs = 100): ServiceDefinitions {
+  function processDefinitions(graceMs = NEVER): ServiceDefinitions {
     executable('service', `const fs=require('node:fs'); const p=require('node:path'); const state=process.env.HH_SERVICE_STATE; fs.mkdirSync(p.join(state,'data'),{recursive:true}); fs.writeFileSync(p.join(state,'data','value'),'prepared'); fs.writeFileSync(p.join(state,'undeclared'),'private'); process.on('SIGINT',()=>{fs.writeFileSync(p.join(state,'data','stopped'),'yes');process.exit(0)}); setInterval(()=>{},100);`);
     executable('ready', `const fs=require('node:fs'); const p=require('node:path'); const t=setInterval(()=>{if(fs.existsSync(p.join(process.env.HH_SERVICE_STATE,'data','value'))){clearInterval(t);process.exit(process.env.BAD_READY==='1'?3:0)}},5);`);
     return { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['fast'], options: {
@@ -231,8 +238,8 @@ describe('managed process services', () => {
     expect(readFileSync(join(artifacts.paths.worker!, 'data', 'stopped'), 'utf8')).toBe('yes');
   });
   it('waits for descendant writers before snapshotting declared process state', async () => {
-    const defs = processDefinitions(1000);
-    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'child-stopped'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER,'yes');process.exit(0)},500));fs.writeFileSync(p.join(d,'child-ready'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER+'.ready','yes');setInterval(()=>{},100)";
+    const defs = processDefinitions();
+    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');const leader=process.ppid;process.on('SIGINT',()=>setInterval(()=>{if(process.ppid===leader)return;fs.writeFileSync(p.join(d,'child-stopped'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER,'yes');process.exit(0)},5));fs.writeFileSync(p.join(d,'child-ready'),'yes');if(process.env.CHILD_STOP_MARKER)fs.writeFileSync(process.env.CHILD_STOP_MARKER+'.ready','yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});const t=setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){clearInterval(t);fs.writeFileSync(p.join(d,'value'),'ready')}},5);process.on('SIGINT',()=>process.exit(0));setInterval(()=>{},100);`);
     executable('ready', "const fs=require('node:fs'),p=require('node:path');const marker=process.env.CHILD_STOP_MARKER?process.env.CHILD_STOP_MARKER+'.ready':p.join(process.env.HH_SERVICE_STATE,'data','value');setInterval(()=>{if(fs.existsSync(marker))process.exit(0)},5);");
     const artifacts = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'b'.repeat(64) });
@@ -251,17 +258,16 @@ describe('managed process services', () => {
     expect(existsSync(join(root, 'runs', 'partial', 'state'))).toBe(false);
   });
   it('honors a longer stop grace while descendants flush prepared state', async () => {
-    const defs = processDefinitions(5000);
-    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'flushed'),'yes');process.exit(0)},3000));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
+    const defs = processDefinitions();
+    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');const leader=process.ppid;process.on('SIGINT',()=>setInterval(()=>{if(process.ppid===leader)return;fs.writeFileSync(p.join(d,'flushed'),'yes');process.exit(0)},5));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready')))fs.writeFileSync(p.join(d,'value'),'ready')},5);process.on('SIGINT',()=>process.exit(0));`);
-    const artifact = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) });
+    const artifact = await prepareServiceArtifacts(defs, root, { ...context, graces: { ...LASTING, stopMs: 1 }, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) });
     expect(readFileSync(join(artifact.paths.worker!, 'data', 'flushed'), 'utf8')).toBe('yes');
   });
   it('never publishes state after the guardian forcibly stops a descendant', async () => {
-    const defs = processDefinitions(5000);
+    const defs = processDefinitions(1);
     const child = "const fs=require('node:fs'),p=require('node:path');process.on('SIGTERM',()=>{});process.on('SIGINT',()=>{});fs.writeFileSync(p.join(process.env.HH_SERVICE_STATE,'data','child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){fs.writeFileSync(p.join(d,'value'),'ready');process.exit(0)}},5);`);
-    defs.prepare = [{ id: 'after-drain', serviceIds: ['worker'], commands: [{ program: process.execPath, args: ['-e', 'setTimeout(()=>{},3000)'], cwd: '.' }] }];
     await expect(prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) })).rejects.toMatchObject({
       errors: [expect.objectContaining({ message: 'Service required forced stop; state cannot be published' })],
     });
@@ -279,7 +285,7 @@ describe('service preparation lock ownership', () => {
     return { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['fast'], options: {
       start: { program: join(bin, 'worker'), args: [], cwd: '.' },
       readiness: { program: join(bin, 'worker-ready'), args: [], cwd: '.' },
-      stop: { signal: 'SIGINT', graceMs: 1000 }, statePaths: ['data'],
+      stop: { signal: 'SIGINT', graceMs: NEVER }, statePaths: ['data'],
     } }], prepare: [{ id: 'barrier', serviceIds: ['worker'], commands: [{ program: join(bin, 'barrier'), args: [], cwd: '.' }] }] };
   }
   function preparationContext(name: string) {
@@ -290,7 +296,7 @@ describe('service preparation lock ownership', () => {
   async function owner(defs: ServiceDefinitions): Promise<{ child: ChildProcess; ended: Promise<[number | null, NodeJS.Signals | null]> }> {
     const ctx = preparationContext('entered');
     writeFileSync(ctx.env.HOLD, 'hold');
-    const script = `import {prepareServiceArtifacts} from ${JSON.stringify(new URL('../src/test-services.ts', import.meta.url).href)};process.getuid=()=>0;const context=${JSON.stringify(ctx)};context.signal=new AbortController().signal;context.deadline=Date.now()+15000;context.log=()=>{};context.registerSecrets=()=>{};context.env.OWNER_PID=String(process.pid);await prepareServiceArtifacts(${JSON.stringify(defs)},${JSON.stringify(root)},context);`;
+    const script = `import {prepareServiceArtifacts} from ${JSON.stringify(new URL('../src/test-services.ts', import.meta.url).href)};process.getuid=()=>0;const context=${JSON.stringify(ctx)};context.signal=new AbortController().signal;context.deadline=Date.now()+${NEVER};context.log=()=>{};context.registerSecrets=()=>{};context.env.OWNER_PID=String(process.pid);await prepareServiceArtifacts(${JSON.stringify(defs)},${JSON.stringify(root)},context);`;
     const watcher = watch(root);
     const entered = new Promise<void>(resolve => watcher.on('change', () => { if (existsSync(ctx.env.ENTERED)) resolve(); }));
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: fileURLToPath(new URL('../../..', import.meta.url)), stdio: 'ignore' });
@@ -300,6 +306,24 @@ describe('service preparation lock ownership', () => {
       return { child, ended };
     } catch (error) { child.kill('SIGKILL'); await ended; throw error;
     } finally { watcher.close(); }
+  }
+  /* A contender for a held lock, on a fake clock: once it waits for the lock, its deadline comes or it is cancelled by the
+     test's hand, never by the real clock. Returns why it gave up. */
+  async function contend(defs: ServiceDefinitions, ctx: ServicePrepareContext, mode: 'deadline' | 'cancellation'): Promise<unknown> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const controller = new AbortController();
+      const running = prepareServiceArtifacts(defs, root, { ...ctx, signal: controller.signal, deadline: Date.now() + 60_000 });
+      void running.catch(() => {});
+      await eventually(() => vi.getTimerCount() === 1);
+      if (mode === 'cancellation') controller.abort();
+      else {
+        vi.advanceTimersByTime(59_999);
+        expect(vi.getTimerCount()).toBe(1);
+        vi.advanceTimersByTime(1);
+      }
+      return await running.then(() => { throw new Error('The contender took a held lock'); }, (error: unknown) => error);
+    } finally { vi.useRealTimers(); }
   }
   function stopWorkers(): void {
     if (!existsSync(join(root, 'workers'))) return;
@@ -314,7 +338,7 @@ describe('service preparation lock ownership', () => {
       running.child.kill('SIGKILL');
       expect((await running.ended)[1]).toBe('SIGKILL');
       rmSync(join(root, 'hold'));
-      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + 2500 });
+      const recovered = await prepareServiceArtifacts(defs, root, preparationContext('recovered'));
       expect(existsSync(join(recovered.paths.worker!, 'data'))).toBe(true);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(true);
     } finally { running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
@@ -326,22 +350,19 @@ describe('service preparation lock ownership', () => {
       const writer = Number(readFileSync(join(root, 'workers'), 'utf8').trim());
       running.child.kill('SIGKILL'); await running.ended;
       expect(() => process.kill(writer, 0)).not.toThrow();
-      await expect(prepareServiceArtifacts(defs, root, { ...preparationContext('contender'), deadline: Date.now() + 1000 })).rejects.toThrow(/deadline/i);
+      expect(await contend(defs, preparationContext('contender'), 'deadline')).toMatchObject({ message: expect.stringMatching(/deadline/i) });
       expect(readFileSync(join(root, 'workers'), 'utf8').trim().split('\n')).toHaveLength(1);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(false);
       stopWorkers(); rmSync(join(root, 'hold'));
-      const recovered = await prepareServiceArtifacts(defs, root, { ...preparationContext('recovered'), deadline: Date.now() + 2500 });
+      const recovered = await prepareServiceArtifacts(defs, root, preparationContext('recovered'));
       expect(existsSync(join(recovered.paths.worker!, 'data'))).toBe(true);
     } finally { running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
   });
-  it.each(['deadline', 'cancellation'])('does not steal a live owner lock or publish a second template after %s', async mode => {
+  it.each(['deadline', 'cancellation'] as const)('does not steal a live owner lock or publish a second template after %s', async mode => {
     const defs = fixture();
     const running = await owner(defs);
-    const controller = new AbortController();
-    const timer = setTimeout(() => { if (mode === 'cancellation') controller.abort(); }, 100);
     try {
-      await expect(prepareServiceArtifacts(defs, root, { ...preparationContext('contender'), signal: controller.signal,
-        deadline: Date.now() + (mode === 'deadline' ? 300 : 2500) })).rejects.toThrow(/deadline|cancel/i);
+      expect(await contend(defs, preparationContext('contender'), mode)).toMatchObject({ message: expect.stringMatching(/deadline|cancel/i) });
       expect(readFileSync(join(root, 'workers'), 'utf8').trim().split('\n')).toHaveLength(1);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(false);
       rmSync(join(root, 'hold'));
@@ -349,7 +370,7 @@ describe('service preparation lock ownership', () => {
       const artifact = await prepareServiceArtifacts(defs, root, preparationContext('hit'));
       expect(existsSync(join(artifact.paths.worker!, 'data'))).toBe(true);
       expect(readFileSync(join(root, 'workers'), 'utf8').trim().split('\n')).toHaveLength(1);
-    } finally { clearTimeout(timer); running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
+    } finally { running.child.kill('SIGKILL'); await running.ended; stopWorkers(); }
   });
   it('rejects ownerless legacy directory locks without changing them', async () => {
     const defs = fixture();
@@ -357,7 +378,7 @@ describe('service preparation lock ownership', () => {
     mkdirSync(lock, { recursive: true, mode: 0o700 });
     const inode = statSync(lock).ino;
     try {
-      await expect(prepareServiceArtifacts(defs, root, { ...preparationContext('legacy'), deadline: Date.now() + 2500 })).rejects.toThrow(/legacy.*directory.*lock/i);
+      await expect(prepareServiceArtifacts(defs, root, preparationContext('legacy'))).rejects.toThrow(/legacy.*directory.*lock/i);
       expect(statSync(lock).ino).toBe(inode);
       expect(existsSync(join(root, 'workers'))).toBe(false);
       expect(existsSync(join(root, 'cache', key, 'READY.json'))).toBe(false);
@@ -374,13 +395,13 @@ async function pgliteProbe(body: string): Promise<Record<string, boolean | numbe
     import {preparePgliteTemplate,readPgliteTemplate} from './apps/server/test/prepare-environment.ts';
     import setup from './apps/server/test/global-setup.ts';
     process.stderr.write('probe-start\\n');
-    const path=process.argv[1]; const started=Date.now();
+    const path=process.argv[1];
     const provided=[]; const project={provide:(_,value)=>provided.push(value)};
     process.env.HH_PGLITE_TEMPLATE=path;
     ${body}
   `;
   const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, join(root, 'pglite')], {
-    cwd: fileURLToPath(new URL('../../..', import.meta.url)), timeout: 18000, killSignal: 'SIGKILL',
+    cwd: fileURLToPath(new URL('../../..', import.meta.url)),
   });
   return JSON.parse(result.stdout) as Record<string, boolean | number>;
 }
@@ -399,7 +420,7 @@ describe('prepared PGlite compatibility', () => {
       writeFileSync(file,JSON.stringify({...metadata,pgliteVersion:'0.0.0'})); assert.equal(readPgliteTemplate(path),null);
       writeFileSync(file,JSON.stringify({...metadata,inputDigest:'0'.repeat(64)})); assert.equal(readPgliteTemplate(path),null);
       writeFileSync(file,JSON.stringify(metadata)); writeFileSync(join(path,'migrated.tar'),'corrupt'); assert.equal(readPgliteTemplate(path),null);
-      process.stdout.write(JSON.stringify({validCopy:true,staleRejected:true,bytes:bytes.length,elapsedMs:Date.now()-started}));
+      process.stdout.write(JSON.stringify({validCopy:true,staleRejected:true,bytes:bytes.length}));
     `);
     expect(measured).toMatchObject({ validCopy: true, staleRejected: true });
     expect(measured.bytes).toBeGreaterThan(0);
@@ -414,7 +435,7 @@ describe('prepared PGlite compatibility', () => {
         const client=new PGlite({loadDataDir:new Blob([readFileSync(provided[0])])});
         try {assert(Number((await client.query('SELECT count(*) AS n FROM drizzle.__drizzle_migrations')).rows[0].n)>0);} finally {await client.close();}
       } finally {cleanup();}
-      process.stdout.write(JSON.stringify({fallback:true,elapsedMs:Date.now()-started}));
+      process.stdout.write(JSON.stringify({fallback:true}));
     `);
     expect(measured.fallback).toBe(true);
   });
@@ -450,14 +471,14 @@ describe('manifest argv selection', () => {
     const run = manifest.suites.find(suite => suite.id === id)!.run;
     const inventory = join(root, `${id}-inventory.json`);
     const list = run.args.flatMap(arg => arg === 'run' ? ['list', '--filesOnly', `--json=${inventory}`] : [arg]);
-    await promisify(execFile)(run.program, [...list, selected], { cwd: join(checkout, run.cwd), timeout: 18000 });
+    await promisify(execFile)(run.program, [...list, selected], { cwd: join(checkout, run.cwd) });
     const files = JSON.parse(readFileSync(inventory, 'utf8')) as { file: string }[];
     expect(files.map(file => file.file)).toEqual([join(checkout, expected)]);
     if (id === 'node') {
       const reportFile = join(root, 'selected-run.json'), filesFile = join(root, 'selected-files.json');
       writeFileSync(filesFile, JSON.stringify([`./${expected}`]));
       const args = run.args.flatMap(arg => arg === 'run' ? ['run', '--reporter=json', `--outputFile=${reportFile}`, '--shard=1/1'] : [arg]);
-      await promisify(execFile)(run.program, [...args, selected], { cwd: join(checkout, run.cwd), timeout: 18000, env: { ...process.env, HH_TEST_FILES: filesFile } });
+      await promisify(execFile)(run.program, [...args, selected], { cwd: join(checkout, run.cwd), env: { ...process.env, HH_TEST_FILES: filesFile } });
       const report = JSON.parse(readFileSync(reportFile, 'utf8')) as { numTotalTests: number; testResults: { name: string }[] };
       expect(report.testResults.map(file => file.name)).toEqual([join(checkout, expected)]);
       expect(report.numTotalTests).toBeGreaterThan(0);
@@ -493,7 +514,7 @@ async function generatedProtocolProbe(body: string): Promise<void> {
     assert(Buffer.isBuffer(readPgliteTemplate(output)));
     ${body}
   `;
-  await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: fixture, timeout: 18000, killSignal: 'SIGKILL' });
+  await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: fixture });
 }
 
 describe('generated protocol inputs in prepared PGlite templates', () => {

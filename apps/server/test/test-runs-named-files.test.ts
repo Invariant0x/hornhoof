@@ -26,7 +26,7 @@ describe('the test files a run_tests command names', () => {
     expect(asked).toEqual([{ url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789', commitSha: TEST_COMMIT }]);
     expect(await c.db.select().from(testRuns)).toEqual([]);
     expect(await c.db.select().from(testParts)).toEqual([]);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
   });
 
   it('runs a command whose test files the commit has, named from the folder a workspace or cd runs in', async () => {

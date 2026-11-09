@@ -65,7 +65,7 @@ const STEPS = {
   },
   /* A process git started, such as a credential daemon, outlives it and keeps its pipes. */
   leave_process() {
-    spawn('/bin/sleep', ['15'], { detached: true, stdio: 'inherit' }).unref();
+    spawn('/bin/sleep', ['30'], { detached: true, stdio: 'inherit' }).unref();
     return real();
   },
 };

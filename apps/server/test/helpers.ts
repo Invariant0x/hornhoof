@@ -18,10 +18,11 @@ import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { openTestDb, timed } from './helpers-db.js';
 import { TEST_SECRET } from './helpers-basic.js';
-export { createTestDb, ownDatabases, statements } from './helpers-db.js';
+import { listenAt } from '../../../test-support/ports.mjs';
+export { createTestDb, fixture, ownDatabases, statements } from './helpers-db.js';
 export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
-export { TEST_API_KEY, SETUP, withoutOperations, setUpCompany, invitePerson } from './helpers-company.js';
+export { TEST_API_KEY, SETUP, appFixture, withoutOperations, setUpCompany, invitePerson } from './helpers-company.js';
 
 /* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
    hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
@@ -149,7 +150,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
 
 /* Starts the app on a free local port and returns the node socket address. */
 export async function listen(app: FastifyInstance): Promise<string> {
-  await app.listen({ host: '127.0.0.1', port: 0 });
+  await listenAt(port => app.listen({ host: '127.0.0.1', port }));
   return `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/nodes/socket`;
 }
 

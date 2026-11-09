@@ -158,12 +158,14 @@ describe('what a node from before skill files takes', () => {
       const { parts, whole, text } = always(role);
       for (const p of parts.filter(p => p.id !== 'hh-superpowers')) expect(whole, `${role.id} ${p.id}`).toContain(p.text);
       expect(text, role.id).toContain('<!-- hh:skill hh-superpowers -->');
-      expect(whole, role.id).not.toContain('superpowers');
+      expect(whole, role.id).not.toContain('<!-- hh:skill hh-superpowers -->');
+      for (const p of parts.filter(p => p.id === 'hh-superpowers')) expect(whole, role.id).not.toContain(p.text);
     }
     const steady = orchestratorSteady(shipped);
     for (const p of steady.parts.filter(p => p.id !== 'hh-superpowers')) expect(steady.whole, p.id ?? 'base').toContain(p.text);
     expect(steady.text).toContain('<!-- hh:skill hh-superpowers -->');
-    expect(steady.whole).not.toContain('superpowers');
+    expect(steady.whole).not.toContain('<!-- hh:skill hh-superpowers -->');
+    for (const p of steady.parts.filter(p => p.id === 'hh-superpowers')) expect(steady.whole).not.toContain(p.text);
   });
 });
 

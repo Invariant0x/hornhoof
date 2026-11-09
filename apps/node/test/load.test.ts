@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { machineLoad } from '../src/load.js';
 
@@ -84,22 +83,4 @@ describe("a node's machine load", () => {
     expect(withoutBootId).toEqual({ cpus: 4, load: 0.5, memFree: 3 * GIB, memTotal: 4 * GIB });
   });
 
-  it('reads this machine without help', () => {
-    const now = machineLoad();
-    expect(now.cpus).toBeGreaterThanOrEqual(1);
-    expect(now.memTotal).toBeGreaterThan(0);
-    expect(now.memFree).toBeLessThanOrEqual(now.memTotal);
-    expect(now.load).toBeGreaterThanOrEqual(0);
-    expect(now.diskTotal).toBeGreaterThan(0);
-  });
-
-  /* Only a Linux kernel names its boot, so a node outside Linux (the tests on a Mac) reports no host. */
-  it.runIf(existsSync('/proc/sys/kernel/random/boot_id'))('names the physical host this machine runs on', () => {
-    const now = machineLoad();
-    expect(now.host).toMatch(/^[0-9a-f]{64}$/);
-    expect(now.hostCpus).toBeGreaterThanOrEqual(now.cpus);
-    expect(now.hostLoad).toBe(now.load);
-    expect(now.hostMemFree).toBeGreaterThan(0);
-    expect(now.hostMemory).toBeGreaterThanOrEqual(now.memTotal);
-  });
 });

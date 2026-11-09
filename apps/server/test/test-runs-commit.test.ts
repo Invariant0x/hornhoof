@@ -116,7 +116,7 @@ describe('one commit for a whole run', () => {
     const refused = await call('run_tests', { command: 'make test' });
     expect(refused).toEqual({ error: true, text: 'The repository has no branch task-1 or task-1-...' });
     expect(await c.db.select().from(testRuns)).toEqual([]);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
   });
 
   it('asks the repository nothing for a run the rules refuse anyway', async () => {

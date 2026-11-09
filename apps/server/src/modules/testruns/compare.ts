@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import type { RepoAddress } from './refs.js';
 
-export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string } | { complete: false; reason: string };
+/* A file GitHub lists with its counts and shows no patch of, as it does for a large file such as a migration's snapshot. */
+export type OmittedPatch = { path: string; additions: number; deletions: number };
+export type CompareResult = { complete: true; baseSha: string; headSha: string; paths: string[]; diff: string; omitted?: OmittedPatch[] } | { complete: false; reason: string };
 export type CompareReader = (repo: RepoAddress, refs: { base: string; head: string }, timeoutMs?: number) => Promise<CompareResult>;
 const Sha = z.string().regex(/^[a-f0-9]{40}$/);
-const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
+const File = z.object({ filename: z.string().min(1), previous_filename: z.string().optional(), patch: z.string().optional(), additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative() });
 const Comparison = z.object({ base_commit: z.object({ sha: Sha }), commits: z.array(z.object({ sha: Sha })), total_commits: z.number().int().nonnegative(), status: z.enum(['ahead', 'behind', 'diverged', 'identical']), files: z.array(File).max(299) });
 
 function trustedHost(at: URL): boolean {
@@ -20,7 +22,9 @@ function githubName(url: string): string | null {
   } catch { return null; }
 }
 
+/* A patch GitHub shows is whole when it holds every line its counts name. One it shows none of is named, never read as empty. */
 function completePatch(file: z.infer<typeof File>): boolean {
+  if (file.patch === undefined) return true;
   const lines = file.patch.split('\n');
   return lines.filter(line => line.startsWith('+')).length === file.additions && lines.filter(line => line.startsWith('-')).length === file.deletions;
 }
@@ -37,6 +41,9 @@ function comparedPaths(file: z.infer<typeof File>): string[] {
   return file.previous_filename ? [file.filename, file.previous_filename] : [file.filename];
 }
 
+const patchOrName = (file: z.infer<typeof File>): string =>
+  file.patch ?? `GitHub shows no patch of ${file.filename}: ${file.additions} lines added, ${file.deletions} removed.`;
+
 function parsedComparison(body: unknown): CompareResult {
   const parsed = Comparison.safeParse(body);
   if (!parsed.success || !completeInventory(parsed.data)) return { complete: false, reason: 'incomplete-comparison' };
@@ -44,7 +51,8 @@ function parsedComparison(body: unknown): CompareResult {
   if (data.status !== 'ahead' && data.status !== 'identical') return { complete: false, reason: 'not-an-ancestor' };
   const headSha = comparisonHead(data);
   if (!headSha) return { complete: false, reason: 'incomplete-comparison' };
-  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(f => f.patch).join('\n') };
+  const omitted = data.files.filter(file => file.patch === undefined).map(file => ({ path: file.filename, additions: file.additions, deletions: file.deletions }));
+  return { complete: true, baseSha: data.base_commit.sha, headSha, paths: data.files.flatMap(comparedPaths), diff: data.files.map(patchOrName).join('\n'), omitted };
 }
 
 /* A GitHub API answer for this repository, or null where it has none to give. No redirect or remote error text can carry the
@@ -60,8 +68,8 @@ async function githubJson(repo: RepoAddress, path: string, timeoutMs: number): P
   return { body: await response.json() };
 }
 
-/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or
-   missing lines mean unknown, never a clean diff. */
+/* GitHub caps comparisons at 300 files and may omit a large/binary patch. A cap or missing lines mean unknown, never a clean
+   diff; an omitted patch keeps its path and is named in the diff. */
 export const readCompare: CompareReader = async (repo, refs, timeoutMs = 10_000) => {
   try {
     const answer = await githubJson(repo, `compare/${encodeURIComponent(refs.base)}...${encodeURIComponent(refs.head)}`, timeoutMs);

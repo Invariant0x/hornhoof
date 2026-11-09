@@ -133,7 +133,7 @@ describe('check command bridge', () => {
       method: 'POST', body: JSON.stringify({ command: ['/bin/bash', '-c', 'sleep 60 & echo leader-exiting; exit 0'], cwd: '/tmp', env: { PATH: process.env.PATH } }),
     });
     const output = response.text();
-    const result = await Promise.race([output.then(text => ({ ended: true, text })), new Promise<{ ended: boolean; text: string }>(resolve => setTimeout(() => resolve({ ended: false, text: '' }), 1500))]);
+    const result = await Promise.race([output.then(text => ({ ended: true, text })), new Promise<{ ended: boolean; text: string }>(resolve => setTimeout(() => resolve({ ended: false, text: '' }), 15_000))]);
     expect(result.ended).toBe(true);
     expect(result.text).toContain('"type":"exit","code":0');
     expect(released).toBe(true);

@@ -23,6 +23,23 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
   await applyMissingMigrations(db, config);
 }
 
+/* A fresh install, migrated once for the file by the first test that needs one: each test opens a copy of its own. */
+let installed: Promise<Blob> | undefined;
+async function freshInstall(): Promise<PGlite> {
+  installed ??= (async () => {
+    const client = await freshPglite();
+    try {
+      await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
+      return await client.dumpDataDir('none');
+    } finally {
+      await client.close();
+    }
+  })();
+  const client = new PGlite({ loadDataDir: await installed });
+  onTestFinished(() => client.close());
+  return client;
+}
+
 describe('department owner and approval policy migration', () => {
   const FORWARD = '0062_pipeline_report';
 
@@ -72,10 +89,8 @@ describe('department owner and approval policy migration', () => {
   });
 
   it('refuses a stored rule that would let everything through: a mode of limits with no limit', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
     await expect(db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode) values (${company}, ${dept}, 'spend', 'within_limits')`)).rejects.toThrow();
@@ -124,10 +139,8 @@ describe('notification provenance migration', () => {
 
 describe('migration 0050', () => {
   it('adds a nullable external wait and its deadline index on a fresh database', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     const columns = await db.execute(sql`select column_name, data_type, is_nullable from information_schema.columns where table_name = 'tasks'`);
     expect(columns.rows).toContainEqual({ column_name: 'external_wait', data_type: 'jsonb', is_nullable: 'YES' });
     const indexes = await db.execute<{ indexdef: string }>(sql`select indexdef from pg_indexes where tablename = 'tasks' and indexname = 'tasks_external_wait_until'`);
@@ -1126,10 +1139,8 @@ describe('migration 0045', () => {
   });
 
   it('creates both indexes on a fresh install', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
 
     const indexes = await db.execute(sql`select indexname, indexdef from pg_indexes
       where schemaname = 'public' and tablename = 'tasks' and indexname in ('tasks_turn_id', 'tasks_product_id') order by indexname`);
@@ -1201,10 +1212,8 @@ describe('migration 0051', () => {
   const ALICE_WAITING = '00000000-0000-4000-8000-000000000016';
 
   it('passes on a fresh install and removes unfinished waiting_machine tails on a machine with test runs while keeping ready, agent-assigned, node-run and another owner subscriptions', async () => {
-    const freshClient = await freshPglite();
-    onTestFinished(() => freshClient.close());
-    const freshDb = drizzle(freshClient);
-    await migrate(freshDb, { migrationsFolder: MIGRATIONS });
+    /* A fresh install migrates: the copy of one is made by migrating it. */
+    await freshInstall();
 
     const client = await freshPglite();
     onTestFinished(() => client.close());
@@ -1297,10 +1306,8 @@ describe('migration 0052', () => {
 
 describe('migration 0053', () => {
   it('creates the person rename journal and its indexes on a fresh install', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'person_changes' order by column_name`);
     expect(columns.rows.map(row => row.column_name)).toEqual(['actor_id', 'after', 'before', 'company_id', 'created_at', 'field', 'id', 'person_id']);
     const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'person_changes' order by indexname`);
@@ -1379,10 +1386,8 @@ describe('migration 0062', () => {
   const labels = async (db: PgliteDatabase) => (await db.execute<{ number: number; work_kind: string | null; risk_class: string | null }>(sql`select number, work_kind, risk_class from tasks order by number`)).rows;
 
   it('makes the fields and the tables on a fresh install, and grants no one anything', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'tasks' and column_name in ('work_kind', 'risk_class') order by column_name`);
     expect(columns.rows.map(c => c.column_name)).toEqual(['risk_class', 'work_kind']);
     expect((await db.execute(sql`select * from turn_snapshots`)).rows).toEqual([]);
@@ -1451,10 +1456,8 @@ describe('migration 0059', () => {
   ];
 
   it('makes the history of node connections on a fresh install, with its indexes', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await tableOf(db)).rows).toEqual(COLUMNS);
     const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'node_connections' and indexname <> 'node_connections_pkey' order by indexname`);
     expect(indexes.rows.map(r => r.indexname)).toEqual(['node_connections_machine', 'node_connections_node']);
@@ -1487,10 +1490,8 @@ describe('migration 0059', () => {
   });
 
   it('refuses a cause on a connection that has not ended, and an end with no cause', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
     const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
     const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
@@ -1506,10 +1507,8 @@ describe('migration 0057', () => {
     db.execute<{ column_name: string; is_nullable: string }>(sql`select column_name, is_nullable from information_schema.columns where table_name = 'attachments' and column_name in ('job_id', 'person_id') order by column_name`);
 
   it('lets a picture have a person instead of a turn on a fresh install', async () => {
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await columnsOf(db)).rows).toEqual([{ column_name: 'job_id', is_nullable: 'YES' }, { column_name: 'person_id', is_nullable: 'YES' }]);
     const indexes = await db.execute(sql`select indexname from pg_indexes where indexname = 'attachments_person_id'`);
     expect(indexes.rows).toHaveLength(1);
@@ -1546,10 +1545,8 @@ describe('migration 0046', () => {
   it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
     onTestFinished(() => logged.mockRestore());
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await db.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('another branch', 1793700000001)`);
     const before = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
     await db.execute(sql`delete from drizzle.__drizzle_migrations where created_at = 1793700000000`);
@@ -1572,10 +1569,8 @@ describe('migration 0046', () => {
   it('does nothing on a second start even if a recorded hash differs', async () => {
     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
     onTestFinished(() => logged.mockRestore());
-    const client = await freshPglite();
-    onTestFinished(() => client.close());
+    const client = await freshInstall();
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: MIGRATIONS });
     await db.execute(sql`update drizzle.__drizzle_migrations set hash = 'old file' where created_at = 1793700000000`);
     const before = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
 

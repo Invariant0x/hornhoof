@@ -48,7 +48,8 @@ it('never publishes node-only bytes when the job swaps a checked source ancestor
   const definitions: ServiceDefinitions = { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['final'], options: {
     start: { program: process.execPath, args: [server], cwd: '.' },
     readiness: { program: process.execPath, args: ['-e', "const fs=require('node:fs'),p=require('node:path');setInterval(()=>{if(fs.existsSync(p.join(process.env.HH_SERVICE_STATE,'data/nested/private.txt')))process.exit(0)},5)"], cwd: '.' },
-    stop: { signal: 'SIGTERM', graceMs: 2000 }, statePaths: ['data/nested'],
+    /* Room for a slow or loaded machine only: the server stops at once. */
+    stop: { signal: 'SIGTERM', graceMs: 10_000 }, statePaths: ['data/nested'],
   } }] };
   const artifacts = await prepareServiceArtifacts(definitions, root, { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid },
     cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64),

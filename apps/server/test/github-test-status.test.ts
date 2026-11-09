@@ -10,6 +10,7 @@ import { cancel, createTask } from '../src/modules/tasks/engine.js';
 import { markCommit, type TestsMark } from '../src/modules/testruns/github-status.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { as, connectNode, createTestDb, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const FULL = 'npm test';
 const MOVED = 'b'.repeat(40);
@@ -78,7 +79,7 @@ async function company({ full = FULL as string | null, env = {} as NodeJS.Proces
   const fails = (part: { partId: string; commitSha?: string | null }) =>
     node!.send({ type: 'tests.done', partId: part.partId, ok: false, exitCode: 1, error: 'failed', commit: part.commitSha ?? null, log: 'FAIL cart.test.ts\n' });
   const runRow = async () => (await db.select().from(testRuns).orderBy(asc(testRuns.number))).at(-1)!;
-  const ended = () => until(async () => (await runRow()).status !== 'running', 8000);
+  const ended = () => until(async () => (await runRow()).status !== 'running');
   /* What the agent was told, turn by turn, on the task. */
   const told = async () => (await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt))).map(j => j.prompt);
   const logLines = async () => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'comment'))).orderBy(asc(taskEvents.id))).map(e => ({ text: e.text, data: e.data }));
@@ -340,7 +341,7 @@ async function github(handler: (req: IncomingMessage, res: ServerResponse, body:
       handler(req, res, raw);
     });
   });
-  await new Promise<void>(ready => server.listen(0, '127.0.0.1', ready));
+  await listenIn(server);
   onTestFinished(() => new Promise<void>(done => {
     server.closeAllConnections();
     server.close(() => done());

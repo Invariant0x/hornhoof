@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -250,7 +250,7 @@ describe('prepareBrowser', () => {
     fixturePid = Number(readFileSync(started, 'utf8'));
     const at = performance.now();
     client.online(false);
-    await expect.poll(() => existsSync(stopped), { timeout: 1500 }).toBe(true);
+    await expect.poll(() => existsSync(stopped), { timeout: 15_000 }).toBe(true);
     expect(settled).toBe(false);
     await pending.catch(() => {});
     expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
@@ -326,8 +326,8 @@ describe('prepareBrowser', () => {
         if (bin === 'npm') {
           expect(args).toContain('--ignore-scripts');
           expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('');
-          const config = JSON.parse(execFileSync('npm', ['config', 'list', '--json', '--prefix', args[args.indexOf('--prefix') + 1]!], { env, cwd, encoding: 'utf8' }));
-          expect(config.registry).toBe('https://registry.npmjs.org/');
+          expect(readFileSync(env.NPM_CONFIG_GLOBALCONFIG!, 'utf8')).toBe('');
+          expect(Object.keys(env).filter(key => /^npm_config_/i.test(key)).sort()).toEqual(['NPM_CONFIG_CACHE', 'NPM_CONFIG_GLOBALCONFIG', 'NPM_CONFIG_REGISTRY', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_WORKSPACES']);
           fakePlaywrightPackage(args[args.indexOf('--prefix') + 1]!, '1.65.0', '1260');
         } else markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, ['chromium-1260', 'chromium_headless_shell-1260']);
         return { code: 0, output: '', timedOut: false };

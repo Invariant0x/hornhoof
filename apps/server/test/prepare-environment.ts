@@ -9,6 +9,7 @@ import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { drizzle as postgresDb } from 'drizzle-orm/node-postgres';
 import { migrate as migratePostgres } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
+import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 
@@ -31,7 +32,7 @@ function protocolInputPaths(): string[] {
 function inputPaths(): string[] {
   const migrations = readdirSync(MIGRATIONS).filter(name => name.endsWith('.sql')).map(name => `apps/server/drizzle/${name}`);
   return [...migrations, ...protocolInputPaths(), 'apps/server/drizzle/meta/_journal.json', 'apps/server/src/db/schema.ts', 'apps/server/src/db/client.ts',
-    'apps/server/test/prepare-environment.ts', 'apps/server/test/global-setup.ts', 'apps/server/package.json', 'package-lock.json'].sort();
+    'apps/server/src/db/agent-sql.ts', 'apps/server/test/prepare-environment.ts', 'apps/server/test/global-setup.ts', 'apps/server/package.json', 'package-lock.json'].sort();
 }
 function inputs(): Record<string, string> {
   return Object.fromEntries(inputPaths().map(path => [path, sha(readFileSync(join(ROOT, path)))]));
@@ -42,6 +43,9 @@ export async function migratedPgliteDump(): Promise<Buffer> {
     const db = pgliteDb(client, { schema });
     await migratePglite(db, { migrationsFolder: MIGRATIONS });
     await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    /* The roles of agent SQL with their rights, as a server makes them as it starts: a test that runs agent SQL then
+       changes nothing beyond rows of the database its file shares. */
+    await client.exec(`${grantsFor(agentRole('postgres'))};\n${readerGrantsFor(readerRole('postgres'))}`);
     return Buffer.from(await (await client.dumpDataDir('none')).arrayBuffer());
   } finally { await client.close(); }
 }

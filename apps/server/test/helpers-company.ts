@@ -1,3 +1,4 @@
+import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Db } from '../src/db/client.js';
@@ -16,7 +17,6 @@ export const SETUP = {
   orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
 };
 
-/* Runs first-run setup and returns the CEO's session token. */
 /* Takes away the Operations every company gets at its setup, for a test that stages the departments it needs itself. */
 export async function withoutOperations(db: Db): Promise<void> {
   const ops = await db.select({ id: schema.departments.id }).from(schema.departments).where(eq(schema.departments.templateKey, 'operations'));
@@ -28,12 +28,26 @@ export async function withoutOperations(db: Db): Promise<void> {
   }
 }
 
-/* A company with its orchestrator and nothing else, for a test about something other than Operations. A test about what
-   people really get calls /api/setup itself. */
+/* Rows a group of tests starts from, made on this app's database as fixture() in helpers-db.ts says, for an app as its
+   config makes it. The app is ready first, as the first request makes it, so what it does as it comes up sees no rows of
+   them whether they are made or put back. */
+export async function appFixture<T>(app: FastifyInstance, key: string, make: () => Promise<T>): Promise<T> {
+  await app.ready();
+  /* Browser support processes own their app without Vitest's lifecycle or fixture cache. */
+  if (!process.env.VITEST) return make();
+  const { fixture } = await import('./helpers-db.js');
+  const { $client } = app.ctx.db as unknown as { $client: PGlite };
+  return fixture($client, `${key} ${JSON.stringify(app.ctx.config)}`, make);
+}
+
+/* A company with its orchestrator and nothing else, for a test about something other than Operations, and the CEO's
+   session token. First-run setup runs once in a file; a test about what people really get calls /api/setup itself. */
 export async function setUpCompany(app: FastifyInstance): Promise<string> {
-  const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
-  await withoutOperations(app.ctx.db);
-  return token;
+  return appFixture(app, 'setUpCompany', async () => {
+    const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+    await withoutOperations(app.ctx.db);
+    return token;
+  });
 }
 
 type Access = { whole: true } | { departments?: string[]; teams?: string[] };

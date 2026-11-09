@@ -11,12 +11,18 @@ import { PassThrough } from 'node:stream';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hh-iso-'));
 
+/* What each program was started as. A program asked to run as another user than this test's gets the system's answer to a
+   node that is not root, recorded: the system refuses. */
+const started = vi.hoisted(() => [] as { file: string; uid?: number; gid?: number }[]);
 vi.mock('node:child_process', async importOriginal => {
   const original = await importOriginal<typeof import('node:child_process')>();
   return {
     ...original,
-    spawn: (file: string, args: string[], options: import('node:child_process').SpawnOptions) =>
-      original.spawn(file === 'npm' ? join(args[args.indexOf('--prefix') + 1]!, 'bin', 'npm') : file, args, options),
+    spawn: (file: string, args: string[], options: import('node:child_process').SpawnOptions) => {
+      started.push({ file, uid: options.uid, gid: options.gid });
+      if (options.uid !== undefined && options.uid !== process.getuid?.()) throw Object.assign(new Error('spawn EPERM'), { code: 'EPERM', syscall: 'spawn' });
+      return original.spawn(file === 'npm' ? join(args[args.indexOf('--prefix') + 1]!, 'bin', 'npm') : file, args, options);
+    },
   };
 });
 
@@ -195,22 +201,32 @@ describe('builtinAdapters', () => {
 });
 
 /* A user this test cannot become: a program started as that user fails, which shows the user was passed on. */
-describe.skipIf(process.getuid?.() === 0)("a root node's own runs of the agents' program", () => {
+describe("a root node's own runs of the agents' program", () => {
   const other = { uid: process.getuid!() + 1, gid: process.getgid!() + 1 };
   const io = () => ({ input: new PassThrough(), output: new PassThrough(), urlFile: join(tmp(), 'login-url') });
+  const bin = 'agents-program';
 
   it("checks the sign-in and signs in as the agents' user, so the program leaves nothing in their home they cannot read", async () => {
-    expect(await exitsCleanly('/usr/bin/true', [], process.env)).toBe(true);
-    expect(await exitsCleanly('/usr/bin/true', [], process.env, other)).toBe(false);
-    await expect(interactiveLogin('/usr/bin/true', [], process.env, io())).resolves.toBeUndefined();
-    await expect(interactiveLogin('/usr/bin/true', [], process.env, io(), other)).rejects.toThrow();
+    started.length = 0;
+    expect(await exitsCleanly(process.execPath, ['-e', ''], process.env)).toBe(true);
+    await expect(interactiveLogin(process.execPath, ['-e', ''], process.env, io())).resolves.toBeUndefined();
+    expect(started.map(s => [s.uid, s.gid])).toEqual([[undefined, undefined], [undefined, undefined]]);
+    started.length = 0;
+    expect(await exitsCleanly(bin, [], process.env, other)).toBe(false);
+    await expect(interactiveLogin(bin, [], process.env, io(), other)).rejects.toThrow();
     const home = tmp();
-    expect(await claudeAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).loggedIn()).toBe(false);
-    expect(await codexAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).loggedIn()).toBe(false);
-    await expect(kimiAdapter({ home, tools: home, bin: '/usr/bin/true', user: other }).login(io())).rejects.toThrow();
-    await expect(claudeAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).login(io())).rejects.toThrow();
-    await expect(codexAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).login(io())).rejects.toThrow();
+    expect(await claudeAdapter({ home, tools: home, bin, mode: 'plan', user: other }).loggedIn()).toBe(false);
+    expect(await codexAdapter({ home, tools: home, bin, mode: 'plan', user: other }).loggedIn()).toBe(false);
+    await expect(kimiAdapter({ home, tools: home, bin, user: other }).login(io())).rejects.toThrow();
+    await expect(claudeAdapter({ home, tools: home, bin, mode: 'plan', user: other }).login(io())).rejects.toThrow();
+    await expect(codexAdapter({ home, tools: home, bin, mode: 'plan', user: other }).login(io())).rejects.toThrow();
+    const asAgents = started.filter(s => s.file === bin);
+    expect(asAgents.length).toBeGreaterThanOrEqual(7);
+    expect(asAgents.every(s => s.uid === other.uid && s.gid === other.gid)).toBe(true);
   });
+});
+
+describe.skipIf(process.getuid?.() === 0)("a root node's installation of the agents' program", () => {
 
   it("keeps npm's cache in the private installer home instead of in the agents' home", async () => {
     const tools = tmp();

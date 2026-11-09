@@ -8,6 +8,7 @@ import { digestOf } from '../src/modules/outbound/checks.js';
 import { recipientDigest } from '../src/modules/outbound/contacts.js';
 import { beginDispatch, recordReview, reserveDispatch, submitOutbound, type Authority, type Review } from '../src/modules/outbound/core.js';
 import { company } from './department-owner-fixture.js';
+import { appFixture } from './helpers.js';
 import { binding as checkBinding } from './model-check-fixture.js';
 import { sha } from './outbound-fixture.js';
 
@@ -91,15 +92,19 @@ export async function letTenDollarsGo(c: C) {
   await c.setRule(c.ceoToken, c.dev.id, 'price', { mode: 'within_limits', limit: 100, unit: 'USD' });
 }
 
+/* The company of department-owner-fixture.ts with that channel, made once in a file for each policy and channel. */
 export async function world(policy: OutboundPolicyValue = QUIET, over: ChannelOver = {}, logger?: Deps['logger']) {
   const c = await company({ PUBLIC_URL: 'https://hornhoof.example' }, logger);
-  const channel = await aChannelOf(c, over);
-  const policyRow = await aPolicyOf(c, channel.id, policy);
-  const { account, binding } = await anAccountOf(c, channel.id, c.worker.id);
-  const contact = await aContactOf(c);
-  const permission = await aPermissionOf(c, contact.id, channel.id);
-  const parts = await partsOf(c, channel.id);
-  await letTenDollarsGo(c);
+  const { channel, policyRow, account, binding, contact, permission, parts } = await appFixture(c.app, `outbound world ${JSON.stringify({ policy, over })}`, async () => {
+    const channel = await aChannelOf(c, over);
+    const policyRow = await aPolicyOf(c, channel.id, policy);
+    const { account, binding } = await anAccountOf(c, channel.id, c.worker.id);
+    const contact = await aContactOf(c);
+    const permission = await aPermissionOf(c, contact.id, channel.id);
+    const parts = await partsOf(c, channel.id);
+    await letTenDollarsGo(c);
+    return { channel, policyRow, account, binding, contact, permission, parts };
+  });
   const authority: Authority = { companyId: c.companyId, agentId: c.worker.id, departmentId: c.dev.id, jobId: null };
   const document = documentOf(parts);
   const input = (change: Partial<OutboundSubmit> = {}): OutboundSubmit => ({
