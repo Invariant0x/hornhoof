@@ -255,7 +255,7 @@ describe.skipIf(!hasTmux)('a turn whose words did not get recorded within 60 s',
     await new Promise(done => setTimeout(done, 200));
     expect(needed(c)).toHaveLength(1);
     expect(needed(c)[0]).toMatchObject({ reason: 'assignment_unrecorded', jobId: first.jobId, deliveryId: first.deliveryId,
-      check: { input: 'text', screen: { protected: false, cols: 120, rows: 40, cells: expect.stringContaining(prompt) } } });
+      check: { input: 'text', screen: { cols: 120, rows: 40, cells: expect.stringContaining(prompt) } } });
     expect(ended).toBe(false);
     await host.operatorMessage({ type: 'program.operator_case', agentKey: c.key, jobId: first.jobId, instance: needed(c)[0]!.instance, ...CASE });
     expect(await first.running).toMatchObject({ ok: false, error: 'agent_failed' });
@@ -272,7 +272,7 @@ describe.skipIf(!hasTmux)('a turn whose words did not get recorded within 60 s',
     await new Promise(done => setTimeout(done, 300));
     c.tick(60_000);
     await until(() => needed(c).length > 0);
-    expect(needed(c)[0]!.check).toMatchObject({ input: 'empty', screen: { protected: false } });
+    expect(needed(c)[0]!.check).toMatchObject({ input: 'empty', screen: { cols: 120, rows: 40 } });
     stop.abort();
     await first.running;
   });

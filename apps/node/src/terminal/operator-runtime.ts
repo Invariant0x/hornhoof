@@ -31,7 +31,7 @@ type Target = { identity: OperatorIdentity; control: OperatorControl; generation
 const NO_PROGRAM = { program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false } as const;
 
 /* Hornhoof's own words that never went are no person's: the words that go on take their place. */
-function inputShown(input: string | null, own: boolean): OperatorRecoveryState['input'] {
+export function inputShown(input: string | null, own: boolean): OperatorRecoveryState['input'] {
   if (input === null) return 'unknown';
   if (!input) return 'empty';
   return own ? 'hornhoof' : 'words';

@@ -93,20 +93,31 @@ export async function readProgramView(ctx: Ctx, caller: OperatorCaller, input: V
 
 /* Text goes in as a paste, then the keys, into the program the fresh snapshot showed. Any key goes, Ctrl+U and Escape too, and
    any question is answered, the owner's own too. A lost answer is unknown and nothing sends it again. */
-export async function sendProgramInput(ctx: Ctx, caller: OperatorCaller, input: KeysInput): Promise<{ action: string; result: ProgramInputResult['result']; reason: ProgramInputResult['reason'] }> {
-  const keys = input.keys ?? [], text = input.text || null;
-  if (!keys.length && !text) throw new ApiError(400, 'validation', 'Give keys, text or both.', 'agent_not_ready');
-  if (!keys.every(key => ProgramKey.safeParse(key).success)) throw new ApiError(400, 'validation', 'Name each key as tmux does: Enter, Escape, Tab, BSpace, Up, PageDown, F5, a letter or a digit, with C-, M- or S- before it for Ctrl, Alt or Shift, as in C-u.', 'agent_not_ready');
+export async function sendProgramInput(ctx: Ctx, caller: OperatorCaller, input: KeysInput): Promise<Outcome> {
+  const typed = typedOf(input);
   const me = await authorizeAccess(ctx, caller);
   const program = await programOf(ctx, me, input.employee);
   const action = randomUUID();
-  const reply = await requestProgramInput(ctx, program, { action, snapshot: input.snapshot, keys, text });
-  const outcome = { action, result: reply?.result ?? 'unknown' as const, reason: reply?.reason ?? (reply ? null : 'action_unknown' as const) };
-  await record(ctx, me, caller, program, input, reply, outcome);
+  const reply = await requestProgramInput(ctx, program, { action, snapshot: input.snapshot, ...typed });
+  const outcome = outcomeOf(action, reply);
+  await record(ctx, { me, caller, program, input, typed, reply, outcome });
   return outcome;
 }
 
-type Outcome = Awaited<ReturnType<typeof sendProgramInput>>;
+type Outcome = { action: string; result: ProgramInputResult['result']; reason: ProgramInputResult['reason'] };
+type Typed = { keys: string[]; text: string | null };
+type Entry = { me: Agent; caller: OperatorCaller; program: Program; input: KeysInput; typed: Typed; reply: ProgramInputResult | null; outcome: Outcome };
+
+/* Keys by their tmux names and text, one of them at least. */
+function typedOf(input: KeysInput): Typed {
+  const keys = input.keys ?? [], text = input.text || null;
+  if (!keys.length && !text) throw new ApiError(400, 'validation', 'Give keys, text or both.', 'agent_not_ready');
+  if (!keys.every(key => ProgramKey.safeParse(key).success)) throw new ApiError(400, 'validation', 'Name each key as tmux does: Enter, Escape, Tab, BSpace, Up, PageDown, F5, a letter or a digit, with C-, M- or S- before it for Ctrl, Alt or Shift, as in C-u.', 'agent_not_ready');
+  return { keys, text };
+}
+
+const outcomeOf = (action: string, reply: ProgramInputResult | null): Outcome =>
+  reply ? { action, result: reply.result, reason: reply.reason } : { action, result: 'unknown', reason: 'action_unknown' };
 
 /* The program operator's look at the case it was given is the picture its report carries. */
 async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, png: Buffer): Promise<void> {
@@ -118,23 +129,47 @@ async function keepForCase(ctx: Ctx, caller: OperatorCaller, program: Program, p
 }
 
 /* Who, why, which keys and what text with its secrets masked, and what came of it, in the employee's conversation. */
-async function record(ctx: Ctx, me: Agent, caller: OperatorCaller, program: Program, input: KeysInput, reply: ProgramInputResult | null, outcome: Outcome): Promise<void> {
+async function record(ctx: Ctx, entry: Entry): Promise<void> {
+  const { me } = entry;
   const secrets = await pictureSecrets(ctx, me.companyId);
-  const keys = input.keys ?? [], typed = input.text ? masked(input.text, secrets) : null;
-  const question = maskedQuestion(reply?.question ?? null, secrets);
-  const permissionDecision = Boolean(input.decision && question?.kind === 'permission' && outcome.result === 'applied');
+  const job = await turnOf(ctx, entry);
+  const action = { ...actionOf(entry, secrets), case: await caseOf(ctx, entry), targetJobId: job.id };
+  const actor = await agentParty(ctx, me.companyId, me.id);
+  await logTurnFact(ctx, job, lineOf(entry, action), { notification: await operatorNotification(ctx, job), actor, from: 'agent', by: me.id, name: me.name, operatorAction: action });
+}
+
+/* The turn the input went into, as the node said, or else the employee's last one. */
+async function turnOf(ctx: Ctx, { program, reply }: Entry): Promise<Job> {
+  if (!reply?.jobId) return program.job;
+  const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, reply.jobId), eq(jobs.agentId, program.agentId)));
+  return job ?? program.job;
+}
+
+/* The case this operator turn was given on the employee: a denial it reports rests on this record. */
+async function caseOf(ctx: Ctx, { me, caller, program }: Entry): Promise<string | null> {
   const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases)
     .where(and(eq(programOperatorCases.agentId, program.agentId), eq(programOperatorCases.companyId, me.companyId), eq(programOperatorCases.operatorJobId, caller.id))).orderBy(desc(programOperatorCases.openedAt)).limit(1);
-  const job = reply?.jobId ? (await ctx.db.select().from(jobs).where(and(eq(jobs.id, reply.jobId), eq(jobs.agentId, program.agentId))))[0] ?? program.job : program.job;
-  const actor = await agentParty(ctx, me.companyId, me.id);
-  const operatorAction = {
-    id: outcome.action, case: held?.id ?? null, operatorJobId: caller.id, targetJobId: job.id, instance: reply?.instance ?? null, snapshot: input.snapshot, at: new Date().toISOString(),
-    actor: { id: me.id, name: me.name }, keys, key: keys.at(-1) ?? null, text: typed, reason: input.reason, result: outcome.result, error: outcome.reason,
-    question, requestedDecision: input.decision, ...(permissionDecision ? { decision: input.decision, permissionDecision } : {}),
+  return held?.id ?? null;
+}
+
+function actionOf({ me, caller, input, typed, reply, outcome }: Entry, secrets: string[]) {
+  const question = maskedQuestion(reply?.question ?? null, secrets);
+  return {
+    id: outcome.action, operatorJobId: caller.id, instance: reply?.instance ?? null, snapshot: input.snapshot, at: new Date().toISOString(),
+    actor: { id: me.id, name: me.name }, keys: typed.keys, key: typed.keys.at(-1) ?? null, text: typed.text && masked(typed.text, secrets), reason: input.reason, result: outcome.result, error: outcome.reason,
+    question, requestedDecision: input.decision, ...decided(input, question, outcome),
   };
-  const said = [keys.length ? `keys ${keys.join(' ')}` : '', typed ? `text "${typed}"` : ''].filter(Boolean).join(' and ');
-  const choice = permissionDecision ? ` Decision: ${input.decision}. Request: ${question?.text ?? 'unavailable'}.` : '';
-  await logTurnFact(ctx, job, `${me.name}, ${said}: ${outcome.result}${outcome.reason ? ` (${outcome.reason})` : ''}. Reason: ${input.reason}.${choice}`, { notification: await operatorNotification(ctx, job), actor, from: 'agent', by: me.id, name: me.name, operatorAction });
+}
+
+/* An answer to a question of permission, given and taken. */
+function decided(input: KeysInput, question: OperatorQuestion | null, outcome: Outcome) {
+  return input.decision && question?.kind === 'permission' && outcome.result === 'applied' ? { decision: input.decision, permissionDecision: true } : {};
+}
+
+function lineOf({ me, input }: Entry, action: ReturnType<typeof actionOf>): string {
+  const said = [action.keys.length ? `keys ${action.keys.join(' ')}` : '', action.text ? `text "${action.text}"` : ''].filter(Boolean).join(' and ');
+  const choice = 'permissionDecision' in action ? ` Decision: ${input.decision}. Request: ${action.question!.text}.` : '';
+  return `${me.name}, ${said}: ${action.result}${action.error ? ` (${action.error})` : ''}. Reason: ${input.reason}.${choice}`;
 }
 
 function masked(text: string, secrets: string[]): string {

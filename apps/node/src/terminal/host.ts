@@ -34,7 +34,7 @@ import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollo
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
 import { holdsWords, LostWords } from './lost-words.js';
-import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
+import { inputShown, OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
 import type { ProgramFacts } from './program-access.js';
 import type { OperatorProgram } from './operator-control.js';
@@ -472,9 +472,12 @@ export class TerminalHost {
     if (!a?.program || !a.instance || !(await this.opts.tmux.alive(a.name))) return null;
     this.drain(a);
     const input = inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true));
-    /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
-    const instance = this.operator?.identity(key)?.instance ?? a.instance;
-    return { jobId: a.turn?.jobId ?? null, instance, working: a.busy, tool: [...a.calls.values()][0]?.name ?? null, question: a.operatorQuestion ?? null, input: inputLine(input, input ? this.ownWordsOnly(a, input) : false), undelivered: wordsUndelivered(a) };
+    return { ...this.programIdentity(key, a), working: a.busy, ...programAsks(a), input: inputShown(input, input !== null && this.ownWordsOnly(a, input)), undelivered: wordsUndelivered(a) };
+  }
+
+  /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
+  private programIdentity(key: string, a: Agent): Pick<ProgramFacts, 'jobId' | 'instance'> {
+    return { jobId: a.turn?.jobId ?? null, instance: this.operator?.identity(key)?.instance ?? a.instance! };
   }
 
   /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */
@@ -3162,11 +3165,9 @@ function stopsAtSetup(step: Awaited<ReturnType<typeof pastColors>>, stuck: boole
   return step === 'terms' || stuck;
 }
 
-/* Nothing typed, Hornhoof's own words that never went, anyone else's words, or an input nobody can read. */
-function inputLine(input: string | null, own: boolean): ProgramFacts['input'] {
-  if (input === null) return 'unknown';
-  if (!input) return 'empty';
-  return own ? 'hornhoof' : 'words';
+/* The tool the program runs and the question it asks, if any. */
+function programAsks(a: Agent): Pick<ProgramFacts, 'tool' | 'question'> {
+  return { tool: [...a.calls.values()][0]?.name ?? null, question: a.operatorQuestion ?? null };
 }
 
 /* Hornhoof's words wait to go in: they stand unsent in the input, are typed and not taken yet, or wait for the turn. */

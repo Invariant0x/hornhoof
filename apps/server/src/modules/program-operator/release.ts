@@ -21,6 +21,9 @@ export type ReleaseInput = { case: string; reason: string };
 type Refusal = OperatorError | 'no_plan';
 export type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: Refusal };
 
+/* Hornhoof's own words that never went are erased by the saved words, which go in once in their place. */
+const READY_INPUT = new Set<OperatorRecoveryState['input']>(['empty', 'hornhoof']);
+
 /* Only what the node sees right now counts; the database may be behind what the program does. */
 function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
   if (!state) return 'node_unavailable';
@@ -28,8 +31,7 @@ function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
   if (state.wait === 'protected') return 'protected_screen';
   if (state.wait) return 'input_not_proven';
   if (state.runningTool || state.retrying || state.busy) return 'program_busy';
-  /* Hornhoof's own words that never went are erased by the saved words, which go in once in their place. */
-  return state.input === 'empty' || state.input === 'hornhoof' ? null : 'input_not_proven';
+  return READY_INPUT.has(state.input) ? null : 'input_not_proven';
 }
 
 const noHold = (row: Case): ReleaseResult => ({ result: 'no_hold', status: row.status, continuation: row.continuationJobId });
