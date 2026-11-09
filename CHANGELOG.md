@@ -18,6 +18,8 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
   lines includes them. A patch GitHub cut short, or a comparison of 300 files or more, is still refused.
 - A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
   mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
+- On a busy machine a turn no longer ends with "The program did not take Hornhoof's prompt" when the program took it
+  during the node's last look: the node looks once more after its time is up, and so does its wait for a program's screen.
 
 ### Russian
 
@@ -30,6 +32,9 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
   GitHub урезал, и сравнение из 300 файлов и больше по-прежнему отказ.
 - Нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
   функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
+- На загруженной машине ход больше не кончается сообщением "The program did not take Hornhoof's prompt", когда программа
+  взяла задание во время последней проверки ноды: нода смотрит еще раз, когда время вышло, и так же ждет нужный экран
+  программы.
 
 ## [0.17.0] - 2026-11-09
 
