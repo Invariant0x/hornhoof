@@ -22,3 +22,13 @@ it('rejects a condition that stays false past the caller deadline', async () => 
   await vi.advanceTimersByTimeAsync(100);
   await rejected;
 });
+
+it('waits long enough by default for a machine busy with other tests', async () => {
+  vi.useFakeTimers();
+  let ready = false;
+  const waiting = until(async () => ready);
+  await vi.advanceTimersByTimeAsync(10_000);
+  ready = true;
+  await vi.advanceTimersByTimeAsync(100);
+  await expect(waiting).resolves.toBeUndefined();
+});

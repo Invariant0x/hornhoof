@@ -57,7 +57,7 @@ const lines = async (db: Awaited<ReturnType<typeof company>>['db'], agentId: str
 /* The updater's side: answers the first command it finds with this output. */
 async function answerAs(control: string, output: string, exit = 0) {
   const dir = join(control, 'computer');
-  await until(() => existsSync(dir) && readdirSync(dir).some(f => !f.endsWith('.out.json')), 5000);
+  await until(() => existsSync(dir) && readdirSync(dir).some(f => !f.endsWith('.out.json')));
   const file = readdirSync(dir).find(f => !f.endsWith('.out.json'))!;
   const asked = JSON.parse(readFileSync(join(dir, file), 'utf8'));
   writeFileSync(join(dir, `${asked.id}.out.json`), JSON.stringify({ id: asked.id, exit, output }));

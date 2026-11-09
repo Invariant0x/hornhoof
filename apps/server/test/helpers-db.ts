@@ -5,7 +5,7 @@ import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from '
 import * as schema from '../src/db/schema.js';
 
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
-type Shared = { client: PGlite; truncate: string; shape: string };
+type Shared = { client: PGlite; shape: string };
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
@@ -40,12 +40,15 @@ export function ownDatabases(): void {
   ownEach = true;
 }
 
+/* A list of rights in one order: granted again after a revoke, a right goes to its end, and means the same. */
+const rights = (acl: string) => `(select array_agg(item::text order by item::text) from unnest(${acl}) item)`;
+
 /* All that a truncate leaves as it was and a test can change. Rows of pg_class and the like hold more, but that more moves
    with every truncate. */
 const SHAPE = `select md5(string_agg(line, E'\n' order by line)) as shape from (
-  select format('relation %s %s %s %s', c.oid::regclass, c.relkind, c.relacl, c.relrowsecurity) as line
+  select format('relation %s %s %s %s', c.oid::regclass, c.relkind, ${rights('c.relacl')}, c.relrowsecurity) as line
     from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'
-  union all select format('column %s %s %s %s %s', a.attrelid::regclass, a.attname, a.atttypid, a.attacl, pg_get_expr(d.adbin, d.adrelid))
+  union all select format('column %s %s %s %s %s', a.attrelid::regclass, a.attname, a.atttypid, ${rights('a.attacl')}, pg_get_expr(d.adbin, d.adrelid))
     from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
     where a.attnum > 0 and not a.attisdropped and n.nspname = 'public'
   union all select format('constraint %s %s %s', c.conrelid::regclass, c.conname, pg_get_constraintdef(c.oid))
@@ -53,14 +56,14 @@ const SHAPE = `select md5(string_agg(line, E'\n' order by line)) as shape from (
   union all select format('index %s', indexdef) from pg_indexes where schemaname = 'public'
   union all select format('trigger %s %s %s', t.tgrelid::regclass, t.tgname, t.tgenabled) from pg_trigger t where not t.tgisinternal
   union all select format('policy %s %s', p.polrelid::regclass, p.polname) from pg_policy p
-  union all select format('function %s %s %s', p.oid::regprocedure, md5(p.prosrc), p.proacl)
+  union all select format('function %s %s %s', p.oid::regprocedure, md5(p.prosrc), ${rights('p.proacl')})
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'
   union all select format('type %s', t.oid::regtype) from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public'
   union all select format('value %s %s', e.enumtypid::regtype, e.enumlabel) from pg_enum e
-  union all select format('schema %s %s', n.nspname, n.nspacl) from pg_namespace n
+  union all select format('schema %s %s', n.nspname, ${rights('n.nspacl')}) from pg_namespace n
   union all select format('role %s %s %s', r.rolname, r.rolsuper, r.rolcanlogin) from pg_roles r
   union all select format('member %s %s', m.roleid, m.member) from pg_auth_members m
-  union all select format('default rights %s', d.defaclacl) from pg_default_acl d
+  union all select format('default rights %s', ${rights('d.defaclacl')}) from pg_default_acl d
   union all select format('database settings %s', s.setconfig) from pg_db_role_setting s
   union all select format('statistics %s', s.starelid::regclass) from pg_statistic s join pg_class c on c.oid = s.starelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'
 ) lines`;
@@ -72,21 +75,95 @@ export async function shapeOf(client: PGlite): Promise<string> {
 
 async function openShared(): Promise<Shared> {
   const client = copyOfMigrated();
-  const tables = await client.query<{ name: string }>(`select format('public.%I', tablename) as name from pg_tables where schemaname = 'public'`);
-  return { client, truncate: `truncate ${tables.rows.map(t => t.name).join(', ')} restart identity cascade`, shape: await shapeOf(client) };
+  return { client, shape: await shapeOf(client) };
 }
 
-/* Whether it is back as it was opened. The first statement waits for any transaction the last test left running. Discarding
-   clears what the connection holds: role, settings, temporary tables, prepared statements and locks. Failing to do all this
-   is an answer too: a test can leave a database that will not truncate. */
-async function emptied({ client, truncate, shape }: Shared): Promise<boolean> {
+/* Only a table with pages can hold rows. */
+const WITH_PAGES = `select format('public.%I', c.relname) as name from pg_class c
+  where c.relnamespace = 'public'::regnamespace and c.relkind = 'r' and pg_relation_size(c.oid) > 0`;
+/* No page and no estimate of rows, for a table and its indexes, as a truncate leaves them: the planner plans for the next
+   test as on a new copy, and the order a query reads rows in does not depend on the tests before. */
+const AS_TRUNCATED = `update pg_class set relpages = 0, reltuples = -1, relallvisible = 0
+  where oid = any($1::regclass[]) or oid in (select indexrelid from pg_index where indrelid = any($1::regclass[]))`;
+const RESTART_NUMBERS = `select setval(format('%I.%I', schemaname, sequencename), start_value, false) from pg_sequences
+  where schemaname = 'public' and last_value is not null`;
+
+const pagedTables = async (client: PGlite) => (await client.query<{ name: string }>(WITH_PAGES)).rows.map(t => t.name);
+
+/* Empties the tables a test wrote and numbers start over. A truncate of all of them took most of a test's time: through
+   the foreign keys it reaches every table, and each costs a new file for it and each of its indexes. */
+async function emptyRows(client: PGlite): Promise<void> {
+  const tables = await pagedTables(client);
+  if (tables.length) {
+    await client.transaction(async tx => {
+      /* No trigger or foreign key has a say, as in a truncate. */
+      await tx.exec('set local session_replication_role = replica');
+      for (const name of tables) await tx.exec(`delete from ${name}`);
+    });
+    await client.exec(`vacuum full ${tables.join(', ')}`);
+    await client.query(AS_TRUNCATED, [tables]);
+  }
+  await client.query(RESTART_NUMBERS);
+}
+
+/* Whether it is ready for the next test. The first statement waits for any transaction the last test left running.
+   Discarding clears what the connection holds: role, settings, temporary tables, prepared statements and locks. Failing
+   is an answer too: a test can leave a database that will not empty. What a test changed beyond rows is seen once, as
+   the file ends. */
+async function emptied({ client }: Shared): Promise<boolean> {
   try {
     await client.exec('discard all');
-    await client.exec(truncate);
-    return (await shapeOf(client)) === shape;
+    await emptyRows(client);
+    return true;
   } catch {
     return false;
   }
+}
+
+/* The tables of a database that hold rows, of those with pages: a table emptied in a test keeps its pages. */
+async function tablesWithRows(client: PGlite): Promise<string[]> {
+  const tables = await pagedTables(client);
+  if (!tables.length) return [];
+  const { rows } = await client.query<{ at: number }>(tables.map((name, at) => `select ${at} as at where exists (select 1 from ${name})`).join(' union all '));
+  return rows.map(r => tables[r.at]!);
+}
+
+type Made = { tables: { name: string; rows: Blob }[]; numbers: { name: string; value: string }[]; value: unknown };
+const made = new Map<string, Made>();
+
+const NUMBERS = `select format('%I.%I', schemaname, sequencename) as name, last_value::text as value from pg_sequences
+  where schemaname = 'public' and last_value is not null`;
+
+async function keep(client: PGlite, value: unknown): Promise<Made> {
+  const tables = [];
+  for (const name of await tablesWithRows(client)) tables.push({ name, rows: (await client.query(`copy ${name} to '/dev/blob' with (format binary)`)).blob! });
+  return { tables, numbers: (await client.query<{ name: string; value: string }>(NUMBERS)).rows, value: structuredClone(value) };
+}
+
+async function putBack(client: PGlite, { tables, numbers }: Made): Promise<void> {
+  await client.query(RESTART_NUMBERS);
+  await client.transaction(async tx => {
+    /* The rows are as the real code made them: no trigger or foreign key has a say again. */
+    await tx.exec('set local session_replication_role = replica');
+    for (const { name, rows } of tables) await tx.query(`copy ${name} from '/dev/blob' with (format binary)`, [], { blob: rows });
+    for (const { name, value } of numbers) await tx.query('select setval($1::regclass, $2::bigint, true)', [name, value]);
+  });
+}
+
+/* Rows a group of tests starts from: make builds them through the real code for the first test of the file that asks,
+   and every later one gets the same rows and numbers back, with a copy of what make returned, which holds no function.
+   They are made again, as on any database, where the database holds rows already, and while the clock is not real:
+   kept ones would hold the time of the real one. Under one key, make builds the same rows each time. */
+export async function fixture<T>(client: PGlite, key: string, make: () => Promise<T>): Promise<T> {
+  if (vi.isFakeTimers() || (await tablesWithRows(client)).length) return make();
+  const kept = made.get(key);
+  if (kept) {
+    await putBack(client, kept);
+    return structuredClone(kept.value) as T;
+  }
+  const value = await make();
+  made.set(key, await keep(client, value));
+  return value;
 }
 
 let shared: Shared | undefined;
@@ -100,7 +177,25 @@ async function closeShared(): Promise<void> {
   await client?.close();
 }
 
-afterAll(closeShared);
+/* Whether the tests of the file left the shared database as it opened, but for its rows. A change beyond them, such as a
+   trigger, a function, a table, a role, a right, a setting of the database or a statistic, reached every later test of
+   the file, so the file fails, and the database is put aside. */
+export async function checkSharedDatabase(): Promise<void> {
+  if (!shared) return;
+  const { client, shape } = shared;
+  const now = await shapeOf(client).catch(() => null);
+  if (now === shape) return;
+  await closeShared();
+  throw new Error('A test of this file changed the shared database beyond its rows, which reaches every test after it. Call ownDatabases() at the top of this file.');
+}
+
+afterAll(async () => {
+  try {
+    await checkSharedDatabase();
+  } finally {
+    await closeShared();
+  }
+});
 
 /* What a test gets of the shared database: closing it only ends the test's hold, and from then on every call fails as on a
    closed database, so work the test left behind cannot write into the rows of the next one. */
