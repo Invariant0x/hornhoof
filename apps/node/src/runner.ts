@@ -7,7 +7,7 @@ import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
 import { carrySession, CARRIES, freshStart, programDirOf, readyProgramFolder } from './program-folder.js';
-import { placeSkills, skillPaths, superpowersIn } from './skills.js';
+import { placeSkills, skillPaths } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
 import type { Worktree } from './tests.js';
 import { headOf, prepareRepo, type Git } from './workspace.js';
@@ -142,11 +142,11 @@ async function withOwnFs<T>(adapter: ProviderAdapter, work: (own: AgentFs) => Pr
 }
 
 /* Gets the folders of a turn ready and its skills in place, in the folder its program works in. */
-async function readyFolders(adapter: ProviderAdapter, { provider, skills }: JobRun, workDir: string, programDir: string | null, superpowers: string | null): Promise<void> {
+async function readyFolders(adapter: ProviderAdapter, { provider, skills }: JobRun, workDir: string, programDir: string | null): Promise<void> {
   if (!skills && !programDir) return;
   await withOwnFs(adapter, async own => {
-    if (programDir) await readyProgramFolder(own, provider, workDir, programDir, skills ? skillPaths(provider, skills, superpowers) : []);
-    if (skills) await placeSkills(own, programDir ?? workDir, provider, skills, superpowers);
+    if (programDir) await readyProgramFolder(own, provider, workDir, programDir, skills ? skillPaths(provider, skills) : []);
+    if (skills) await placeSkills(own, programDir ?? workDir, provider, skills);
   });
 }
 
@@ -162,12 +162,12 @@ async function readyWorkDir({ owner }: ProviderAdapter, workDir: string): Promis
 const anewInTask = (inTask: ProgramWorkspace | undefined, known: string | null, sessionId: string | null) => (inTask && known && !sessionId ? freshStart(inTask.catchUp) : null);
 
 /* Where a turn runs and what it goes on from, in folders ready for it. */
-async function placeOfTurn(adapter: ProviderAdapter, msg: JobRun, dir: string, emit: (event: AgentEvent) => void, { workspace, carries, superpowers }: { workspace: ProgramWorkspace | undefined; carries: ReadonlySet<ProviderId>; superpowers: string | null }): Promise<TurnPlace> {
+async function placeOfTurn(adapter: ProviderAdapter, msg: JobRun, dir: string, emit: (event: AgentEvent) => void, { workspace, carries }: { workspace: ProgramWorkspace | undefined; carries: ReadonlySet<ProviderId> }): Promise<TurnPlace> {
   const inTask = msg.workspace ? workspace : undefined;
   const programDir = inTask?.programDir ?? null;
   const { workDir, sessionId } = workDirFor(msg, dir, programDir, carries);
   await readyWorkDir(adapter, workDir);
-  await readyFolders(adapter, msg, workDir, programDir, superpowers);
+  await readyFolders(adapter, msg, workDir, programDir);
   const anew = anewInTask(inTask, msg.sessionId, sessionId);
   if (anew) emit({ kind: 'text', text: anew.note });
   return { workDir, sessionId, context: anew?.context ?? msg.context ?? null, ...(inTask && { programDir: inTask.programDir, workspaceBinding: inTask.binding }) };
@@ -186,8 +186,6 @@ type RunOptions = {
   beforeRun?: () => Promise<void>;
   /* The turn runs in a live program that people watch: only its own end or a stop ends it, never a time limit. */
   untimed?: boolean;
-  /* The superpowers copy whose skills a program without its plugin gets; the image's by default. */
-  superpowers?: string | null;
   /* Ensures the repository lockfile's Playwright browsers are ready and launchable before the turn starts. */
   prepareRepoBrowser?: (repoDir: string, verifyUser: JobUser | null) => Promise<void>;
   /* The task's folder this turn runs in. */
@@ -263,7 +261,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), workspace, carries = CARRIES, dependencies, dependenciesMs }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), workspace, carries = CARRIES, dependencies, dependenciesMs }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -282,7 +280,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   };
   let res: RunResult;
   try {
-    const place = await placeOfTurn(adapter, msg, dir, emit, { workspace, carries, superpowers });
+    const place = await placeOfTurn(adapter, msg, dir, emit, { workspace, carries });
     const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
     const placed = await placeDependencies(adapter, msg, place, { dependencies, dependenciesMs, git, signal });
     if (placed) emit({ kind: 'text', text: placed });

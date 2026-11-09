@@ -48,8 +48,7 @@ RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGET
 
 # Uncle Bob's quality tools (0BSD): crapper for CRAP scores, dryer for duplicates, mutator for mutation testing. Each keeps
 # its virtualenv next to it, as its launcher expects; mutator also gets crapper, whose names it uses. With them, ECC's
-# rules for each language (MIT), without its common layer and hooks, which assume ECC's own agents. And obra/superpowers
-# (MIT), which Claude Code loads as its plugin and the node copies as skills for the other programs. All at pinned
+# rules for each language (MIT), without its common layer and hooks, which assume ECC's own agents. All at pinned
 # commits. The grammars the tools parse with come along, so they run without fetching anything.
 FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS quality
 # Fixed timestamp so pip wheel archives and Python bytecode headers stay byte-for-byte identical across builds.
@@ -59,7 +58,6 @@ ARG CRAPPER_COMMIT=6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d
 ARG DRYER_COMMIT=66ff6d21a42c04afcad89c78a80066176d1294b0
 ARG MUTATOR_COMMIT=a5a0cb803b66e0cdb8bf471b3b08af701d424a41
 ARG ECC_COMMIT=91b5f6a371f7b06d2c3e0c208147c559e11f022c
-ARG SUPERPOWERS_COMMIT=bb92a77741419a4ab5f06e711a283343f1ada0c3
 ARG TREE_SITTER="tree-sitter==0.26.0 tree-sitter-language-pack==1.22.1"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl patch python3 python3-venv && rm -rf /var/lib/apt/lists/*
 COPY apps/node/quality/ /tmp/hornhoof-quality/
@@ -89,7 +87,6 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
   cp -R /tmp/ecc/rules/. /opt/hornhoof/rules/; cp /tmp/ecc/LICENSE /opt/hornhoof/rules/LICENSE; rm -rf /tmp/ecc; \
   cd /opt/hornhoof/rules; rm -rf common README.md */hooks.md; find . -name '*.md' -exec sed -i '/^See skill:/d' {} +; \
   printf 'Rules for each language from affaan-m/ECC at %s, under its MIT license (LICENSE).\nHornhoof left out its common layer and hooks, which assume ECC agents, and its pointers to ECC skills.\n' $ECC_COMMIT > README.md; \
-  fetch obra/superpowers /opt/hornhoof/superpowers $SUPERPOWERS_COMMIT; \
   chmod -R a+rX /opt/hornhoof
 
 FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
@@ -141,7 +138,6 @@ COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mj
 RUN node /app/apps/node/service-runtime-smoke.mjs
 COPY --from=quality /opt/hornhoof/ub /opt/hornhoof/ub
 COPY --from=quality /opt/hornhoof/rules /opt/hornhoof/rules
-COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers
 COPY --from=quality /opt/hornhoof/grammars /opt/hornhoof/grammars
 ENV TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/hornhoof/grammars
 COPY --from=quality /opt/hornhoof/bin/ /usr/local/bin/

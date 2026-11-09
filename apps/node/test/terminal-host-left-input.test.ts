@@ -25,7 +25,7 @@ async function atWork(kind: Kind, more: Parameters<typeof setUp>[0] = {}, operat
   const frames: OperatorNodeMessage[] = [];
   let clock = 1000;
   const dir = mkdtempSync(join(tmpdir(), 'hh-left-input-'));
-  await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000, ...more,
+  await setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000, ...more,
     operator: { dir, send: frame => { frames.push(frame); return true; }, connected: () => true, now: () => clock, ...operator } });
   const key = randomUUID();
   let ordinal = 0;
@@ -358,7 +358,7 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
   const started = async (kind: Kind, more: Parameters<typeof setUp>[0] = {}) => {
-    await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 3000, toolsMs: 5000, typingQuietMs: 50, keptWaitMs: 300, enterWaitMs: 300, ...more });
+    await setUp({ cols: 120, rows: 40, readyMs: 3000, toolsMs: 5000, typingQuietMs: 50, keptWaitMs: 300, enterWaitMs: 300, ...more });
     const key = randomUUID();
     const first = await host.run(PROGRAMS[kind](key, 'First assignment.', { jobId: randomUUID() }));
     expect(first).toMatchObject({ ok: true });

@@ -55,7 +55,7 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => program.onPaste(text));
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter')) program.onEnter(); });
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], plugins: [], readyMs: readyMs ?? (plain ? 3000 : 20), pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], readyMs: readyMs ?? (plain ? 3000 : 20), pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const abort = new AbortController();

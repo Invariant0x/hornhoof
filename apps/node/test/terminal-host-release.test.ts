@@ -15,7 +15,7 @@ const PROGRAMS = { claude: job, codex: codexJob, kimi: kimiJob, antigravity: agy
 const KINDS = Object.keys(PROGRAMS) as (keyof typeof PROGRAMS)[];
 type Left = Extract<NodeMessage, { type: 'agent.input_left' }>;
 
-const start = () => setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 500 });
+const start = () => setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 500 });
 const nameOf = (key: string) => `a-${key}`;
 const gone = (key: string) => until(async () => !(await tmux.has(nameOf(key))));
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));

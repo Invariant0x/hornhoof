@@ -6,7 +6,6 @@ import type { JobUser } from '../isolation.js';
 import { programDirOf } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
-import { claudePlugins } from '../skills.js';
 import { credentialSecrets } from '../credentials.js';
 import { readAccount } from '../account.js';
 import { claudePlanLimits, planToken } from '../terminal/programs.js';
@@ -18,8 +17,7 @@ import { NPM_PACKAGES } from './packages.js';
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
 
-/* plugins: folders Claude Code loads for each run, superpowers from the image by default. */
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null; plugins?: string[] };
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null };
 
 const GLM_ENV = {
   ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
@@ -81,7 +79,7 @@ export function claudeInterrupted(line: unknown): boolean {
 
 export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
-export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null, plugins = claudePlugins() }: Options): ProviderAdapter {
+export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
   /* The agents own the home, so the key is not read through a link they could put there. */
   const glmKey = () => readPrivate(keyFile)?.trim() ?? '';
@@ -145,7 +143,6 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         writePrivate(file, input.instructions + '\n', user);
         args.push('--append-system-prompt-file', file);
       }
-      for (const dir of plugins) args.push('--plugin-dir', dir);
       /* The token sits in a file only the node reads, for this run alone, never on the command line. */
       const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
       if (mcpFile && input.tools) {

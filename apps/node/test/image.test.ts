@@ -108,17 +108,16 @@ describe('the node image', () => {
     expect(runtime.indexOf(profile![0])).toBeLessThan(runtime.indexOf('USER node'));
   });
 
-  it('carries superpowers at a pinned commit where the node looks for it, readable by every agent', () => {
-    expect(dockerfile).toMatch(/ARG SUPERPOWERS_COMMIT=[0-9a-f]{40}\n/);
-    expect(dockerfile).toContain('fetch obra/superpowers /opt/hornhoof/superpowers $SUPERPOWERS_COMMIT');
-    expect(runtime).toContain('COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers');
+  it('carries no copy of obra/superpowers for the agents, neither its plugin nor its skills', () => {
+    expect(dockerfile).not.toMatch(/superpowers/i);
   });
 
-  it('credits superpowers in the templates sources at the commit it pins, as shipped word for word under MIT', () => {
-    const commit = dockerfile.match(/ARG SUPERPOWERS_COMMIT=([0-9a-f]{40})/)![1]!;
-    const credit = readFileSync(new URL('../../../templates/SOURCES.md', import.meta.url), 'utf8').split('\n').find(line => line.startsWith('| obra/superpowers |'))!;
+  it('names superpowers in the templates sources as a source we learned from, under MIT, and no longer as shipped', () => {
+    const sources = readFileSync(new URL('../../../templates/SOURCES.md', import.meta.url), 'utf8');
+    const credit = sources.split('\n').find(line => line.startsWith('| obra/superpowers |'))!;
     expect(credit).toContain('| MIT |');
-    expect(credit).toContain(`word for word at commit ${commit}`);
+    expect(credit).not.toMatch(/shipped|word for word|plugin|node image/i);
+    expect(sources).not.toMatch(/carries obra\/superpowers/i);
   });
 
   it('installs full Playwright Chromium, Firefox and WebKit at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {

@@ -1,6 +1,6 @@
 # Where these templates learned from
 
-Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules includes unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, as its README asks people to copy it, and Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
+Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules includes unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, as its README asks people to copy it, and Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Each skill names its sources in its `sources` field as `<repo> <path>`.
 
 The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
@@ -8,7 +8,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 
 | Source | Licence | What we learned from it |
 |---|---|---|
-| obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. Also shipped whole, word for word at commit bb92a77741419a4ab5f06e711a283343f1ada0c3 (version 7.0.0), in the node image: Claude Code agents load it as a plugin, the other programs get its skills as files in the agent's folder, each with the MIT licence. |
+| obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
 | unclebob/ub-mode | none; its README asks to copy SKILL.md | The core engineering rules for development roles: make it work, then make it right, then follow practice. Kept word for word; dev-testing-policy says how a company applies them. |
 | unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. T11 holds CRAP under 10 and duplicates under 0.8, and T4 sends surviving mutants to their authors; the assigned test engineer or QA runs them once per turn. |
 | affaan-m/ECC | MIT | Reviewer and security reviewer checklists, agent hardening, safety guard, cross-checks with several reviewers. Its rules for each language (style, patterns, security, testing) come with every node in /opt/hornhoof/rules, with its licence. |
@@ -171,7 +171,6 @@ Development authors write a failing test before the change, run only affected te
 | `skills/hh-run-checks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
-| `skills/hh-superpowers.md` | Written for Hornhoof | obra/superpowers | Hornhoof |
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |

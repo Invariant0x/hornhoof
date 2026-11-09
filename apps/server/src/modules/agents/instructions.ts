@@ -23,10 +23,6 @@ function header(agent: AgentRow, role: string, place: Place): string {
   return `You are ${agent.name}, ${where}.`;
 }
 
-/* The superpowers skills come with the skill files, so a node that writes none has nothing for these to speak of. */
-const WITH_SKILL_FILES: ReadonlySet<string> = new Set(['hh-superpowers']);
-const forOldNode = (parts: Part[]): string[] => parts.filter(p => !(p.id && WITH_SKILL_FILES.has(p.id))).map(p => p.text);
-
 /* A skill as instructions carry it, between markers the card finds it by. */
 const skillBlock = (id: string, title: string, body: string) => `<!-- hh:skill ${id} -->\n## ${title}\n\n${body}\n<!-- /hh:skill -->`;
 
@@ -139,7 +135,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   parts.push(...collected.parts);
 
   const text = told([...initialKept, ...collected.kept], collected.files);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole(forOldNode(parts)) };
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole(parts.map(p => p.text)) };
 }
 
 /* The names an employee's header uses: its company, department and product. */
@@ -157,7 +153,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 /* The orchestrator's skills, always on after his standing role: working in Hornhoof as everyone does, leading as every
    head does, then what only he does, and development's own way of leading for when he needs it. */
 export const ORCHESTRATOR_SKILLS = [
-  'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+  'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
   'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
 ] as const;
 
@@ -174,7 +170,7 @@ export function orchestratorSteady(t: Templates, assignment?: string): { parts: 
     if (inline(skill)) kept.push(text);
     else skills.push(skillFile(id, skill, skill.body));
   }
-  return { parts, text: told(kept, skills), skills, whole: whole(forOldNode(parts)) };
+  return { parts, text: told(kept, skills), skills, whole: whole(parts.map(p => p.text)) };
 }
 
 const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';

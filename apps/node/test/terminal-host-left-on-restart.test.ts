@@ -26,7 +26,7 @@ const realLaunch: typeof tmux.launch = (name, spec) => Object.getPrototypeOf(tmu
 const kept = (key: string) => host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: lefts()[0]!.ref });
 
 async function atWork(kind: Kind, more: Parameters<typeof setUp>[0] = {}) {
-  await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000, ...more });
+  await setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000, ...more });
   const key = randomUUID();
   const termId = `view-${key}`;
   const run = (prompt: string, effort: string, sessionId: string | null = null, timeoutMs = 20_000) => {

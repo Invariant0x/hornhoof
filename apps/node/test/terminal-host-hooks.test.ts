@@ -6,14 +6,14 @@ import { hasTmux, host, job, sent, setUp, tmux, until } from './terminal-host-he
 const fire = (key: string, event: string, body: unknown = {}) => host['hook'](key, event, body);
 
 async function quiet() {
-  await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100 });
+  await setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100 });
   const key = randomUUID();
   return { key, a: host['agent'](key) };
 }
 
 /* A turn its fake program is at work on. */
 async function atWork() {
-  await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100 });
+  await setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100 });
   const key = randomUUID();
   const jobId = randomUUID();
   const running = host.run(job(key, 'HANG here', { jobId }));
