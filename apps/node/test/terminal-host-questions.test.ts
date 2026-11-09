@@ -11,42 +11,63 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it.each([true, false])('binds permission keys to the current host question and refuses them after its tool ends (assignment metadata: %s)', async metadata => {
+type Live = Awaited<ReturnType<typeof liveTerminal>>;
+
+/* A program on the recorded stand-in, with what its node tells the server kept in sent. */
+async function program(options: Parameters<typeof liveTerminal>[2] = {}) {
   const sent: OperatorNodeMessage[] = [];
   const dir = mkdtempSync(join(tmpdir(), 'hh-question-'));
-  let now = 0;
-  const t = await liveTerminal('claude', 'queued', { key: randomUUID(), jobId: randomUUID(), ...(metadata ? { operatorDelivery: { id: randomUUID(), ordinal: 1 } } : {}), operator: { dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } } });
+  const clock = { now: 0 };
+  const t = await liveTerminal('claude', 'queued', { key: randomUUID(), jobId: randomUUID(), ...options, operator: { dir, now: () => clock.now, connected: () => true, send: frame => { sent.push(frame); return true; } } });
   cleanups.push(async () => { rmSync(dir, { recursive: true, force: true }); });
+  return { t, sent, clock };
+}
+
+/* What the orchestrator and Operations see of the program, and what came of the keys they gave it after that look. No case
+   has to be open for either. */
+async function look(t: Live, sent: OperatorNodeMessage[], agentKey: string) {
+  const request = randomUUID();
+  await t.host.operatorMessage({ type: 'program.view_get', agentKey, request });
+  const view = sent.find(f => f.type === 'program.view' && f.request === request);
+  if (view?.type !== 'program.view' || !view.snapshot) throw new Error('No view of the program.');
+  return view;
+}
+
+async function type(t: Live, sent: OperatorNodeMessage[], agentKey: string, snapshot: string, keys: string[]) {
+  const action = randomUUID();
+  await t.host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot, keys, text: null, auditReason: 'Continue the program.' });
+  return sent.find(f => f.type === 'program.input_result' && f.action === action);
+}
+
+it.each([true, false])('shows the permission question the program asks and takes one input for each look (assignment metadata: %s)', async metadata => {
+  const { t, sent, clock } = await program(metadata ? { operatorDelivery: { id: randomUUID(), ordinal: 1 } } : {});
   await t.hook('ask', { tool_use_id: 'permission-1', tool_name: 'Bash', tool_input: { command: 'rm -r ./tmp/mine' } });
   t.screen.mockResolvedValue('Permission request for Bash. Remove ./tmp/mine? Yes / No');
-  now = 29999; t.host.operatorTick();
+  clock.now = 29999; t.host.operatorTick();
   expect(sent.some(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toBe(false);
-  now = 30000; t.host.operatorTick(); t.host.operatorTick();
+  clock.now = 30000; t.host.operatorTick(); t.host.operatorTick();
   const needed = sent.filter(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting');
   expect(needed).toHaveLength(1);
   const fact = needed[0]!;
   if (fact.type !== 'program.operator_needed') throw new Error('Question evidence is missing.');
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.question', phase: 'asked', question: expect.objectContaining({ id: fact.questionId, kind: 'permission', tool: 'Bash', text: expect.stringContaining('./tmp/mine') }) }));
-  const incident = { agentKey: fact.agentKey, jobId: fact.jobId!, instance: fact.instance, case: randomUUID(), capability: randomUUID() };
-  await t.host.operatorMessage({ type: 'program.operator_case', ...incident, revision: 1, disposition: 'open', remainingMs: 600000, reason: 'question_waiting', questionId: fact.questionId });
-  const request = randomUUID();
-  await t.host.operatorMessage({ type: 'program.screen_get', ...incident, request });
-  const screen = sent.find(f => f.type === 'program.screen' && f.request === request);
-  expect(screen).toMatchObject({ keysAllowed: true, state: 'awaiting_input' });
-  if (screen?.type !== 'program.screen') throw new Error('Screen evidence is missing.');
-  const input = { ...incident, generation: screen.generation, snapshot: screen.snapshot!, action: randomUUID(), key: 'Enter' as const };
-  await t.host.operatorMessage({ type: 'program.key_prepare', ...input });
-  const prepared = sent.find(f => f.type === 'program.key_prepared' && f.action === input.action);
-  expect(prepared).toMatchObject({ result: 'ok' });
-  if (prepared?.type !== 'program.key_prepared') throw new Error('Key preparation is missing.');
-  const command = { type: 'program.key_send' as const, ...input, lease: prepared.lease! };
+  const view = await look(t, sent, fact.agentKey);
+  expect(view).toMatchObject({ result: 'ok', jobId: fact.jobId, instance: fact.instance, state: 'working', question: { id: fact.questionId, kind: 'permission', tool: 'Bash' } });
+  expect(view.cells).toContain('Remove ./tmp/mine?');
   t.keys.mockClear();
-  await t.host.operatorMessage(command);
-  expect(sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'applied' });
+  expect(await type(t, sent, fact.agentKey, view.snapshot!, ['Enter'])).toMatchObject({ result: 'applied', reason: null, question: { id: fact.questionId } });
   expect(t.keys).toHaveBeenCalledTimes(1);
   await t.hook('tooldone', { tool_use_id: 'permission-1', tool_name: 'Bash' });
-  await t.host.operatorMessage({ ...command, action: randomUUID() });
-  expect(sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'refused' });
+  expect(await type(t, sent, fact.agentKey, view.snapshot!, ['Enter'])).toMatchObject({ result: 'refused', reason: 'snapshot_stale' });
   expect(t.keys).toHaveBeenCalledTimes(1);
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.question', phase: 'cleared', question: expect.objectContaining({ id: fact.questionId }) }));
+});
+
+it('shows a program between turns to whoever looks, at rest and on no turn', async () => {
+  const { t, sent } = await program();
+  const key = t.host['agents'].keys().next().value as string;
+  const during = await look(t, sent, key);
+  t.finish();
+  expect(await t.running).toMatchObject({ ok: true });
+  expect(await look(t, sent, key)).toMatchObject({ result: 'ok', jobId: null, instance: during.instance, state: 'idle', question: null, input: 'empty' });
 });

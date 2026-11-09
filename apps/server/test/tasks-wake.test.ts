@@ -566,6 +566,20 @@ describe('waking agents for their tasks', () => {
     expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
   });
 
+  /* A node ends the turn of a program that has no Hornhoof tools in its session this way, and starts the program anew. */
+  it('does not remind an agent whose turn ended without its tools: the turn goes again later', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const noTools = () => db.update(jobs).set({ error: 'agent_failed', failure: { kind: 'tools', text: 'The program has no Hornhoof tools in this session.', retryable: true } }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    await finish(bruno.id, noTools, 'failed');
+    expect(await db.select({ kind: taskEvents.kind }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
+    const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.notBefore).not.toBeNull();
+  });
+
   it.each([
     ['instructions_too_long', "Bruno's instructions are 200857 characters, more than the 200000 a turn carries, so this turn did not go out."],
     ['node_too_old', "This machine's node is too old for these instructions; update it."],

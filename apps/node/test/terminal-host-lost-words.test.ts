@@ -24,6 +24,8 @@ type Program = {
   /* What it does with a paste and an Enter; the test decides what gets lost. */
   onPaste(text: string): void;
   onEnter(): void;
+  /* What the keys that erase the input do. */
+  onErase?(): void;
 };
 
 /* A host with a program it started, whose screen and keys the test plays. */
@@ -33,11 +35,11 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
   const workDir = join(home, 'work');
   const file = join(home, 'sessions/2026/11/05', `rollout-${sessionId}.jsonl`);
   const record = (line: object) => appendFileSync(file, JSON.stringify(line) + '\n');
-  const finish = () => {
-    record(userMessage(WORDS));
-    record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'work' } });
+  const finish = (words = WORDS, turn = 'work') => {
+    record(userMessage(words));
+    record({ type: 'event_msg', payload: { type: 'task_started', turn_id: turn } });
     record({ type: 'event_msg', payload: { type: 'agent_message', message: 'Done.' } });
-    record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'work', last_agent_message: 'Done.' } });
+    record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: turn, last_agent_message: 'Done.' } });
   };
   const tmux = new Tmux({ env: { HOME: home } });
   const sent: OperatorNodeMessage[] = [];
@@ -53,7 +55,10 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   vi.spyOn(tmux, 'screen').mockImplementation(async () => `OpenAI Codex\n${program.status}\n${codexPrompt(program.input)}`);
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => program.onPaste(text));
-  const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter')) program.onEnter(); });
+  const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => {
+    if (pressed.includes('C-u')) program.onErase?.();
+    if (pressed.includes('Enter')) program.onEnter();
+  });
   const host = new TerminalHost({
     tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], readyMs: readyMs ?? (plain ? 3000 : 20), pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
@@ -62,7 +67,9 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
   const running = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, ...(plain ? {} : { operatorDelivery: { id: deliveryId, ordinal: 1 } }), input: { agentKey, jobId, prompt: WORDS, sessionId: null, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {} } } as never);
   stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
   const enters = () => keys.mock.calls.filter(([, key]) => key === 'Enter').length;
-  return { host, running, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir, tmux };
+  /* The next turn of the same program, in the same session. */
+  const next = (prompt: string, more: object = {}) => host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: randomUUID(), ordinal: 2 }, input: { agentKey, jobId: randomUUID(), prompt, sessionId, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {}, ...more } } as never);
+  return { host, running, next, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir, tmux };
 }
 
 const empty = (over: Partial<Program> = {}): Program => ({ input: '', status: 'idle', onPaste() {}, onEnter() {}, ...over });
@@ -133,6 +140,51 @@ it('does not type them again after the program recorded them', async () => {
   expect(await c.running).toMatchObject({ ok: true });
   await new Promise(done => setTimeout(done, 120));
   expect(c.paste).toHaveBeenCalledTimes(1);
+});
+
+/* On a busy machine a program can take the words and say so only after it stood still long enough for them to be typed
+   again. The copy then stays in its input, folded as a long paste: the next turn erases it rather than waiting on it. */
+it('erases a copy of its words it typed again while the program was on its way to record them', async () => {
+  const program = empty();
+  let pastes = 0, busy = false;
+  const c = await started({
+    ...program, get input() { return program.input; },
+    onPaste: () => { program.input = '[Pasted Content 2047 chars]'; if (++pastes === 2) c.finish(); },
+    onEnter: () => { if (!busy) { busy = true; program.input = ''; } },
+    onErase: () => { program.input = ''; },
+  });
+  expect(await c.running).toMatchObject({ ok: true });
+  expect(program.input).not.toBe('');
+  /* The program took these words: whoever looks at its screen is not told to send them. */
+  expect(await c.host['programFacts'](c.agentKey)).toMatchObject({ input: 'words', undelivered: false });
+  busy = false;
+  const next = c.next('Look at the release.');
+  await until(() => c.paste.mock.calls.length > 2);
+  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual([WORDS, WORDS, 'Look at the release.']);
+  c.finish('Look at the release.', 'next');
+  expect(await next).toMatchObject({ ok: true });
+  expect(c.reports.filter(frame => frame.type === 'agent.input_left')).toEqual([]);
+});
+
+/* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
+   for them then, and goes without them for the rest of its session. */
+it('ends a turn of a program whose tools were turned away as it connected, and starts it anew for the next', async () => {
+  let turn = 0;
+  const program = empty();
+  const c = await started({ ...program, get input() { return program.input; }, onPaste: text => { program.input = text; }, onEnter: () => {
+    const words = program.input;
+    program.input = '';
+    if (words) c.finish(words, `turn-${++turn}`);
+  } });
+  expect(await c.running).toMatchObject({ ok: true });
+  await c.host.start();
+  const connect = await fetch(c.host['bridge'].agent(c.agentKey).mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} }) });
+  expect((await connect.json()).error).toMatchObject({ code: -32001 });
+  const tools = { url: 'http://127.0.0.1:9/mcp', token: 'tok-turn' };
+  expect(await c.next('Look at the release.', { tools })).toMatchObject({ ok: false, failure: { kind: 'tools' } });
+  expect(c.tmux.launch).toHaveBeenCalledTimes(1);
+  expect(await c.next('Look at the checkout.', { tools })).toMatchObject({ ok: true });
+  expect(c.tmux.launch).toHaveBeenCalledTimes(2);
 });
 
 it('stops typing them after a few tries and leaves it to the operator case', async () => {
