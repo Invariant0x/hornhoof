@@ -68,6 +68,8 @@ async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): 
 const heldByWait = (task: Task, state: TaskWake | null): boolean => Boolean(task.externalWait) && !RUN_ENDS.has(state?.why ?? '');
 
 async function applies(db: Store, task: Task, agentId: string, state: TaskWake | null): Promise<boolean> {
+  /* Paused work wakes nobody, not even with a message about it, until it is resumed. */
+  if (task.paused && !CLOSED.includes(task.status)) return false;
   if (isNotice(state) || directMessage(task, agentId, state)) return true;
   return !heldByWait(task, state) && !CLOSED.includes(task.status) && (await samePhase(db, task, state)) && (await wakeRecipient(db, task, agentId, state?.why));
 }

@@ -6,6 +6,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, testRuns, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
+import { refusePaused } from './pause.js';
 import { wakeAll } from './wake.js';
 import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -135,12 +136,14 @@ const senderMayWrite = (task: Task, sender: Sender | undefined): boolean => Bool
 function requireHolder(task: Task, agentId: string): void {
   if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} cannot wait while ${task.status}.`);
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
+  refusePaused(task);
 }
 
 /* The recipient holds the task, or the sender acts on it or oversees it as orchestrator or head of its department. */
 function requireMessageTask(task: Task, recipientId: string, sender: Sender | undefined): void {
   if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is ${task.status}.`);
   if (task.assigneeAgentId !== recipientId && !senderMayWrite(task, sender)) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
+  if (task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused, so a message about it wakes nobody. Send it without the task, or resume the task first.`);
 }
 
 type TaskMessage = { companyId: string; agentId: string; task?: number | string; actor: Actor; text: string };

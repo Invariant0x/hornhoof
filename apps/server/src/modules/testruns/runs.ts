@@ -1,4 +1,5 @@
 import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
+import { refusePaused } from '../tasks/pause.js';
 import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -659,6 +660,7 @@ export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: Run
   const mode = testRunMode(input, kind);
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
+  refusePaused(task);
   const binding = await candidateForRun(ctx.db, task, job.agentId, input, kind);
   if (binding) input = { ...input, branch: binding.branch };
   const found = await runRepository(ctx, task, input, kind);

@@ -615,6 +615,8 @@ export const turnSnapshots = pgTable(
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type { ExternalWait } from '@hornhoof/protocol/waits';
+/* Who stopped the work and why; root is the task the pause was placed on, which the work under it shares. */
+export type TaskPause = { at: string; reason: string; by: { agentId: string } | { personId: string }; root: string };
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its required route. */
 export const tasks = pgTable(
@@ -642,6 +644,8 @@ export const tasks = pgTable(
     silent: integer('silent').notNull().default(0),
     /* Waiting for an external event, without changing who holds the task or its workflow stage. */
     externalWait: jsonb('external_wait').$type<ExternalWait>(),
+    /* Paused work wakes nobody until whoever may pause it resumes it. Closing a task ends its pause. */
+    paused: jsonb('paused').$type<TaskPause>(),
     /* What kind of work it is and what a mistake in it would cost, as whoever gave it out named them. */
     workKind: text('work_kind', { enum: WORK_KINDS }),
     riskClass: text('risk_class', { enum: RISK_CLASSES }),

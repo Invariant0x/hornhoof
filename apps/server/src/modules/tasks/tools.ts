@@ -18,6 +18,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { setPaused } from './pause.js';
 import { resolveStuckComment } from './stuck.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
@@ -142,6 +143,27 @@ class TaskTools {
   private registerManagementTools(): void {
     this.registerUpdateTask();
     this.registerCancelTask();
+    this.registerPause();
+  }
+
+  private registerPause(): void {
+    this.server.registerTool('pause_task', {
+      description: 'Pauses a task of your department (any task, for the orchestrator) with every open task under it. A paused task wakes nobody: no reminders, wait deadlines, comments, messages or run ends reach its holder, its holder\'s turn on it stops and its own work is refused. Test runs already running finish. It stays paused until resume_task, which wakes its holder once.',
+      inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) },
+    }, async ({ task: ref, why }) => this.run(async () => {
+      const { task } = await this.find(ref);
+      const moved = await setPaused(this.ctx, { agentId: this.job.agentId }, task.id, true, why);
+      await stopTurns(this.ctx, moved.tree, this.job.agentId);
+      return { text: `Paused #${task.number}${moved.tree.length > 1 ? ` and ${moved.tree.length - 1} open task${moved.tree.length > 2 ? 's' : ''} under it` : ''}.`, moved };
+    }));
+    this.server.registerTool('resume_task', {
+      description: 'Resumes a task you or someone else paused, with the work paused with it. Its holder is woken once to go on.',
+      inputSchema: { task: Ref },
+    }, async ({ task: ref }) => this.run(async () => {
+      const { task } = await this.find(ref);
+      const moved = await setPaused(this.ctx, { agentId: this.job.agentId }, task.id, false, '');
+      return { text: `Resumed #${task.number}. ${await this.where(moved.task)}`, moved };
+    }));
   }
 
   private registerExecutionTools(): void {

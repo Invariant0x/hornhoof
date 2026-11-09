@@ -17,7 +17,7 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { actsAsCeo, requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -31,6 +31,7 @@ import { replanWait } from './wait-state.js';
 import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
+import { setPaused } from './pause.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
@@ -206,7 +207,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* The task as this person reads it. */
-  const detail = async (me: Person, task: Task) => detailFor(ctx, await viewerOf(db, me), task);
+  const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: actsAsCeo(me) });
 
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
@@ -324,6 +325,17 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const { urgent } = z.object({ urgent: z.boolean() }).strict().parse(req.body);
     const moved = await setUrgent(ctx, actorOf(me), (await shown(me, id)).id, urgent);
+    return { task: await detail(me, moved.task) };
+  });
+
+  /* The CEO or the CEO delegate stops work that should wake nobody, and resumes it; the engine checks who may. */
+  app.put('/api/tasks/:id/paused', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { paused, reason } = z.object({ paused: z.boolean(), reason: z.string().max(1000).default('') }).strict().parse(req.body);
+    const moved = await setPaused(ctx, actorOf(me), (await shown(me, id)).id, paused, reason);
+    if (paused) await stopTurns(ctx, moved.tree);
+    await wakeAll(ctx, moved.wakes);
     return { task: await detail(me, moved.task) };
   });
 

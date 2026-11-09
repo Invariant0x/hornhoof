@@ -106,6 +106,7 @@ function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
       <WorkLabels task={task} />
       <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
       <ExternalTaskWait wait={task.externalWait} />
+      {task.paused && <p className="muted">{t.tasks.pausedLine(task.paused.reason)}</p>}
       {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
     </header>
   );
@@ -266,6 +267,8 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
   const t = useT();
   const [text, setText] = useState('');
   const [asking, setAsking] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [why, setWhy] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const sending = useRef(false);
@@ -279,6 +282,8 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
       await action();
       setText('');
       setAsking(false);
+      setPausing(false);
+      setWhy('');
       onChanged();
     } catch (err) {
       setFailure(err);
@@ -320,6 +325,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
           )}
         </div>
       </div>
+      {task.mayPause && <PauseActions task={task} busy={busy} pausing={pausing} why={why} setPausing={setPausing} setWhy={setWhy} run={run} />}
       {failure !== null && (
         <p className="alert" role="alert">
           {proseErrorText(t, failure)}
@@ -327,6 +333,31 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
       )}
     </>
   );
+}
+
+type PauseProps = { task: TaskDetail; busy: boolean; pausing: boolean; why: string; setPausing(on: boolean): void; setWhy(text: string): void; run(action: () => Promise<unknown>): Promise<void> };
+
+/* Pausing asks why, since the reason is what the holder reads; resuming is one step. Work paused with the task above it
+   is resumed there. */
+function PauseActions({ task, busy, pausing, why, setPausing, setWhy, run }: PauseProps) {
+  const t = useT();
+  const put = (paused: boolean, reason: string) => run(() => api.put(`/api/tasks/${task.id}/paused`, { paused, reason }));
+  if (task.paused) {
+    if (task.paused.root !== task.id) return null;
+    return <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tasks.pause}>
+      <button className="btn" type="button" disabled={busy} onClick={() => void put(false, '')}>{t.tasks.resume}</button>
+    </div></div>;
+  }
+  if (!pausing) return <div className="ac-actions"><div className="entry-actions" role="group" aria-label={t.tasks.pause}>
+    <button className="btn ghost" type="button" onClick={() => setPausing(true)}>{t.tasks.pause}</button>
+  </div></div>;
+  return <form className="tp-comment" onSubmit={e => { e.preventDefault(); if (why.trim()) void put(true, why.trim()); }}>
+    <Field label={t.tasks.pauseWhy}>{p => <textarea {...p} rows={2} value={why} onChange={e => setWhy(e.target.value)} />}</Field>
+    <div className="form-foot" role="group" aria-label={t.tasks.pause}>
+      <button className="btn" type="submit" disabled={busy || !why.trim()}>{t.tasks.yesPause}</button>
+      <button className="btn ghost" type="button" onClick={() => setPausing(false)}>{t.tasks.keep}</button>
+    </div>
+  </form>;
 }
 
 /* One task in the left panel, kept fresh from the live stream. */

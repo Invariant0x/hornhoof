@@ -320,6 +320,34 @@ describe('a task', () => {
     expect(calls.find(c => c.path === '/api/tasks/t12/comments')?.body).toEqual({ text: 'Ship it today.' });
   });
 
+  it('lets the CEO pause a task with a reason and shows it paused', async () => {
+    const user = userEvent.setup();
+    const paused = { at: '2026-11-09T05:00:00.000Z', reason: 'Wait for the release.', root: 't12', by: { personId: 'p1' } };
+    const calls = shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true } }], 'PUT /api/tasks/t12/paused': [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }] });
+    const panel = await openTask(user);
+    await user.click(within(panel).getByRole('button', { name: 'Pause' }));
+    await user.type(within(panel).getByRole('textbox', { name: 'Why pause it' }), 'Wait for the release.');
+    await user.click(within(panel).getByRole('button', { name: 'Yes, pause it' }));
+    expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/paused')?.body).toEqual({ paused: true, reason: 'Wait for the release.' });
+  });
+
+  it('shows a paused task and resumes it in one step, and hides both for those who may not', async () => {
+    const user = userEvent.setup();
+    const paused = { at: '2026-11-09T05:00:00.000Z', reason: 'Wait for the release.', root: 't12', by: { personId: 'p1' } };
+    const calls = shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: true, paused } }], 'PUT /api/tasks/t12/paused': [200, { task: { ...TASK_DETAIL, mayPause: true } }] });
+    const panel = await openTask(user);
+    expect(within(panel).getByText('Paused: Wait for the release. Nobody is woken on it until it is resumed.')).toBeTruthy();
+    await user.click(within(panel).getByRole('button', { name: 'Resume' }));
+    expect(calls.find(c => c.method === 'PUT' && c.path === '/api/tasks/t12/paused')?.body).toEqual({ paused: false, reason: '' });
+  });
+
+  it('offers no pause to a person who may not pause', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, mayPause: false } }] });
+    const panel = await openTask(user);
+    expect(within(panel).queryByRole('button', { name: 'Pause' })).toBeNull();
+  });
+
   it('asks before cancelling a task and the tasks under it', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/cancel': [200, { task: { ...TASK_DETAIL, status: 'cancelled' } }] });

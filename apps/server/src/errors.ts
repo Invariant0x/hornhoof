@@ -95,6 +95,7 @@ export type ErrorReason =
   | 'registry_unreachable'
   | 'task_unknown'
   | 'task_closed'
+  | 'task_paused'
   | 'task_changed'
   | 'task_not_yours'
   | 'test_mode_conflict'

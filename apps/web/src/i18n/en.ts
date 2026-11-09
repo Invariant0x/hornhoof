@@ -1123,6 +1123,11 @@ export const en = {
     addComment: 'Add comment',
     cancelAsk: (n: number) => `Cancel #${n} and its open subtasks?`,
     yesCancel: 'Yes, cancel it',
+    pause: 'Pause',
+    resume: 'Resume',
+    pauseWhy: 'Why pause it',
+    yesPause: 'Yes, pause it',
+    pausedLine: (reason: string) => `Paused: ${reason} Nobody is woken on it until it is resumed.`,
     requestStates: { open: 'open', answered: 'answered', approved: 'approved', declined: 'declined', withdrawn: 'withdrawn' } as Record<string, string>,
     events: {
       created: (by: string) => `${by} gave the task`,

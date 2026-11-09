@@ -542,7 +542,7 @@ async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Pr
   return other ? handOver(ctx, task, other.id, `${agent.name} is busy with another turn, so ${other.name} takes the unstarted work.`) : null;
 }
 
-const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait;
+const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait && !task.paused;
 
 async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Promise<string | null> {
   if (!subscriptionId) return null;

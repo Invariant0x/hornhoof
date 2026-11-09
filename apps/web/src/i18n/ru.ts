@@ -1157,6 +1157,11 @@ export const ru: Messages = {
     addComment: 'Добавить комментарий',
     cancelAsk: n => `Отменить #${n} и ее открытые подзадачи?`,
     yesCancel: 'Да, отменить',
+    pause: 'Пауза',
+    resume: 'Продолжить',
+    pauseWhy: 'Почему пауза',
+    yesPause: 'Да, поставить на паузу',
+    pausedLine: reason => `На паузе: ${reason} Никого не будят, пока паузу не снимут.`,
     requestStates: { open: 'открыт', answered: 'отвечен', approved: 'одобрен', declined: 'отклонен', withdrawn: 'снят' },
     events: {
       created: by => `${by} поставил задачу`,

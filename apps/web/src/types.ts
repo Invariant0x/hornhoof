@@ -349,6 +349,8 @@ export type TaskLine = {
   brief: string;
   status: TaskStatus;
   externalWait?: ExternalWait | null;
+  /* Paused work wakes nobody until it is resumed; root is the task the pause was placed on. */
+  paused?: { at: string; reason: string; root: string } | null;
   /* What kind of work it is and what a mistake in it would cost, when someone said so. An older server sends neither. */
   workKind?: WorkKind | null;
   riskClass?: RiskClass | null;
@@ -371,6 +373,8 @@ export type TaskFile = { id: string; name: string; size: number; by: { id: strin
 
 export type TaskDetail = TaskLine & {
   echelonFindings: EchelonFindingsView;
+  /* The person reading it may pause and resume it. */
+  mayPause?: boolean;
   body: string;
   parent: { id: string; number: number; title: string } | null;
   /* The tasks of its turn it comes after, and where each stands. */

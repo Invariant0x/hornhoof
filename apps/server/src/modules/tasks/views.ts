@@ -41,6 +41,7 @@ export type TaskLine = {
   waits: TaskWaitView[];
   independentPart?: (Omit<IndependentPartInput, 'executor'> & { executor: AgentRef; task: AfterView }) | { reason: string } | null;
   externalWait?: Task['externalWait'];
+  paused: Task['paused'];
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
   urgent: boolean;
@@ -161,6 +162,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
     return sees(part.child) ? { title: part.part.title, brief: part.part.brief, body: part.part.body, executor: n.agent(part.part.executor)!, task: { id: part.child.id, number: part.child.number, title: part.child.title, status: part.child.status } } : null;
   })(),
   externalWait: t.externalWait,
+  paused: t.paused,
   workKind: t.workKind,
   riskClass: t.riskClass,
   urgent: t.urgent,

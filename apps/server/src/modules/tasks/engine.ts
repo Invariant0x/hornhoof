@@ -26,6 +26,7 @@ import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
 import { captureReview } from './review-context.js';
+import { refusePaused } from './pause.js';
 import { repoAt } from '../departments/repository.js';
 import type { ReviewVerdict } from './review-verdict.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
@@ -260,7 +261,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     await lockClosingParent(tx, task, set);
     const [row] = await tx
       .update(tasks)
-      .set({ externalWait: null, ...set, version: task.version + 1, updatedAt: new Date() })
+      .set({ externalWait: null, ...set, ...(set.status && CLOSED.includes(set.status) ? { paused: null } : {}), version: task.version + 1, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
@@ -572,6 +573,7 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
   stillOpen(task);
   if ((await routeOf(ctx.db, task)).state.resultKind !== 'code') throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not waiting for your work');
+  refusePaused(task);
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
@@ -682,6 +684,7 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
 
 export async function report(ctx: Live, agentId: string, taskId: string, r: ReportInput): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
+  refusePaused(task);
   const route = await routeOf(ctx.db, task);
   const stage = reportedStage(route, r.done);
   if (stage) return reportStage(ctx, task, route, agentId, r, stage);
@@ -704,6 +707,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not with you');
+  refusePaused(task);
   await refuseWaiting(ctx.db, task);
   const wakes = giver(task, 'blocked', agentId, why);
   const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why, returned: true }, undefined, wakes);
@@ -742,7 +746,7 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
     while (level.length) {
       const below = await tx
         .update(tasks)
-        .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
+        .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, paused: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
       for (const t of below) {
@@ -954,6 +958,7 @@ export async function comment(ctx: Live, actor: Actor, taskId: string, text: str
   const task = await loadTask(ctx.db, taskId);
   if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
   const words = text.trim();
+  if (task.paused) return logComment(ctx, actor, task, words);
   return (await unblockByComment(ctx, actor, task, words)) ?? (await resumeByComment(ctx, actor, task, words)) ?? logComment(ctx, actor, task, words);
 }
 
@@ -970,7 +975,7 @@ async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string
 }
 
 function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
-  if (CLOSED.includes(task.status)) return [];
+  if (CLOSED.includes(task.status) || task.paused) return [];
   if (task.status === 'blocked' && !actor.personId) return [];
   const recipients = new Set([task.assigneeAgentId]);
   recipients.delete(actor.agentId ?? null);
@@ -1032,6 +1037,7 @@ export function mayAsk(task: Task, agentId: string): void {
 export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
   const task = await loadTask(ctx.db, taskId);
   mayAsk(task, agentId);
+  refusePaused(task);
   if (!q.text.trim()) throw refuse(400, 'task_invalid', 'Say what you need.');
   if (q.kind === 'approval' && !namesItsWork(q)) throw refuse(400, 'task_invalid', 'An approval names the full 40-character commit.');
   if (q.kind !== 'approval' && q.commit) throw refuse(400, 'task_invalid', 'Only an approval names a commit; ask for an approval instead.');
@@ -1087,7 +1093,7 @@ async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: s
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS its head is asked. */
 export async function silentTurn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
-  if (task.externalWait) return { task, wakes: [] };
+  if (task.externalWait || task.paused) return { task, wakes: [] };
   return remindOnSilence(ctx, agentId, task);
 }
 
