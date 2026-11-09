@@ -1,3 +1,4 @@
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -122,7 +123,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.route('**/api/version', route => route.fulfill({ json: current }));
         await page.route('**/api/updates', route => route.fulfill({ json: { current, available: false, latest: null, updater: { status: null, waiting: null } } }));
         await page.route('**/api/tasks?status=all', route => route.fulfill({ json: { tasks: [task, ...TASKS.slice(1)] } }));
-        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...task, body: LONG_TEXT, parent: null, after: [], executor: task.assignee, gates: [], createdBy: null, subtasks: [], log: [], requests: [] } } }));
+        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...task, echelonFindings: emptyEchelonFindings(), body: LONG_TEXT, parent: null, after: [], executor: task.assignee, createdBy: null, subtasks: [], log: [], requests: [] } } }));
         await page.goto('/tasks');
         const row = page.locator('button.trow').first();
         const brief = row.locator('.trow-brief');

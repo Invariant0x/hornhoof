@@ -1,3 +1,4 @@
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import type { AgentCardView, Employee, Org } from '../src/types';
 import { CARD, SUB } from './agent-window-api';
@@ -46,7 +47,7 @@ const ORCHESTRATOR_CARD: AgentCardView = { ...CARD, id: 'a1', kind: 'orchestrato
 
 const detailOf = (name: string) => ({
   ...TASKS[0]!, id: taskOf(name), number: NAMES.indexOf(name) + 1, title: `Work of ${name}`, assignee: ref(next(name)), executor: ref(next(name)),
-  body: 'What this agent works on.', parent: null, after: [], gates: [], createdBy: null, subtasks: [], requests: [], log: [],
+  echelonFindings: emptyEchelonFindings(), body: 'What this agent works on.', parent: null, after: [], createdBy: null, subtasks: [], requests: [], log: [],
 });
 
 /* What Dana asks on Clara's task: its line in the task's panel opens Dana's window. */
