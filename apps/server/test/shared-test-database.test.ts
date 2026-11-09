@@ -113,14 +113,6 @@ describe('what a test changes beyond rows', { shuffle: false }, () => {
     await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
   });
 
-  it('fails its file as a statistic the planner goes by', async () => {
-    const db = await createTestDb();
-    await db.insert(companies).values({ name: 'Acme' });
-    await db.execute(sql`analyze companies`);
-    expect((await statistics(db)).rows).not.toEqual([]);
-    await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
-  });
-
   it('does not fail its file when it gave the same rights again, in another order', async () => {
     const db = await createTestDb();
     await db.$client.exec(grantsFor(agentRole('postgres')));
@@ -160,24 +152,41 @@ describe('a setting of the connection', { shuffle: false }, () => {
   });
 });
 
-/* As a truncate leaves a table and its indexes: no pages and no estimate of rows, so the planner plans for the next test as
-   it would after a truncate, and the order a query reads rows in does not depend on what tests ran before. */
-const plannerView = (db: Db, table: string) => db.execute(sql`select c.relname, c.relkind, c.relpages, c.reltuples, pg_relation_size(c.oid)::int as size from pg_class c
-  where c.oid = ${table}::regclass or c.oid in (select indexrelid from pg_index where indrelid = ${table}::regclass) order by c.relname`);
-/* A table without rows has no page, and an index of one has its first page only. */
-const emptyPages = { r: 0, i: 8192 } as Record<string, number>;
+/* What the planner knows of the tables and indexes, and of the rows in them: the next test is planned as on a new copy,
+   and the order a query reads rows in does not depend on the tests before. */
+const plannerView = (db: Db) => db.execute(sql`select c.relname, c.relkind, c.relpages, c.reltuples, c.relallvisible, pg_relation_size(c.oid)::int as size from pg_class c
+  where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'i') order by c.relname`);
 
-describe('a table a test wrote', { shuffle: false }, () => {
-  it('can hold rows', async () => {
+describe('what a test leaves for the planner', { shuffle: false }, () => {
+  it('can be rows in the tables it wrote', async () => {
     const db = await createTestDb();
     await numberedEvent(db);
   });
 
-  it('is for the next test as a truncate leaves it', async () => {
+  it('is gone for the next test, as on a new copy', async () => {
+    const emptied = await createTestDb();
+    const copy = await createTestDb();
+    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+  });
+
+  it('can be statistics an analyze made of every table', async () => {
     const db = await createTestDb();
-    for (const table of ['companies', 'agents', 'agent_events']) {
-      for (const row of (await plannerView(db, table)).rows as { relkind: string }[]) expect(row, table).toMatchObject({ relpages: 0, reltuples: -1, size: emptyPages[row.relkind] });
-    }
+    await db.insert(companies).values({ name: 'Acme' });
+    await db.execute(sql`analyze`);
+    expect((await statistics(db)).rows).not.toEqual([]);
+  });
+
+  it('does not reach the next test as statistics', async () => {
+    const emptied = await createTestDb();
+    expect((await statistics(emptied)).rows).toEqual([]);
+    const copy = await createTestDb();
+    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+  });
+
+  it('does not fail its file', async () => {
+    const db = await createTestDb();
+    await db.execute(sql`analyze`);
+    await expect(checkSharedDatabase()).resolves.toBeUndefined();
   });
 });
 
@@ -222,12 +231,32 @@ describe('rows a file makes once', { shuffle: false }, () => {
     expect(await nextEvent(db)).toBe(first.seq + 1);
   });
 
-  it('are made again in a database that holds rows already, as on any database', async () => {
+  it('are made again on other rows, as on any database', async () => {
     const db = await createTestDb();
     await db.insert(companies).values({ name: 'Other' });
     /* Here the second company is refused, as a Hornhoof has one. */
     await expect(acme(db)).rejects.toThrow();
     expect(made).toBe(2);
+  });
+
+  it('can stand on other rows made once, and come back on them', async () => {
+    let layers = 0;
+    const team = (db: Db) => fixture(db.$client, 'team', async () => {
+      layers += 1;
+      const [company] = await db.select().from(companies);
+      const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
+      return agent!;
+    });
+    const names = (db: Db) => db.select({ name: agents.name }).from(agents).orderBy(agents.name);
+    const first = await createTestDb();
+    await acme(first);
+    const bruno = await team(first);
+    await first.$client.close();
+    const second = await createTestDb();
+    await acme(second);
+    expect(await team(second)).toEqual(bruno);
+    expect(layers).toBe(1);
+    expect(await names(second)).toEqual([{ name: 'Bruno' }, { name: 'Orchestrator' }]);
   });
 
   it('are made again while the clock is not real, as made ones would hold the time of the real one', async () => {
