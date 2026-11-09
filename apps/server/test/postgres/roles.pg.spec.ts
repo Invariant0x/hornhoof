@@ -16,7 +16,8 @@ async function rejectsWrongPassword(url: string, role: string): Promise<void> {
   const wrong = new URL(url);
   wrong.username = role;
   wrong.password = randomBytes(24).toString('hex');
-  const client = new pg.Client({ connectionString: wrong.toString(), connectionTimeoutMillis: 2000 });
+  /* No limit of its own (pg's default 0): the refusal comes as an answer, and only the runner's limit ends a hang. */
+  const client = new pg.Client({ connectionString: wrong.toString() });
   try {
     /* A trust or peer socket cannot pass as proof of the production password login. */
     await expect(client.connect()).rejects.toMatchObject({ code: '28P01' });

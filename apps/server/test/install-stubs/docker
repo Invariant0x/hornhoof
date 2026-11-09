@@ -66,13 +66,17 @@ case "$1" in
       exit 1
     fi
     WORD=/data/login-url; if has "$@"; then
-      WORD=cat; if has "$@"; then [ -n "${STUB_LOGIN_URL:-}" ] && echo "$STUB_LOGIN_URL" || exit 1; fi
+      # Each look the installer takes for the link is counted, so a sign-in can last until it has looked.
+      WORD=cat; if has "$@"; then [ -n "${STUB_LOGIN_URL:-}" ] && { echo look >> "$STUB_STATE/link-looks"; echo "$STUB_LOGIN_URL"; } || exit 1; fi
       exit 0
     fi
     WORD=login; if has "$@"; then
       IFS= read -r line || true; printf 'tty %s\n' "$line" >> "$STUB_LOG"
       touch "$STUB_STATE/signed-in-$3"
-      sleep "${STUB_LOGIN_SLEEP:-0}"; echo "Logged in."; exit "${STUB_LOGIN_EXIT:-0}"
+      # STUB_LOGIN_UNTIL_LOOKS: the sign-in lasts until the installer looked for the link that many times, so it has done
+      # what it does with each earlier look; it waits for that, not for a time.
+      while [ "$(cat "$STUB_STATE/link-looks" 2> /dev/null | wc -l)" -lt "${STUB_LOGIN_UNTIL_LOOKS:-0}" ]; do sleep 0.01; done
+      echo "Logged in."; exit "${STUB_LOGIN_EXIT:-0}"
     fi
     WORD=status; if has "$@"; then
       for n in ${STUB_REMOVED:-}; do WORD=$n; if has "$@"; then echo removed; exit 0; fi; done
