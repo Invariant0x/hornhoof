@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { agents, modelChecks, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundEvents, outboundMessageRevisions, outboundMessages, waitNotices } from '../src/db/schema.js';
 import { minuteRound, startTimers } from '../src/modules/agents/timers.js';
@@ -104,7 +104,10 @@ describe('sending what is due', () => {
     expect(await w.messageOf(second.messageId)).toMatchObject({ status: 'sent' });
   });
 
-  it('never sends an unknown one again, and keeps its place and the next message of the account back', async () => {
+  it.each(['2026-11-08T12:00:00.000Z', '2026-11-08T23:58:00.000Z'])('never sends an unknown one again, and keeps its place and the next message of the account back, from %s', async clock => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(clock));
+    onTestFinished(() => vi.useRealTimers());
     const w = await ready();
     const first = await w.submit();
     const { sent, use } = senders(async () => ({ kind: 'unknown', safeCode: 'timeout' }));
