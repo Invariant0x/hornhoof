@@ -63,34 +63,27 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
   host.operatorTick();
   const needed = sent.filter(frame => frame.type === 'program.operator_needed');
   expect(needed).toHaveLength(1);
-  expect(needed[0]).toMatchObject({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'unknown', screen: { protected: false, cells: expect.stringContaining('Choose the new display theme') } } });
+  expect(needed[0]).toMatchObject({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'unknown', screen: { cells: expect.stringContaining('Choose the new display theme') } } });
   const identity = { agentKey, jobId, instance: needed[0]!.instance };
   const capability = randomUUID(), caseId = randomUUID();
-  const press = async (screen: Extract<OperatorNodeMessage, { type: 'program.screen' }>) => {
-    const input = { ...identity, case: caseId, capability, snapshot: screen.snapshot!, generation: screen.generation, action: randomUUID(), key: 'Enter' as const };
-    await host.operatorMessage({ type: 'program.key_prepare', ...input });
-    const prepared = sent.find(frame => frame.type === 'program.key_prepared' && frame.action === input.action);
-    expect(prepared).toMatchObject({ result: 'ok', lease: expect.any(String) });
-    if (prepared?.type !== 'program.key_prepared') throw new Error('The key was not prepared.');
-    await host.operatorMessage({ type: 'program.key_send', ...input, lease: prepared.lease! });
+  /* Operations look at the program and press Enter on what it shows, as the server lets them. */
+  const press = async () => {
+    const request = randomUUID(), action = randomUUID();
+    await host.operatorMessage({ type: 'program.view_get', agentKey, request });
+    const view = sent.find(frame => frame.type === 'program.view' && frame.request === request);
+    expect(view).toMatchObject({ result: 'ok', jobId, instance: identity.instance, cells: expect.stringContaining('Choose the new display theme') });
+    if (view?.type !== 'program.view') throw new Error('The program view was not returned.');
+    await host.operatorMessage({ type: 'program.input_send', agentKey, action, snapshot: view.snapshot!, keys: ['Enter'], text: null, auditReason: 'Continue the program.' });
+    expect(sent.find(frame => frame.type === 'program.input_result' && frame.action === action)).toMatchObject({ result: 'applied', reason: null });
   };
   await host.operatorMessage({ type: 'program.operator_case', ...identity, case: caseId, capability, disposition: 'open', remainingMs: 600000, revision: 1 });
-  const request = randomUUID();
-  await host.operatorMessage({ type: 'program.screen_get', ...identity, request, case: caseId, capability });
-  const screen = sent.find(frame => frame.type === 'program.screen' && frame.request === request);
-  expect(screen).toMatchObject({ keysAllowed: true, state: 'pre_work' });
-  if (screen?.type !== 'program.screen') throw new Error('The program screen was not returned.');
-  await press(screen);
+  await press();
   if (changes) {
     await until(() => changed);
     await new Promise(done => setTimeout(done, 600));
     expect(paste).not.toHaveBeenCalled();
     now += 1001;
-    const request = randomUUID();
-    await host.operatorMessage({ type: 'program.screen_get', ...identity, request, case: caseId, capability });
-    const next = sent.find(frame => frame.type === 'program.screen' && frame.request === request);
-    if (next?.type !== 'program.screen') throw new Error('The second program screen was not returned.');
-    await press(next);
+    await press();
   }
   if (cancelled) {
     expect(await running).toMatchObject({ ok: false, error: 'cancelled' });

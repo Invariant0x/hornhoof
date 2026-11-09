@@ -15,8 +15,9 @@ import { programRestartStatus, restartProgram } from '../tasks/program-restarts.
 import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
-import { registerOperatorTools } from '../program-operator/tools.js';
-import { RELEASE_ROLES, registerReleaseTool } from '../program-operator/release.js';
+import { OPERATIONS_ROLES } from '../program-operator/access.js';
+import { registerOperatorTools, registerProgramAccessTools } from '../program-operator/tools.js';
+import { registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
 
@@ -74,10 +75,14 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
   return { withMessage, told };
 }
 
-/* A program operator gets its own tools along with what its skills grant. */
+/* Operations see and type into any employee's program and release its recovery hold, along with what their skills grant; the
+   program operator also reports the case it was given. Each call checks the role again. */
 function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  if (job.roleKey && OPERATIONS_ROLES[job.roleKey] === job.agentKind) {
+    registerProgramAccessTools(server, ctx, job);
+    registerReleaseTool(server, ctx, job);
+  }
   if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
-  if (job.roleKey && RELEASE_ROLES.includes(job.roleKey)) registerReleaseTool(server, ctx, job);
 }
 
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */

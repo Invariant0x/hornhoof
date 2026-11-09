@@ -478,15 +478,31 @@ describe('templates', () => {
       expect(body.split('\n')[0]).toMatch(/data/);
     });
 
-    it('asks the owner nothing about a protected screen while the program works', () => {
-      expect(step('Press nothing on terms')).toMatch(/protected screen while the program works asks its owner nothing: signal nothing/);
+    it('acts on any employee\'s program with any keys, text and answers, the owner\'s own questions too, with only secrets masked', () => {
+      const act = step('You may act on');
+      for (const part of ['any employee', 'any department, plan or machine', 'program_keys', 'any keys', 'C-u', 'control keys', 'type text', 'any question', 'subscription owner', 'values of secrets']) expect(act, part).toContain(part);
+      expect(act).toMatch(/program_screen again after every input/);
     });
 
-    it('passes only harmless screens itself, looking at the screen after every key', () => {
-      const harmless = step('Pass a screen yourself only');
-      for (const kind of ['color scheme', 'press Enter', 'news about a version', 'first-run']) expect(harmless, kind).toContain(kind);
-      expect(harmless).toContain('program_keys');
-      expect(harmless).toMatch(/program_screen again after every key/);
+    it('sends Hornhoof\'s own words that never went, and leaves a person\'s words alone', () => {
+      const words = step('Words Hornhoof typed');
+      for (const part of ['hornhoof', 'Enter', 'a person typed', 'do not send or clear them']) expect(words, part).toContain(part);
+    });
+
+    it('lifts a recovery hold only with program_recovery_release, with the case and a reason', () => {
+      const hold = step('recovery hold');
+      for (const part of ['program_recovery_release', 'case', 'reason', 'only way']) expect(hold, part).toContain(part);
+    });
+
+    it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
+      const stuck = step('You do not understand');
+      expect(stuck).toContain('tell_orchestrator');
+      expect(stuck).toContain('failed');
+      expect(stuck).toMatch(/which screen it is and why it stands/);
+    });
+
+    it('keeps no key limit, and no rule against Escape or text', () => {
+      expect(body).not.toMatch(/at most 20 keys|takes no Escape|Press nothing on/);
     });
 
     describe('on a question about permission', () => {
@@ -509,17 +525,17 @@ describe('templates', () => {
         for (const told of ['outcome denied', "head of that agent's department", 'picture of the screen']) expect(deny, told).toContain(told);
       });
 
-      it('never answers consents, sign-in, passwords, payment or plans, and only signals the orchestrator', () => {
-        const never = point('Consents');
-        for (const kind of ['sign-in', 'passwords', 'payment', 'plans', 'never']) expect(never, kind).toContain(kind);
-        expect(never).toContain('orchestrator');
-        expect(never).not.toContain('program_keys');
+      it('answers sign-in, consent, terms and the owner\'s own questions itself, and leaves only spending money to a person', () => {
+        const owner = point('Sign-in');
+        for (const kind of ['consent', 'terms', 'subscription owner', 'answer them yourself', 'program_keys']) expect(owner, kind).toContain(kind);
+        expect(owner).toMatch(/costs money/);
+        expect(owner).toContain('tell_orchestrator');
       });
 
-      it('takes a fresh picture before every key and leaves its decision in the agent\'s journal', () => {
+      it('takes a fresh picture before every input and leaves its decision in the agent\'s journal', () => {
         const key = point('Take a fresh');
         expect(key).toContain('program_screen');
-        expect(key).toContain('before every key');
+        expect(key).toContain('before every input');
         for (const part of ['what was asked', 'what you chose', 'why', "agent's journal"]) expect(key, part).toContain(part);
       });
 
@@ -529,26 +545,12 @@ describe('templates', () => {
         expect(work).toMatch(/Leave it alone/);
       });
     });
+  });
 
-    it('presses nothing on terms, consents, sign-in, passwords, codes, payment or a plan, and only signals', () => {
-      const never = step('Press nothing on');
-      for (const kind of ['terms', 'any consent', 'sharing data', 'sign-in', 'passwords', 'codes', 'payment', 'plan']) expect(never, kind).toContain(kind);
-      expect(never).toContain('tell_orchestrator');
-      expect(never).toContain('needs_owner');
-      expect(never).not.toContain('program_keys');
-    });
-
-    it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
-      const stuck = step('You do not understand');
-      expect(stuck).toContain('tell_orchestrator');
-      expect(stuck).toContain('failed');
-      expect(stuck).toMatch(/which screen it is and why it stands/);
-    });
-
-    it('is bound to 20 keys a case, and knows the tool takes no Escape and no text', () => {
-      expect(body).toMatch(/at most 20 keys/);
-      expect(body).toMatch(/takes no Escape and no text/);
-    });
+  it.each([['OPS-PROGRAM', 'role'], ['OPS-HEAD', 'role'], ['orch-trouble', 'skill']] as const)('tells %s straight that it sees and acts on any employee\'s program and lifts a hold with program_recovery_release', (id, kind) => {
+    /* A role says it through the skills it carries on, as a role's own line stays one short sentence. */
+    const text = kind === 'role' ? templates.roles.get(id)!.skills.filter(skill => skill.on).map(skill => templates.skills.get(skill.id)!.body).join('\n') : templates.skills.get(id)!.body;
+    for (const part of ['any employee', 'program_screen', 'program_keys', 'any keys', 'any question', 'subscription owner', 'values of secrets', 'program_recovery_release']) expect(text, part).toContain(part);
   });
 
   it('teaches the failure collector to file an improvement as a short case, part by part as the tool takes it', () => {

@@ -4,31 +4,33 @@ import type { ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import { NodeHub, nodeIdentity } from '../src/modules/nodes/hub.js';
-import { receiveOperatorReply, requestOperatorScreen, requestOperatorKey } from '../src/modules/program-operator/rpc.js';
+import { receiveOperatorReply, requestProgramInput, requestProgramView } from '../src/modules/program-operator/rpc.js';
 
 function fixture() {
   const sent: ProgramServerMessage[] = [];
   const hub = new NodeHub({ pingMs: 60000, onClose: async () => {}, onMessage: async () => {} });
   onTestFinished(() => hub.stop());
-  const target = { id: randomUUID(), agentId: randomUUID(), jobId: randomUUID(), instance: randomUUID(), nodeId: randomUUID(), capability: randomUUID() };
-  const node = nodeIdentity(target.nodeId);
+  const node = nodeIdentity(randomUUID());
+  const program = { agentId: randomUUID(), node };
   const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {}, send: (raw: string) => sent.push(JSON.parse(raw)) });
   hub.attach(node, socket as unknown as WebSocket);
   socket.emit('message', JSON.stringify({ type: 'hello', version: 'new', loggedIn: true, running: [], programOperatorV1: true }));
   hub.greet(node, true);
-  return { ctx: { hub }, target, node, sent };
+  return { ctx: { hub }, program, node, sent };
 }
 
-it('accepts a screen only from the requested node, agent, job and physical instance', async () => {
+const viewOf = (request: string, agentKey: string) => ({ type: 'program.view' as const, agentKey, request, result: 'ok' as const, reason: null, jobId: randomUUID(), instance: randomUUID(), snapshot: randomUUID(), state: 'idle' as const, tool: null, question: null, input: 'empty' as const, undelivered: false, cols: 80, rows: 24, cells: 'A theme.' });
+
+it('accepts a view only from the node it asked, for the agent it asked about', async () => {
   const c = fixture();
-  const pending = requestOperatorScreen(c.ctx, c.target);
+  const pending = requestProgramView(c.ctx, c.program);
   const command = c.sent[0]!;
-  if (command.type !== 'program.screen_get') throw new Error('No screen command.');
-  const response = { type: 'program.screen' as const, agentKey: command.agentKey, jobId: command.jobId, instance: command.instance, request: command.request, result: 'ok' as const, reason: null, snapshot: randomUUID(), generation: 1, state: 'pre_work' as const, keysAllowed: true, protected: false, cols: 80, rows: 24, cells: 'A theme.' };
+  if (command.type !== 'program.view_get') throw new Error('No view command.');
+  expect(command.agentKey).toBe(c.program.agentId);
+  const response = viewOf(command.request, command.agentKey);
   expect(receiveOperatorReply(c.ctx, nodeIdentity(randomUUID()), response)).toBe(false);
-  expect(receiveOperatorReply(c.ctx, c.node, { ...response, instance: randomUUID() })).toBe(false);
   expect(receiveOperatorReply(c.ctx, c.node, { ...response, agentKey: randomUUID() })).toBe(false);
-  expect(receiveOperatorReply(c.ctx, c.node, { ...response, jobId: randomUUID() })).toBe(false);
+  expect(receiveOperatorReply(c.ctx, c.node, { ...response, request: randomUUID() })).toBe(false);
   expect(receiveOperatorReply(c.ctx, c.node, response)).toBe(true);
   expect(await pending).toEqual(response);
   expect(receiveOperatorReply(c.ctx, c.node, response)).toBe(false);
@@ -37,53 +39,40 @@ it('accepts a screen only from the requested node, agent, job and physical insta
 it('never falls back to terminal input for an old node', async () => {
   const c = fixture();
   vi.spyOn(c.ctx.hub, 'hasProgramOperator').mockReturnValue(false);
-  expect(await requestOperatorScreen(c.ctx, c.target)).toBeNull();
+  expect(await requestProgramView(c.ctx, c.program)).toBeNull();
+  expect(await requestProgramInput(c.ctx, c.program, { action: randomUUID(), snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue.' })).toBeNull();
   expect(c.sent).toEqual([]);
 });
 
-it('ends an uncertain key request without retrying it or accepting a late result', async () => {
+it('sends keys and text once, and ends an input the node does not answer without retrying it or taking a late result', async () => {
   vi.useFakeTimers(); onTestFinished(() => { vi.useRealTimers(); });
   const c = fixture();
-  const input = { snapshot: randomUUID(), generation: 1, action: randomUUID(), key: 'Enter' as const };
-  const pending = requestOperatorKey(c.ctx, c.target, input);
-  const prepare = c.sent[0]!;
-  if (prepare.type !== 'program.key_prepare') throw new Error('No key preparation.');
-  const lease = randomUUID();
-  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.key_prepared', agentKey: prepare.agentKey, jobId: prepare.jobId, instance: prepare.instance, action: input.action, result: 'ok', reason: null, lease })).toBe(true);
-  await vi.advanceTimersByTimeAsync(0);
-  expect(c.sent[1]).toMatchObject({ type: 'program.key_send', lease });
+  const input = { action: randomUUID(), snapshot: randomUUID(), keys: ['C-u', 'Enter'], text: 'Go on.', auditReason: 'Continue.' };
+  const pending = requestProgramInput(c.ctx, c.program, input);
+  expect(c.sent).toEqual([{ type: 'program.input_send', agentKey: c.program.agentId, ...input }]);
+  expect(await requestProgramInput(c.ctx, c.program, input)).toBeNull();
+  expect(c.sent).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(3000);
   expect(await pending).toBeNull();
-  expect(c.sent).toHaveLength(2);
-  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.key_result', agentKey: c.target.agentId, jobId: c.target.jobId, instance: c.target.instance, action: input.action, result: 'applied', reason: null })).toBe(false);
+  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.input_result', agentKey: c.program.agentId, action: input.action, result: 'applied', reason: null, jobId: null, instance: null, question: null, text: null, auditReason: 'Continue.' })).toBe(false);
 });
 
-
-it.each(['refused', 'missing-lease'])('never sends a key after preparation is %s', async mode => {
+it('takes the result of an input from its node for its agent', async () => {
   const c = fixture();
-  const input = { snapshot: randomUUID(), generation: 1, action: randomUUID(), key: 'Enter' as const };
-  const pending = requestOperatorKey(c.ctx, c.target, input);
-  expect(receiveOperatorReply(c.ctx, c.node, { type: 'program.key_prepared', agentKey: c.target.agentId, jobId: c.target.jobId, instance: c.target.instance, action: input.action, result: mode === 'refused' ? 'refused' : 'ok', reason: mode === 'refused' ? 'program_busy' : null, lease: null })).toBe(true);
-  expect(await pending).toMatchObject({ result: 'refused', reason: mode === 'refused' ? 'program_busy' : 'node_unavailable' });
-  expect(c.sent).toHaveLength(1);
+  const action = randomUUID();
+  const pending = requestProgramInput(c.ctx, c.program, { action, snapshot: randomUUID(), keys: ['Enter'], text: null, auditReason: 'Continue.' });
+  const result = { type: 'program.input_result' as const, agentKey: c.program.agentId, action, result: 'applied' as const, reason: null, jobId: randomUUID(), instance: randomUUID(), question: null, text: null, auditReason: 'Continue.' };
+  expect(receiveOperatorReply(c.ctx, nodeIdentity(randomUUID()), result)).toBe(false);
+  expect(receiveOperatorReply(c.ctx, c.node, { ...result, agentKey: randomUUID() })).toBe(false);
+  expect(receiveOperatorReply(c.ctx, c.node, result)).toBe(true);
+  expect(await pending).toEqual(result);
 });
 
-it.each(['false', 'throws'])('ends failed screen transport promptly (%s)', async failure => {
+it.each(['false', 'throws'])('ends failed view transport promptly (%s)', async failure => {
   const c = fixture();
   vi.spyOn(c.ctx.hub, 'send').mockImplementation(() => {
     if (failure === 'throws') throw new Error('Socket closed');
     return false;
   });
-  expect(await requestOperatorScreen(c.ctx, c.target)).toBeNull();
-});
-
-it('does not register a second waiter or retry preparation for a pending action identity', async () => {
-  vi.useFakeTimers(); onTestFinished(() => { vi.useRealTimers(); });
-  const c = fixture();
-  const input = { snapshot: randomUUID(), generation: 1, action: randomUUID(), key: 'Enter' as const };
-  const pending = requestOperatorKey(c.ctx, c.target, input);
-  expect(await requestOperatorKey(c.ctx, c.target, input)).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
-  expect(c.sent).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(3000);
-  expect(await pending).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
+  expect(await requestProgramView(c.ctx, c.program)).toBeNull();
 });
