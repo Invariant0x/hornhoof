@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent } from '../src/terminal/peer.js';
 import { hookClock } from './hook-test-clock.js';
@@ -47,12 +48,12 @@ describe('word that a turn ended, on a busy machine', () => {
     closers.push(() => { b.release(); hook.kill('SIGKILL'); });
     const clock = hookClock(hook);
     const exited = new Promise<void>(resolve => hook.once('exit', () => resolve()));
-    await vi.waitFor(() => expect(b.checking()).toBe(true));
+    await eventually(() => b.checking());
     await clock.advance(BUSY_MS);
     b.release();
     await exited;
     expect(hook.exitCode).toBe(0);
-    await vi.waitFor(() => expect(b.checked).toHaveLength(1), { timeout: BUSY_MS + 2000 });
+    await eventually(() => b.checked.length === 1);
     expect(b.checked).toEqual([true]);
     expect(b.heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]);
   }, 20_000);

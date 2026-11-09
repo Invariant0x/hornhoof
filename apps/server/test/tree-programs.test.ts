@@ -168,11 +168,19 @@ it('gives the same lines as looking through every segment, for many random segme
   }
 });
 
-it('lays out the segments of a long day of many turns in a moment', () => {
+it('lays out the segments of a long day of many turns with work that grows only as they do', () => {
   const kinds = ['stall', 'work', 'person', 'alarm'] as const;
-  const segments = Array.from({ length: 20_000 }, (_, i) => ({ kind: kinds[i % kinds.length]!, from: iso(i * 1000), to: iso(i * 1000 + 1500) }));
-  const started = performance.now();
-  const laid = countedSegments(segments, date(30_000_000));
-  expect(performance.now() - started).toBeLessThan(1000);
-  expect(laid.length).toBeGreaterThan(1000);
+  const day = (count: number) => Array.from({ length: count }, (_, i) => ({ kind: kinds[i % kinds.length]!, from: iso(i * 1000), to: iso(i * 1000 + 1500) }));
+  /* The work is counted, not timed: how often the layout reads a moment of a segment. One sweep reads each a few times;
+     a look over all segments for each slice reads them as often as there are slices. */
+  const layout = (segments: ReturnType<typeof day>) => {
+    const parse = Date.parse;
+    let reads = 0;
+    Date.parse = text => (reads++, parse(text));
+    try { return { laid: countedSegments(segments, date(30_000_000)), reads }; } finally { Date.parse = parse; }
+  };
+  const some = layout(day(4_000)), twice = layout(day(8_000));
+  expect(twice.laid.length).toBeGreaterThan(1000);
+  expect(twice.reads).toBeLessThan(10 * 8_000);
+  expect(twice.reads / some.reads).toBeLessThan(2.5);
 });
