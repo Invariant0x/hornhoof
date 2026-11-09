@@ -10,6 +10,7 @@ import { cancel, createTask } from '../src/modules/tasks/engine.js';
 import { markCommit, type TestsMark } from '../src/modules/testruns/github-status.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { as, connectNode, createTestDb, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const FULL = 'npm test';
 const MOVED = 'b'.repeat(40);
@@ -340,7 +341,7 @@ async function github(handler: (req: IncomingMessage, res: ServerResponse, body:
       handler(req, res, raw);
     });
   });
-  await new Promise<void>(ready => server.listen(0, '127.0.0.1', ready));
+  await listenIn(server);
   onTestFinished(() => new Promise<void>(done => {
     server.closeAllConnections();
     server.close(() => done());

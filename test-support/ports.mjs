@@ -48,3 +48,18 @@ export async function testPort(host = '127.0.0.1') {
   await new Promise(resolve => { probe.close(resolve); });
   return port;
 }
+
+/* Starts a server that takes its port as it starts, like a Fastify app, on a free port of this worker's share, and
+   returns what its start returns. A port taken meanwhile is passed over. */
+export async function listenAt(start, host = '127.0.0.1') {
+  for (let tries = 0; tries < SHARE; tries++) {
+    const port = await testPort(host);
+    try {
+      return await start(port);
+    } catch (error) {
+      if (error?.code !== 'EADDRINUSE') throw error;
+    }
+  }
+  const { first, last } = corridorShare();
+  throw new Error(`No free port in ${first}-${last}.`);
+}

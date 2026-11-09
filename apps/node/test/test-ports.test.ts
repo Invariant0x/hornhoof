@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CORRIDOR, corridorShare, listenIn, testPort } from '../../../test-support/ports.mjs';
+import { CORRIDOR, corridorShare, listenAt, listenIn, testPort } from '../../../test-support/ports.mjs';
 
 const open: Server[] = [];
 afterEach(async () => { await Promise.all(open.splice(0).map(server => new Promise(resolve => { server.close(resolve); }))); });
@@ -28,6 +28,19 @@ describe('the port corridor of tests', () => {
     for (const each of tried) { expect(each).toBeGreaterThanOrEqual(first); expect(each).toBeLessThanOrEqual(last); }
     const denied = Object.assign(new EventEmitter(), { listen() { queueMicrotask(() => denied.emit('error', Object.assign(new Error('denied'), { code: 'EACCES' }))); } });
     await expect(listenIn(denied as unknown as Server)).rejects.toMatchObject({ code: 'EACCES' });
+  });
+
+  it('starts a server that takes its port as it starts, like a Fastify app, on a port of its share, passing over one taken meanwhile', async () => {
+    const { first, last } = corridorShare(), tried: number[] = [];
+    const started = await listenAt(async port => {
+      tried.push(port);
+      if (tried.length === 1) throw Object.assign(new Error('in use'), { code: 'EADDRINUSE' });
+      return `http://127.0.0.1:${port}`;
+    });
+    expect(tried).toHaveLength(2);
+    expect(started).toBe(`http://127.0.0.1:${tried[1]}`);
+    for (const each of tried) { expect(each).toBeGreaterThanOrEqual(first); expect(each).toBeLessThanOrEqual(last); }
+    await expect(listenAt(async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); })).rejects.toMatchObject({ code: 'EACCES' });
   });
 
   it('names a free port of its share for a server that takes its port when it is made', async () => {

@@ -17,6 +17,7 @@ import { applyMissingMigrations, MIGRATIONS } from '../../src/db/client.js';
 import * as schema from '../../src/db/schema.js';
 import { createRoute } from '../../src/modules/tasks/echelons-store.js';
 import type { ToolJob } from '../../src/modules/tools/job.js';
+import { listenIn } from '../../../../test-support/ports.mjs';
 
 type Cleanup = () => Promise<unknown>;
 export type PgDb = NodePgDatabase<typeof schema>;
@@ -133,7 +134,7 @@ async function localRepository(fixture: PostgresFixture, held: boolean) {
     if (released) send(response);
     else waiting.push(response);
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   fixture.cleanup(async () => {
     release();
     server.closeAllConnections();
