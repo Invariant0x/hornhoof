@@ -56,11 +56,17 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 
 ### Fixed
 
-- A test part keeps green results only where it ran on the runtimes its run's fingerprints name, so a later run skips
-  unchanged files.
-- A test part goes only to a machine with the very runtimes that described its run, the ones Tests checks its receipt
-  against, so a run that passed is no longer refused for parts that ran on another architecture. A run whose describing
-  node lacks a runtime its profile needs ends at once and names the runtime.
+- A test part is accepted from any machine of the class of runtimes that described its run: the same system, libc and
+  major versions, whatever the build or processor, so parts that ran on an arm64 Mac count for a run described on x64
+  and are no longer refused by Tests. A part goes only to a machine of that class. A run whose describing node lacks a
+  runtime its profile needs ends at once and names the runtime.
+- The fingerprints of test files name the class of runtimes, not the build of one machine, and a part keeps its green
+  results wherever it ran in that class, so a later run on any machine of the class skips unchanged files.
+- A product run is laid out by the pace of each free machine, taken from how long the last parts of the repository ran,
+  so its parts end at about the same time, and each part goes to the machine it was laid out for while that machine can
+  take it.
+- The log of a failed test part ends with the name and error of each test that failed, not with what a service said as
+  it stopped.
 - Quality tools in a test part read the grammars the machine keeps, and a crapper failure says why.
 - A preparation step that hears nothing from Hornhoof for a minute stops, a part waits at most ten minutes for another
   machine's build and then builds it itself, and the part's log says each step.
@@ -119,7 +125,7 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   целиком.
 - Шаблоны и руководство держат связанную работу у одного владельца, убирают проверку живыми программами при выпуске и
   просят отчеты обычными словами с пробелами.
-- Исправлено: часть сохраняет зеленые результаты только там, где шла на средах, названных в отпечатках прогона; quality
+- Исправлено: часть сохраняет зеленые результаты везде, где шла на средах того же класса, что описали прогон; quality
   tools читают грамматики машины, а отказ crapper называет причину; шаг подготовки, который минуту ничего не слышит от
   Hornhoof, останавливается, часть ждет чужую сборку не больше десяти минут и потом собирает сама, а журнал части
   называет каждый шаг; локальное правило команд находит рабочие пространства и пакеты по имени, называет отсутствующий
@@ -129,9 +135,15 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   отдела с длинными ходами отвечают сразу; итог проверяющего отказывает, если его модель, подписка или навык сменились до
   записи; маршрут отмененной задачи показывается отмененным, каждая причина этапа названа, а сырой id владельца не
   показывается.
-- Исправлено: часть прогона уходит только машине с теми самыми средами, которые описали прогон и по которым Тесты
-  проверяют ее квитанцию, поэтому прошедший прогон больше не отвергается из-за частей на машине другой архитектуры.
-  Прогон, у описавшей ноды которого нет среды, нужной профилю, кончается сразу и называет эту среду.
+- Исправлено: Тесты принимают часть с любой машины того класса сред, что описали прогон: та же система, libc и
+  основные версии, какими бы ни были сборка и процессор, поэтому части с Mac на arm64 засчитываются прогону, описанному
+  на x64. Часть уходит только машине этого класса. Прогон, у описавшей ноды которого нет среды, нужной профилю,
+  кончается сразу и называет эту среду. Отпечатки файлов тестов называют класс сред, а не сборку одной машины, и
+  следующий прогон на любой машине класса пропускает неизмененные файлы.
+- Прогон продукта раскладывается по скорости каждой свободной машины, взятой из того, сколько шли последние части
+  репозитория, поэтому его части кончаются примерно вместе, и каждая часть уходит той машине, для которой разложена,
+  пока та может ее взять.
+- Журнал упавшей части кончается именем и ошибкой каждого упавшего теста, а не тем, что сказал сервис при остановке.
 - Исправлено: нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
   функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
 - Исправлено: Тесты возвращают дефект кандидата, в том числе такой, из-за которого прогон не может начаться, автору на
