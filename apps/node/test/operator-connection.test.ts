@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { expect, it, onTestFinished } from 'vitest';
 import { connect, parseOperatorServerMessage } from '../src/connection.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 it('accepts bounded operator messages and keeps legacy transport compatible', () => {
   const frame = { type: 'program.view_get', agentKey: randomUUID(), request: randomUUID() };
@@ -24,7 +25,7 @@ it('preserves validated delivery metadata for live words and refuses malformed i
 });
 
 it('preserves operator frames and delivery metadata through reconnect while close-hook errors cannot stop retries', async () => {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise<void>(resolve => server.once('listening', () => resolve()));
   const identity = { agentKey: randomUUID(), jobId: randomUUID(), instance: randomUUID() };

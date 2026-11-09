@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -171,7 +171,7 @@ it('retains a writer lock in a trusted descendant until that descendant exits', 
   });
   onTestFinished(() => { child.kill('SIGKILL'); });
   await once(child.stdout!, 'data');
-  expect(spawnSync('flock', ['--nonblock', path, '/usr/bin/true']).status).toBe(1);
+  await expect(cache.withCacheLock(path, { ...ctx, deadline: Date.now() + 300 }, async () => 'taken')).rejects.toThrow();
   const closed = once(child, 'exit'); child.kill('SIGKILL'); await closed;
   await expect(cache.withCacheLock(path, ctx, async () => 'released')).resolves.toBe('released');
 });

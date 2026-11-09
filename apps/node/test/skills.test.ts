@@ -1,29 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { agyRules } from '../src/providers/antigravity.js';
-import { placeSkills, skillsFolder } from '../src/skills.js';
+import { placeSkills, skillPaths, skillsFolder } from '../src/skills.js';
 
 const TDD = { name: 'dev-tdd', description: 'Test-driven development. Writes the test: then the code.', body: '# Test-driven development\n\nWrite the test first.' };
 const DOCS = { name: 'dev-docs', description: 'Docs. Keeps the docs true.', body: '# Docs\n\nUpdate the README.' };
-
-/* A copy of superpowers as the image keeps it: its manifest, licence and two skills, one with a script. */
-function superpowers(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-sp-'));
-  mkdirSync(join(dir, '.claude-plugin'));
-  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.0' }));
-  writeFileSync(join(dir, 'LICENSE'), 'MIT License\n');
-  for (const name of ['brainstorming', 'systematic-debugging']) {
-    mkdirSync(join(dir, 'skills', name, 'scripts'), { recursive: true });
-    writeFileSync(join(dir, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: Use when.\n---\n\nWord for word.\n`);
-    writeFileSync(join(dir, 'skills', name, 'scripts', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
-  }
-  return dir;
-}
 
 const work = () => mkdtempSync(join(tmpdir(), 'hh-work-'));
 
@@ -43,17 +29,17 @@ describe('skills as files', () => {
 
   it('writes each skill as a folder with its SKILL.md, named and described in its frontmatter', async () => {
     const dir = work();
-    await placeSkills(ownFs, dir, 'claude', [TDD], null);
+    await placeSkills(ownFs, dir, 'claude', [TDD]);
     const text = readFileSync(join(dir, '.claude', 'skills', 'dev-tdd', 'SKILL.md'), 'utf8');
     expect(text).toBe('---\nname: dev-tdd\ndescription: "Test-driven development. Writes the test: then the code."\n---\n\n# Test-driven development\n\nWrite the test first.\n');
   });
 
   it('takes away a skill turned off, and those of another program after a change of subscription', async () => {
     const dir = work();
-    await placeSkills(ownFs, dir, 'claude', [TDD, DOCS], null);
-    await placeSkills(ownFs, dir, 'claude', [TDD], null);
+    await placeSkills(ownFs, dir, 'claude', [TDD, DOCS]);
+    await placeSkills(ownFs, dir, 'claude', [TDD]);
     expect(readdirSync(join(dir, '.claude', 'skills'))).toEqual(['dev-tdd']);
-    await placeSkills(ownFs, dir, 'codex', [DOCS], null);
+    await placeSkills(ownFs, dir, 'codex', [DOCS]);
     expect(readdirSync(join(dir, '.claude', 'skills'))).toEqual([]);
     expect(readdirSync(join(dir, '.agents', 'skills'))).toEqual(['dev-docs']);
   });
@@ -65,8 +51,8 @@ describe('skills as files', () => {
     writeFileSync(join(dir, 'repo', 'main.go'), 'package main\n');
     writeFileSync(join(root, 'node.json'), 'key');
     const listed = ['repo', '../node.json', '.agents/skills/../../node.json', '.agents/skills/..', '.agents/skills', '/etc', '.claude/skills/a/b'];
-    writeFileSync(join(dir, '.hh-skills.json'), JSON.stringify({ paths: listed, superpowers: null }));
-    await placeSkills(ownFs, dir, 'codex', [TDD], null);
+    writeFileSync(join(dir, '.hh-skills.json'), JSON.stringify({ paths: listed }));
+    await placeSkills(ownFs, dir, 'codex', [TDD]);
     expect(existsSync(join(dir, 'repo', 'main.go'))).toBe(true);
     expect(existsSync(join(root, 'node.json'))).toBe(true);
     expect(readdirSync(join(dir, '.agents', 'skills'))).toEqual(['dev-tdd']);
@@ -76,24 +62,23 @@ describe('skills as files', () => {
     const dir = work();
     mkdirSync(join(dir, '.agents', 'skills', 'own'), { recursive: true });
     writeFileSync(join(dir, '.agents', 'skills', 'own', 'SKILL.md'), 'mine');
-    await placeSkills(ownFs, dir, 'kimi', [TDD], null);
-    await placeSkills(ownFs, dir, 'kimi', [], null);
+    await placeSkills(ownFs, dir, 'kimi', [TDD]);
+    await placeSkills(ownFs, dir, 'kimi', []);
     expect(readdirSync(join(dir, '.agents', 'skills'))).toEqual(['own']);
   });
 
-  it('copies the superpowers skills word for word with their licence for programs without the plugin', async () => {
-    const dir = work();
-    const sp = superpowers();
-    await placeSkills(ownFs, dir, 'codex', [TDD], sp);
-    const skills = join(dir, '.agents', 'skills');
-    expect(readdirSync(skills).sort()).toEqual(['brainstorming', 'dev-tdd', 'systematic-debugging']);
-    expect(readFileSync(join(skills, 'brainstorming', 'SKILL.md'), 'utf8')).toBe(readFileSync(join(sp, 'skills', 'brainstorming', 'SKILL.md'), 'utf8'));
-    expect(readFileSync(join(skills, 'brainstorming', 'LICENSE'), 'utf8')).toBe('MIT License\n');
-    expect(statSync(join(skills, 'systematic-debugging', 'scripts', 'run.sh')).mode & 0o111).not.toBe(0);
-    /* Claude Code gets superpowers as its plugin instead. */
-    await placeSkills(ownFs, dir, 'claude', [TDD], sp);
-    expect(existsSync(join(skills, 'brainstorming'))).toBe(false);
-    expect(readdirSync(join(dir, '.claude', 'skills'))).toEqual(['dev-tdd']);
+  it("gives every program only the agent's own skills, and takes away the superpowers skills an earlier node copied", async () => {
+    for (const provider of ['claude', 'anthropic_api', 'glm', 'codex', 'openai_api', 'kimi', 'antigravity'] as const) {
+      const folder = skillsFolder(provider);
+      expect(skillPaths(provider, [TDD, DOCS]), provider).toEqual([`${folder}/dev-tdd`, `${folder}/dev-docs`, '.hh-skills.json']);
+      const dir = work();
+      mkdirSync(join(dir, folder, 'brainstorming'), { recursive: true });
+      writeFileSync(join(dir, folder, 'brainstorming', 'SKILL.md'), 'Word for word.');
+      writeFileSync(join(dir, '.hh-skills.json'), JSON.stringify({ paths: [`${folder}/brainstorming`], superpowers: '7.0.0' }));
+      await placeSkills(ownFs, dir, provider, [TDD, DOCS]);
+      expect(readdirSync(join(dir, folder)).sort(), provider).toEqual(['dev-docs', 'dev-tdd']);
+      expect(JSON.parse(readFileSync(join(dir, '.hh-skills.json'), 'utf8')), provider).toEqual({ paths: [`${folder}/dev-tdd`, `${folder}/dev-docs`] });
+    }
   });
 
   it('keeps them out of a repository the agent folder is part of, and only them', async () => {
@@ -102,10 +87,10 @@ describe('skills as files', () => {
     const dir = join(repo, 'work', 'agents', 'a [1]');
     mkdirSync(join(dir, '.agents', 'skills', 'own'), { recursive: true });
     writeFileSync(join(dir, '.agents', 'skills', 'own', 'SKILL.md'), 'mine');
-    await placeSkills(ownFs, dir, 'kimi', [TDD], superpowers());
+    await placeSkills(ownFs, dir, 'kimi', [TDD]);
     expect(added(repo)).toEqual(['work/agents/a [1]/.agents/skills/own/SKILL.md']);
     /* A turn later on another program, with other skills. */
-    await placeSkills(ownFs, dir, 'claude', [DOCS], null);
+    await placeSkills(ownFs, dir, 'claude', [DOCS]);
     expect(added(repo)).toEqual(['work/agents/a [1]/.agents/skills/own/SKILL.md']);
   });
 
@@ -114,19 +99,19 @@ describe('skills as files', () => {
     git(repo, 'init', '-q');
     const dirs = ['a1', 'a2', 'a3'].map(key => join(repo, 'work', key));
     for (const dir of dirs) mkdirSync(dir, { recursive: true });
-    await Promise.all(dirs.map(dir => placeSkills(ownFs, dir, 'codex', [TDD], null)));
+    await Promise.all(dirs.map(dir => placeSkills(ownFs, dir, 'codex', [TDD])));
     expect(added(repo)).toEqual([]);
   });
 
   it('keeps them out of the agent folder made a repository, and of a worktree', async () => {
     const dir = work();
     git(dir, 'init', '-q');
-    await placeSkills(ownFs, dir, 'codex', [TDD], superpowers());
+    await placeSkills(ownFs, dir, 'codex', [TDD]);
     expect(added(dir)).toEqual([]);
     git(dir, 'commit', '-q', '--allow-empty', '-m', 'start');
     const tree = join(work(), 'tree');
     git(dir, 'worktree', 'add', '-q', tree);
-    await placeSkills(ownFs, tree, 'claude', [TDD], null);
+    await placeSkills(ownFs, tree, 'claude', [TDD]);
     expect(added(tree)).toEqual([]);
   });
 
@@ -141,7 +126,7 @@ describe('skills as files', () => {
       write: async (path, data) => void (path.startsWith('/elsewhere') ? (seen[path] = data) : await ownFs.write(path, data)),
       mkdir: async path => (path.startsWith('/elsewhere') ? undefined : ownFs.mkdir(path)),
     };
-    await placeSkills(fs, dir, 'codex', [TDD], null);
+    await placeSkills(fs, dir, 'codex', [TDD]);
     expect(seen['/elsewhere/.git/info/exclude']).toContain('\n/.agents/skills/dev-tdd/\n');
   });
 
@@ -151,23 +136,10 @@ describe('skills as files', () => {
     git(dir, 'commit', '-q', '--allow-empty', '-m', 'start');
     const tree = join(work(), 'tree');
     git(dir, 'worktree', 'add', '-q', tree);
-    await placeSkills(ownFs, dir, 'codex', [TDD], null);
-    await placeSkills(ownFs, tree, 'codex', [DOCS], null);
+    await placeSkills(ownFs, dir, 'codex', [TDD]);
+    await placeSkills(ownFs, tree, 'codex', [DOCS]);
     expect(added(dir)).toEqual([]);
     expect(added(tree)).toEqual([]);
-  });
-
-  it('copies superpowers again only when the image brings another version', async () => {
-    const dir = work();
-    const sp = superpowers();
-    await placeSkills(ownFs, dir, 'antigravity', [], sp);
-    const file = join(dir, '.agents', 'skills', 'brainstorming', 'SKILL.md');
-    writeFileSync(file, 'changed by the agent');
-    await placeSkills(ownFs, dir, 'antigravity', [], sp);
-    expect(readFileSync(file, 'utf8')).toBe('changed by the agent');
-    writeFileSync(join(sp, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.1' }));
-    await placeSkills(ownFs, dir, 'antigravity', [], sp);
-    expect(readFileSync(file, 'utf8')).toContain('Word for word.');
   });
 
   it('materializes the shipped dev-frontend-ui skill and AGENTS.md pointer for Antigravity within its 24 KB limit', async () => {
@@ -183,7 +155,7 @@ describe('skills as files', () => {
     const agy = agyRules(pointer, '.hh-instructions.md');
     expect(agy.whole).toBeNull();
     expect(agy.rules).toContain('- dev-frontend-ui: User interface engineering.');
-    await placeSkills(ownFs, dir, 'antigravity', [uiSkill], superpowers());
+    await placeSkills(ownFs, dir, 'antigravity', [uiSkill]);
     const skillPath = join(dir, '.agents', 'skills', 'dev-frontend-ui', 'SKILL.md');
     const placedText = readFileSync(skillPath, 'utf8');
     expect(Buffer.byteLength(placedText)).toBeLessThan(24_000);

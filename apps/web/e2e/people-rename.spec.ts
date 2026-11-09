@@ -26,6 +26,7 @@ import { loadConfig } from './src/config.js';
 import { applyMissingMigrations, MIGRATIONS } from './src/db/client.js';
 import * as schema from './src/db/schema.js';
 import { setupCode } from './src/modules/setup/code.js';
+import { testPort } from '../../test-support/ports.mjs';
 
 const secret = Buffer.alloc(32, 7).toString('base64');
 const client = new PGlite();
@@ -66,7 +67,7 @@ const maria = await join('Maria', { whole: true });
 const olga = await join('Olga', { departments: [marketing.id] });
 await app.inject({ method: 'PUT', url: '/api/people/' + dana.id + '/ceo-delegate', payload: { isCeoDelegate: true }, ...asCeo });
 
-const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
 process.stdout.write(JSON.stringify({ origin, sessions: { ceo, deputy: dana.session, whole: maria.session, listed: olga.session }, listedId: olga.id }) + '\\n');
 process.stdin.resume();
 process.stdin.on('end', () => void app.close().then(() => client.close()).then(() => process.exit(0)));

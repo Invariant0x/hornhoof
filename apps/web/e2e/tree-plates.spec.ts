@@ -133,7 +133,8 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(page.locator('.tv-card')).toContainText(text);
           await page.keyboard.press('Escape');
         };
-        await card('Bruno', '#120 Checkout step 120');
+        /* Task #120 is Vera's review since 0.17.0; Bruno's own task is #62. */
+        await card('Bruno', '#62 Night checkout work');
         await card('Hana', lang === 'en' ? 'Head of development' : 'Руководитель разработки');
         await card('Bruno', lang === 'en' ? 'Developer' : 'Разработчик');
         await card('Bruno', lang === 'en' ? 'waits for Hana since' : 'ждет Hana с');

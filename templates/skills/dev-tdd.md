@@ -7,6 +7,10 @@ sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpo
 ---
 You can establish a behavior with a failing test and a minimal verified change.
 
+**The first rule: we test our program, not the operating system and not other programs.** Where our code drives another program, a test checks only our side: we started it correctly, passed it the input and parsed its output correctly, that output coming from a recorded sample. A test never waits for another program's work and never depends on machine speed, the clock, a random port or unsorted order.
+
+**The second rule: time in a test is virtual only.** No test waits for or measures real time: not one deadline, wait or pause on the real clock, and no check of elapsed time. A test drives time with a controlled clock (fake timers or the code's injected clock), calls the step directly, or waits for an event or a state with no deadline; the runner's limit on a whole test is the only limit. A test gives the same verdict on any machine at any load.
+
 Use the check assigned by the head under the shared small-task rule. The cycle below applies when that requires a separate test.
 
 Every task is one of four task kinds, and the kind chooses the cycle:
@@ -18,7 +22,7 @@ Every task is one of four task kinds, and the kind chooses the cycle:
 
 For every behaviour you add or change, and for every bug you fix:
 
-1. **Red.** Write one test for one behaviour, named for what it shows ("rejects an empty email"). Use the real code; mock only what you cannot run (the network, the clock, another service).
+1. **Red.** Write one test for one behaviour, named for what it shows ("rejects an empty email"). Use our real code; replace only what is not ours (another program or service, the operating system, the network, the clock) with a recorded sample or a fake.
 2. **Watch it fail.** Run that affected test file in your own workspace right away. It must fail because the behaviour is missing, not because of a typo or an import. A characterization test of legacy code passes immediately, and that is correct: it pins current behaviour before structural work. Any other new behaviour test that passes before the code exists tests nothing; fix the test.
 3. **Green.** Write the simplest code that makes it pass. Nothing the test does not ask for.
 4. **Run the tests around it** in your workspace: name the files for your change and its callers. Only a whole suite uses `run_tests`, split into groups over free machines. Every failure goes into your report, even one you did not cause.

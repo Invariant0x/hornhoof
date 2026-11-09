@@ -159,7 +159,7 @@ describe('Department view', () => {
     const sasha = { ...dev!.people[0]!, pendingDecisions: 2 };
     shell({
       'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: sasha.id }, { ...REQUESTS[1]!, ownerPersonId: sasha.id }])],
-      'GET /api/tasks?status=all': [200, { tasks: TASKS }],
+      'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }],
       'GET /api/turns': [200, { turns: [] }],
     }, { ...DEV_ORG, departments: [{ ...dev!, people: [sasha] }] });
     await flyIn(user);
@@ -188,7 +188,7 @@ describe('Department view', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
     expect(bruno).toHaveTextContent('free');
-    expect(screen.getByText('The map shows the current task stages and their owners.')).toBeInTheDocument();
+    expect(screen.getByText('Work goes left to right through the gates. Whoever leads a stage now is marked in its role.')).toBeInTheDocument();
     started = true;
     await act(async () => {
       stream.send({ type: 'working', working: 2 });
@@ -268,23 +268,28 @@ describe('Department view', () => {
     }
   });
 
-  it('follows a Review owner handoff without showing an ordinary return to the author', async () => {
+  it('follows a Review owner handoff from frame to frame of the roles, marking who leads the stage, with no return to the author', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     const dev = DEV_ORG.departments[0]!;
     const bruno = dev.employees.find(e => e.id === 'b1')!;
-    const rita = { ...bruno, id: 'b2', name: 'Rita' };
+    const reviewer = { id: 'DEV-REV', title: { en: 'Code reviewer', ru: 'Ревьюер кода' }, description: { en: 'Reviews every change.', ru: 'Смотрит каждое изменение.' }, kind: 'member' as const, gate: 1 };
+    const rita = { ...bruno, id: 'b2', name: 'Rita', roleId: 'DEV-REV' };
     const task = { id: 't1', number: 1, title: 'Checkout', echelons: taskRoute('development', bruno.id) };
     let moved = false;
-    const before = { ...dev, employees: [...dev.employees.map(e => e.id === bruno.id ? { ...e, status: 'working' as const, task } : e), rita] };
+    const before = { ...dev, roles: [...dev.roles, reviewer], employees: [...dev.employees.map(e => e.id === bruno.id ? { ...e, status: 'working' as const, task } : e), rita] };
     const after = { ...before, employees: before.employees.map(e => e.id === bruno.id ? { ...e, status: 'handed' as const, task: null } : e.id === rita.id ? { ...e, status: 'working' as const, task: { ...task, echelons: { ...taskRoute('review', rita.id), revision: 2 } } } : e) };
     shell({ 'GET /api/org': () => [200, { ...DEV_ORG, departments: [moved ? after : before] }] });
     await flyIn(user);
-    expect(within(screen.getByRole('group', { name: 'Development' })).getByRole('button', { name: /Bruno/ })).toBeInTheDocument();
+    const developers = () => screen.getByRole('group', { name: 'Backend engineer' });
+    const reviewers = () => screen.getByRole('group', { name: 'Code reviewer' });
+    expect(within(developers()).getByRole('button', { name: /Bruno/ })).toHaveClass('lead');
+    expect(within(reviewers()).getByRole('button', { name: /Rita/ })).not.toHaveClass('lead');
     moved = true;
     stream.send({ type: 'task', id: task.id });
-    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Review' })).getByRole('button', { name: /Rita/ })).toBeInTheDocument());
-    expect(within(screen.getByRole('group', { name: 'Review' })).queryByRole('button', { name: /Bruno/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(reviewers()).getByRole('button', { name: /Rita/ })).toHaveClass('lead'));
+    expect(within(developers()).getByRole('button', { name: /Bruno/ })).not.toHaveClass('lead');
+    expect(within(reviewers()).getByRole('button', { name: /Rita/ })).toHaveTextContent('Review #1 Checkout');
     expect(screen.queryByText(/work came back for rework/)).not.toBeInTheDocument();
     expect(document.querySelectorAll('.dview .rl, .dview .rah')).toHaveLength(0);
   });
@@ -368,7 +373,7 @@ describe('Department view', () => {
       ]);
   });
 
-  it('keeps idle reviewers outside task stages without inventing gates or return arrows', async () => {
+  it('keeps an idle reviewer in its role frame behind gate 1, with no return arrows', async () => {
     const user = userEvent.setup();
     const dev = DEV_ORG.departments[0]!;
     const rita = { ...dev.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV', title: { en: 'Code reviewer', ru: 'Ревьюер кода' } };
@@ -376,11 +381,12 @@ describe('Department view', () => {
     shell({}, { ...DEV_ORG, departments: [{ ...dev, employees: [...dev.employees, rita], roles: [...dev.roles, reviewer] }] });
     await flyIn(user);
     const schema = screen.getByRole('region', { name: 'Department schema' });
-    expect(within(schema).getByRole('button', { name: /Rita/ })).toBeInTheDocument();
-    expect(schema.querySelectorAll('.frame[data-echelon], .rl, .rah')).toHaveLength(0);
-    expect(schema).not.toHaveTextContent('gate 1');
+    const frame = within(schema).getByRole('group', { name: 'Code reviewer' });
+    expect(within(frame).getByRole('button', { name: /Rita/ })).toBeInTheDocument();
+    expect(frame).toHaveClass('gt');
+    expect([...schema.querySelectorAll('.gl')].map(g => g.textContent)).toEqual(['Gate 1']);
+    expect(schema.querySelectorAll('.rl, .rah')).toHaveLength(0);
     expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles');
-    expect(screen.getByRole('region', { name: 'Head' })).not.toHaveTextContent('gate');
   });
 
   it('hires through the orchestrator', async () => {

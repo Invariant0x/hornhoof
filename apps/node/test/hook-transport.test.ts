@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { listenIn } from '../../../test-support/ports.mjs';
 const { sendHook } = createRequire(import.meta.url)('../hh-hook-send.cjs');
 const timeout = AbortSignal.timeout.bind(AbortSignal);
 const close: (() => void)[] = [];
@@ -18,7 +19,7 @@ async function bridge(status: number | 'timeout' | 'disconnect', recover = false
       res.writeHead(status).end('');
     });
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await listenIn(server);
   close.push(() => { server.closeAllConnections();server.close(); });
   vi.stubEnv('HH_BRIDGE', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
   return calls;

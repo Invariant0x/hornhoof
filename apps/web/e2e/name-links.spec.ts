@@ -38,13 +38,13 @@ async function expectNameHover(link: Locator) {
   await expect(link).toHaveCSS('text-decoration-line', 'none');
 }
 
-async function openTree(page: Page, lang: 'en' | 'ru') {
+async function openTree(page: Page, lang: 'en' | 'ru', line = /Vera, #121/) {
   await page.goto('/');
   await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
   await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
   const graph = page.getByRole('group', { name: lang === 'en' ? 'Tree of turn 4' : 'Дерево хода 4' });
   await expect(graph).toBeVisible();
-  const review = graph.getByRole('button', { name: /Vera, #121/ }).first();
+  const review = graph.getByRole('button', { name: line }).first();
   await review.scrollIntoViewIfNeeded();
   await review.click();
   const card = page.locator('.tv-card');
@@ -92,16 +92,18 @@ for (const lang of ['en', 'ru'] as const) {
         await serveTree(page, { during: true });
         const card = await openTree(page, lang);
         const lane = card.locator('h4').getByRole('button', { name: /^Vera/ });
-        const reviewer = card.getByRole('button', { name: /^Rita/ });
         const task = card.getByRole('button', { name: /#121/ });
         await lane.hover();
         await capture(page, info, `tree-lane-${look}`);
-        await reviewer.hover();
-        await capture(page, info, `tree-reviewer-${look}`);
         await expectNameHover(lane);
-        await expectNameHover(reviewer);
         await task.hover();
         await expect(task).toHaveCSS('text-decoration-line', 'underline');
+        /* Since 0.17.0 a checker's work is its own task with its own card, not a reviewer on the card of the work it checks. */
+        const checkerCard = await openTree(page, lang, /Rita, #122/);
+        const reviewer = checkerCard.locator('h4').getByRole('button', { name: /^Rita/ });
+        await reviewer.hover();
+        await capture(page, info, `tree-reviewer-${look}`);
+        await expectNameHover(reviewer);
         await reviewer.click();
         const reviewerWindow = page.getByRole('complementary', { name: 'Rita', exact: true });
         await expect(reviewerWindow).toBeVisible();

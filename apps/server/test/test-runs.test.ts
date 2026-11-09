@@ -71,7 +71,7 @@ describe('a test run', () => {
     const waits = await call('run_tests', { command: 'make test', branch: 'task-1-checkout' });
     expect(waits.text).toMatch(/waits for a free machine/);
     expect(JSON.parse((await call('test_run', { run: 2 })).text)).toMatchObject({ status: 'running', parts: [{ part: 1, status: 'queued', machine: null }] });
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send(done(one));
     const two = await nextOf(ivan.node, 'tests.run');
     expect(two.partId).not.toBe(one.partId);
@@ -83,7 +83,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ memFree: 6 * GIB }));
     const { call } = await c.turn(c.bruno);
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ memFree: 9 * GIB }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
   });
@@ -93,7 +93,7 @@ describe('a test run', () => {
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 7.6 }));
     const { call } = await c.turn(c.bruno);
     expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     ivan.node.send({ type: 'load', ...idle({ load: 2 }) });
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
   });
@@ -107,8 +107,8 @@ describe('a test run', () => {
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test -- {part}', parts: 3 });
     expect((await nextOf(ivan.node, 'tests.run')).part).toBe(1);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
-    expect(await gets(bob.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, bob.node, 'tests.run')).toBe(false);
     expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${ann.machineId}`, payload: { lendsTests: true }, ...as(c.ann) })).statusCode).toBe(200);
     expect((await nextOf(ann.node, 'tests.run')).part).toBe(2);
   });
@@ -121,7 +121,7 @@ describe('a test run', () => {
     const run = await nextOf(ivan.node, 'tests.run');
     expect(run.timeoutMs).toBe(5 * 60_000);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
-    expect(await gets(ivan.node, 'tests.cancel')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.cancel')).toBe(false);
     await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
     expect(await nextOf(ivan.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: run.partId });
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*did not end within 5 min/);
@@ -199,7 +199,7 @@ describe('a test run', () => {
     const again = await nextOf(ivan.node, 'tests.run');
     expect(again).toMatchObject({ part: 1, command: 'make test' });
     expect(again.partId).not.toBe(lost.partId);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
     /* The lost run's end, should it still come, changes nothing, and its node hears to stop it. */
     ann.node.send(done(lost, { ok: false, exitCode: 1, error: 'failed' }));
     await nextOf(ann.node, 'tests.ack');
@@ -234,7 +234,7 @@ describe('a test run', () => {
     const result = JSON.parse((await call('test_run', { run: 1 })).text);
     expect(result).toMatchObject({ status: 'passed', parts: [{ status: 'passed' }] });
     expect(result.parts[0].ranAgain).toBeUndefined();
-    expect(await gets(back, 'tests.cancel')).toBe(false);
+    expect(await gets(c.app.ctx, back, 'tests.cancel')).toBe(false);
   });
 
   it('runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost', async () => {
@@ -259,7 +259,7 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(
       /Test run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:\n]*: its machine restarted and lost it\. It ran again after ivan-mac went offline, and again after ivan-mac restarted and lost it\./,
     );
-    expect(await gets(back, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, back, 'tests.run')).toBe(false);
   });
 
   it("does not count a turn that ended while its test run goes on as standing still", async () => {
@@ -309,7 +309,7 @@ describe('a test run', () => {
     expect(one.partId).not.toBe(first.partId);
     expect((await c.app.inject({ method: 'DELETE', url: `/api/subscriptions/${ann.subscriptionId}`, ...as(c.ann) })).statusCode).toBe(204);
     /* One part at a time on a machine: the second waits for the first to end there. */
-    expect(await gets(spare.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, spare.node, 'tests.run')).toBe(false);
     spare.node.send(done(one));
     const two = await nextOf(spare.node, 'tests.run');
     expect(two).toMatchObject({ part: 2 });
@@ -359,7 +359,7 @@ async function productNode(c: Awaited<ReturnType<typeof company>>) {
   return node;
 }
 
-async function productDescription(request: Extract<ServerMessage, { type: 'tests.describe' }>) {
+async function productDescription(request: Extract<ServerMessage, { type: 'tests.describe' }>, runtimeCapabilities: { id: string; version: string; fingerprint: string; platform?: { os: string; arch: string; libc: string } }[] = [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }]) {
   const manifest = {
     version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'npm', inputs: ['package-lock.json'], install: [], paths: ['node_modules'], cache: 'copy' as const }, services: [], prepare: [], reset: null,
@@ -370,7 +370,7 @@ async function productDescription(request: Extract<ServerMessage, { type: 'tests
   const manifestSource = JSON.stringify(manifest);
   return { type: 'tests.described' as const, requestId: request.requestId, commitSha: request.commitSha, result: { status: 'ready' as const, description: {
     version: 1 as const, repositoryScope: request.repositoryScope, commitSha: request.commitSha, manifestSource, manifestHash: await hashTestEnvironment(manifestSource), manifest,
-    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }],
+    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities,
   } } };
 }
 
@@ -417,9 +417,9 @@ describe('pinned product environment runs', () => {
   });
 });
 
-function productDone(part: TestsRun) {
+function productDone(part: TestsRun, runtimes = part.environment!.snapshot.description.runtimeCapabilities) {
   const { snapshot, selection } = part.environment!;
-  return done(part, { commit: part.commitSha, environmentReceipt: { version: 1, commitSha: part.commitSha, manifestHash: snapshot.description.manifestHash, ...selection, runtimes: snapshot.description.runtimeCapabilities, dependencies: { key: 'd'.repeat(64), hit: false }, environments: [], phases: { checkoutMs: 1, dependenciesMs: 1, environmentMs: 0, servicesMs: 0, commandMs: 1, cleanupMs: 1 } } });
+  return done(part, { commit: part.commitSha, environmentReceipt: { version: 1, commitSha: part.commitSha, manifestHash: snapshot.description.manifestHash, ...selection, runtimes, dependencies: { key: 'd'.repeat(64), hit: false }, environments: [], phases: { checkoutMs: 1, dependenciesMs: 1, environmentMs: 0, servicesMs: 0, commandMs: 1, cleanupMs: 1 } } });
 }
 
 it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful product result with %s receipt evidence', async kind => {
@@ -478,7 +478,7 @@ it('selects a capable sibling volume, holds no machine to where it ran before as
   await call('stop_tests', { run: 3 });
 });
 
-it('gives a part only to a node with the very runtimes that described its run, the ones the part\'s receipt is checked against', async () => {
+it('gives a part to a node of another build and processor of the class that described its run, and the Tests report accepts its receipt, but not to another system or Node major', async () => {
   const c = await company();
   const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
   const code = connect.json().command.split('--join ')[1];
@@ -490,39 +490,42 @@ it('gives a part only to a node with the very runtimes that described its run, t
     await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null); connected.push({ node, id: entry.nodeId });
   }
   const { testCapabilities } = await import('../src/modules/testruns/describe.js');
-  const { passedProductPart, runsAsDescribed } = await import('../src/modules/testruns/receipts.js');
-  const runtimes = (fingerprint: string) => [{ id: 'node', version: '22.15.0', fingerprint }];
-  const advertise = async (entry: { node: FakeNode; id: string }, testRuntimes: { id: string; version: string; fingerprint: string }[]) => {
+  const { passedProductPart } = await import('../src/modules/testruns/receipts.js');
+  const { runsInClass } = await import('@hornhoof/protocol');
+  type Runtime = { id: string; version: string; fingerprint: string; platform: { os: string; arch: string; libc: string } };
+  const runtime = (fingerprint: string, platform: Partial<Runtime['platform']> = {}, version = '22.15.0'): Runtime[] => [{ id: 'node', version, fingerprint, platform: { os: 'linux', arch: 'x64', libc: 'glibc', ...platform } }];
+  const x64 = runtime('b'.repeat(64)), arm64 = runtime('c'.repeat(64), { arch: 'arm64' }), darwin = runtime('d'.repeat(64), { os: 'darwin', arch: 'arm64' }), node24 = runtime('e'.repeat(64), {}, '24.1.0');
+  const advertise = async (entry: { node: FakeNode; id: string }, testRuntimes: Runtime[]) => {
     entry.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes });
     await until(() => JSON.stringify(testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testRuntimes) === JSON.stringify(testRuntimes));
   };
   /* The machine gives a run without a snapshot to its first node, so that one describes it. */
   const order = await c.db.select({ id: nodes.id }).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const [describer, other] = order.map(row => connected.find(entry => entry.id === row.id)!) as [typeof connected[number], typeof connected[number]];
-  await advertise(describer, runtimes('b'.repeat(64)));
+  await advertise(describer, x64);
   const { call } = await c.turn(c.bruno);
   expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
   const request = await nextOf(describer.node, 'tests.describe');
-  /* The describer takes no part now. The other node has the same Node version from another build, as a machine of another
-     architecture has: a receipt from it names runtimes the description does not. */
+  /* The describer, an x64 machine, takes no part now. */
   await advertise(describer, []);
-  await advertise(other, runtimes('c'.repeat(64)));
-  describer.node.send(await productDescription(request));
-  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null, 15_000);
-  await pumpTests(c.app.ctx);
-  expect((await c.db.select().from(testParts)).map(part => [part.status, part.nodeId])).toEqual([['queued', null], ['queued', null]]);
+  describer.node.send(await productDescription(request, x64));
+  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
   const snapshot = (await c.db.select().from(testRuns))[0]!.environmentSnapshot!;
-  expect(runsAsDescribed(snapshot, runtimes('c'.repeat(64)))).toBe(false);
-  expect(runsAsDescribed(snapshot, runtimes('b'.repeat(64)))).toBe(true);
-  /* A node that has the described runtimes takes the parts, and the Tests report accepts what it proves. */
-  await advertise(other, runtimes('b'.repeat(64)));
-  const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first));
-  const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final));
-  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed', 15_000);
+  for (const foreign of [darwin, node24]) {
+    await advertise(other, foreign); await pumpTests(c.app.ctx);
+    expect((await c.db.select().from(testParts)).map(part => [part.status, part.nodeId])).toEqual([['queued', null], ['queued', null]]);
+    expect(runsInClass(snapshot, foreign)).toBe(false);
+  }
+  /* An arm64 machine of the same system, libc and Node major takes the parts, and the Tests report accepts what it proves. */
+  await advertise(other, arm64);
+  const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first, arm64));
+  const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final, arm64));
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed');
   const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
   expect(parts.map(part => part.nodeId)).toEqual([other.id, other.id]);
+  expect(parts.map(part => part.environmentReceipt?.runtimes)).toEqual([arm64, arm64]);
   expect(parts.every(part => passedProductPart(snapshot, part))).toBe(true);
-  expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: runtimes('c'.repeat(64)) } })).toBe(false);
+  for (const foreign of [darwin, node24]) expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: foreign } })).toBe(false);
 });
 
 it('fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes', async () => {
@@ -534,7 +537,7 @@ it('fails a run at once when the node that described it lacks a runtime its prof
   reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
   const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
   node.send(reply);
-  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed', 15_000);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
   expect((await c.db.select().from(testParts))).toMatchObject([{ status: 'failed', error: 'runtime_missing', tail: expect.stringContaining('python 3.12') }]);
   expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ environmentStatus: 'failed', environmentProblem: { code: 'runtime_missing' } });
 });
@@ -586,7 +589,7 @@ it('refuses to dispatch a pinned product snapshot after its repository configura
   node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: reply.result.description.runtimeCapabilities });
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
   expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'no_repository', nodeId: null });
-  expect(await gets(node, 'tests.run', 30)).toBe(false);
+  expect(await gets(c.app.ctx, node, 'tests.run')).toBe(false);
 });
 
 it('retries interrupted metadata under new request IDs at the same pinned commit and fails once after three attempts', async () => {
@@ -622,7 +625,7 @@ it.each(['lending', 'access'])('rechecks a persisted metadata node after revokin
     await c.db.delete(personAccess).where(eq(personAccess.personId, owner!.id));
   }
   const restarted = { ...c.app.ctx }; noteTestCapabilities(restarted, id, capabilities); await pumpTests(restarted);
-  expect(await gets(machine.node, 'tests.describe')).toBe(false);
+  expect(await gets(c.app.ctx, machine.node, 'tests.describe')).toBe(false);
   expect((await c.db.select().from(testRuns))[0]!.environmentRequest!.requestId).toBeNull();
   const replacement = await productNode(c), next = await nextOf(replacement, 'tests.describe');
   expect(next.requestId).not.toBe(request.requestId); expect(next.commitSha).toBe(request.commitSha);

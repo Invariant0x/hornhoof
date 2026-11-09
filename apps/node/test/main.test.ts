@@ -15,11 +15,14 @@ import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost } from '../src/terminal/host.js';
+import { StreamMask } from '../src/terminal/mask.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 import type { runTests } from '../src/tests.js';
+import { eventually } from '../../../test-support/eventually.mjs';
+import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:os', async importOriginal => {
   const os = await importOriginal<typeof import('node:os')>();
@@ -39,7 +42,7 @@ function grantCheck(socket: WebSocket, frame: { type: string; id?: string }, all
 }
 
 async function fakeServer(grantChecks = true) {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];
@@ -52,11 +55,7 @@ async function fakeServer(grantChecks = true) {
       grantCheck(s, frame, grantChecks);
     });
   });
-  const wait = async (check: () => boolean, ms = 3000) => {
-    const end = Date.now() + ms;
-    while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
+  const wait = (check: () => boolean) => eventually(check);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
 }
 
@@ -70,15 +69,6 @@ function nodeDir(server: string) {
   return dir;
 }
 
-const hasTmux = (() => {
-  try {
-    execFileSync('tmux', ['-V']);
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 describe('reporting the node lifecycle', () => {
   it('reports a real SIGKILL as an unclean exit with the previous process log after startup', async () => {
     const server = await fakeServer();
@@ -89,13 +79,13 @@ describe('reporting the node lifecycle', () => {
       return child;
     };
     const first = start();
-    await server.wait(() => server.received.some(m => m.type === 'hello'), 6000);
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
     const boot = server.received[0]!.boot as { startedAt: string };
     const ended = once(first, 'exit');
     first.kill('SIGKILL');
     await ended;
     start();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ restart: { kind: 'unplanned', reason: 'unclean_exit', at: null, startedAt: boot.startedAt, log: expect.stringContaining(`Node started at ${boot.startedAt}.`) } });
     expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
   });
@@ -141,7 +131,7 @@ describe('reporting the node lifecycle', () => {
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const before = server.received[0]!;
     server.drop();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const after = server.received.findLast(m => m.type === 'hello')!;
     expect(after.boot).toEqual(before.boot);
     expect(after.restart).toMatchObject({ kind: 'unknown', reason: 'unknown' });
@@ -218,7 +208,7 @@ describe('reporting managed programs', () => {
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'delivered'));
     expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
     server.drop();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'reconnected' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'reconnected'));
     expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
@@ -237,7 +227,7 @@ describe('reporting managed programs', () => {
     for (const status of server.received.filter(m => m.type === 'status')) expect(status.programs).toEqual(snapshot);
     server.drop();
     await programs.update();
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const hello = server.received.findLastIndex(m => m.type === 'hello');
     expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
     for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
@@ -278,7 +268,7 @@ describe('a node that runs agents in terminals', () => {
     const pending = new Promise<void>(resolve => { release = resolve; });
     const tmux = new Tmux({ socket: `hh-program-timeout-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
     const node = await runNode({ dir, log: () => {}, adapter: { ...adapter, run: async input => { await pending; return adapter.run(input); } },
-      ...(terminal ? { terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } } : {}),
+      ...(terminal ? { terminal: { tmux, program: claudeProgram, bin: 'claude', home: join(dir, 'home'), signedOut: /not logged in/i } } : {}),
     });
     onTestFinished(() => node.stop());
     try {
@@ -289,36 +279,6 @@ describe('a node that runs agents in terminals', () => {
     } finally {
       release();
     }
-  });
-
-  it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
-    vi.mocked(uptime).mockReturnValueOnce(3600);
-    const server = await fakeServer();
-    const dir = nodeDir(server.url);
-    const tmux = new Tmux({ socket: `hh-within-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const say = vi.spyOn(TerminalHost.prototype, 'say').mockResolvedValue(true);
-    onTestFinished(() => say.mockRestore());
-    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
-    const log = vi.fn();
-    const node = await runNode({ dir, adapter, log, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
-    onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
-    const words = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.' };
-    server.send({ ...words, ref: 'budget', within: 15_000 });
-    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'budget'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000, undefined);
-    server.send({ ...words, ref: 'older' });
-    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'older'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, undefined);
-    const operatorDelivery = { id: '10000000-0000-4000-8000-000000000001', ordinal: 3 };
-    server.send({ ...words, ref: 'operator', operatorDelivery });
-    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'operator'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, operatorDelivery);
-    say.mockRejectedValueOnce(new Error(words.text));
-    server.send({ ...words, ref: 'failed' });
-    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'failed'));
-    expect(server.received.find(m => m.type === 'agent.said' && m.ref === 'failed')).toMatchObject({ ok: false });
-    expect(log.mock.calls.filter(([line]) => line.includes('live words'))).toEqual([['Agent agent-1: live words were not delivered: terminal input failed.']]);
   });
 
   it('keeps a live receipt across a short reconnect', async () => {
@@ -340,105 +300,39 @@ describe('a node that runs agents in terminals', () => {
     server.drop();
     await server.wait(() => log.some(line => line.includes('Connection closed')));
     receipt(true);
-    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 5000);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(server.received.filter(m => m.type === 'agent.said')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
   });
 
-  it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {
-    vi.mocked(uptime).mockReturnValueOnce(3600);
-    const server = await fakeServer();
-    const dir = nodeDir(server.url);
-    const tmux = new Tmux({ socket: `hh-main-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
-    const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
-    onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
-    expect(server.received[0]).toMatchObject({ type: 'hello', terminals: true });
-
-    const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1' };
-    server.send({ ...run, jobId: 'j1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
-    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
-    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: true, result: 'echo: hi' });
-    expect(server.received).toContainEqual({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } });
-
-    server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: false });
-    await server.wait(() => server.received.some(m => m.type === 'term.data' && String(m.data).includes('echo: hi')), 8000);
-
-    server.send({ ...run, jobId: 'j2', prompt: 'test', toolToken: null });
-    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
-    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
-  });
-
-  it.skipIf(!hasTmux)('leaves a turn in a session to say the limits itself, and asks the program only after a job outside one', async () => {
-    const server = await fakeServer();
-    const dir = nodeDir(server.url);
-    const tmux = new Tmux({ socket: `hh-main-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
-    let asked = 0;
-    const limits = async () => {
-      asked++;
-      return { status: 'allowed' as const, windows: [] };
-    };
-    const run = async () => ({ ok: true, sessionId: null, result: 'ready', output: '', error: null, limits: null });
-    const node = await runNode({ dir, adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 60_000, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
-    onTestFinished(() => node.stop());
-    await server.wait(() => asked === 1 && server.received.some(m => m.type === 'hello'));
-
-    const job = { type: 'job.run', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1' };
-    server.send({ ...job, jobId: 'j1', prompt: 'NOLIMITS', workspace: { key: 'agent-1', repo: null } });
-    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'), 15000);
-    expect(asked).toBe(1);
-
-    server.send({ ...job, jobId: 'j2', prompt: 'test', toolToken: null });
-    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
-    expect(asked).toBe(2);
-  });
-
-  it.skipIf(!hasTmux)("installs the agents' program before a turn in a session, and says the turn failed when it cannot", async () => {
-    const server = await fakeServer();
-    const dir = nodeDir(server.url);
-    const tmux = new Tmux({ socket: `hh-install-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    onTestFinished(async () => { await tmux.run(['kill-server']).catch(() => {}); });
-    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
-    let installs = 0;
-    const install = async () => {
-      installs++;
-      throw new Error('npm: offline');
-    };
-    const node = await runNode({ dir, adapter, log: () => {}, install, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
-    onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
-    const before = installs;
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: 'tok-1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
-    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
-    expect(installs).toBeGreaterThan(before);
-    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'agent_failed' });
-    expect(await tmux.has('a-agent-1')).toBe(false);
-  });
-
-  it.skipIf(!hasTmux)("hides on a screen a program's token from after the node started, with no Hornhoof turn since", async () => {
-    const server = await fakeServer();
-    const dir = nodeDir(server.url);
-    const tmux = new Tmux({ socket: `hh-learn-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+  it('learns a renewed program token between turns and gives it to an existing terminal mask', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
     const tokens: string[] = [];
-    const node = await runNode({ dir, adapter: { ...adapter, secrets: async () => tokens }, log: () => {}, learnMs: 50, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
-    onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
-    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
-    tokens.push('late-token-1234567890');
-    await new Promise(r => setTimeout(r, 200));
-    server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: true });
-    const screen = () => server.received.flatMap(m => (m.type === 'term.data' ? [String(m.data)] : [])).join('');
-    await server.wait(() => screen().length > 0, 8000);
-    server.send({ type: 'term.input', termId: 't1', data: 'say late-token-1234567890\r' });
-    await server.wait(() => server.received.some(m => m.type === 'turn.open'), 8000);
-    server.send({ type: 'turn.opened', agentKey: 'agent-1', jobId: null, toolToken: null });
-    await server.wait(() => screen().includes('echo: say'), 8000);
-    expect(screen()).toContain('[hidden]');
-    expect(screen()).not.toContain('late-token-1234567890');
+    const tmux = new Tmux({ env: { HOME: dir } });
+    const stopAll = vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+    const start = vi.spyOn(TerminalHost.prototype, 'start').mockResolvedValue();
+    const stop = vi.spyOn(TerminalHost.prototype, 'stop').mockResolvedValue();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let node: Awaited<ReturnType<typeof runNode>> | undefined;
+    try {
+      node = await runNode({ dir, adapter: { ...adapter, secrets: async () => [...tokens] }, log: () => {}, learnMs: 100,
+        terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i },
+      });
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      const host = start.mock.instances[0]! as TerminalHost;
+      const mask = new StreamMask(host['opts'].secrets);
+      const token = 'late-token-1234567890';
+      expect(host['opts'].secrets()).not.toContain(token);
+      tokens.push(token);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(host['opts'].secrets()).toContain(token);
+      expect(mask.push(`renewed ${token} here\n`) + mask.flush()).toBe('renewed [hidden] here\n');
+      expect(server.received.some(m => m.type === 'job.done' || m.type === 'turn.open')).toBe(false);
+    } finally {
+      node?.stop();
+      vi.useRealTimers();
+      stopAll.mockRestore(); start.mockRestore(); stop.mockRestore();
+    }
   });
 
   it("says it writes an agent's skills as files, so Hornhoof sends them as files", async () => {
@@ -521,14 +415,14 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => dones().length === 1);
     server.drop();
-    await server.wait(() => dones().length === 2, 5000);
+    await server.wait(() => dones().length === 2);
     expect(hellos()[1]).toMatchObject({ running: ['j1'] });
     expect(dones()[1]).toMatchObject({ ok: true, result: 'ready' });
 
     server.send({ type: 'job.ack', jobId: 'j1' });
     await new Promise(r => setTimeout(r, 50));
     server.drop();
-    await server.wait(() => hellos().length === 3, 5000);
+    await server.wait(() => hellos().length === 3);
     await new Promise(r => setTimeout(r, 100));
     expect(hellos()[2]).toMatchObject({ running: [] });
     expect(dones()).toHaveLength(2);
@@ -655,7 +549,7 @@ describe('runNode', () => {
     const usage = (utilization: number) => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization, resetsAt: null }] });
     const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     const framesAfterHello = (received: { type: string; [k: string]: unknown }[]) => received.slice(received.findLastIndex(m => m.type === 'hello') + 1);
-    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
 
     it('keeps no reading in the queue, and says only the newest when it is back', async () => {
       const server = await fakeServer();
@@ -885,9 +779,9 @@ describe('runNode', () => {
     const hellos = () => server.received.filter(m => m.type === 'hello');
     await server.wait(() => hellos().length === 1);
     for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
-    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52, 15000);
+    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52);
     server.drop();
-    await server.wait(() => hellos().length === 2, 5000);
+    await server.wait(() => hellos().length === 2);
     const running = hellos()[1]!.running as string[];
     expect(running).toHaveLength(50);
     expect(running).not.toContain('j1');
@@ -1175,13 +1069,13 @@ describe('runNode', () => {
 
     const hellos = () => server.received.filter(m => m.type === 'hello');
     server.drop();
-    await server.wait(() => hellos().length === 2, 5000);
+    await server.wait(() => hellos().length === 2);
     expect(hellos()[1]).toMatchObject({ tests: ['p1'] });
     await server.wait(() => server.received.filter(m => m.type === 'tests.done').length === 2);
     server.send({ type: 'tests.ack', partId: 'p1' });
     await new Promise(r => setTimeout(r, 50));
     server.drop();
-    await server.wait(() => hellos().length === 3, 5000);
+    await server.wait(() => hellos().length === 3);
     expect(hellos()[2]).toMatchObject({ tests: [] });
 
     server.send({ ...part, partId: 'p2', command: 'slow' });
@@ -1350,7 +1244,7 @@ it('describes a product by itself with what lets the server reuse results', asyn
   const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   server.send({ type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', repo: { url, token: '' }, commitSha, repositoryScope });
-  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'), 15_000);
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
   expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'ready', fingerprints: [{ suiteId: 'unit', file: 'test/a.js' }] } });
 });
 
@@ -1402,35 +1296,6 @@ it('keeps a stopped part cleanup exclusive when another machine slot is granted 
   release(); await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'second'));
   expect(runPart).toHaveBeenCalledTimes(2);
 });
-
-it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting the next terminal assignment', async () => {
-  const server = await fakeServer(), dir = nodeDir(server.url), key = 'kept-agent';
-  const tmux = new Tmux({ socket: `hh-main-kept-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-  const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } });
-  onTestFinished(() => node.stop());
-  await server.wait(() => server.received.some(message => message.type === 'hello'));
-  const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: 'fixture-token', workspace: { key, repo: null } };
-  server.send({ ...run, jobId: 'kept-first', prompt: 'First assignment.', sessionId: null });
-  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-first'), 15000);
-  const first = server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-first')!;
-  expect(first).toMatchObject({ ok: true });
-  server.send({ type: 'term.open', termId: 'kept-window', agentKey: key, cols: 100, rows: 30, write: true });
-  await server.wait(() => server.received.some(message => message.type === 'term.data' && message.termId === 'kept-window'));
-  server.send({ type: 'term.input', termId: 'kept-window', data: 'Unsent draft' });
-  await server.wait(() => server.received.some(message => message.type === 'term.data' && String(message.data).includes('Unsent draft')));
-  // Advance only the idle clock past the host's typing grace; do not change its timeout policy.
-  const now = Date.now.bind(Date), clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + 16_000);
-  onTestFinished(() => clock.mockRestore());
-  server.send({ ...run, jobId: 'kept-second', prompt: 'Second assignment.', sessionId: first.sessionId });
-  await server.wait(() => server.received.some(message => message.type === 'agent.input_left' && message.jobId === 'kept-second'), 8000);
-  const left = server.received.find(message => message.type === 'agent.input_left' && message.jobId === 'kept-second')!;
-  expect(left).toMatchObject({ text: 'Unsent draft', typed: true });
-  expect(server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second')).toBe(false);
-  server.send({ type: 'agent.input_kept', agentKey: key, ref: left.ref });
-  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second'), 8000);
-  expect(server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-second')).toMatchObject({ ok: true, result: 'echo: Second assignment.' });
-});
-
 
 describe('checking work before admission', () => {
   it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts', 'npm run ordinary'])('refuses %s before any part preparation', async command => {

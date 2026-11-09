@@ -1,4 +1,4 @@
-import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -14,9 +14,9 @@ import { computerKey } from './capacity.js';
 import { pickMachine } from './pick.js';
 import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
+import { measuredHistory } from './plan-measured.js';
 import { runPurpose } from './purpose.js';
 export { productReceipt } from './receipts.js';
-import { runsAsDescribed } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
@@ -93,13 +93,14 @@ function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestE
   if (leaves.length > MAX_TEST_PARTS) throw new Error('The product plan exceeds the supported part count.');
   return leaves;
 }
-async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<number> {
+/* The computers free now that may run a part of the run. */
+async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<string[]> {
   const sources = planningSources.get(ctx);
-  if (!sources) return 0;
+  if (!sources) return [];
   const target = await sources.target(run), need = (run.memoryGb ?? target?.department?.repoTestMemoryGb ?? TEST_MEMORY_GB) * 1024 ** 3;
   const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need);
   const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
-  return new Set(free.map(computerKey)).size;
+  return [...new Set(free.map(computerKey))].sort();
 }
 function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
   if (snapshot.candidate) return candidateTestUnits(snapshot);
@@ -109,16 +110,17 @@ function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): Envi
   return units;
 }
 function planningCosts(history: PlanningHistory | null | undefined) {
-  return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000 };
+  return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: history?.unknownFileMs ?? 30_000 };
 }
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot, reuse: ReuseDecision): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
   const units = requestedUnits(snapshot, requested);
-  const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
+  const history = await (planningPorts.get(ctx)?.history ?? measuredHistory(ctx))(run, snapshot);
+  const free = await freeProductMachines(ctx, run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: runPurpose(snapshot, requested), units, reuse,
     ...planningCosts(history),
-    availableMachines: await freeProductMachines(ctx, run, snapshot) });
+    availableMachines: free.length, machines: free.map(key => ({ key, pace: history?.paces?.get(key) ?? 1 })) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
   return { leaves: plan.leaves, plan };
 }
@@ -156,13 +158,13 @@ function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequ
 function candidateReuseMode(mode: RunMode, snapshot: EnvironmentSnapshot): RunMode {
   return mode && snapshot.candidate ? { ...mode, mode: 'cached', profile: snapshot.profile } : mode;
 }
-/* A part runs only on the runtimes that described its run, so a run its describing node could not run itself runs nowhere: it ends
-   now with what it lacks, not at its queue deadline. */
+/* A part runs only on runtimes of the class that described its run, so a run its describing node could not run itself runs nowhere:
+   it ends now with what it lacks, not at its queue deadline. */
 function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   const own = snapshot.description.runtimeCapabilities;
-  if (runsAsDescribed(snapshot, own)) return null;
+  if (runsInClass(snapshot, own)) return null;
   const lacks = requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).filter(needed => !own.some(actual => actual.id === needed.id && runtimeVersionMatches(needed.version, actual.version)));
-  const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on the runtimes that described its run, so no node can run it.`;
+  const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on runtimes of the class that described its run, so no node can run it.`;
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<EnvironmentProblem | null> {

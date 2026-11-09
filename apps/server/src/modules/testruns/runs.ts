@@ -28,6 +28,7 @@ import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productRece
 import { checkNamedFiles } from './named-files.js';
 import { pickMachine } from './pick.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
+import { keepPartTimings } from './timings.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -278,10 +279,13 @@ async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, 
   return places;
 }
 
-/* Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
+/* A part laid out for a computer by its pace waits for that computer while it is online and may take it; after a loss, or when it
+   cannot, any computer does. Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
 function placeFor(open: Place[], run: Run, part: Part, department: Department | null, reserved: Reservations): Place | null {
   const need = needOf(run, department) * GIB;
   const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: mayTake(p, run, department), busy: reserved.busy(p), load: p.load }));
+  const laidOut = part.lost.length ? [] : spots.filter(s => s.computer === part.environmentSelection?.computer && s.lent && s.reaches);
+  if (laidOut.length) { const own = pickMachine(laidOut, need); return own ? open.find(p => p.key === own.key) ?? null : null; }
   const lostOn = new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
   const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need) ?? pickMachine(spots, need);
   return spot ? open.find(p => p.key === spot.key) ?? null : null;
@@ -478,6 +482,8 @@ function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commi
 async function keepPartResults(ctx: Ctx, run: Run, part: Part, ended: Part, msg: TestsDone): Promise<void> {
   try { await recordPartFiles(ctx, run, part, ended, msg); await rememberKept(ctx, run, msg); }
   catch (err) { ctx.log.error({ error: loggable(err), runId: run.id }, 'The results of a test part could not be kept.'); }
+  try { if (run.kind === 'tests') await keepPartTimings(ctx.db, run, ended, msg); }
+  catch (err) { ctx.log.error({ error: loggable(err), runId: run.id }, 'The file times of a test part could not be kept.'); }
 }
 
 /* The node's end of a part: its result, and its log on the task, also for a part that ended here first. */

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath, URL } from 'node:url';
+import { listenIn } from '../../test-support/ports.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../tests-mark.mjs', import.meta.url));
 const SHA = 'a'.repeat(40);
@@ -18,7 +19,7 @@ async function github(code) {
       res.writeHead(code, { 'content-type': 'application/json' }).end('{}');
     });
   });
-  await new Promise(done => server.listen(0, '127.0.0.1', done));
+  await listenIn(server);
   return { sent, url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(done => server.close(done)) };
 }
 

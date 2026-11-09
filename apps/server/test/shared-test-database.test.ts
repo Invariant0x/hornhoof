@@ -1,7 +1,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { afterAll, describe, expect, it } from 'vitest';
-import { readerRole } from '../src/db/agent-sql.js';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
 
 /* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
@@ -10,7 +10,7 @@ let lastShared: PGlite | undefined;
 afterAll(() => {
   expect(lastShared?.closed).toBe(true);
 });
-const { createTestDb, databasesOpened, sharedDatabase } = await import('./helpers-db.js');
+const { checkSharedDatabase, createTestDb, databasesOpened, fixture, shapeOf, sharedDatabase } = await import('./helpers-db.js');
 const { testApp } = await import('./helpers.js');
 afterAll(() => {
   lastShared = sharedDatabase();
@@ -72,13 +72,12 @@ describe('the tests of one file', { shuffle: false }, () => {
   });
 });
 
-describe('a test that takes a right away', { shuffle: false }, () => {
-  it('has it gone for itself', async () => {
-    const { app, db } = await testApp();
+describe('agent SQL in a test', { shuffle: false }, () => {
+  it('finds its roles and rights in the database already, so it changes nothing beyond rows', async () => {
+    const { app } = await testApp();
+    const shape = await shapeOf(sharedDatabase()!);
     await app.ctx.agentSql!.run('select 1', 'read');
-    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test is about what such a statement leaves behind.
-    await db.execute(sql.raw(`revoke select on companies from "${reader}"`));
-    await expect(app.ctx.agentSql!.run('select id from companies', 'read')).rejects.toThrow('permission denied');
+    expect(await shapeOf(sharedDatabase()!)).toBe(shape);
   });
 
   it('leaves the rights and roles of a new copy to the next test', async () => {
@@ -86,62 +85,204 @@ describe('a test that takes a right away', { shuffle: false }, () => {
     const copy = await createTestDb();
     expect(await rights(emptied)).toEqual(await rights(copy));
   });
-
-  it('does not stop the next test from reading', async () => {
-    const { app } = await testApp();
-    const [result] = await app.ctx.agentSql!.run('select id from companies', 'read');
-    expect(result!.rows).toEqual([]);
-  });
 });
 
+/* A change beyond rows outlives the emptying between tests and reaches every later test of the file, so the file fails
+   when it ends, and its database is put aside. A test here asks for that check itself, so the file goes on. */
 describe('what a test changes beyond rows', { shuffle: false }, () => {
-  it('can be a trigger', async () => {
+  it('fails its file when the file ends, as a trigger', async () => {
     const db = await createTestDb();
     // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test is about what such a statement leaves behind.
     await db.execute(sql`create function refuse_company() returns trigger language plpgsql as $$ begin raise exception 'no company'; end $$`);
     // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test is about what such a statement leaves behind.
     await db.execute(sql`create trigger refuse_company before insert on companies for each row execute function refuse_company()`);
-    await expect(db.insert(companies).values({ name: 'Acme' })).rejects.toThrow();
+    await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
   });
 
-  it('does not reach the next test as a trigger', async () => {
+  it('leaves the next test a new copy once its file was told', async () => {
     const db = await createTestDb();
     await expect(db.insert(companies).values({ name: 'Acme' }).returning()).resolves.toHaveLength(1);
   });
 
-  it('can be a setting of the connection', async () => {
+  it('fails its file as a right taken away', async () => {
+    const { app, db } = await testApp();
+    await app.ctx.agentSql!.run('select 1', 'read');
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test is about what such a statement leaves behind.
+    await db.execute(sql.raw(`revoke select on companies from "${reader}"`));
+    await expect(app.ctx.agentSql!.run('select id from companies', 'read')).rejects.toThrow('permission denied');
+    await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
+  });
+
+  it('fails its file when a schema change prevents emptying the database', async () => {
+    const db = await createTestDb();
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test checks that a broken cleanup cannot hide a schema change.
+    await db.$client.exec('drop schema public cascade');
+    await expect(checkSharedDatabase()).rejects.toThrow(/ownDatabases\(\)/);
+  });
+
+  it('does not hide a schema change by replacing a database that cannot be emptied', async () => {
+    const db = await createTestDb();
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- This test checks cleanup before the next test asks for its database.
+    await db.$client.exec('drop schema public cascade');
+    await db.$client.close();
+    await expect(createTestDb().then(() => null)).rejects.toThrow(/ownDatabases\(\)/);
+  });
+
+  it('does not fail its file when it gave the same rights again, in another order', async () => {
+    const db = await createTestDb();
+    await db.$client.exec(grantsFor(agentRole('postgres')));
+    await expect(checkSharedDatabase()).resolves.toBeUndefined();
+  });
+
+  it('does not fail its file when it changed only rows', async () => {
+    const db = await createTestDb();
+    await db.insert(companies).values({ name: 'Acme' });
+    await expect(checkSharedDatabase()).resolves.toBeUndefined();
+  });
+});
+
+/* What a test sets on its connection ends with the test, as each test starts by discarding it. */
+describe('a setting of the connection', { shuffle: false }, () => {
+  it('can be one every read depends on', async () => {
     const db = await createTestDb();
     await db.execute(sql`select set_config('search_path', 'pg_catalog', false)`);
     await expect(db.select().from(companies)).rejects.toThrow();
   });
 
-  it('does not reach the next test as a setting', async () => {
+  it('does not reach the next test as such a setting', async () => {
     const db = await createTestDb();
     await expect(db.select().from(companies)).resolves.toEqual([]);
   });
 
-  it('can be a setting no read depends on', async () => {
+  it('can be one no read depends on', async () => {
     const db = await createTestDb();
     await db.execute(sql`select set_config('application_name', 'left behind', false)`);
     expect(await applicationName(db)).toEqual([{ name: 'left behind' }]);
   });
 
-  it('does not reach the next test as such a setting', async () => {
+  it('does not reach the next test as that setting', async () => {
     const emptied = await createTestDb();
     const copy = await createTestDb();
     expect(await applicationName(emptied)).toEqual(await applicationName(copy));
   });
+});
 
-  it('can be a statistic the planner goes by', async () => {
+/* What the planner knows of the tables and indexes, and of the rows in them: the next test is planned as on a new copy,
+   and the order a query reads rows in does not depend on the tests before. */
+const plannerView = (db: Db) => db.execute(sql`select c.relname, c.relkind, c.relpages, c.reltuples, c.relallvisible, pg_relation_size(c.oid)::int as size from pg_class c
+  where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'i') order by c.relname`);
+
+describe('what a test leaves for the planner', { shuffle: false }, () => {
+  it('can be rows in the tables it wrote', async () => {
+    const db = await createTestDb();
+    await numberedEvent(db);
+  });
+
+  it('is gone for the next test, as on a new copy', async () => {
+    const emptied = await createTestDb();
+    const copy = await createTestDb();
+    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+  });
+
+  it('can be statistics an analyze made of every table', async () => {
     const db = await createTestDb();
     await db.insert(companies).values({ name: 'Acme' });
-    await db.execute(sql`analyze companies`);
+    await db.execute(sql`analyze`);
     expect((await statistics(db)).rows).not.toEqual([]);
   });
 
-  it('does not reach the next test as a statistic', async () => {
+  it('does not reach the next test as statistics', async () => {
+    const emptied = await createTestDb();
+    expect((await statistics(emptied)).rows).toEqual([]);
+    const copy = await createTestDb();
+    expect((await plannerView(emptied)).rows).toEqual((await plannerView(copy)).rows);
+  });
+
+  it('does not fail its file', async () => {
     const db = await createTestDb();
-    expect((await statistics(db)).rows).toEqual([]);
+    await db.execute(sql`analyze`);
+    await expect(checkSharedDatabase()).resolves.toBeUndefined();
+  });
+});
+
+describe('rows a file makes once', { shuffle: false }, () => {
+  let made = 0;
+  const acme = (db: Db) => fixture(db.$client, 'acme', async () => {
+    made += 1;
+    const seq = await numberedEvent(db);
+    const [company] = await db.select().from(companies);
+    return { company: company!, seq };
+  });
+  const nextEvent = async (db: Db) => {
+    const [agent] = await db.select().from(agents);
+    const [event] = await db.insert(agentEvents).values({ companyId: agent!.companyId, agentId: agent!.id, kind: 'message', data: {} }).returning();
+    return event!.seq;
+  };
+  let first: Awaited<ReturnType<typeof acme>>;
+
+  it('are made by the first test that asks for them', async () => {
+    const db = await createTestDb();
+    first = await acme(db);
+    expect(made).toBe(1);
+    expect(await db.select().from(companies)).toEqual([first.company]);
+  });
+
+  it('are there for the next test as they were made, without being made again', async () => {
+    const db = await createTestDb();
+    const again = await acme(db);
+    expect(made).toBe(1);
+    expect(again).toEqual(first);
+    expect(await db.select().from(companies)).toEqual([first.company]);
+    expect(await nextEvent(db)).toBe(first.seq + 1);
+    await db.update(companies).set({ name: 'Changed' });
+    again.company.name = 'Changed';
+  });
+
+  it('come back for each test without what the test before changed', async () => {
+    const db = await createTestDb();
+    const again = await acme(db);
+    expect(again).toEqual(first);
+    expect(await db.select().from(companies)).toEqual([first.company]);
+    expect(await nextEvent(db)).toBe(first.seq + 1);
+  });
+
+  it('are made again on other rows, as on any database', async () => {
+    const db = await createTestDb();
+    await db.insert(companies).values({ name: 'Other' });
+    /* Here the second company is refused, as a Hornhoof has one. */
+    await expect(acme(db)).rejects.toThrow();
+    expect(made).toBe(2);
+  });
+
+  it('can stand on other rows made once, and come back on them', async () => {
+    let layers = 0;
+    const team = (db: Db) => fixture(db.$client, 'team', async () => {
+      layers += 1;
+      const [company] = await db.select().from(companies);
+      const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
+      return agent!;
+    });
+    const names = (db: Db) => db.select({ name: agents.name }).from(agents).orderBy(agents.name);
+    const first = await createTestDb();
+    await acme(first);
+    const bruno = await team(first);
+    await first.$client.close();
+    const second = await createTestDb();
+    await acme(second);
+    expect(await team(second)).toEqual(bruno);
+    expect(layers).toBe(1);
+    expect(await names(second)).toEqual([{ name: 'Bruno' }, { name: 'Orchestrator' }]);
+  });
+
+  it('are made again while the clock is not real, as made ones would hold the time of the real one', async () => {
+    vi.useFakeTimers({ now: new Date('2030-01-01T00:00:00Z'), toFake: ['Date'] });
+    try {
+      const db = await createTestDb();
+      await acme(db);
+      expect(made).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

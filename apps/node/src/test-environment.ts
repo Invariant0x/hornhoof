@@ -125,8 +125,10 @@ async function runtimeOutput(program: string, args: string[], context: CacheCont
 }
 let libcVersion: string | undefined;
 const libc = (): string => libcVersion ??= (process.report.getReport() as { header: { glibcVersionRuntime?: string } }).header.glibcVersionRuntime ?? 'unknown';
+/* The fingerprint is of the exact build, for what a machine installs and builds; the platform says the class a test result holds for. */
 function capability(id: string, version: string, build: unknown): RuntimeCapability {
-  return { id, version, fingerprint: digest(JSON.stringify({ platform: process.platform, arch: process.arch, libc: libc(), build })) };
+  return { id, version, fingerprint: digest(JSON.stringify({ platform: process.platform, arch: process.arch, libc: libc(), build })),
+    platform: { os: process.platform, arch: process.arch, libc: libc() === 'unknown' ? 'other' : 'glibc' } };
 }
 async function pythonRuntime(context: CacheContext): Promise<RuntimeCapability[]> {
   const output = await runtimeOutput('/usr/bin/python3', ['-I', '-c', 'import json,sys,sysconfig;print(json.dumps({"version":".".join(map(str,sys.version_info[:3])),"build":sys.version,"abi":sysconfig.get_config_var("SOABI")}))'], context);

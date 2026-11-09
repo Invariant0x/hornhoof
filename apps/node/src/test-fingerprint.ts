@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { builtinModules } from 'node:module';
 import { matchesGlob, posix } from 'node:path';
-import { PREPARATION_UNIT, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
+import { PREPARATION_UNIT, runtimeClass, type EnvironmentDescription, type RepositoryScope, type TestEnvironmentV1, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { checkCacheContext, type CacheContext } from './test-cache.js';
 import { matchesPattern, NAMED_TESTS, namedAfter, selectAffectedTests, type ImpactEnvironment, type ImpactGraph, type ImpactPackage } from './test-impact.js';
 import { readCommit, readMutationDelta, type GitEntry } from './test-mirror.js';
@@ -406,13 +406,15 @@ async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, strin
   return new Map([...found].map(([id, files]) => [id, tree.pairsDigest(files)]));
 }
 
-function versionOf(description: FingerprintInput['description'], id: string): [string, string | null, string | null] {
+/* A runtime counts by its class, which any machine of that class shares; one that does not name its system, by its very build. */
+function versionOf(description: FingerprintInput['description'], id: string): unknown[] {
   const runtime = description.runtimeCapabilities.find(runtime => runtime.id === id);
-  return [id, runtime?.version ?? null, runtime?.fingerprint ?? null];
+  const kind = runtime && runtimeClass(runtime);
+  return kind ? [id, kind] : [id, runtime?.version ?? null, runtime?.fingerprint ?? null];
 }
 /* A service counts for a suite only where they share every profile, so a suite that may run without it keeps its results. */
 const servicesOf = (manifest: Manifest, suite: Suite | null) => manifest.services.filter(service => suite === null || suite.profiles.every(profile => service.profiles.includes(profile)));
-/* The runtimes' versions and not the machines, and what is installed. */
+/* The classes of the runtimes and not the machines. */
 function runtimesOf(description: FingerprintInput['description'], suite: Suite | null): unknown {
   const { manifest } = description, services = new Set(manifest.services.map(service => service.runtime));
   const needed = servicesOf(manifest, suite).map(service => service.runtime);

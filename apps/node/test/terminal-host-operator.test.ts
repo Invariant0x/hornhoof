@@ -49,7 +49,7 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
     record({ type: 'event_msg', payload: { type: 'agent_message', message: 'Done.' } });
     record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'work', last_agent_message: 'Done.' } });
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: frame => ordinary.push(frame), secrets: () => [], plugins: [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: frame => ordinary.push(frame), secrets: () => [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true, now: () => now },
   });
   const running = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });

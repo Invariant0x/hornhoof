@@ -44,9 +44,22 @@ export function packageTiming(modules: readonly TestModule[], name: string): Tes
   return { package: name, tests: times.length, medianTestMs: Math.round(middle), slowerThanMedian: times.filter(t => t > middle).length };
 }
 
+/* Each test of a file that failed, with its error, and what failed the file before its tests: the node ends a failed part's log with
+   them. A message is cut here; the node keeps only its first line. */
+const MESSAGE = 2000;
+const said = (name: string, message: string | undefined) => ({ name: name.slice(0, 500), message: (message ?? '').slice(0, MESSAGE) });
+function failuresOf(module: TestModule): { name: string; message: string }[] {
+  const own = module.errors().map(error => said(module.relativeModuleId, error.message));
+  const tests = [...module.children.allTests()].filter(test => test.result().state === 'failed').map(test => said(test.fullName, test.result().errors?.[0]?.message));
+  return [...own, ...tests];
+}
 /* How a file went, for the report a part of a run asks for. A file that ran no test says nothing: a run that passed proves it with
    the others, and one that failed or stopped early leaves it unknown. */
-const fileOutcomes = (module: TestModule) => module.state() === 'skipped' ? [] : [{ file: module.moduleId, status: module.state() === 'passed' ? 'passed' : 'failed', ms: Math.round(module.diagnostic().duration) }];
+const fileOutcomes = (module: TestModule) => {
+  if (module.state() === 'skipped') return [];
+  const failures = module.state() === 'passed' ? [] : failuresOf(module);
+  return [{ file: module.moduleId, status: module.state() === 'passed' ? 'passed' : 'failed', ms: Math.round(module.diagnostic().duration), ...(failures.length ? { failures } : {}) }];
+};
 
 /* In a part of a run, each test file's time goes into the log for the pipeline report, ahead of the runner's own summary:
    the last lines of a log are what the agent reads of a failed part. */

@@ -9,6 +9,7 @@ import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
 import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -77,10 +78,13 @@ describe('Claude Code in a terminal', () => {
     expect(command).not.toContain('--append-system-prompt-file');
   });
 
-  it('loads the plugins the node has for this session only, such as superpowers', () => {
-    const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS, plugins: ['/opt/hornhoof/superpowers'] });
-    expect(arg(command, '--plugin-dir')).toBe('/opt/hornhoof/superpowers');
-    expect(claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS }).command).not.toContain('--plugin-dir');
+  it("loads no plugin, new or resumed, so every hook of the session is Hornhoof's own", () => {
+    for (const sessionId of [null, 'abc-1']) {
+      const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
+      expect(command).not.toContain('--plugin-dir');
+      const { hooks } = JSON.parse(arg(command, '--settings')!) as { hooks: Record<string, { hooks: { command: string }[] }[]> };
+      for (const command of Object.values(hooks).flat().flatMap(entry => entry.hooks.map(h => h.command))) expect(command).toMatch(/^hh-hook [a-z]+$/);
+    }
   });
 
   it('thinks as hard as the agent was set to, or at the plan default when nothing is set', () => {
@@ -127,7 +131,7 @@ describe('Claude Code in a terminal', () => {
       asked.push(`${req.url} ${req.headers.authorization} ${req.headers['anthropic-beta']}`);
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ five_hour: { utilization: 40, resets_at: '2026-10-31T03:00:00Z' }, seven_day: { utilization: 93, resets_at: '2026-11-01T07:00:00Z' } }));
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
       expect(await claudePlanLimits(home, base)).toBeNull();
@@ -335,7 +339,7 @@ describe('Kimi Code in a terminal', () => {
       auths.push(`${req.url} ${req.headers.authorization}`);
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ usages: { limit_5h: { used_ratio: 0.5, reset_time: '2026-10-31T03:00:00Z' } } }));
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     const before = process.env.KIMI_CODE_BASE_URL;
     process.env.KIMI_CODE_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/coding/v1`;
     try {

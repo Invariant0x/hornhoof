@@ -3,10 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
+import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDepartments, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
-function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
+export function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
   const [data, setData] = useState<T | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
   const latest = useRef(path);
@@ -47,9 +47,10 @@ function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: 
   return { data, failure, load };
 }
 
-export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string | null };
+/* department: one of the person's own, or none for the work given to the orchestrator itself. */
+export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string };
 
-export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
+export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}&department=${f.department}`;
 
 const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enabled ? tasksPath(filter) : null;
 
@@ -57,6 +58,12 @@ const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enab
 export function useTasks(filter: TaskFilter, enabled = true) {
   const { data, failure, load } = useLive(taskSource(filter, enabled), (b: { tasks: TaskLine[] }) => b.tasks, m => m.type === 'task');
   return { tasks: data, failure, load };
+}
+
+/* The departments whose tasks the person reads, which can change with their access. */
+export function useTaskDepartments() {
+  const { data, failure, load } = useLive('/api/task-departments', (b: TaskDepartments) => b, m => m.type === 'org');
+  return { taskDepartments: data, failure, load };
 }
 
 /* One task with its gates, subtasks and log. */

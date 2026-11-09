@@ -7,6 +7,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import { ASKPASS, gitPreparationFailure, prepareRepo, type Git } from '../src/workspace.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const AGENT = '7d3c2a10-0000-4000-8000-000000000001';
 const TOKEN = 'ghp_repotoken0123456789';
@@ -241,7 +242,7 @@ describe('with real git', () => {
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
     onTestFinished(() => { vi.unstubAllEnvs(); });
     const server = createServer((_req, res) => { res.writeHead(503); res.end('Temporarily unavailable'); });
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenIn(server);
     onTestFinished(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing controlled Git endpoint.');

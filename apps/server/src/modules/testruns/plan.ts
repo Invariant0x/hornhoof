@@ -9,8 +9,12 @@ export type TestPartPlanInput = {
   availableMachines: number;
   costs: { setupMs: number; collectMs: number };
   unknownFileMs: number;
+  /* The free machines and their paces, the time each takes for work of 1 ms at the middle pace, when they are known. */
+  machines?: MachinePace[];
 };
-export type PlannedTestPart = { units: TestUnit[]; testMs: number };
+export type MachinePace = { key: string; pace: number };
+/* machine: the machine a part is laid out for and how long it should take there, when the machines go at different paces. */
+export type PlannedTestPart = { units: TestUnit[]; testMs: number; machine?: { key: string; ms: number } };
 export type PartEstimate = { parts: number; estimatedWallMs: number; costAdjustedMs: number };
 export type TestPartPlan = {
   parts: PlannedTestPart[];
@@ -72,17 +76,26 @@ function groupsOf(timed: TimedUnit[]): Group[] {
   }
   return [...groups.values()].sort((a, b) => b.ms - a.ms || lexical(a.key, b.key));
 }
-function distribute(groups: Group[], count: number): PlannedTestPart[] {
-  const parts: PlannedTestPart[] = Array.from({ length: count }, () => ({ units: [], testMs: 0 }));
+/* Machines whose paces differ by less than this go at one pace: their parts are laid out evenly and may run on any of them. */
+const ONE_PACE = 1.1;
+/* The fastest machines first; without known paces, as many of one pace as there are free machines. */
+function pacesOf(input: TestPartPlanInput): MachinePace[] {
+  const known = [...(input.machines ?? [])].filter(machine => Number.isFinite(machine.pace) && machine.pace > 0).sort((a, b) => a.pace - b.pace || lexical(a.key, b.key));
+  return known.length ? known : Array.from({ length: Math.max(1, input.availableMachines) }, () => ({ key: '', pace: 1 }));
+}
+/* Each group goes where it would end soonest on that part's machine, so a faster machine gets more. */
+function distribute(groups: Group[], machines: MachinePace[], paced: boolean): PlannedTestPart[] {
+  const parts = machines.map(machine => ({ units: [] as TestUnit[], testMs: 0, pace: machine.pace, key: machine.key }));
   for (const group of groups) {
-    const part = parts.reduce((best, next) => next.testMs < best.testMs ? next : best);
+    const part = parts.reduce((best, next) => (next.testMs + group.ms) * next.pace < (best.testMs + group.ms) * best.pace ? next : best);
     part.units.push(...group.units);
     part.testMs += group.ms;
   }
-  return parts;
+  return parts.map(({ units, testMs, pace, key }) => ({ units, testMs, ...(paced ? { machine: { key, ms: Math.round(testMs * pace) } } : {}) }));
 }
-function alternative(groups: Group[], count: number, costs: TestPartPlanInput['costs']): Alternative {
-  const parts = distribute(groups, count), longest = Math.max(...parts.map(part => part.testMs));
+const partMs = (part: PlannedTestPart): number => part.machine?.ms ?? part.testMs;
+function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPlanInput['costs'], paced: boolean): Alternative {
+  const count = machines.length, parts = distribute(groups, machines, paced), longest = Math.max(...parts.map(partMs));
   /* Setup can overlap across machines; collecting every result still costs time. Charge the extra machines' setup
      separately when choosing, rather than claiming that extra resource cost is measured wall time. */
   const estimatedWallMs = costs.setupMs + longest + count * costs.collectMs;
@@ -101,9 +114,10 @@ function reasonFor(input: TestPartPlanInput, best: Alternative, oneMachineMs: nu
 /* This is a pure estimate. The existing pool still owns compatibility, freshness, physical-host admission and dispatch. */
 export function planTestParts(input: TestPartPlanInput): TestPartPlan {
   validInput(input);
-  const timed = timedUnits(input), groups = groupsOf(timed);
-  const limit = Math.min(MAX_TEST_PARTS, Math.max(1, input.availableMachines), groups.length);
-  const options = Array.from({ length: limit }, (_, index) => alternative(groups, index + 1, input.costs));
+  const timed = timedUnits(input), groups = groupsOf(timed), machines = pacesOf(input);
+  const paced = machines[machines.length - 1]!.pace / machines[0]!.pace >= ONE_PACE;
+  const limit = Math.min(MAX_TEST_PARTS, machines.length, groups.length);
+  const options = Array.from({ length: limit }, (_, index) => alternative(groups, machines.slice(0, index + 1), input.costs, paced));
   const best = options.reduce((chosen, next) => next.estimate.costAdjustedMs < chosen.estimate.costAdjustedMs ? next : chosen);
   const unknownUnits = timed.filter(item => item.unknown).map(item => item.unit);
   const oneMachineMs = options[0]!.estimate.estimatedWallMs;

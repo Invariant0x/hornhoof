@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,9 @@ import { CheckClient } from '../src/check-client.js';
 import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
+
+/* Playwright's browsers stand in for themselves only in the tests of preparing them; elsewhere they are ready at once. */
+const browsersReady = async () => ({ ok: true as const, status: 'not_needed' as const });
 
 const tempDirs: string[] = [];
 const realRunProgram = programs.runProgram;
@@ -102,7 +105,7 @@ describe('startup tool readiness', () => {
 
   it('checks the complete runtime tool set with the required version arguments', async () => {
     const bin = startupToolsOnPath();
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, browsersReady)).toBeNull();
     for (const [name, args] of [
       ['unzip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
       ['strings', '--version'], ['patch', '--version'], ['ss', '--version'], ['objdump', '--version'],
@@ -161,7 +164,7 @@ describe('startup tool readiness', () => {
 
   it('continues readiness after unzip -v succeeds', async () => {
     const args = unzipOnPath('echo "UnZip 6.00"\nexit 0');
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, browsersReady)).toBeNull();
     expect(existsSync(args)).toBe(true);
     expect(readFileSync(args, 'utf8').trim()).toBe('-v');
   });
@@ -250,7 +253,7 @@ describe('prepareBrowser', () => {
     fixturePid = Number(readFileSync(started, 'utf8'));
     const at = performance.now();
     client.online(false);
-    await expect.poll(() => existsSync(stopped), { timeout: 1500 }).toBe(true);
+    await expect.poll(() => existsSync(stopped), { timeout: 15_000 }).toBe(true);
     expect(settled).toBe(false);
     await pending.catch(() => {});
     expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
@@ -326,8 +329,8 @@ describe('prepareBrowser', () => {
         if (bin === 'npm') {
           expect(args).toContain('--ignore-scripts');
           expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('');
-          const config = JSON.parse(execFileSync('npm', ['config', 'list', '--json', '--prefix', args[args.indexOf('--prefix') + 1]!], { env, cwd, encoding: 'utf8' }));
-          expect(config.registry).toBe('https://registry.npmjs.org/');
+          expect(readFileSync(env.NPM_CONFIG_GLOBALCONFIG!, 'utf8')).toBe('');
+          expect(Object.keys(env).filter(key => /^npm_config_/i.test(key)).sort()).toEqual(['NPM_CONFIG_CACHE', 'NPM_CONFIG_GLOBALCONFIG', 'NPM_CONFIG_REGISTRY', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_WORKSPACES']);
           fakePlaywrightPackage(args[args.indexOf('--prefix') + 1]!, '1.65.0', '1260');
         } else markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, ['chromium-1260', 'chromium_headless_shell-1260']);
         return { code: 0, output: '', timedOut: false };
@@ -839,14 +842,12 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     writeFileSync(join(badRepo, 'node_modules', 'playwright', 'package.json'), JSON.stringify({ version: '9.9.9' }));
     await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright browsers could not start:');
 
-    if (existsSync(GLOBAL_PLAYWRIGHT_DIR) && existsSync(SEED_BROWSERS_PATH)) {
-      expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null)).toBeNull();
-    }
+    expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null, undefined, browsersReady)).toBeNull();
     const sysDir2 = makeTemp('hh-sysfiles-2-');
     const files2 = { passwd: join(sysDir2, 'passwd'), group: join(sysDir2, 'group') };
-    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2, browsersReady);
     expect(existsSync(files2.passwd)).toBe(false);
-    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2, browsersReady);
     expect(readFileSync(files2.passwd, 'utf8')).toContain(`hh${FIRST_UID}:x:${FIRST_UID}:${FIRST_UID}`);
   });
 });

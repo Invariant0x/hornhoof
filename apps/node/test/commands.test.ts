@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
 import { markRemoved, readState } from '../src/state.js';
+import { eventually } from '../../../test-support/eventually.mjs';
+import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:child_process', async importOriginal => {
   const original = await importOriginal<typeof import('node:child_process')>();
@@ -16,6 +18,13 @@ vi.mock('node:child_process', async importOriginal => {
     spawn: (file: string, args: string[], options: import('node:child_process').SpawnOptions) =>
       original.spawn(file === 'npm' ? join(bin, 'npm') : file, args, options),
   };
+});
+
+/* A node's start checks Playwright's browsers; they are not the node's, so here they are ready at once. Preparing them for a
+   repository keeps its own tests below and in browser.test.ts. */
+vi.mock('../src/browser.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/browser.js')>();
+  return { ...original, startupBrowserCheck: async () => null };
 });
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
@@ -91,7 +100,7 @@ const logged = () => readFileSync(logFile, 'utf8').trim().split('\n').map(l => J
 
 /* A Hornhoof that records what a node says and sends it what the test gives. */
 async function fakeServer() {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];
@@ -102,11 +111,7 @@ async function fakeServer() {
     headers.push(req.headers.authorization ?? '');
     s.on('message', d => received.push(JSON.parse(String(d))));
   });
-  const wait = async (check: () => boolean) => {
-    const end = Date.now() + 5000;
-    while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
+  const wait = (check: () => boolean) => eventually(check);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, headers, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
 }
 

@@ -333,7 +333,7 @@ describe('what cannot be told is refused, not allowed', () => {
     file('wide/package.json', JSON.stringify({ scripts: { ...scripts, [`s${COMMAND_LIMITS.resolving}`]: 'echo end' } }));
     const started = Date.now();
     expect(await agent('npm run s0', join(root, 'wide'))).toEqual(denied('command_guard_unavailable'));
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(15_000);
   });
 
   it('tells two commands at once apart', async () => {

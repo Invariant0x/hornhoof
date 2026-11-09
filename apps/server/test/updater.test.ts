@@ -618,7 +618,8 @@ describe('updater', () => {
 /* The orchestrator's commands on the server's computer, while the CEO keeps access to it open. */
 describe('updater, the computer', () => {
   const HELPER = `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`;
-  const env = { HORNHOOF_COMPUTER_IMAGE: HELPER };
+  /* A command runs against its watch in real seconds. */
+  const env = { HORNHOOF_COMPUTER_IMAGE: HELPER, STUB_SECONDS: '1' };
   function access(s: Stand, untilSec: number) {
     writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
   }

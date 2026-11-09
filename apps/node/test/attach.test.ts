@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../hh-attach.cjs', import.meta.url));
 const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
@@ -33,7 +34,7 @@ async function hub(status = 201) {
       res.end(JSON.stringify(status === 201 ? { id: `id-${got.length}` } : { error: { message: 'Send a PNG, JPEG or WebP picture.' } }));
     });
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await listenIn(server);
   onTestFinished(() => new Promise<void>(r => server.close(() => r())));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/attachments`, got };
 }

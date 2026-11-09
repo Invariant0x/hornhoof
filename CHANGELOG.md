@@ -5,11 +5,14 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
-## [0.17.1] - 2026-11-09
+## [0.17.2] - 2026-11-09
 
 Fix what stalled turn 17 and the release of 0.17.0, so that a turn goes through its stages without waiting for people:
 test results are reused, the author check takes minutes, a task can be paused, notices and waits stop repeating, a
 message reaches every employee, and nodes check pages in Chromium, Firefox and WebKit.
+Let an employee hand in work that adds a database migration: GitHub shows no patch of a migration's large snapshot, and
+0.17.0 refused every such handoff. The department schema stands its roles by gates again, and the release tests check
+only Hornhoof's own side.
 
 ### Before you update
 
@@ -20,6 +23,7 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 - The node image now brings Firefox and WebKit beside Chromium, so it is larger.
 - 0.17.0 kept green test results whatever runtimes a part ran on. After the update, clear the results kept before it
   once, as `docs/development-echelons-release-data.md` describes, so the next full run checks those files again.
+- Migration 0091 adds the empty table `backlog_items` for each department's work kept for later turns; nothing is converted.
 
 ### Added
 
@@ -31,6 +35,9 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   from the same lockfile.
 - Nodes prepare Chromium, Firefox and WebKit and check that each one starts, naming the one that does not.
 - `test_run` shows how many fingerprints a run brought and how many green results it kept.
+- The tasks screen shows one department at a time as a table by turn, and its list of work kept for later turns, which
+  its people add to, order by dragging and put into a turn (`backlog` for the orchestrator). A person sees only the tasks
+  and lists of their own departments.
 
 ### Changed
 
@@ -53,14 +60,24 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   whole task.
 - The templates and the guide keep connected work with one owner, drop the release check on live programs, and ask for
   reports in plain words with spaces.
+- Release tests check Hornhoof's own side only: what it starts, what it types and what it makes of a program's recorded
+  output. They no longer run tmux, the agents' programs, npm or the operating system's refusals, depend on the machine's
+  speed, or take random ports: every test port comes from a narrow range of its own. Skills and role templates name this
+  principle first.
 
 ### Fixed
 
-- A test part keeps green results only where it ran on the runtimes its run's fingerprints name, so a later run skips
-  unchanged files.
-- A test part goes only to a machine with the very runtimes that described its run, the ones Tests checks its receipt
-  against, so a run that passed is no longer refused for parts that ran on another architecture. A run whose describing
-  node lacks a runtime its profile needs ends at once and names the runtime.
+- A test part is accepted from any machine of the class of runtimes that described its run: the same system, libc and
+  major versions, whatever the build or processor, so parts that ran on an arm64 Mac count for a run described on x64
+  and are no longer refused by Tests. A part goes only to a machine of that class. A run whose describing node lacks a
+  runtime its profile needs ends at once and names the runtime.
+- The fingerprints of test files name the class of runtimes, not the build of one machine, and a part keeps its green
+  results wherever it ran in that class, so a later run on any machine of the class skips unchanged files.
+- A product run is laid out by the pace of each free machine, taken from how long the last parts of the repository ran,
+  so its parts end at about the same time, and each part goes to the machine it was laid out for while that machine can
+  take it.
+- The log of a failed test part ends with the name and error of each test that failed, not with what a service said as
+  it stopped.
 - Quality tools in a test part read the grammars the machine keeps, and a crapper failure says why.
 - A preparation step that hears nothing from Hornhoof for a minute stops, a part waits at most ten minutes for another
   machine's build and then builds it itself, and the part's log says each step.
@@ -78,12 +95,26 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 - Tests sends a defect of the candidate, also one that keeps its run from starting, back to its author on Development
   (`report` with `done` false and `verification.defect` true, naming the failed runs), and the new candidate passes every
   check again. Before, such a candidate could not leave Tests.
+- A handoff no longer takes the comparison with its base for unknown when GitHub lists a file but shows no patch of it,
+  as it does for a large file such as a migration's snapshot. The file's path stays in the candidate and is checked
+  against the task's paths as before, the diff names the file with its added and removed lines, and the count of changed
+  lines includes them. A patch GitHub cut short, or a comparison of 300 files or more, is still refused.
+- A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
+  mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
+- On a busy machine a turn no longer ends with "The program did not take Hornhoof's prompt" when the program took it
+  during the node's last look: the node looks once more after its time is up, and so does its wait for a program's screen.
+- The department schema stands its roles left to right by gates again, as before 0.17.0: architecture, development, then
+  each check in order, with "Gate 1", "Gate 2" between them. An employee always stays in its role's frame, and whoever
+  leads a stage now is marked there; only teams such as Matrix and observers stand apart.
 
 ### Russian
 
 Исправлено то, что останавливало ход 17 и выпуск 0.17.0, чтобы ход проходил свои этапы без ожидания людей: результаты
 тестов используются повторно, проверка автора идет минуты, задачу можно поставить на паузу, уведомления и ожидания не
 повторяются, сообщение доходит до каждого сотрудника, а ноды проверяют страницы в Chromium, Firefox и WebKit.
+Сотрудник снова может сдать работу с новой миграцией базы: GitHub не показывает patch большого снимка миграции, и 0.17.0
+отказывала в каждой такой сдаче. Схема отдела снова ставит роли по рубежам, а тесты выпуска проверяют только сторону
+Hornhoof.
 
 - Перед обновлением: миграция 0089 добавляет пустой столбец `tasks.paused`, все задачи начинают без паузы, ничего не
   переводится. `create_task` теперь требует у задачи кода пути, которые может менять правка, и продукт, когда репозиторий
@@ -119,7 +150,7 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   целиком.
 - Шаблоны и руководство держат связанную работу у одного владельца, убирают проверку живыми программами при выпуске и
   просят отчеты обычными словами с пробелами.
-- Исправлено: часть сохраняет зеленые результаты только там, где шла на средах, названных в отпечатках прогона; quality
+- Исправлено: часть сохраняет зеленые результаты везде, где шла на средах того же класса, что описали прогон; quality
   tools читают грамматики машины, а отказ crapper называет причину; шаг подготовки, который минуту ничего не слышит от
   Hornhoof, останавливается, часть ждет чужую сборку не больше десяти минут и потом собирает сама, а журнал части
   называет каждый шаг; локальное правило команд находит рабочие пространства и пакеты по имени, называет отсутствующий
@@ -129,14 +160,40 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   отдела с длинными ходами отвечают сразу; итог проверяющего отказывает, если его модель, подписка или навык сменились до
   записи; маршрут отмененной задачи показывается отмененным, каждая причина этапа названа, а сырой id владельца не
   показывается.
-- Исправлено: часть прогона уходит только машине с теми самыми средами, которые описали прогон и по которым Тесты
-  проверяют ее квитанцию, поэтому прошедший прогон больше не отвергается из-за частей на машине другой архитектуры.
-  Прогон, у описавшей ноды которого нет среды, нужной профилю, кончается сразу и называет эту среду.
+- Исправлено: Тесты принимают часть с любой машины того класса сред, что описали прогон: та же система, libc и
+  основные версии, какими бы ни были сборка и процессор, поэтому части с Mac на arm64 засчитываются прогону, описанному
+  на x64. Часть уходит только машине этого класса. Прогон, у описавшей ноды которого нет среды, нужной профилю,
+  кончается сразу и называет эту среду. Отпечатки файлов тестов называют класс сред, а не сборку одной машины, и
+  следующий прогон на любой машине класса пропускает неизмененные файлы.
+- Прогон продукта раскладывается по скорости каждой свободной машины, взятой из того, сколько шли последние части
+  репозитория, поэтому его части кончаются примерно вместе, и каждая часть уходит той машине, для которой разложена,
+  пока та может ее взять.
+- Журнал упавшей части кончается именем и ошибкой каждого упавшего теста, а не тем, что сказал сервис при остановке.
 - Исправлено: нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
   функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
 - Исправлено: Тесты возвращают дефект кандидата, в том числе такой, из-за которого прогон не может начаться, автору на
   Development (`report` с `done` false и `verification.defect` true и номерами упавших прогонов), и новый кандидат снова
   проходит все проверки. Раньше такой кандидат не мог уйти с Тестов.
+- Тесты выпуска проверяют только сторону Hornhoof: что он запускает, что вводит и как разбирает записанный вывод
+  программы. Они больше не запускают tmux, программы агентов, npm и отказы операционной системы, не зависят от скорости
+  машины и не берут случайные порты: каждый тестовый порт берется из своего узкого коридора. Навыки и шаблоны ролей
+  называют этот принцип первым.
+- Сдача больше не считает сравнение с базой неизвестным, когда GitHub перечисляет файл, но не показывает его patch, как
+  бывает с большим файлом вроде снимка миграции. Путь файла остается в кандидате и проверяется по путям задачи, как
+  раньше, diff называет файл с числом добавленных и удаленных строк, а число измененных строк их учитывает. Patch, который
+  GitHub урезал, и сравнение из 300 файлов и больше по-прежнему отказ.
+- Нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
+  функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
+- На загруженной машине ход больше не кончается сообщением "The program did not take Hornhoof's prompt", когда программа
+  взяла задание во время последней проверки ноды: нода смотрит еще раз, когда время вышло, и так же ждет нужный экран
+  программы.
+- Схема отдела снова ставит роли слева направо по рубежам, как до 0.17.0: архитектура, разработка, затем каждая проверка
+  по порядку, с пометками «Рубеж 1», «Рубеж 2» между ними. Сотрудник всегда в рамке своей роли, а кто сейчас ведет этап,
+  выделен там же; отдельно стоят только подотряды вроде Matrix и наблюдатели.
+- Экран задач показывает один отдел: таблицу задач по ходам и список работы на будущие ходы. Люди отдела пополняют
+  список, меняют порядок перетаскиванием и ставят пункты в ход (у оркестратора инструмент `backlog`). Человек видит
+  задачи и списки только своих отделов.
+- Миграция 0091 добавляет пустую таблицу `backlog_items` для работы отдела на будущие ходы; ничего не переносится.
 
 ## [0.17.0] - 2026-11-09
 

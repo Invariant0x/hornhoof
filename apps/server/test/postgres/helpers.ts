@@ -15,7 +15,9 @@ import { encryptSecret } from '../../src/crypto/secrets.js';
 import { agentRole, readerRole } from '../../src/db/agent-sql.js';
 import { applyMissingMigrations, MIGRATIONS } from '../../src/db/client.js';
 import * as schema from '../../src/db/schema.js';
+import { createRoute } from '../../src/modules/tasks/echelons-store.js';
 import type { ToolJob } from '../../src/modules/tools/job.js';
+import { listenIn } from '../../../../test-support/ports.mjs';
 
 type Cleanup = () => Promise<unknown>;
 export type PgDb = NodePgDatabase<typeof schema>;
@@ -132,7 +134,7 @@ async function localRepository(fixture: PostgresFixture, held: boolean) {
     if (released) send(response);
     else waiting.push(response);
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   fixture.cleanup(async () => {
     release();
     server.closeAllConnections();
@@ -155,6 +157,8 @@ async function appContext(fixture: PostgresFixture, label: string, secret: strin
 async function seedActor(fixture: PostgresFixture, context: { ctx: Ctx; pool: pg.Pool }, companyId: string, departmentId: string, subscriptionId: string, number: number): Promise<Actor> {
   const [agent] = await fixture.db.insert(schema.agents).values({ companyId, departmentId, subscriptionId, kind: 'worker', name: `Worker ${number}`, model: '', roleKey: 'DEV-BE' }).returning();
   const [task] = await fixture.db.insert(schema.tasks).values({ companyId, departmentId, number, title: `PostgreSQL task ${number}`, status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id }).returning();
+  /* Every executable task has its required route, as createTask gives it. */
+  await context.ctx.db.transaction(tx => createRoute(tx, task!, { paths: ['**'] }));
   const [job] = await fixture.db.insert(schema.jobs).values({ companyId, subscriptionId, agentId: agent!.id, taskId: task!.id, kind: 'conversation', prompt: 'Check PostgreSQL', timeoutMs: 900000, status: 'running' }).returning();
   return { ...context, task: task!, job: { id: job!.id, companyId, agentId: agent!.id, agentKind: 'worker', roleKey: 'DEV-BE', departmentId, skills: [] } };
 }

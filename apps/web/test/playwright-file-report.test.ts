@@ -1,50 +1,51 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import type { Suite, TestCase } from '@playwright/test/reporter';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import FileReport from '../e2e/file-report';
 
 const WEB = resolve(__dirname, '..');
-const REPORTER = join(WEB, 'e2e/file-report.ts');
-const HEAD = "import { expect, test } from '@playwright/test';\n";
+/* The folder the recorded specs ran in: the paths of the record are relative to it. */
+const SPECS = join(WEB, 'test/.report-recorded');
+
+type Recorded = { tests: { location: { file: string }; outcome: string; results: { duration: number }[] }[] };
+/* What Playwright 1.64.1 handed a reporter in three real runs of the specs written in the file, recorded once by hand (its
+   "recorded" says how). These tests start no runner. */
+const RUNS = JSON.parse(readFileSync(join(WEB, 'test/playwright-reporter-runs.json'), 'utf8')) as Record<'mixed' | 'maxFailures' | 'retries', Recorded>;
 
 type Reported = { files: { file: string; status: string; ms: number }[] };
 
-/* A real run of the runner on spec files of its own. None of them opens a browser, so none is needed here. */
-async function run(specs: Record<string, string>, options = '') {
-  const dir = await mkdtemp(join(WEB, 'test/.report-'));
+/* The calls a run makes on the reporter, with the tests of the recorded run as they stood at its end. */
+async function run(recorded: Recorded) {
+  const dir = await mkdtemp(join(tmpdir(), 'hh-file-report-'));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
-  for (const [name, text] of Object.entries(specs)) await writeFile(join(dir, name), HEAD + text);
-  await writeFile(join(dir, 'playwright.config.ts'), `export default { testDir: '.', outputDir: 'results', workers: 1, reporter: [[${JSON.stringify(REPORTER)}]], ${options} };\n`);
   const report = join(dir, 'report.json');
-  const child = spawn('npx', ['--no-install', 'playwright', 'test', '--config', join(dir, 'playwright.config.ts')], { cwd: WEB, env: { ...process.env, NO_COLOR: '1', HH_TEST_REPORT: report }, stdio: 'ignore' });
-  await new Promise(done => child.on('close', done));
+  vi.stubEnv('HH_TEST_REPORT', report);
+  onTestFinished(() => { vi.unstubAllEnvs(); });
+  const tests = recorded.tests.map(test => ({ ...test, location: { ...test.location, file: join(SPECS, test.location.file) }, outcome: () => test.outcome }));
+  const reporter = new FileReport();
+  reporter.onBegin({}, { allTests: () => tests as unknown as TestCase[] } as unknown as Suite);
+  reporter.onEnd();
   const { files } = JSON.parse(await readFile(report, 'utf8')) as Reported;
-  return { files, status: Object.fromEntries(files.map(file => [file.file.slice(dir.length + 1), file.status])) };
+  return { files, status: Object.fromEntries(files.map(file => [file.file.slice(SPECS.length + 1), file.status])) };
 }
 
 describe('the report of how each spec file went', () => {
   it('names a file failed when any of its tests failed, and passed when none did', async () => {
-    const { status, files } = await run({
-      'good.spec.ts': "test('a', () => {});\ntest('b', () => {});\n",
-      'mixed.spec.ts': "test('a', () => {});\ntest('b', () => expect(1).toBe(2));\n",
-      'waiting.spec.ts': "test.skip('a', () => {});\ntest('b', () => test.skip());\n",
-    });
+    const { status, files } = await run(RUNS.mixed);
     expect(status).toEqual({ 'good.spec.ts': 'passed', 'mixed.spec.ts': 'failed', 'waiting.spec.ts': 'passed' });
     expect(files.every(file => file.file.startsWith('/') && file.ms >= 0)).toBe(true);
-  }, 120_000);
+  });
 
   it('never calls a file passed when its tests did not get to run', async () => {
-    const { status } = await run({
-      'first.spec.ts': "test('a', () => expect(1).toBe(2));\n",
-      'second.spec.ts': "test('a', () => {});\n",
-    }, 'maxFailures: 1');
+    const { status } = await run(RUNS.maxFailures);
     expect(status).toEqual({ 'first.spec.ts': 'failed', 'second.spec.ts': 'failed' });
-  }, 120_000);
+  });
 
   it('counts a test that only passed on a second try against its file', async () => {
-    const { status } = await run({
-      'shaky.spec.ts': "test('a', ({}, info) => expect(info.retry).toBe(1));\n",
-    }, 'retries: 1');
+    const { status } = await run(RUNS.retries);
     expect(status).toEqual({ 'shaky.spec.ts': 'failed' });
-  }, 120_000);
+  });
 });

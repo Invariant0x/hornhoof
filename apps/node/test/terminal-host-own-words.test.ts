@@ -55,7 +55,7 @@ function program() {
   const state = { input: '', session: '', takes: false, launches: 0, prompts: [] as string[], keys: [] as string[] };
   const record = (line: object) => appendFileSync(claudeTranscript(home, workDir, state.session), `${JSON.stringify(line)}\n`);
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], plugins: [], pollMs: 50, lookMs: 100, enterWaitMs: 1000,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], pollMs: 50, lookMs: 100, enterWaitMs: 1000,
     operator: { dir: join(home, 'operator'), send: frame => { frames.push(frame); return true; }, connected: () => true, now: () => Date.now() },
   });
   const submit = async () => {

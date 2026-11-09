@@ -1,10 +1,15 @@
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { vi } from 'vitest';
 import type { Limits, NodeMessage } from '@hornhoof/protocol';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { TerminalHost } from '../src/terminal/host.js';
 import type { OperatorOptions } from '../src/terminal/operator-runtime.js';
+import { withProgramExit } from '../src/program-exit.js';
 import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -17,8 +22,19 @@ export const TEXT = 'From Hornhoof:\n\nKeep these exact words.';
 export const cleanups: (() => Promise<void>)[] = [];
 type Kind = 'claude' | 'codex' | 'kimi';
 type Mode = 'queued' | 'silent' | 'lost' | 'hook' | 'taken';
+/* A person's view of the session: what tmux's client would print, written by the test, and what the person types. */
+export type FakeView = ChildProcessWithoutNullStreams & { stdout: PassThrough; stdin: PassThrough; typed: () => string };
+function fakeView(): FakeView {
+  const view = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stdin: new PassThrough(), stderr: new PassThrough(), killed: false, pid: 0 });
+  const typed: Buffer[] = [];
+  view.stdin.on('data', (chunk: Buffer) => typed.push(chunk));
+  return Object.assign(view, {
+    kill() { if (!view.killed) { view.killed = true; view.emit('exit', 0, null); } return true; },
+    typed: () => Buffer.concat(typed).toString(),
+  }) as unknown as FakeView;
+}
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -40,7 +56,17 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   };
   const display = () => kind === 'kimi' ? kimiScreen(input)
     : kind === 'claude' ? `────────────\n❯ ${input}\n────────────\n  ? for shortcuts\n` : `OpenAI Codex\n${codexPrompt(input)}`;
+  /* tmux itself never runs: a command no stand-in below answers gets an empty answer. */
+  vi.spyOn(tmux, 'run').mockImplementation(async args => (args.includes('#{pane_width} #{pane_height}') ? '100 30' : ''));
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  vi.spyOn(tmux, 'has').mockResolvedValue(true);
+  vi.spyOn(tmux, 'clients').mockResolvedValue([]);
+  const views: { view: FakeView; name: string; cols: number; rows: number; write: boolean }[] = [];
+  const attach = vi.spyOn(tmux, 'attach').mockImplementation((name, cols, rows, write) => {
+    const view = fakeView();
+    views.push({ view, name, cols, rows, write });
+    return view;
+  });
   const launch = vi.spyOn(tmux, 'launch').mockImplementation(async (_name, spec) => {
     hookUrl = /^HH_BRIDGE='([^']+)'$/m.exec(readFileSync(spec.envFile!, 'utf8'))![1]!;
     mkdirSync(dirname(file), { recursive: true });
@@ -49,7 +75,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
-  vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
+  const exitSnapshot = vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   const screen = vi.spyOn(tmux, 'screen').mockImplementation(async () => display());
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_name, text) => { input += text; });
   const submitted: string[] = [];
@@ -71,16 +97,16 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
       else if (kind === 'kimi' && mode === 'queued') await hook('queued', { prompt: text });
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [], ...(options.operator ? { operator: options.operator } : {}) });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => options.secrets ?? [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, ...(options.operator ? { operator: options.operator } : {}), ...options.host });
   await host.start();
   const results: Promise<unknown>[] = [];
-  const run = (prompt = 'HANG', jobId = 'job-receipt') => {
+  const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt') => {
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob('receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
-    const running = host.run({ ...base, program, home }).then(result => {
+    const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));
       return result;
     });
@@ -97,6 +123,11 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   if (options.prompt === '') await running;
   else await until(() => sent.some(m => m.type === 'job.program' && m.state === 'thinking'));
   paste.mockClear(); keys.mockClear();
-  return { host, tmux, running, run, sent, log, hook, record, finish, screen, paste, keys, alive, launch, submitted,
-    input: () => input, draft: (text: string) => { input = text; }, unheard: () => sent.filter(m => m.type === 'agent.unheard') };
+  return { host, tmux, running, run, sent, log, hook, record, finish, screen, paste, keys, alive, launch, submitted, attach, views,
+    input: () => input, draft: (text: string) => { input = text; },
+    /* The program ends with what it printed last, as tmux's recording of it would say. */
+    ends: (output: string, code: number) => {
+      alive.mockResolvedValue(false);
+      exitSnapshot.mockResolvedValue({ ...withProgramExit(output, { code, signal: null, at: new Date().toISOString() }), complete: true });
+    }, unheard: () => sent.filter(m => m.type === 'agent.unheard') };
 }

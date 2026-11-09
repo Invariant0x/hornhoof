@@ -1,4 +1,4 @@
-import { KeptFiles, PREPARATION_UNIT, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
+import { KeptFiles, PREPARATION_UNIT, runsInClass, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, lt, notExists, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
@@ -221,11 +221,10 @@ async function forgetFailed(db: Db, cache: TestRunFileCache, scope: RepositorySc
 }
 
 type PartEnd = { ok: boolean; commit: string | null; files?: FileOutcome[] };
-/* The fingerprints name the runtimes of the machine that described the run. A part proves its files at them only where it ran on
-   those very runtimes; on others it proved them somewhere no fingerprint names. */
-function ranAsDescribed(snapshot: EnvironmentSnapshot, receipt: Part['environmentReceipt']): boolean {
-  const described = snapshot.description.runtimeCapabilities;
-  return Boolean(receipt) && receipt!.runtimes.every(actual => described.some(runtime => runtime.id === actual.id && runtime.version === actual.version && runtime.fingerprint === actual.fingerprint));
+/* The fingerprints name the class of the runtimes that described the run. A part proves its files at them only where it ran on
+   runtimes of that class; on others it proved them somewhere no fingerprint names. */
+function ranInClass(snapshot: EnvironmentSnapshot, receipt: Part['environmentReceipt']): boolean {
+  return Boolean(receipt) && runsInClass(snapshot, receipt!.runtimes);
 }
 
 /* What a part that ended leaves behind. A part that lost its machine, checked another commit or passed without proof leaves nothing. */
@@ -234,7 +233,7 @@ export async function recordPartFiles(ctx: Pick<Ctx, 'db'>, run: Run, part: Part
   if (!cache || !snapshot || !selection || message.commit !== run.commitSha) return;
   if (message.ok && ended.status !== 'passed') return;
   const { green, failed } = partFileResults(snapshot, selection, message.ok, message.files);
-  if (ranAsDescribed(snapshot, ended.environmentReceipt)) await keepGreen(ctx.db, run, cache, snapshot.description.repositoryScope, green);
+  if (ranInClass(snapshot, ended.environmentReceipt)) await keepGreen(ctx.db, run, cache, snapshot.description.repositoryScope, green);
   if (!failed.length) return;
   await forgetFailed(ctx.db, cache, snapshot.description.repositoryScope, failed);
   await ctx.db.update(testParts).set({ failedFiles: failed }).where(eq(testParts.id, part.id));

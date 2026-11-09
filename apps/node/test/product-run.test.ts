@@ -106,8 +106,9 @@ it('integrates the real process service provider with cached stopped state and p
 
 function fixtureService(): TestService { return { id: 'fixture', runtime: 'node', profiles: ['fast'], driver: 'process', options: {
       start: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;if(!f.existsSync(p.join(s,'data/db')))f.writeFileSync(p.join(s,'data/db'),'fresh');f.writeFileSync(p.join(s,'running'),'yes');process.on('SIGINT',()=>{f.rmSync(p.join(s,'running'),{force:true});process.exit(0)});setInterval(()=>{},100)"),
-      readiness: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;let n=0;const t=setInterval(()=>{if(f.existsSync(p.join(s,'running'))){clearInterval(t);process.exit(0)}if(n++>100)process.exit(1)},10)"),
-      stop: { signal: 'SIGINT', graceMs: 1000 }, statePaths: ['data'],
+      readiness: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;let n=0;const t=setInterval(()=>{if(f.existsSync(p.join(s,'running'))){clearInterval(t);process.exit(0)}if(n++>1500)process.exit(1)},10)"),
+      /* Fifteen seconds to start and ten to stop are only room for a slow or loaded machine: a quick service is done at once. */
+      stop: { signal: 'SIGINT', graceMs: 10_000 }, statePaths: ['data'],
     } }; }
 
 it('opens a described service with fresh state when no preparation unit declares its template', async () => {

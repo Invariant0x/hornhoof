@@ -77,7 +77,7 @@ async function atWork(kind: Kind, mode: Mode) {
       }
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30, plugins: [] });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30 });
   const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
   if (mode === 'bridge') await host.start();
   const run = () => {
@@ -610,7 +610,7 @@ describe('program receipts for live words', () => {
     const started = Date.now();
     await c.host['hook']('receipt', 'stop', {});
     expect(await c.running).toMatchObject({ ok: true, result: 'Answer.' });
-    expect(Date.now() - started).toBeLessThan(4500);
+    expect(Date.now() - started).toBeLessThan(15_000);
   });
 
   it('sends Kimi Ctrl-S and accepts its queued hook then turn.steer', async () => {

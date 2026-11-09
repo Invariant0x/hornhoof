@@ -406,7 +406,7 @@ function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
     } satisfies HarnessRemote,
   };
 }
-const until = (check: () => boolean) => eventually(check, { every: 5, message: 'timed out' });
+const until = (check: () => boolean) => eventually(check);
 const STILL_WAITING = 'still waiting';
 const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
 

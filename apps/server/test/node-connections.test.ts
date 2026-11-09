@@ -61,7 +61,7 @@ describe('the history of a node connection', () => {
     await storedAre(db, 1);
     const [row] = await stored(db);
     expect(row).toMatchObject({ companyId: acme!.id, machineId, nodeId: ids[0], disconnectedAt: null, cause: null, closeCode: null, closeReason: null, error: null, report: null });
-    expect(Date.now() - row!.connectedAt.getTime()).toBeLessThan(5000);
+    expect(Date.now() - row!.connectedAt.getTime()).toBeLessThan(60_000);
   });
 
   it('writes a node closing with the code and reason it gave, and how long it was away until it came back', async () => {

@@ -12,4 +12,4 @@ You can resolve a failed check without lowering its standard or repeating unrela
 3. Use the task's gates and assignment to decide who accepts the fix. A scoped repeat checks the original findings and new breakage in the changed range; it does not reopen an entire review by default. Independent approvals for sensitive or protected actions still apply before those actions, including urgent or small fixes.
 4. After three ineffective rounds, involve a stronger or different owner with the full history. After five, or a substantive disagreement, give the task owner both positions, the evidence and your recommendation.
 
-A finding not fixed is an explicit decision with a reason and cost if wrong. Never weaken a test, check or threshold to end the loop.
+A finding not fixed is an explicit decision with a reason and cost if wrong. Never weaken a test, check or threshold to end the loop. The one exception is an unstable test, one that passes and fails on the same code: it may be weakened or deleted, never skipped, and a check of access rights, identity or secret redaction is never weakened.
