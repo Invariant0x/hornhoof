@@ -3,7 +3,7 @@ import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
-import { agentIdentity, checkerFor, checkingIdentity } from './echelons-assign.js';
+import { agentIdentity, checkerFor, checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
@@ -618,7 +618,7 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
   }, async tx => {
-    if (inputCandidate) await checkingIdentity({ db: tx }, task, route, inputCandidate);
+    if (inputCandidate) await heldCheckingIdentity(tx, task, route, inputCandidate);
     await changeRoute(tx, route, next.state);
     await unstuck.also(tx);
   }, next.wakes);

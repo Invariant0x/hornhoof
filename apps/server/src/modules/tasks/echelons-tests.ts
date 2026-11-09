@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { changeRoute, type Route } from './echelons-store.js';
-import { checkingIdentity, departmentHead } from './echelons-assign.js';
+import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { requireCandidateRun } from './echelons-run.js';
 import { ReviewSha } from './review-schema.js';
 import { scopeKey } from '../testruns/load.js';
@@ -165,6 +165,7 @@ async function failedTestsReport(ctx: Reader, task: Task, route: Route, agentId:
   const row = await move(ctx, task, { status: kind === 'content' ? 'blocked' : 'working', assigneeAgentId: kind === 'content' ? null : agentId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { failedVerification: { kind, candidateId: input.candidateId, routeRevision: route.revision, runIds: input.runIds } },
   }, async tx => {
+    await heldCheckingIdentity(tx, task, route, await currentCandidate(tx, task, route));
     if (await failureKind(tx, task, route, input.runIds) !== kind) throw refuse(409, 'task_changed', 'The failed check changed.');
     if (kind === 'content') await changeRoute(tx, route, state);
   }, wakes);
@@ -185,6 +186,7 @@ export async function testsReport(ctx: Reader, task: Task, route: Route, agentId
   const row = await move(ctx, task, { status: 'open', assigneeAgentId: headId, silent: 0 }, {
     kind: 'report', actor: { agentId }, text: summary, data: { verifiedCandidate: { candidateId: candidate.id, commit: candidate.commit, routeRevision: route.revision + 1, testedRevision: route.revision, evidence } },
   }, async tx => {
+    await heldCheckingIdentity(tx, task, route, candidate);
     await candidateRunEvidence(tx, task, route, input.data.runIds);
     await changeRoute(tx, route, state);
   }, wakes);

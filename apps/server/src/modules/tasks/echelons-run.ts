@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents, tasks } from '../../db/schema.js';
-import { checkingIdentity } from './echelons-assign.js';
+import { checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { routeOf, type Route } from './echelons-store.js';
 import { note, refuse, type Task, type Tx } from './engine.js';
@@ -41,6 +41,8 @@ export async function candidateForRun(db: Reader, task: Task, agentId: string, i
 export async function bindCandidateRun(tx: Tx, task: Task, binding: CandidateRun, run: { id: string; commitSha: string | null; branch: string | null }): Promise<void> {
   const [current] = await tx.select().from(tasks).where(and(eq(tasks.id, task.id), eq(tasks.companyId, task.companyId))).for('update');
   if (!current || current.version !== task.version || current.assigneeAgentId !== binding.testerId) throw refuse(409, 'task_changed', 'The task changed while Tests was being pinned.');
+  const route = await routeOf(tx, current);
+  await heldCheckingIdentity(tx, current, route, await currentCandidate(tx, current, route));
   const now = await candidateForRun(tx, current, binding.testerId, { candidate: { candidateId: binding.candidateId, revision: binding.routeRevision }, branch: binding.branch }, 'tests');
   if (!now || JSON.stringify(now) !== JSON.stringify(binding) || run.commitSha !== binding.commit || run.branch !== binding.branch) throw refuse(409, 'task_changed', 'The candidate changed while Tests was being pinned.');
   await note(tx, task, { kind: 'comment', actor: { agentId: binding.testerId }, text: 'Tests run bound to the current candidate.', data: { candidateRun: { runId: run.id, ...binding } } });

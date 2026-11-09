@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, subscriptions, taskEvents } from '../src/db/schema.js';
-import { submit, verdict } from '../src/modules/tasks/engine.js';
+import { report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
+import { testsFixture } from './development-echelons-verification.js';
+import { as } from './helpers.js';
 
 const code = { summary: 'Keep totals.', evidence: 'Changed tests passed.', review: { baseCommit: BASE } };
 
@@ -40,5 +42,37 @@ describe('one current assignment under retries and identity changes', () => {
     f.atCommit('c'.repeat(40));
     await expect(submit(f.ctx, f.reviewer.id, f.task.id, { ...code, summary: 'Repair from a stale assignment.' }).then(() => null)).rejects.toMatchObject({ status: 409 });
     expect((await f.detail()).echelons).toMatchObject({ stage: 'review', candidateId });
+  });
+
+  /* The card changes after the checker's identity was read and before its result commits. */
+  const changeModelBeforeCommit = (f: { db: { transaction: unknown }; app: { inject: (request: object) => Promise<{ statusCode: number }> }; ceoToken: string }, agentId: string) => {
+    const db = f.db as { transaction: (...args: unknown[]) => Promise<unknown> };
+    const transaction = db.transaction.bind(db);
+    const changed = { done: false };
+    db.transaction = async (...args: unknown[]) => {
+      db.transaction = transaction;
+      const response = await f.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, payload: { model: 'claude-haiku-5-5' }, ...as(f.ceoToken) });
+      changed.done = response.statusCode === 200;
+      return transaction(...args);
+    };
+    return changed;
+  };
+  it.each(['review', 'security'] as const)('refuses a %s PASS whose checker model changes before the verdict commits', async stage => {
+    const f = await fixture({ riskClass: stage === 'security' ? 'security' : 'none' });
+    await submit(f.ctx, f.author.id, f.task.id, code);
+    if (stage === 'security') await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Review passed.', reviewedCommit: HEAD });
+    const checker = stage === 'security' ? f.security : f.reviewer;
+    const changed = changeModelBeforeCommit(f, checker.id);
+    await expect(verdict(f.ctx, checker.id, f.task.id, { pass: true, comment: 'Stale checker.', reviewedCommit: HEAD }).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect(changed.done).toBe(true);
+    expect((await f.detail()).echelons.stage).toBe(stage);
+  });
+  it('refuses a Tests certification whose tester model changes before the report commits', async () => {
+    const f = await testsFixture();
+    const run = await f.run();
+    const changed = changeModelBeforeCommit(f, f.tester.id);
+    await expect(report(f.ctx, f.tester.id, f.task.id, f.verified([run.id])).then(() => null)).rejects.toMatchObject({ status: 409 });
+    expect(changed.done).toBe(true);
+    expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active' });
   });
 });

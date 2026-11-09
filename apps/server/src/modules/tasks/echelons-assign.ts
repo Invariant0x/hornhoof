@@ -47,3 +47,10 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
   if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
   return identity;
 }
+
+/* Inside the transaction that commits a checker's result: the card is held until it commits, so a model, subscription
+   or ability change either lands before this read and refuses the result, or waits until the result is in. */
+export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+  if (task.assigneeAgentId) await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
+  return checkingIdentity({ db: tx }, task, route, candidate);
+}

@@ -1,12 +1,12 @@
 import { issuesForEchelon } from './review-findings.js';
 import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
-import { checkingIdentity, departmentHead } from './echelons-assign.js';
+import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
 import { currentCandidate } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
-import type { CheckerIdentity } from './echelons-policy.js';
-import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Wake } from './engine.js';
+import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
+import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { bindReviewEvidence, type ReviewVerdict } from './review-verdict.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
@@ -47,17 +47,18 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   const state = verdictState(route, verdict, agentId);
   const issues = await issuesForEchelon(ctx.db, task, route, candidate, identity, verdict.issues ?? [], verdict.pass);
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: verdictData(route, candidate, identity, verdict, issues, state) };
+  const held = async (tx: Tx) => { if (!sameChecker(await heldCheckingIdentity(tx, task, route, candidate), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.'); };
   if (verdict.escalate) {
     const wakes: Wake[] = [{ agentId: await departmentHead(ctx.db, task), taskId: task.id, why: 'blocked', text: verdict.comment.trim() }];
     const escalated: typeof state = { ...state, phase: 'escalated', stages: state.stages.map(step => step.stage === state.stage ? { ...step, reason: 'wrong_goal' } : step) };
-    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, tx => changeRoute(tx, route, escalated), wakes);
+    const row = await move(ctx, task, { status: 'blocked', assigneeAgentId: null }, n, async tx => { await held(tx); await changeRoute(tx, route, escalated); }, wakes);
     return { task: row, wakes };
   }
   if (!verdict.pass) {
-    const row = await move(ctx, task, { status: 'working' }, n, tx => changeRoute(tx, route, state));
+    const row = await move(ctx, task, { status: 'working' }, n, async tx => { await held(tx); await changeRoute(tx, route, state); });
     return { task: row, wakes: [] };
   }
   const next = await forwardHandoff(ctx, task, { ...route, state }, candidate);
-  const row = await move(ctx, task, next.set, { ...n, returned: true }, tx => changeRoute(tx, route, next.state), next.wakes);
+  const row = await move(ctx, task, next.set, { ...n, returned: true }, async tx => { await held(tx); await changeRoute(tx, route, next.state); }, next.wakes);
   return { task: row, wakes: next.wakes };
 }
