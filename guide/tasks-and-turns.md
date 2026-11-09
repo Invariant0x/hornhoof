@@ -62,7 +62,7 @@ A coordination task with no executable result closes with a checked report and v
 ## How does a member work its piece?
 
 1. It works the task in a branch.
-2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again.
+2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again once. If the task comes back blocked after that, the head writes the answer into the task, which opens it again.
 3. It hands the task in, with evidence.
 4. The current stage owner checks and repairs the same branch, records its findings and exact candidate, then passes the task forward.
 5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. Main and release still require the authorized person's approval of the exact commit.

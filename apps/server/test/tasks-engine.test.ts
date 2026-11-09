@@ -1,11 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -34,7 +35,15 @@ async function company() {
   };
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const snapshot = async (id: string) => { const task = await read(id); return routeSnapshot(await routeOf(db, task), task.assigneeAgentId); };
-  return { ctx, db, snapshot, CEO, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, tess, deptTask, memberTask, read };
+  return { app, ctx, db, companyId, sub: sub!, snapshot, CEO, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, tess, deptTask, memberTask, read };
+}
+
+/* The tools of an agent in a running turn of its own. */
+async function mcpOf(c: Awaited<ReturnType<typeof company>>, agentId: string) {
+  await listen(c.app);
+  const token = `engine-${agentId}`;
+  await c.db.insert(jobs).values({ companyId: c.companyId, agentId, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', startedAt: new Date(), timeoutMs: 60_000, toolTokenHash: hashToken(token) });
+  return mcp(c.app, token);
 }
 
 const code = { summary: 'Done.', evidence: 'Changed total tests.', review: { baseCommit: BASE } };
@@ -74,12 +83,63 @@ describe('the task engine', () => {
     expect(prompt).toContain('blocked');
     const [hana] = await db.select().from(agents).where(eq(agents.id, head.id));
     const stopped = await blocked(ctx, bruno.id, task.id, 'And the rounding?');
-    expect(wakePrompt(hana!, stopped.task, stopped.wakes[0]!)).toContain('Answer it with comment, which opens it again for its executor');
-    const resumed = await comment(ctx, { agentId: orchestrator.id }, task.id, 'Round half up.');
+    expect(wakePrompt(hana!, stopped.task, stopped.wakes[0]!)).toContain('Answer it with comment, which opens it again for its executor once');
+    expect(wakePrompt(hana!, stopped.task, stopped.wakes[0]!)).toContain('write the answer into the task with update_task');
+    const other = await memberTask();
+    await blocked(ctx, bruno.id, other.id, 'Which rounding?');
+    const resumed = await comment(ctx, { agentId: orchestrator.id }, other.id, 'Round half up.');
     expect(resumed.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id });
     expect(woken(resumed)).toEqual([[bruno.id, 'unblocked']]);
+    await comment(ctx, { agentId: head.id }, task.id, 'Round half up as well.');
+    await updateTask(ctx, head.id, task.id, { body: 'POST /checkout, rounding half up.' });
     expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Thanks.'))).toEqual([[bruno.id, 'comment']]);
     expect(woken(await comment(ctx, { agentId: bruno.id }, task.id, 'Understood.'))).toEqual([]);
+  });
+
+  describe('a task blocked again after a comment opened it', () => {
+    async function blockedAgain() {
+      const c = await company();
+      const task = await c.memberTask();
+      await blocked(c.ctx, c.bruno.id, task.id, 'Which currency?');
+      expect(woken(await comment(c.ctx, { agentId: c.head.id }, task.id, 'I asked finance, wait.'))).toEqual([[c.bruno.id, 'unblocked']]);
+      await blocked(c.ctx, c.bruno.id, task.id, 'Still no currency.');
+      return { ...c, task };
+    }
+
+    it('stays blocked and wakes nobody on another comment from whoever gave it out', async () => {
+      const c = await blockedAgain();
+      for (const actor of [c.head, c.orchestrator]) {
+        const later = await comment(c.ctx, { agentId: actor.id }, c.task.id, 'Still asking finance.');
+        expect([later.wakes, later.task.status]).toEqual([[], 'blocked']);
+      }
+      expect(await c.read(c.task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: c.bruno.id });
+    });
+
+    it('opens again when the answer goes into the task, and a comment opens it once more after that', async () => {
+      const c = await blockedAgain();
+      const rewritten = await updateTask(c.ctx, c.head.id, c.task.id, { body: 'Stripe checkout in euros.' });
+      expect(rewritten.task).toMatchObject({ status: 'open', assigneeAgentId: c.bruno.id });
+      await blocked(c.ctx, c.bruno.id, c.task.id, 'And the rounding?');
+      expect(woken(await comment(c.ctx, { agentId: c.head.id }, c.task.id, 'Round half up.'))).toEqual([[c.bruno.id, 'unblocked']]);
+    });
+
+    it('tells whoever gave it out that a comment no longer opens it', async () => {
+      const c = await blockedAgain();
+      const head = await mcpOf(c, c.head.id);
+      const said = await head.callTool({ name: 'comment', arguments: { task: c.task.number, text: 'Still asking finance.' } });
+      expect(said.isError).toBeFalsy();
+      expect(JSON.stringify(said.content)).toContain('stays blocked');
+      expect(JSON.stringify(said.content)).toContain('update_task');
+    });
+  });
+
+  it('refuses to block a task that is blocked already, and tells nobody again', async () => {
+    const { ctx, CEO, bruno, memberTask, read } = await company();
+    const task = await memberTask();
+    await blocked(ctx, bruno.id, task.id, 'Which currency?');
+    await comment(ctx, CEO, task.id, 'Check the accounting notes.');
+    await expect(blocked(ctx, bruno.id, task.id, 'Still which currency?')).rejects.toMatchObject({ status: 409 });
+    expect(await read(task.id)).toMatchObject({ status: 'blocked' });
   });
 
   it('delivers a person comment to the blocked executor without opening the task', async () => {

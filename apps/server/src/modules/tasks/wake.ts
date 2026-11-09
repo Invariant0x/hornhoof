@@ -85,7 +85,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       /* The orchestrator does not rewrite a department's task: he gives the department a new one. */
       if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with add_tasks, or tell the CEO what stands in the way.`;
       if (task.executorAgentId && task.assigneeAgentId === null) return `${ref} needs your decision${said}Read task.echelons, decide the goal and current stage owner, and record that decision with update_task, or cancel it. Keep the current candidate and its findings with the task.`;
-      if (task.executorAgentId) return `${ref}, which you gave out, cannot go on${said}Answer it with comment, which opens it again for its executor. Rewrite it with update_task only when its goal changed, give it to someone else, or cancel it.`;
+      if (task.executorAgentId) return `${ref}, which you gave out, cannot go on${said}Answer it with comment, which opens it again for its executor once; comment only with the answer. If it comes back blocked after a comment, write the answer into the task with update_task, which opens it again. Give it to someone else or cancel it when nobody can answer.`;
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
     case 'cancelled':
       return `${ref}, which you gave out, was cancelled${said}Go on with ${own} without it.`;

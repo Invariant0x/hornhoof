@@ -345,7 +345,8 @@ class TaskTools {
       {
         description:
           "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
-          'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. ' +
+          'which opens it again and wakes its executor with your words, once in a piece of work: blocked again after that, it opens with the answer written into it by update_task. ' +
+          'A comment from a person or another agent also ends an external wait and wakes its holder. ' +
           'The current head or orchestrator resolves its internal stuck request with a comment. To hand work on, use the task\'s own moves.',
         inputSchema: { task: Ref, text: Text.trim().min(1) },
       },
@@ -354,6 +355,7 @@ class TaskTools {
           const { task } = await this.find(ref);
           this.plain(task, text);
           const moved = (await resolveStuckComment(this.ctx, this.job, task.id, text)) ?? (await comment(this.ctx, { agentId: this.job.agentId }, task.id, text));
+          if ('held' in moved && moved.held) return { text: `Noted on #${task.number}. It stays blocked: its executor blocked it again after a comment opened it. Write the answer into the task with update_task, which opens it again, give it to someone else, or cancel it.`, moved };
           return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
         }),
     );

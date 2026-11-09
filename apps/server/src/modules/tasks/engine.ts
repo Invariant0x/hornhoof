@@ -707,6 +707,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not with you');
+  if (task.status === 'blocked') throw refuse(409, 'task_invalid', `#${task.number} is blocked already, and whoever gave it out was told. Go on if what you read lets you, else end this turn.`);
   refusePaused(task);
   await refuseWaiting(ctx.db, task);
   const wakes = giver(task, 'blocked', agentId, why);
@@ -953,8 +954,9 @@ async function endFormerOwnerTurns(tx: Tx, task: Task, set: Partial<Task>): Prom
   }
 }
 
-/* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
-export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved> {
+/* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor, once in a
+   piece of work: held says it stays blocked as its executor blocked it again after a comment opened it. */
+export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved & { held?: true }> {
   const task = await loadTask(ctx.db, taskId);
   if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
   const words = text.trim();
@@ -962,10 +964,26 @@ export async function comment(ctx: Live, actor: Actor, taskId: string, text: str
   return (await unblockByComment(ctx, actor, task, words)) ?? (await resumeByComment(ctx, actor, task, words)) ?? logComment(ctx, actor, task, words);
 }
 
-async function unblockByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
+async function unblockByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<(Moved & { held?: true }) | null> {
   if (!actor.agentId || task.status !== 'blocked' || !task.executorAgentId || task.assigneeAgentId !== task.executorAgentId || !(await gaveOut(ctx.db, task, actor.agentId))) return null;
+  if (await openedByComment(ctx.db, task.id)) return { ...(await logComment(ctx, actor, task, text)), held: true };
   const wakes: Wake[] = [{ agentId: task.executorAgentId, taskId: task.id, why: 'unblocked', text }];
-  return { task: await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text }, undefined, wakes), wakes };
+  return { task: await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text, data: { unblocked: true } }, undefined, wakes), wakes };
+}
+
+/* What begins a new piece of work on a task: a move of its work, or its words or owner rewritten. */
+const NEW_PIECE: TaskEventKind[] = ['created', 'assigned', 'started', 'submitted', 'verdict', 'report', 'answered'];
+
+/* Whether a comment opened the task again since its last piece of work began: the answer it was blocked for came then. */
+async function openedByComment(db: Db, taskId: string): Promise<boolean> {
+  const [piece] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), or(
+    inArray(taskEvents.kind, NEW_PIECE),
+    and(eq(taskEvents.kind, 'updated'), sql`${taskEvents.data}->'fields' ?| array['title', 'brief', 'body', 'owner', 'assigneeAgentId']`),
+  ))).orderBy(desc(taskEvents.id)).limit(1);
+  const [opened] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(
+    eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'comment'), sql`${taskEvents.data}->>'unblocked' = 'true'`, gt(taskEvents.id, piece?.id ?? 0),
+  )).limit(1);
+  return Boolean(opened);
 }
 
 async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
