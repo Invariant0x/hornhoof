@@ -2689,12 +2689,17 @@ export class TerminalHost {
   private async enterUntilTaken(a: Agent, turn: Turn, text: string, pastedAt: number): Promise<void> {
     for (const end = Date.now() + this.readyMs; Date.now() < end;) {
       await sleep(this.enterWaitMs);
-      this.drain(a);
-      if (a.turn !== turn || a.took || a.restarting || (a.typedAt ?? -Infinity) > pastedAt) return;
-      const input = await this.readInput(a);
-      if (!input || !holdsWords(input, text)) return;
-      await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Enter'));
+      if (!await this.inputLane(a, () => this.enterWaitingWords(a, turn, text, pastedAt))) return;
     }
+  }
+
+  /* Capture and Enter share the input lane. A person's key can arrive while the capture waits, so check again after it. */
+  private async enterWaitingWords(a: Agent, turn: Turn, text: string, pastedAt: number): Promise<boolean> {
+    const input = await this.readInput(a);
+    this.drain(a);
+    if (a.turn !== turn || a.took || a.restarting || (a.typedAt ?? -Infinity) > pastedAt || !input || !holdsWords(input, text)) return false;
+    await this.opts.tmux.keys(a.name, 'Enter');
+    return true;
   }
 
   private async eraseInput(a: Agent, receipt: WordReceipt): Promise<void> {

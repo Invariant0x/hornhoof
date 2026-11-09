@@ -218,3 +218,28 @@ it('presses Enter again for the words a restarted program shows but did not take
   expect(await running).toMatchObject({ ok: true });
   expect(c.state.prompts).toEqual(['Continue.']);
 });
+
+it('does not submit a person\'s words when they edit during the retry input capture', async () => {
+  const c = program();
+  c.state.takes = true;
+  void c.host.run(c.job(randomUUID(), {}, HANG));
+  await waitFor(() => c.state.prompts.length === 1);
+  const agent = c.agent();
+  const turn = agent.turn!;
+  agent.took = false;
+  const pastedAt = Date.now();
+  c.state.input = PROMPT;
+  const before = c.state.keys.length;
+  const reader = c.host as unknown as { readInput(agent: unknown): Promise<string | null> };
+  vi.spyOn(reader, 'readInput').mockImplementationOnce(async () => {
+    /* The capture began before the person's key, but its answer arrives after that key. */
+    agent.typedAt = Date.now();
+    c.state.input = `${PROMPT} ${PERSON}`;
+    return PROMPT;
+  });
+  void c.host['enterUntilTaken'](agent, turn, PROMPT, pastedAt);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(c.state.keys.slice(before)).not.toContain('Enter');
+  expect(c.state.input).toBe(`${PROMPT} ${PERSON}`);
+  expect(c.state.prompts).toEqual([HANG]);
+});
