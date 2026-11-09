@@ -23,6 +23,7 @@ only Hornhoof's own side.
 - The node image now brings Firefox and WebKit beside Chromium, so it is larger.
 - 0.17.0 kept green test results whatever runtimes a part ran on. After the update, clear the results kept before it
   once, as `docs/development-echelons-release-data.md` describes, so the next full run checks those files again.
+- Migration 0091 adds the empty table `backlog_items` for each department's work kept for later turns; nothing is converted.
 
 ### Added
 
@@ -34,6 +35,9 @@ only Hornhoof's own side.
   from the same lockfile.
 - Nodes prepare Chromium, Firefox and WebKit and check that each one starts, naming the one that does not.
 - `test_run` shows how many fingerprints a run brought and how many green results it kept.
+- The tasks screen shows one department at a time as a table by turn, and its list of work kept for later turns, which
+  its people add to, order by dragging and put into a turn (`backlog` for the orchestrator). A person sees only the tasks
+  and lists of their own departments.
 
 ### Changed
 
@@ -186,6 +190,10 @@ Hornhoof.
 - Схема отдела снова ставит роли слева направо по рубежам, как до 0.17.0: архитектура, разработка, затем каждая проверка
   по порядку, с пометками «Рубеж 1», «Рубеж 2» между ними. Сотрудник всегда в рамке своей роли, а кто сейчас ведет этап,
   выделен там же; отдельно стоят только подотряды вроде Matrix и наблюдатели.
+- Экран задач показывает один отдел: таблицу задач по ходам и список работы на будущие ходы. Люди отдела пополняют
+  список, меняют порядок перетаскиванием и ставят пункты в ход (у оркестратора инструмент `backlog`). Человек видит
+  задачи и списки только своих отделов.
+- Миграция 0091 добавляет пустую таблицу `backlog_items` для работы отдела на будущие ходы; ничего не переносится.
 
 ## [0.17.0] - 2026-11-09
 
