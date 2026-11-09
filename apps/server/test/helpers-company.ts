@@ -5,7 +5,6 @@ import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { as, sessionFrom, TEST_SECRET } from './helpers-basic.js';
-import { fixture } from './helpers-db.js';
 
 export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';
 export const SETUP = {
@@ -34,6 +33,9 @@ export async function withoutOperations(db: Db): Promise<void> {
    them whether they are made or put back. */
 export async function appFixture<T>(app: FastifyInstance, key: string, make: () => Promise<T>): Promise<T> {
   await app.ready();
+  /* Browser support processes own their app without Vitest's lifecycle or fixture cache. */
+  if (!process.env.VITEST) return make();
+  const { fixture } = await import('./helpers-db.js');
   const { $client } = app.ctx.db as unknown as { $client: PGlite };
   return fixture($client, `${key} ${JSON.stringify(app.ctx.config)}`, make);
 }
