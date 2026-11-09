@@ -109,6 +109,14 @@ const killGroup = (pid: number | undefined, signal: NodeJS.Signals) => {
 };
 
 /* Runs one program in a process group of its own, so a stop or the time limit ends everything it started. */
+/* What a part's commands get of the machine: its programs, its browsers and the grammars its quality tools parse with, which
+   the image keeps in place so that they fetch nothing. Nothing else of the node's own environment. */
+const MACHINE_TOOLS = ['TREE_SITTER_LANGUAGE_PACK_CACHE_DIR'];
+function partBase(root: string, dir: string): Record<string, string> {
+  const tools = Object.fromEntries(MACHINE_TOOLS.flatMap(key => (process.env[key] ? [[key, process.env[key]]] : [])));
+  return { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir), ...tools };
+}
+
 function runIn(bin: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; user: JobUser | null; deadline: number; signal?: AbortSignal; out: Output }): Promise<Ended> {
   return new Promise(resolve => {
     const child = spawn(bin, args, { cwd: o.cwd, env: o.env, uid: o.user?.uid, gid: o.user?.gid, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -417,7 +425,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     chmodSync(folders.own, 0o755);
     for (const folder of folders.user) prepareFolder(folder, user);
     if (user) ensurePasswd(user, parts);
-    const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir) };
+    const base = partBase(root, dir);
     const source = msg.repo;
     /* Git reads no settings but its own here, and gets the token only through the helper, for the repository's host. */
     const git = (args: string[], cwd: string, into = out) =>
@@ -603,7 +611,7 @@ function forBuildHere(remote: HarnessRemote, elsewhere: AbortController): Harnes
    the owner moves each into the worktree: the node writes nothing where an agent's program could change what it writes into. */
 async function placeInWorktree(description: EnvironmentDescription, tree: Worktree, options: WorktreeOptions, deadline: number, signal: AbortSignal): Promise<void> {
   const root = join(partsFolder(options.dir), `worktree-${tree.id}`), staging = join(root, 'tree'), hidden = productSecrets({ repo: tree.repo }, options.hidden);
-  const state: PreparationState = { ...productUser(tree.owner), root, repo: join(root, 'repo'), out: new Output(), deadline, signal, options: { ...options, user: tree.owner }, builder: WORKTREE_BUILDER, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+  const state: PreparationState = { ...productUser(tree.owner), root, repo: join(root, 'repo'), out: new Output(), deadline, signal, options: { ...options, user: tree.owner }, builder: WORKTREE_BUILDER, base: partBase(root, options.dir) };
   /* Its owner's programs keep running meanwhile, so nothing here runs or stops anything as that user. A build takes the
      commit's own files, never the worktree's. taking: the pass without the machine's turn, which stops where a build here
      would start. elsewhere: the pass in it, which stops where another machine has the unit or builds it. */
@@ -882,7 +890,7 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
   await productDescription(description);
   const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
-  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], kept: [], base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], kept: [], base: partBase(root, options.dir) };
 }
 async function productFolders(state: PreparationState): Promise<void> {
   await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
@@ -995,7 +1003,7 @@ export async function syncHarness(msg: HarnessRequest, options: Options): Promis
   const root = join(partsFolder(options.dir), `harness-${msg.requestId}`), deadline = Date.now() + SYNC_MS, signal = productSignal(options.signal, deadline);
   let state: PreparationState | undefined, result: HarnessSynced['result'];
   try {
-    state = { ...productUser(options.user), root, repo: join(root, 'repo'), out, deadline, signal, options, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+    state = { ...productUser(options.user), root, repo: join(root, 'repo'), out, deadline, signal, options, base: partBase(root, options.dir) };
     await productFolders(state);
     result = { status: 'ready', ...await syncedHarness(msg, state, hidden) };
   } catch (error) { result = { status: 'error', problem: syncProblem(error, signal, hidden) }; }

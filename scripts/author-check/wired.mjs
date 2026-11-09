@@ -15,6 +15,9 @@ const COLLECT_MS = 5 * 60 * 1000;
 const COLLECT_BYTES = 64 * 1024 * 1024;
 const PROBE = "const {probe}=await import('./scripts/test/related-probe.mjs');process.stdout.write(JSON.stringify(await probe({root:process.cwd()},JSON.parse(process.argv[1]))));";
 
+/* Why a tool did not run: its last line of errors, or what kept it from starting. */
+const lastWords = ran => ran.error?.message ?? (ran.stderr ?? '').trim().split('\n').at(-1)?.slice(0, 300) ?? '';
+
 /* A commit's files under the paths they have now, read by the same tool from the same folder depth as the run reads them. */
 export const complexityAt = (git, tool = 'crapper') => (_cwd, commit, files) => {
   const dir = mkdtempSync(join(tmpdir(), 'hh-author-base-'));
@@ -23,7 +26,8 @@ export const complexityAt = (git, tool = 'crapper') => (_cwd, commit, files) => 
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), git(['show', `${commit}:${from}`]));
     }
-    if (spawnSync(tool, ['--no-coverage', ...files.map(file => file.path)], { cwd: dir, stdio: 'ignore' }).status !== 0) throw new Error('crapper_unavailable');
+    const ran = spawnSync(tool, ['--no-coverage', ...files.map(file => file.path)], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
+    if (ran.status !== 0) throw new Error(['crapper_unavailable', lastWords(ran)].filter(Boolean).join(': '));
     return parseCrapEdn(readFileSync(join(dir, '.metrics/crap.edn'), 'utf8'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 };

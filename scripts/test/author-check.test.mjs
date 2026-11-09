@@ -714,6 +714,15 @@ test('a missing tool for the plan is said, not taken for a simple commit', () =>
   assert.throws(() => complexityAt(() => 'x', 'no-such-tool-at-all')('.', BASE, [{ path: 'a.ts', from: 'a.ts' }]), /crapper_unavailable/);
 });
 
+test('a tool that fails says why in its last words', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-broken-crapper-'));
+  const tool = join(dir, 'crapper');
+  writeFileSync(tool, '#!/bin/sh\necho "Traceback" >&2\necho "DownloadError: Failed to download parsers: http status: 504" >&2\nexit 1\n', { mode: 0o755 });
+  try {
+    assert.throws(() => complexityAt(() => 'x', tool)('.', BASE, [{ path: 'a.ts', from: 'a.ts' }]), { message: 'crapper_unavailable: DownloadError: Failed to download parsers: http status: 504' });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 for (const path of ['AGENTS.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'apps/server/test/fixtures/deep/README.md']) {
   test(`checked Markdown ${path} participates in author selection`, async () => {
     const ports = selector();

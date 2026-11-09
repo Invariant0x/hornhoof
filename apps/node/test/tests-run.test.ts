@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, relative } from 'node:path';
 import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearShared, partFiles, partFolders, putOutputs, removeOldParts, runTests, type PartFiles } from '../src/tests.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -57,6 +57,18 @@ describe('a part of a test run on a node', () => {
     const done = await runTests(run(url, { command: 'pwd' }), { dir, user: null, hidden: [] });
     const repo = relative(dir, done.log.split('\n').find(line => line.startsWith(dir))!);
     expect(readFileSync(new URL('../quality/test_part_paths.py', import.meta.url), 'utf8')).toContain(`PART_REPO = Path("/data/${repo}")`);
+  });
+
+  /* The image keeps the grammars of the quality tools in place and names them; without the name crapper fetches them from the
+     network and fails where it cannot. */
+  it('gives the quality tools the grammars the machine keeps, and nothing else of its own environment', async () => {
+    vi.stubEnv('TREE_SITTER_LANGUAGE_PACK_CACHE_DIR', '/opt/hornhoof/grammars');
+    vi.stubEnv('HH_SOMETHING_OF_THE_NODE', 'secret');
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const { url } = origin();
+    const done = await runTests(run(url, { command: 'printf "%s|%s\n" "$TREE_SITTER_LANGUAGE_PACK_CACHE_DIR" "$HH_SOMETHING_OF_THE_NODE"' }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: true, exitCode: 0 });
+    expect(done.log).toContain('/opt/hornhoof/grammars|\n');
   });
 
   it('exposes PLAYWRIGHT_BROWSERS_PATH on /data/browsers and prepares the repository browser before running the check', async () => {
