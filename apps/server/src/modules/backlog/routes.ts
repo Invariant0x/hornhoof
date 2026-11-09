@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireDepartmentHad } from '../../auth/departments.js';
-import { requirePerson } from '../../auth/session.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { scheduleBacklog } from '../tasks/turns.js';
@@ -20,20 +20,18 @@ const Chosen = z.strictObject({ ids: z.array(z.uuid()).min(1).max(20) });
    the orchestrator put items into the next turn. Only people who have the department read or change it. */
 export function backlogRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
-  const place = async (req: FastifyRequest) => {
-    const me = await requirePerson(req, db);
-    const { id } = Params.parse(req.params);
-    return { me, department: await requireDepartmentHad(db, me, id) };
-  };
+  const departmentOf = (req: FastifyRequest, me: Person) => requireDepartmentHad(db, me, Params.parse(req.params).id);
   const items = (companyId: string, departmentId: string) => listBacklog(db, companyId, departmentId).then(list => ({ items: list }));
 
   app.get('/api/departments/:id/backlog', async req => {
-    const { me, department } = await place(req);
+    const me = await requirePerson(req, db);
+    const department = await departmentOf(req, me);
     return items(me.companyId, department.id);
   });
 
   app.post('/api/departments/:id/backlog', async (req, reply) => {
-    const { me, department } = await place(req);
+    const me = await requirePerson(req, db);
+    const department = await departmentOf(req, me);
     const body = NewItem.parse(req.body);
     const row = await addBacklogItem(db, me.companyId, department.id, me.id, body);
     backlogChanged(ctx, me.companyId, department.id);
@@ -42,7 +40,8 @@ export function backlogRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.put('/api/departments/:id/backlog/order', async req => {
-    const { me, department } = await place(req);
+    const me = await requirePerson(req, db);
+    const department = await departmentOf(req, me);
     const { ids } = Order.parse(req.body);
     await reorderBacklog(db, me.companyId, department.id, ids);
     backlogChanged(ctx, me.companyId, department.id);
@@ -50,7 +49,8 @@ export function backlogRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/departments/:id/backlog/:item', async req => {
-    const { me, department } = await place(req);
+    const me = await requirePerson(req, db);
+    const department = await departmentOf(req, me);
     const { item } = ItemParams.parse(req.params);
     await removeBacklogItem(db, me.companyId, department.id, item);
     backlogChanged(ctx, me.companyId, department.id);
@@ -59,7 +59,8 @@ export function backlogRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* The chosen items become tasks of the next turn and leave the list. */
   app.post('/api/departments/:id/backlog/schedule', async req => {
-    const { me, department } = await place(req);
+    const me = await requirePerson(req, db);
+    const department = await departmentOf(req, me);
     const { ids } = Chosen.parse(req.body);
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     if (!orchestrator) throw new ApiError(409, 'conflict', 'This company has no orchestrator to give the tasks of a turn.', 'no_head');

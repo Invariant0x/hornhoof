@@ -53,7 +53,7 @@ describe('what people read of the waits on a task', () => {
     expect(leaks(res, [c.crew.far])).toEqual([]);
     for (const word of ['Far secret', hidden.id, afterSourceKey(hidden.id)]) expect(res.body).not.toContain(word);
     expect(await waitsOn(c, follow, c.tokens.ceo)).toHaveLength(2);
-    const line = (await c.get('/api/tasks', c.tokens.ann)).json().tasks.find((t: { id: string }) => t.id === follow.id);
+    const line = (await c.get(`/api/tasks?department=${c.dev.id}`, c.tokens.ann)).json().tasks.find((t: { id: string }) => t.id === follow.id);
     expect(line.waits).toHaveLength(1);
   });
 
