@@ -477,7 +477,7 @@ export class TerminalHost {
 
   /* The program by the identity the server knows it by, so that a look binds the input to the program it showed. */
   private programIdentity(key: string, a: Agent): Pick<ProgramFacts, 'jobId' | 'instance'> {
-    return { jobId: a.turn?.jobId ?? null, instance: this.operator?.identity(key)?.instance ?? a.instance! };
+    return { jobId: a.turn?.jobId ?? null, instance: this.operator!.identity(key)?.instance ?? a.instance! };
   }
 
   /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */

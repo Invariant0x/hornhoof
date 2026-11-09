@@ -94,6 +94,8 @@ describe.skipIf(!hasTmux)('operator questions from the program', () => {
       }
       expect(await running).toMatchObject({ ok: true, result: `echo: Permission ${decision}.` });
       expect(sent).toContainEqual(expect.objectContaining({ type: 'program.question', phase: 'cleared', question: expect.objectContaining({ id: needed.questionId }) }));
+      /* Between turns the program is still there to look at, at rest and on no turn. */
+      expect(await look(sent, key)).toMatchObject({ result: 'ok', jobId: null, instance: needed.instance, state: 'idle', question: null });
     } finally { abort.abort(); await running; }
   });
 });
