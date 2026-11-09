@@ -29,13 +29,14 @@ describe('versioned product execution planning', () => {
     expect(selected.flatMap(batch => batch.selections).filter(suite => suite.suiteId === 'vitest').map(suite => suite.shard)).toEqual([{ index: 1, count: 2 }, { index: 2, count: 2 }]);
     expect(plan.estimate!.parts.map(part => part.testMs)).toEqual([30_000, 30_000, 30_000]);
   });
-  it('gates all batches on a separate preparation without running its suite again', async () => {
+  it('starts the batches beside a separate preparation, without running its suite again, and keeps its final checks after it', async () => {
     const input = await fixture(true), plan = await planProductParts(input);
     expect(plan.leaves).toEqual([
       { selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [] },
-      { selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha, selections: [{ kind: 'suite', suiteId: 'pytest', files: ['python/tests/test_values.py'], shard: { index: 1, count: 1 } }] }, after: [1] },
+      { selection: { kind: 'batch', version: 2, expectedCommitSha: input.expectedCommitSha, selections: [{ kind: 'suite', suiteId: 'pytest', files: ['python/tests/test_values.py'], shard: { index: 1, count: 1 } }] }, after: [] },
       { selection: { kind: 'final', suiteId: 'vitest', files: [] }, after: [1] },
     ]);
+    expect(plan.reason).toContain('One explicit preparation runs 1 suites and 1 commands beside the batches.');
   });
   it('retains every suite prerequisite for a final leaf after splitting', async () => {
     const plan = await planProductParts(await fixture());
