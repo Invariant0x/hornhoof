@@ -12,8 +12,8 @@ const ROOT = resolve(import.meta.dirname, '..');
 type Recorded = {
   root: string;
   modules: {
-    moduleId: string; relativeModuleId: string; state: string; diagnostic: Record<string, unknown>;
-    tests: { fullName: string; diagnostic: Record<string, unknown> | null; meta: Record<string, number> }[];
+    moduleId: string; relativeModuleId: string; state: string; diagnostic: Record<string, unknown>; errors?: { message: string }[];
+    tests: { fullName: string; diagnostic: Record<string, unknown> | null; meta: Record<string, number>; result?: { state: string; errors?: { message: string }[] } }[];
   }[];
 };
 /* What Vitest 5.0.5 handed a reporter in two real runs of the specs written in the file, recorded once by hand (its "recorded"
@@ -28,9 +28,9 @@ function reporting(recorded: Recorded, env: { HH_TEST_PART?: string; HH_TEST_REP
   onTestFinished(() => { vi.unstubAllEnvs(); });
   const root = join(ROOT, recorded.root);
   const modules = recorded.modules.map(module => {
-    const tests = module.tests.map(test => ({ fullName: test.fullName, diagnostic: () => test.diagnostic ?? undefined, meta: () => test.meta }) as unknown as TestCase);
+    const tests = module.tests.map(test => ({ fullName: test.fullName, diagnostic: () => test.diagnostic ?? undefined, meta: () => test.meta, result: () => test.result ?? { state: 'passed' } }) as unknown as TestCase);
     return {
-      moduleId: join(root, module.moduleId), relativeModuleId: module.relativeModuleId, state: () => module.state, diagnostic: () => module.diagnostic,
+      moduleId: join(root, module.moduleId), relativeModuleId: module.relativeModuleId, state: () => module.state, diagnostic: () => module.diagnostic, errors: () => module.errors ?? [],
       children: { allTests: () => tests.values() },
     } as unknown as TestModule;
   });
@@ -72,5 +72,25 @@ describe('the timing reporter', () => {
     const status = Object.fromEntries(files.map(file => [file.file.slice(root.length + 1), file.status]));
     expect(status).toEqual({ 'sample.test.ts': 'passed', 'failing.test.ts': 'failed' });
     expect(files.every(file => file.file.startsWith('/') && file.ms >= 0)).toBe(true);
+  });
+
+  /* The node ends a failed part's log with these, so an agent reads which test failed and why. */
+  it('names each test that failed with its error, and the error of a file that failed before its tests', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hh-report-'));
+    onTestFinished(() => rm(dir, { recursive: true, force: true }));
+    const report = join(dir, 'report.json');
+    const diagnostic = { duration: 5, setupDuration: 1, environmentSetupDuration: 0, prepareDuration: 0, collectDuration: 1 };
+    const run: Recorded = { root: RUNS.withFailingAndSkipped.root, modules: [
+      { moduleId: 'failing.test.ts', relativeModuleId: 'failing.test.ts', state: 'failed', diagnostic, tests: [
+        { fullName: 'group > passes', diagnostic: { duration: 1 }, meta: {}, result: { state: 'passed' } },
+        { fullName: 'group > fails', diagnostic: { duration: 1 }, meta: {}, result: { state: 'failed', errors: [{ message: 'expected 1 to be 2' }] } },
+      ] },
+      { moduleId: 'broken.test.ts', relativeModuleId: 'broken.test.ts', state: 'failed', diagnostic, errors: [{ message: 'cannot load the fixture' }], tests: [] },
+    ] };
+    const { root } = reporting(run, { HH_TEST_REPORT: report });
+    const { files } = JSON.parse(await readFile(report, 'utf8')) as { files: { file: string; failures?: { name: string; message: string }[] }[] };
+    const failures = Object.fromEntries(files.map(file => [file.file.slice(root.length + 1), file.failures]));
+    expect(failures['failing.test.ts']).toEqual([{ name: 'group > fails', message: expect.stringContaining('expected 1 to be 2') }]);
+    expect(failures['broken.test.ts']).toEqual([{ name: 'broken.test.ts', message: expect.stringContaining('cannot load the fixture') }]);
   });
 });

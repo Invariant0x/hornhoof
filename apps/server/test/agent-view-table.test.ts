@@ -124,6 +124,8 @@ const ELSEWHERE: Record<string, string> = {
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'GET /api/task-departments': 'backlog.test.ts: only the departments the person has',
+  'GET /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
+  'PUT /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'GET /api/departments/:id/backlog': 'backlog.test.ts: a person with the department, 403 for another one',
   'POST /api/departments/:id/backlog': 'backlog.test.ts: a person with the department, 403 for another one',
   'PUT /api/departments/:id/backlog/order': 'backlog.test.ts: a person with the department, 403 for another one',

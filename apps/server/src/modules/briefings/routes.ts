@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Person } from '../../auth/session.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
@@ -15,8 +16,7 @@ const Params = z.object({ id: z.uuid() });
 export function briefingRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
-  async function placeFor(req: FastifyRequest) {
-    const me = await requirePerson(req, db);
+  async function placeFor(req: FastifyRequest, me: Person) {
     const { id } = Params.parse(req.params);
     const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
@@ -27,12 +27,12 @@ export function briefingRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   app.get('/api/departments/:id/briefing', async req => {
-    const { dept } = await placeFor(req);
+    const { dept } = await placeFor(req, await requirePerson(req, db));
     return { briefing: await briefingView(db, dept) };
   });
 
   app.put('/api/departments/:id/briefing', async req => {
-    const { me, dept } = await placeFor(req);
+    const { me, dept } = await placeFor(req, await requirePerson(req, db));
     await writeBriefing(db, dept, BriefingBody.parse(req.body), changedBy(me));
     return { briefing: await briefingView(db, dept) };
   });

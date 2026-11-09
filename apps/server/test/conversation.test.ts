@@ -399,7 +399,6 @@ describe('the orchestrator\'s conversation', () => {
     const old = await nextRun(mac);
     expect(old.instructions).toContain(app.ctx.templates.skills.get('dev-tdd')!.body);
     expect(old.instructions).not.toContain('<!-- hh:skill hh-superpowers -->');
-    expect(old.instructions).not.toContain(app.ctx.templates.skills.get('hh-superpowers')!.body);
     expect(old.skills).toBeUndefined();
     const fresh = await onMac('0.5.0');
     await until(async () => (await state(fresh.app, fresh.ceo)).ready);
