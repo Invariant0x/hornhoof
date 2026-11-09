@@ -60,8 +60,9 @@ import type { Db } from './db/client.js';
 
 import { readCompare, readTree, type CompareReader, type TreeReader } from './modules/testruns/compare.js';
 
-/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader };
+/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. templates are read
+   from config.templatesDir unless given: a test file reads them once for all its servers. */
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader; readTree?: TreeReader; templates?: Templates };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
@@ -117,7 +118,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   ctx.updater = new UpdaterControl(config.controlDir);
   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
-  ctx.templates = loadTemplates(config.templatesDir);
+  ctx.templates = deps.templates ?? loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());

@@ -8,7 +8,7 @@ import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../
 import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { IssueInput } from '../src/modules/tasks/review-findings.js';
-import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
+import { copyTemplates, CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
@@ -237,6 +237,31 @@ describe('templates', () => {
     expect(() => loadTemplates(dir)).toThrow(/DEV-BE\.md: effort/);
     writeFileSync(file, original);
     expect(loadTemplates(dir).roles.get('DEV-BE')!.effort).toBeUndefined();
+  });
+
+  it('copies into templates with the same roles, skills and rosters', () => {
+    const copy = copyTemplates(templates);
+    expect(copy.roles).toEqual(templates.roles);
+    expect(copy.skills).toEqual(templates.skills);
+    for (const key of TEMPLATE_KEYS) expect(copy.roster(key)).toEqual(templates.roster(key));
+  });
+
+  it('copies into templates that change apart from the ones they came from', () => {
+    const copy = copyTemplates(templates);
+    copy.roles.set('DEV-BE', { ...copy.roles.get('DEV-BE')!, effort: undefined });
+    copy.skills.get('hh-tasks')!.title.en = 'Changed';
+    expect(templates.roles.get('DEV-BE')!.effort).toBe('xhigh');
+    expect(templates.skills.get('hh-tasks')!.title.en).not.toBe('Changed');
+  });
+
+  it('copies into templates whose rosters list the roles the copy holds now, in the order of the templates', () => {
+    const copy = copyTemplates(templates);
+    const [head, ...members] = templates.roster('development');
+    copy.roles.set(head!.id, { ...copy.roles.get(head!.id)!, kind: 'member', inDefault: false });
+    const inDefault = members.filter(role => role.inDefault).map(role => role.id);
+    expect(copy.roster('development').map(role => role.id).slice(0, inDefault.length)).toEqual(inDefault);
+    expect(copy.roster('development')).toContain(copy.roles.get(head!.id));
+    expect(templates.roster('development')[0]).toBe(head);
   });
 
   it('keeps roles short, and every skill within what each program reads of a skill file', () => {
