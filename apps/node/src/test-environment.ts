@@ -203,6 +203,38 @@ export async function buildTestInvocation(suite: TestSuite, files: string[], con
   return { command, env: { HH_TEST_FILES: context.filesPath, ...(mutation ? { HH_MUTATION_PLAN_FILE: mutation.planFile } : {}) } };
 }
 
+/* Vitest suites whose commands differ only in the projects they name can run as one command over the projects and files of them
+   all: one pool of workers then takes the files of every suite, instead of each suite's slowest file holding the machine in turn. */
+export type SharedMember = { suite: TestSuite; files: string[]; shard: { index: number; count: number } };
+const PROJECT = /^--project=./;
+const withoutProjects = (command: Command): string => JSON.stringify({ ...command, args: command.args.filter(arg => !PROJECT.test(arg)) });
+function shareable(member: SharedMember, snapshot: EnvironmentSnapshot | undefined): boolean {
+  const { suite, files, shard } = member, policy = snapshot?.description.manifest.mutation;
+  /* A suite whose candidate mutation needs a command of its own never shares one. */
+  const mutated = !!snapshot?.candidate && policy?.status === 'supported' && files.some(file => policy.sourcePaths.includes(file));
+  return suite.split.kind === 'vitest-shard' && files.length > 0 && validShardCoordinates(shard) && !mutated
+    && !suite.run.args.some(arg => arg === '--project' || arg === '--shard' || arg.startsWith('--shard=')) && suite.run.args.some(arg => PROJECT.test(arg));
+}
+export function sharedVitestCommand(members: SharedMember[], snapshot?: EnvironmentSnapshot): Command | null {
+  if (members.length < 2 || members.some(member => !shareable(member, snapshot))) return null;
+  const commands = members.map(member => shardCommand(member.suite, member.shard)), first = commands[0]!;
+  if (commands.some(command => withoutProjects(command) !== withoutProjects(first))) return null;
+  const projects = [...new Set(commands.flatMap(command => command.args.filter(arg => PROJECT.test(arg))))], at = first.args.findIndex(arg => PROJECT.test(arg));
+  const rest = first.args.filter(arg => !PROJECT.test(arg));
+  return { ...first, args: [...rest.slice(0, at), ...projects, ...rest.slice(at)] };
+}
+/* The one command of such suites, given every selected file of each, checked as for one suite. */
+export async function buildSharedTestInvocation(members: SharedMember[], context: InvocationContext): Promise<{ command: Command; env: Record<string, string> }> {
+  const command = sharedVitestCommand(members, context.snapshot);
+  if (!command) fail('environment_invalid', 'These suites cannot share one command.');
+  await safeCheckoutPath(context.checkout, command.cwd);
+  for (const member of members) await validateSuiteFiles(member.suite, member.files, context.checkout);
+  const paths = members.flatMap(member => member.files.map(file => `./${relative(resolve(context.checkout, command.cwd), resolve(context.checkout, file))}`));
+  const output = await open(context.filesPath, 'wx', 0o600);
+  try { await output.writeFile(JSON.stringify(paths)); } finally { await output.close(); }
+  return { command, env: { HH_TEST_FILES: context.filesPath } };
+}
+
 
 function selectedInputs(description: EnvironmentDescription, patterns: string[]): InputDigest[] {
   return description.inputDigests.filter(input => patterns.some(pattern => match(input.path, pattern)));
