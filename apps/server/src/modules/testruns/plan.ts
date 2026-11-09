@@ -11,6 +11,8 @@ export type TestPartPlanInput = {
   unknownFileMs: number;
   /* The free machines and their paces, the time each takes for work of 1 ms at the middle pace, when they are known. */
   machines?: MachinePace[];
+  /* How long a preparation takes, at the middle pace, that the first machine runs before its part. */
+  preparationMs?: number;
 };
 export type MachinePace = { key: string; pace: number };
 /* machine: the machine a part is laid out for and how long it should take there, when the machines go at different paces. */
@@ -25,6 +27,8 @@ export type TestPartPlan = {
   unknownUnits: TestUnit[];
   waitingForCapacity: boolean;
   reason: string;
+  /* The machine laid out to run the preparation first, when the machines go at different paces. */
+  preparationMachine?: string;
 };
 
 type TimedUnit = { unit: TestUnit; ms: number; unknown: boolean };
@@ -43,6 +47,7 @@ function validInput(input: TestPartPlanInput): void {
   nonnegative(input.costs.setupMs, 'setup cost');
   nonnegative(input.costs.collectMs, 'collection cost');
   nonnegative(input.unknownFileMs, 'unknown-file estimate');
+  nonnegative(input.preparationMs ?? 0, 'preparation estimate');
   if (!input.unknownFileMs) throw new RangeError('The unknown-file estimate must be positive.');
 }
 
@@ -83,19 +88,21 @@ function pacesOf(input: TestPartPlanInput): MachinePace[] {
   const known = [...(input.machines ?? [])].filter(machine => Number.isFinite(machine.pace) && machine.pace > 0).sort((a, b) => a.pace - b.pace || lexical(a.key, b.key));
   return known.length ? known : Array.from({ length: Math.max(1, input.availableMachines) }, () => ({ key: '', pace: 1 }));
 }
-/* Each group goes where it would end soonest on that part's machine, so a faster machine gets more. */
-function distribute(groups: Group[], machines: MachinePace[], paced: boolean): PlannedTestPart[] {
-  const parts = machines.map(machine => ({ units: [] as TestUnit[], testMs: 0, pace: machine.pace, key: machine.key }));
+/* Each group goes where it would end soonest on that part's machine, so a faster machine gets more. The first machine starts
+   with the preparation, so it gets that much less; a part it has nothing for is left out. */
+function distribute(groups: Group[], machines: MachinePace[], paced: boolean, preparationMs: number): { parts: PlannedTestPart[]; longest: number } {
+  const parts = machines.map((machine, index) => ({ units: [] as TestUnit[], testMs: 0, startMs: index ? 0 : preparationMs, pace: machine.pace, key: machine.key }));
+  const end = (part: (typeof parts)[number], ms = 0) => (part.startMs + part.testMs + ms) * (paced ? part.pace : 1);
   for (const group of groups) {
-    const part = parts.reduce((best, next) => (next.testMs + group.ms) * next.pace < (best.testMs + group.ms) * best.pace ? next : best);
+    const part = parts.reduce((best, next) => end(next, group.ms) < end(best, group.ms) ? next : best);
     part.units.push(...group.units);
     part.testMs += group.ms;
   }
-  return parts.map(({ units, testMs, pace, key }) => ({ units, testMs, ...(paced ? { machine: { key, ms: Math.round(testMs * pace) } } : {}) }));
+  const longest = Math.max(...parts.map(part => paced ? Math.round(end(part)) : end(part)));
+  return { longest, parts: parts.filter(part => part.units.length).map(({ units, testMs, pace, key }) => ({ units, testMs, ...(paced ? { machine: { key, ms: Math.round(testMs * pace) } } : {}) })) };
 }
-const partMs = (part: PlannedTestPart): number => part.machine?.ms ?? part.testMs;
-function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPlanInput['costs'], paced: boolean): Alternative {
-  const count = machines.length, parts = distribute(groups, machines, paced), longest = Math.max(...parts.map(partMs));
+function alternative(groups: Group[], machines: MachinePace[], costs: TestPartPlanInput['costs'], paced: boolean, preparationMs: number): Alternative {
+  const count = machines.length, { parts, longest } = distribute(groups, machines, paced, preparationMs);
   /* Setup can overlap across machines; collecting every result still costs time. Charge the extra machines' setup
      separately when choosing, rather than claiming that extra resource cost is measured wall time. */
   const estimatedWallMs = costs.setupMs + longest + count * costs.collectMs;
@@ -117,11 +124,15 @@ export function planTestParts(input: TestPartPlanInput): TestPartPlan {
   const timed = timedUnits(input), groups = groupsOf(timed), machines = pacesOf(input);
   const paced = machines[machines.length - 1]!.pace / machines[0]!.pace >= ONE_PACE;
   const limit = Math.min(MAX_TEST_PARTS, machines.length, groups.length);
-  const options = Array.from({ length: limit }, (_, index) => alternative(groups, machines.slice(0, index + 1), input.costs, paced));
+  const preparationMs = input.preparationMs ?? 0;
+  const options = Array.from({ length: limit }, (_, index) => alternative(groups, machines.slice(0, index + 1), input.costs, paced, preparationMs));
   const best = options.reduce((chosen, next) => next.estimate.costAdjustedMs < chosen.estimate.costAdjustedMs ? next : chosen);
+  /* At one pace any machine takes any part: the part laid out beside the preparation goes last, for the machine it frees. */
+  const parts = preparationMs && !paced && best.parts.length === best.estimate.parts ? [...best.parts.slice(1), best.parts[0]!] : best.parts;
   const unknownUnits = timed.filter(item => item.unknown).map(item => item.unit);
   const oneMachineMs = options[0]!.estimate.estimatedWallMs;
-  return { parts: best.parts, oneMachineMs, estimatedWallMs: best.estimate.estimatedWallMs,
+  return { parts, oneMachineMs, estimatedWallMs: best.estimate.estimatedWallMs,
     costAdjustedMs: best.estimate.costAdjustedMs, alternatives: options.map(option => option.estimate), unknownUnits,
-    waitingForCapacity: input.availableMachines === 0, reason: reasonFor(input, best, oneMachineMs, unknownUnits.length) };
+    waitingForCapacity: input.availableMachines === 0, reason: reasonFor(input, best, oneMachineMs, unknownUnits.length),
+    ...(preparationMs && paced ? { preparationMachine: machines[0]!.key } : {}) };
 }

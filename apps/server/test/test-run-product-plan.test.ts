@@ -38,6 +38,24 @@ describe('versioned product execution planning', () => {
     ]);
     expect(plan.reason).toContain('One explicit preparation runs 1 suites and 1 commands beside the batches.');
   });
+  it('gives the machine that runs the preparation first less of the batches, by how long a preparation took before', async () => {
+    const input = await fixture(), manifest = input.snapshot.description.manifest;
+    manifest.execution = { version: 2, oncePreparation: { profiles: ['fast'], suiteIds: [], commands: [{ program: 'node', args: ['types.js'], cwd: '.' }] } };
+    input.snapshot.description.manifestSource = JSON.stringify(manifest);
+    input.snapshot.description.manifestHash = await hashTestEnvironment(input.snapshot.description.manifestSource);
+    const ms = { 'web/test/a.test.ts': 40_000, 'web/test/b.test.ts': 30_000, 'python/tests/test_values.py': 20_000 } as Record<string, number>;
+    const timed = { ...input, availableMachines: 2, durations: input.units.map(unit => ({ suiteId: unit.suiteId, file: unit.file, ms: ms[unit.file]! })), preparationMs: 30_000 };
+    const files = (plan: Awaited<ReturnType<typeof planProductParts>>) => batches(plan).map(batch => batch.selections.flatMap(suite => suite.files).sort());
+
+    const even = await planProductParts(timed);
+    expect(even.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [] });
+    expect(files(even)).toEqual([['python/tests/test_values.py', 'web/test/a.test.ts'], ['web/test/b.test.ts']]);
+
+    const paced = await planProductParts({ ...timed, machines: [{ key: 'host:a', pace: 1 }, { key: 'host:b', pace: 2 }] });
+    expect(paced.leaves[0]).toEqual({ selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha }, after: [], computer: 'host:a' });
+    expect(paced.leaves.slice(1, 3).map(leaf => leaf.computer)).toEqual(['host:a', 'host:b']);
+    expect(files(paced)).toEqual([['python/tests/test_values.py', 'web/test/a.test.ts'], ['web/test/b.test.ts']]);
+  });
   it('retains every suite prerequisite for a final leaf after splitting', async () => {
     const plan = await planProductParts(await fixture());
     const suiteParts = plan.leaves.flatMap((leaf, index) => leaf.selection.kind === 'batch' && leaf.selection.selections.some(suite => suite.suiteId === 'vitest') ? [index + 1] : []);

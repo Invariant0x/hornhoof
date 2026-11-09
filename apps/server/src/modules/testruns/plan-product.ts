@@ -40,9 +40,11 @@ function planReason(preparation: ReturnType<typeof preparationFor>, planned: Env
   const prefix = preparation ? `One explicit preparation runs ${preparation.suiteIds.length} suites and ${preparation.commands.length} commands beside the batches. ` : '';
   return prefix + (planned?.testPlan.reason ?? (preparation ? 'All selected suites run once in preparation; no batch is needed.' : 'Every selected file was reused; no batch is needed.'));
 }
-function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>): ProductPlan['leaves'] {
+/* The preparation runs where the batches were laid out to leave it room, when the machines go at different paces. */
+function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>, planned: EnvironmentPartPlan | null): ProductPlan['leaves'] {
   if (!preparation) return [];
-  return [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [] }];
+  const computer = planned?.testPlan.preparationMachine;
+  return [{ selection: TestExecution.parse({ snapshot: input.snapshot, selection: { kind: 'prepare', version: 2, expectedCommitSha: input.expectedCommitSha } }).selection, after: [], ...(computer ? { computer } : {}) }];
 }
 function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null {
   if (!planned) return null;
@@ -76,9 +78,9 @@ export async function planProductParts(input: ReusingInput): Promise<ProductPlan
   const finals = finalSuites(input, onceIds);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
-  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget));
-  const planned = await remainingPlan({ ...input, availableMachines }, remaining);
-  const leaves = preparationLeaves(input, preparation);
+  const availableMachines = Math.min(input.availableMachines, Math.max(0, budget)), { preparationMs, ...rest } = input;
+  const planned = await remainingPlan({ ...rest, availableMachines, ...(preparation && preparationMs ? { preparationMs } : {}) }, remaining);
+  const leaves = preparationLeaves(input, preparation, planned);
   leaves.push(...batchLeaves(input, planned));
   leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));
   const reason = input.snapshot.candidate && !input.units.length ? 'No canonical test unit has a changed influencing fingerprint at the bound base and final commit.' : planReason(preparation, planned);

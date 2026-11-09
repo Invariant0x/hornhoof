@@ -9,6 +9,8 @@ import { median } from './plan-statistics.js';
 
 /* The parts of a repository whose times a plan reads: the last ones, enough for each machine to have run most files. */
 const PARTS_READ = 40;
+/* The preparations that passed whose times a plan reads, the last ones. */
+const PREPARATIONS_READ = 5;
 const FALLBACK = { setupMs: 10_000, collectMs: 1000 };
 
 type Row = { computer: string | null; files: (typeof testPartTimings.$inferSelect)['files']; receipt: (typeof testParts.$inferSelect)['environmentReceipt']; selection: (typeof testParts.$inferSelect)['environmentSelection'] };
@@ -36,28 +38,36 @@ function partTimes(rows: Row[]): PartTime[] {
   });
 }
 /* What a part spends before its tests start: the checkout, the dependencies, the environment and its services. */
+const setupMsOf = (phases: NonNullable<Row['receipt']>['phases']): number => phases.checkoutMs + phases.dependenciesMs + phases.environmentMs + phases.servicesMs;
 function setupOf(rows: Row[]): number | null {
-  const spent = rows.flatMap(row => {
-    const phases = row.receipt?.phases;
-    return phases ? [phases.checkoutMs + phases.dependenciesMs + phases.environmentMs + phases.servicesMs] : [];
-  });
+  const spent = rows.flatMap(row => row.receipt ? [setupMsOf(row.receipt.phases)] : []);
   return spent.length ? median(spent) : null;
+}
+/* How long a preparation takes from its start to its end, at the middle pace: what it took on a computer over that computer's pace. */
+function preparationOf(rows: Pick<Row, 'computer' | 'receipt'>[], paces: Map<string, number>): number | undefined {
+  const took = rows.flatMap(row => row.receipt && row.computer ? [(setupMsOf(row.receipt.phases) + row.receipt.phases.commandMs) / (paces.get(row.computer) ?? 1)] : []);
+  return took.length ? median(took) : undefined;
 }
 
 /* What the last parts of this repository took, file by file and machine by machine, as they said when they ended. */
 export function measuredHistory(ctx: Pick<Ctx, 'db'>) {
   return async (_run: unknown, snapshot: EnvironmentSnapshot): Promise<PlanningHistory | null> => {
     const scope = snapshot.description.repositoryScope;
+    const repository = and(eq(testRuns.companyId, scope.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`);
     const rows = await ctx.db.select({ computer: testParts.computer, files: testPartTimings.files, receipt: testParts.environmentReceipt, selection: testParts.environmentSelection })
       .from(testPartTimings).innerJoin(testParts, eq(testParts.id, testPartTimings.partId)).innerJoin(testRuns, eq(testRuns.id, testPartTimings.runId))
-      .where(and(eq(testRuns.companyId, scope.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`,
-        inArray(testParts.status, ['passed', 'failed']), isNotNull(testParts.computer)))
+      .where(and(repository, inArray(testParts.status, ['passed', 'failed']), isNotNull(testParts.computer)))
       .orderBy(desc(testPartTimings.createdAt), desc(testPartTimings.partId)).limit(PARTS_READ);
     const { times, unmatched } = fileTimes(rows, snapshot);
     if (!times.length) return null;
     /* The files' sizes come from what each took, the machines' paces from how long their parts ran. */
     const { paces, durations } = partPaces(partTimes(rows), machinePaces(times).durations), setupMs = setupOf(rows);
-    return { durations, paces, unknownFileMs: median(durations.map(duration => duration.ms)), unmatchedFiles: unmatched, usedPartIds: [],
+    const preparations = await ctx.db.select({ computer: testParts.computer, receipt: testParts.environmentReceipt })
+      .from(testParts).innerJoin(testRuns, eq(testRuns.id, testParts.runId))
+      .where(and(repository, eq(testParts.status, 'passed'), isNotNull(testParts.computer), sql`${testParts.environmentSelection}->'selection'->>'kind' = 'prepare'`))
+      .orderBy(desc(testParts.finishedAt), desc(testParts.id)).limit(PREPARATIONS_READ);
+    const preparationMs = preparationOf(preparations, paces);
+    return { durations, paces, unknownFileMs: median(durations.map(duration => duration.ms)), unmatchedFiles: unmatched, usedPartIds: [], ...(preparationMs ? { preparationMs } : {}),
       costs: { setupMs: setupMs ?? FALLBACK.setupMs, collectMs: FALLBACK.collectMs },
       costBasis: { setup: setupMs === null ? 'fallback' : 'historical', collection: 'fallback' } };
   };
