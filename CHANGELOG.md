@@ -70,6 +70,8 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 - The tree and speed views of a department with long turns answer at once.
 - A checker's result is refused when its model, plan or ability changed before the result was stored.
 - A cancelled task's route shows as cancelled, every stage reason is named, and an owner's raw id is never shown.
+- A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
+  mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
 
 ### Russian
 
@@ -121,6 +123,8 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   отдела с длинными ходами отвечают сразу; итог проверяющего отказывает, если его модель, подписка или навык сменились до
   записи; маршрут отмененной задачи показывается отмененным, каждая причина этапа названа, а сырой id владельца не
   показывается.
+- Исправлено: нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
+  функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
 
 ## [0.17.0] - 2026-11-09
 
