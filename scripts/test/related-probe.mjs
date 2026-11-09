@@ -13,17 +13,3 @@ export async function probe(options, changed) {
     return { projects: vitest.projects.map(p => p.name).sort(), all: rows(all), selected: rows(selected) };
   } finally { await vitest.close(); }
 }
-
-export const workspaces = [
-  ['apps/server', 'vitest.config.ts'], ['apps/node', 'vitest.config.ts'],
-  ['apps/web', 'vite.config.ts'], ['packages/protocol', 'vitest.config.ts'],
-];
-
-export function workspaceOptions(folder, config) {
-  return { root: resolve(folder), config: resolve(folder, config) };
-}
-
-export function evidence(mode, changed, result) {
-  process.stdout.write('HH_RELATED_WIDTH ' + JSON.stringify({ mode, changed, projects: result.projects, total: result.all.length,
-    selected: result.selected.length, files: result.selected }) + '\n');
-}

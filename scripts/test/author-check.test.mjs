@@ -771,13 +771,30 @@ test('the tracked files of the index keep paths with spaces', () => {
   assert.deepEqual(tracked(() => '100644 aaa 0\ta b.ts\0' + '120000 bbb 0\tlink\0'), [{ path: 'a b.ts', mode: '100644', oid: 'aaa' }, { path: 'link', mode: '120000', oid: 'bbb' }]);
 });
 
-const hasCrapper = spawnSync('crapper', ['--help'], { stdio: 'ignore' }).status === 0;
+/* What crapper 0.1.0 wrote to .metrics/crap.edn for `crapper --no-coverage src/deep/moved.ts` on the source of the test below,
+   recorded once by hand. In crapper's place, a stand-in notes what it was given and where, and writes that record back. */
+const RECORDED_CRAP = readFileSync(new URL('./fixtures/crapper-no-coverage.edn', import.meta.url), 'utf8');
+function recordedCrapper(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-crapper-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const tool = join(dir, 'crapper'), seen = join(dir, 'seen.json');
+  writeFileSync(tool, `#!${process.execPath}
+const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+const files = Object.fromEntries(args.filter(arg => !arg.startsWith('-')).map(path => [path, existsSync(path) ? readFileSync(path, 'utf8') : null]));
+writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ args, files }));
+mkdirSync('.metrics', { recursive: true });
+writeFileSync('.metrics/crap.edn', ${JSON.stringify(RECORDED_CRAP)});
+`, { mode: 0o755 });
+  return { tool, seen: () => JSON.parse(readFileSync(seen, 'utf8')) };
+}
 
-test('the complexity of a commit is read at the path the file has now', { skip: !hasCrapper }, () => {
+test('the complexity of a commit is read at the path the file has now', t => {
   const source = 'export function f(x: number) {\n  if (x > 1) return 1;\n  if (x > 2) return 2;\n  return 3;\n}\n';
-  const shown = [];
-  const entries = complexityAt(args => { shown.push(args); return source; })('apps/node', BASE, [{ path: 'src/deep/moved.ts', from: 'apps/node/src/old.ts' }]);
+  const shown = [], crapper = recordedCrapper(t);
+  const entries = complexityAt(args => { shown.push(args); return source; }, crapper.tool)('apps/node', BASE, [{ path: 'src/deep/moved.ts', from: 'apps/node/src/old.ts' }]);
   assert.deepEqual(shown, [['show', `${BASE}:apps/node/src/old.ts`]]);
+  assert.deepEqual(crapper.seen(), { args: ['--no-coverage', 'src/deep/moved.ts'], files: { 'src/deep/moved.ts': source } });
   assert.deepEqual(entries.map(({ name, namespace, complexity }) => [name, namespace, complexity]), [['f', 'deep.moved', 3]]);
 });
 

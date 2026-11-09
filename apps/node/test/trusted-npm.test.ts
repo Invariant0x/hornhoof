@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,12 +53,13 @@ describe('node-owned npm installations', () => {
       expect(statSync(installerHome).mode & 0o777).toBe(0o700);
       expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('');
       expect(readFileSync(env.NPM_CONFIG_GLOBALCONFIG!, 'utf8')).toBe('');
-      /* Ask the real npm to resolve settings at the process boundary, without installing a package. */
-      const config = JSON.parse(execFileSync('npm', ['config', 'list', '--json', '-g', '--prefix', tools], { env, cwd: options!.cwd, encoding: 'utf8' }));
-      expect(config.registry).toBe('https://registry.npmjs.org/');
-      expect(config['@openai:registry']).toBeUndefined();
-      expect(config['@anthropic-ai:registry']).toBeUndefined();
-      expect(config.cache).toBe(join(installerHome, 'cache'));
+      /* npm reads its settings from the env, the folder it runs in and the user and global files: we give it only our own. */
+      expect(env.NPM_CONFIG_REGISTRY).toBe('https://registry.npmjs.org/');
+      expect(env.NPM_CONFIG_CACHE).toBe(join(installerHome, 'cache'));
+      expect(env.NPM_CONFIG_WORKSPACES).toBe('false');
+      expect(Object.keys(env).filter(key => /^npm_config_/i.test(key)).sort()).toEqual(['NPM_CONFIG_CACHE', 'NPM_CONFIG_GLOBALCONFIG', 'NPM_CONFIG_REGISTRY', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_WORKSPACES']);
+      expect(readFileSync(join(options!.cwd as string, 'package.json'), 'utf8')).toBe('{}');
+      expect(readFileSync(join(options!.cwd as string, '.npmrc'), 'utf8')).toBe('');
       return real.spawn(process.execPath, ['-e', ''], options);
     });
     await adapterFor(provider, { tools, home }).install();
@@ -66,7 +67,6 @@ describe('node-owned npm installations', () => {
   });
 
   it('discards inherited npm, runtime and script overrides before starting npm', async () => {
-    const npm = execFileSync('which', ['npm'], { encoding: 'utf8' }).trim();
     vi.spyOn(process, 'getuid').mockReturnValue(0);
     for (const [name, value] of Object.entries({
       npm_config_registry: 'https://lower.invalid/',
@@ -94,9 +94,9 @@ describe('node-owned npm installations', () => {
       for (const key of ['NpM_CoNfIg_Script_Shell', 'NODE_OPTIONS', 'NODE_PATH', 'BASH_ENV', 'ENV', 'LD_PRELOAD', 'TAR_OPTIONS', 'HTTP_PROXY', 'PLAYWRIGHT_DOWNLOAD_HOST']) {
         expect(env[key], key).toBeUndefined();
       }
-      const config = JSON.parse(execFileSync(npm, ['config', 'list', '--json', '-g'], { env, cwd: options!.cwd, encoding: 'utf8' }));
-      expect(config.registry).toBe('https://registry.npmjs.org/');
-      expect(config['script-shell']).toBeNull();
+      expect(Object.keys(env).filter(key => /^npm_config_/i.test(key)).sort()).toEqual(['NPM_CONFIG_CACHE', 'NPM_CONFIG_GLOBALCONFIG', 'NPM_CONFIG_REGISTRY', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_WORKSPACES']);
+      expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('');
+      expect(readFileSync(env.NPM_CONFIG_GLOBALCONFIG!, 'utf8')).toBe('');
       return real.spawn(process.execPath, ['-e', 'process.exit(1)'], options);
     });
     await expect(adapterFor('codex', { tools, home }).install()).rejects.toThrow('npm ended with code 1');

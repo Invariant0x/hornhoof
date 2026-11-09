@@ -395,9 +395,9 @@ describe('the harness reaching every machine', () => {
     await harnessRound(c.app.ctx);
     expect(await asked(one.node)).toMatchObject({ commitSha: COMMIT, repo: { url: REPO }, repositoryScope: { repositoryOwnerId: c.dev.id } });
     expect((await asked(two.node)).commitSha).toBe(COMMIT);
-    expect(await gets(old.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, old.node, 'tests.harness')).toBe(false);
     await harnessRound(c.app.ctx);
-    expect(await gets(one.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, one.node, 'tests.harness')).toBe(false);
     atHead(c, NEXT);
     await harnessRound(c.app.ctx);
     expect((await asked(one.node)).commitSha).toBe(NEXT);
@@ -446,7 +446,7 @@ describe('the harness reaching every machine', () => {
     one.node.send(synced(await asked(one.node), { result: { status: 'error', problem: { code: 'environment_unsupported', detail: 'Needs Go.' } } }));
     await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.problem).toBeTruthy();
     await harnessRound(c.app.ctx);
-    expect(await gets(one.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, one.node, 'tests.harness')).toBe(false);
     await harnessRound(c.app.ctx, new Date(Date.now() + 31 * 60_000));
     one.node.send(synced(await asked(one.node)));
     await expect.poll(async () => (await c.db.select().from(harnessProducts))[0]?.problem).toBeNull();
@@ -468,7 +468,7 @@ describe('the harness reaching every machine', () => {
     atHead(c);
     await c.claim(one.key, { commitSha: NEXT }); await c.uploaded(one.key, Buffer.from('new lock'));
     expect((await asked(two.node)).commitSha).toBe(NEXT);
-    expect(await gets(one.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, one.node, 'tests.harness')).toBe(false);
   });
 
   it('sends the changed lock file of one program of several to the other machines', async () => {
@@ -484,7 +484,7 @@ describe('the harness reaching every machine', () => {
     await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-go-api' }); await c.uploaded(one.key, Buffer.from('new lock'));
     const first = await asked(two.node);
     await c.claim(one.key, { commitSha: NEXT, unit: 'dependencies-python-ml', key: OTHER }); await c.uploaded(one.key, Buffer.from('another lock'), OTHER);
-    expect(await gets(two.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.harness')).toBe(false);
     two.node.send(synced(first));
     await new Promise(resolve => setTimeout(resolve, 100));
     const third = 'd'.repeat(64);
@@ -500,13 +500,13 @@ describe('the harness reaching every machine', () => {
     const seen = [await asked(one.node), await asked(one.node), await asked(one.node)].map(message => message.repo.url).sort();
     expect(seen).toEqual([REPO, ...others.map(other => other.repoUrl!)].sort());
     expect((await asked(two.node)).repo.url).toBe(REPO);
-    expect(await gets(two.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.harness')).toBe(false);
   });
 
   it('spreads only what is shared by all: a unit built from a branch stays where it was asked for', async () => {
     const c = await shared(), one = await capable(c, c.ceo, 'one'), two = await capable(c, c.ann, 'two');
     await c.claim(one.key, { commitSha: NEXT, unit: 'runtime-build' }); await c.uploaded(one.key, Buffer.from('build'));
-    expect(await gets(two.node, 'tests.harness')).toBe(false);
+    expect(await gets(c.app.ctx, two.node, 'tests.harness')).toBe(false);
   });
 
   it('asks a machine again after it came back, as its folder may be new', async () => {

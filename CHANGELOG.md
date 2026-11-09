@@ -5,11 +5,14 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
-## [0.17.1] - 2026-11-09
+## [0.17.2] - 2026-11-09
 
 Fix what stalled turn 17 and the release of 0.17.0, so that a turn goes through its stages without waiting for people:
 test results are reused, the author check takes minutes, a task can be paused, notices and waits stop repeating, a
 message reaches every employee, and nodes check pages in Chromium, Firefox and WebKit.
+Let an employee hand in work that adds a database migration: GitHub shows no patch of a migration's large snapshot, and
+0.17.0 refused every such handoff. The department schema stands its roles by gates again, and the release tests check
+only Hornhoof's own side.
 
 ### Before you update
 
@@ -53,6 +56,10 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
   whole task.
 - The templates and the guide keep connected work with one owner, drop the release check on live programs, and ask for
   reports in plain words with spaces.
+- Release tests check Hornhoof's own side only: what it starts, what it types and what it makes of a program's recorded
+  output. They no longer run tmux, the agents' programs, npm or the operating system's refusals, depend on the machine's
+  speed, or take random ports: every test port comes from a narrow range of its own. Skills and role templates name this
+  principle first.
 
 ### Fixed
 
@@ -84,12 +91,26 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 - Tests sends a defect of the candidate, also one that keeps its run from starting, back to its author on Development
   (`report` with `done` false and `verification.defect` true, naming the failed runs), and the new candidate passes every
   check again. Before, such a candidate could not leave Tests.
+- A handoff no longer takes the comparison with its base for unknown when GitHub lists a file but shows no patch of it,
+  as it does for a large file such as a migration's snapshot. The file's path stays in the candidate and is checked
+  against the task's paths as before, the diff names the file with its added and removed lines, and the count of changed
+  lines includes them. A patch GitHub cut short, or a comparison of 300 files or more, is still refused.
+- A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
+  mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
+- On a busy machine a turn no longer ends with "The program did not take Hornhoof's prompt" when the program took it
+  during the node's last look: the node looks once more after its time is up, and so does its wait for a program's screen.
+- The department schema stands its roles left to right by gates again, as before 0.17.0: architecture, development, then
+  each check in order, with "Gate 1", "Gate 2" between them. An employee always stays in its role's frame, and whoever
+  leads a stage now is marked there; only teams such as Matrix and observers stand apart.
 
 ### Russian
 
 Исправлено то, что останавливало ход 17 и выпуск 0.17.0, чтобы ход проходил свои этапы без ожидания людей: результаты
 тестов используются повторно, проверка автора идет минуты, задачу можно поставить на паузу, уведомления и ожидания не
 повторяются, сообщение доходит до каждого сотрудника, а ноды проверяют страницы в Chromium, Firefox и WebKit.
+Сотрудник снова может сдать работу с новой миграцией базы: GitHub не показывает patch большого снимка миграции, и 0.17.0
+отказывала в каждой такой сдаче. Схема отдела снова ставит роли по рубежам, а тесты выпуска проверяют только сторону
+Hornhoof.
 
 - Перед обновлением: миграция 0089 добавляет пустой столбец `tasks.paused`, все задачи начинают без паузы, ничего не
   переводится. `create_task` теперь требует у задачи кода пути, которые может менять правка, и продукт, когда репозиторий
@@ -149,6 +170,22 @@ message reaches every employee, and nodes check pages in Chromium, Firefox and W
 - Исправлено: Тесты возвращают дефект кандидата, в том числе такой, из-за которого прогон не может начаться, автору на
   Development (`report` с `done` false и `verification.defect` true и номерами упавших прогонов), и новый кандидат снова
   проходит все проверки. Раньше такой кандидат не мог уйти с Тестов.
+- Тесты выпуска проверяют только сторону Hornhoof: что он запускает, что вводит и как разбирает записанный вывод
+  программы. Они больше не запускают tmux, программы агентов, npm и отказы операционной системы, не зависят от скорости
+  машины и не берут случайные порты: каждый тестовый порт берется из своего узкого коридора. Навыки и шаблоны ролей
+  называют этот принцип первым.
+- Сдача больше не считает сравнение с базой неизвестным, когда GitHub перечисляет файл, но не показывает его patch, как
+  бывает с большим файлом вроде снимка миграции. Путь файла остается в кандидате и проверяется по путям задачи, как
+  раньше, diff называет файл с числом добавленных и удаленных строк, а число измененных строк их учитывает. Patch, который
+  GitHub урезал, и сравнение из 300 файлов и больше по-прежнему отказ.
+- Нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
+  функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
+- На загруженной машине ход больше не кончается сообщением "The program did not take Hornhoof's prompt", когда программа
+  взяла задание во время последней проверки ноды: нода смотрит еще раз, когда время вышло, и так же ждет нужный экран
+  программы.
+- Схема отдела снова ставит роли слева направо по рубежам, как до 0.17.0: архитектура, разработка, затем каждая проверка
+  по порядку, с пометками «Рубеж 1», «Рубеж 2» между ними. Сотрудник всегда в рамке своей роли, а кто сейчас ведет этап,
+  выделен там же; отдельно стоят только подотряды вроде Matrix и наблюдатели.
 
 ## [0.17.0] - 2026-11-09
 

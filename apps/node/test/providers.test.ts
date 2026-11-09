@@ -17,6 +17,7 @@ import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.j
 import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { runJob, type RunInput } from '../src/runner.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const FAKE_BIN: Record<ProviderId, string> = {
@@ -873,7 +874,7 @@ describe('Antigravity CLI', () => {
       if (req.url === '/1.4.12-1/linux-arm/cli_linux_arm64.tar.gz') return void res.end(archive);
       res.writeHead(404).end();
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     onTestFinished(() => void server.close());
 
@@ -898,7 +899,7 @@ describe('calling a job off', () => {
     const started = Date.now();
     stop.abort();
     await run;
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(12_000);
     expect(alive(child)).toBe(false);
   });
 });

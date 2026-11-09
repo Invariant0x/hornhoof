@@ -5,6 +5,9 @@ import { migrationsBefore } from '../migrations-before.js';
 import { migrateCandidate, privatePostgres } from './helpers.js';
 import { candidateHistory, migrationHistory, prepareUpgrade, savedRows, UPGRADE_PART, UPGRADE_RUN } from './migration-fixture.js';
 
+/* Migration 0088 removes the gate columns of a task; its required route replaces them. */
+const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
+
 it('keeps retired developer lines in pending staffing proposals without changing their other choices or history', async () => {
   const fixture = await privatePostgres({ migrate: false });
   const migrationsFolder = await migrationsBefore('composable_skills');
@@ -59,9 +62,11 @@ it('upgrades nonempty 0059 rows through candidate migrations and preserves data 
   const after = await savedRows(fixture);
   for (const [table, rows] of Object.entries(before.rows)) {
     // Migrations 0084 and 0085 add these abilities to the existing developer.
-    const expected = table === 'agents' ? rows.map(row => ({ ...row, skills: ['dev-task-flow', 'hh-work-fast'] })) : rows;
+    const kept = table === 'tasks' ? rows.map(row => Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column)))) : rows;
+    const expected = table === 'agents' ? kept.map(row => ({ ...row, skills: ['dev-task-flow', 'hh-work-fast'] })) : kept;
     expect(after[table], `preserved ${table}`).toMatchObject(expected);
   }
+  for (const column of GATE_COLUMNS) expect(after.tasks![0]).not.toHaveProperty(column);
   expect(after.subscriptions!.map(row => row.limits_updated_at)).toEqual([null, null]);
   expect(after.test_runs![0]).toMatchObject({ id: UPGRADE_RUN, number: 9, commit_sha: null });
   expect(after.test_parts![0]).toMatchObject({ id: UPGRADE_PART, run_id: UPGRADE_RUN, part: 1, status: 'passed' });

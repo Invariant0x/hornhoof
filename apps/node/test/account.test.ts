@@ -10,6 +10,7 @@ import { runNode } from '../src/main.js';
 import { claudeAdapter } from '../src/providers/claude.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 const FAKE_CLAUDE = fileURLToPath(new URL('./fakes/claude', import.meta.url));
 const PATH = process.env.PATH ?? '';
@@ -42,7 +43,7 @@ describe('the account a plan runs on', () => {
   });
 
   it('goes out with the hello and again once a sign-in came', async () => {
-    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
     onTestFinished(() => server.close());
     await new Promise(r => server.once('listening', r));
     const received: { type: string; [k: string]: unknown }[] = [];

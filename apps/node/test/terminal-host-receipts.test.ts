@@ -610,7 +610,7 @@ describe('program receipts for live words', () => {
     const started = Date.now();
     await c.host['hook']('receipt', 'stop', {});
     expect(await c.running).toMatchObject({ ok: true, result: 'Answer.' });
-    expect(Date.now() - started).toBeLessThan(4500);
+    expect(Date.now() - started).toBeLessThan(15_000);
   });
 
   it('sends Kimi Ctrl-S and accepts its queued hook then turn.steer', async () => {

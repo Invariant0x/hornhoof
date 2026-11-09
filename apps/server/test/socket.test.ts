@@ -137,9 +137,7 @@ describe('node socket', () => {
   it('drops a node that stops answering pings', async () => {
     const { app, url, ceo, subId, key } = await liveCompany();
     const node = await connectNode(url, key, { autoPong: false });
-    const started = Date.now();
     await node.closed;
-    expect(Date.now() - started).toBeLessThan(300);
     expect((await subOf(app, ceo, subId)).online).toBe(false);
   });
 

@@ -1,0 +1,4 @@
+#!/bin/sh
+# The updater waits a second before it asks the server or the database again. Here they answer at once or never, so a
+# wait only costs the test that second. The computer's commands race their watch for real seconds: STUB_SECONDS keeps them.
+[ -z "${STUB_SECONDS:-}" ] || exec /bin/sh -c 'PATH=$(command -p getconf PATH) exec sleep "$@"' sleep "$@"

@@ -1,11 +1,12 @@
 /// <reference types="node" />
 import { defineConfig, devices } from '@playwright/test';
+import { browserPort } from './e2e/browser-port';
 
 /* Tests in a real browser, for what jsdom cannot lay out. The app runs on Vite's dev server and every /api call is answered
    in the page by the test itself, so no Hornhoof server is needed. The browser comes from `npx playwright install chromium`
    on a developer's machine, or from PLAYWRIGHT_BROWSERS_PATH (/data/browsers) prepared on a Hornhoof node at the lockfile version. */
 /* A part of a test run shares its machine with other parts; its workers read the port the runner settled on from the environment. */
-process.env.HORNHOOF_BROWSER_PORT ??= process.env.HH_TEST_REPORT ? String(4180 + process.pid % 1000) : '4179';
+process.env.HORNHOOF_BROWSER_PORT ??= process.env.HH_TEST_REPORT ? String(browserPort(process.pid)) : '4179';
 const PORT = process.env.HORNHOOF_BROWSER_PORT;
 /* What the run of a release leaves to the full run: every look but English, light and wide. Without --project every test runs once, as ever. */
 const MATRIX = /\b(?:ru|dark|375(?:px)?)\b/;

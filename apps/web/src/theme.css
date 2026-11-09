@@ -857,6 +857,9 @@ button.shead, button.schip { cursor: pointer; }
 .s-h .r1 .ic { color: var(--pink); }
 .s-h .st { color: var(--pink-ink); }
 .s-o .st { color: var(--amber-ink); }
+/* Whoever leads a stage of a task now is marked in its role's frame: a cyan line and a light cyan fill. */
+.schip.lead > .edge { background: var(--cyan-ink); }
+.schip.lead .edge-in { background: color-mix(in srgb, var(--cyan) 12%, var(--surface)); }
 .schip.s-h > .edge { background: var(--pink); }
 .schip:has(.ast.alarm) > .edge, .shead:has(.ast.alarm) > .edge { background: var(--red); }
 .schip .r3 .ast { margin-right: 6px; }

@@ -1,36 +1,16 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
-import { vi } from 'vitest';
+import type { AgentEvent } from '@hornhoof/protocol';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
-import { TerminalHost, type TermJob } from '../src/terminal/host.js';
+import type { TermJob } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
-import { Tmux } from '../src/terminal/tmux.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
-/* What the tests of agents in live terminals share. They wait on real programs in tmux far more than they compute, so
-   they sit in several files that run side by side. Each file loads its own copy of this module, with a home of its own,
-   and each test starts a tmux server under a name of its own. */
+/* What the tests of agents in terminals share. tmux is never started: each test stands in for it with what the program would
+   show, recorded from the real programs (fixtures/real-screens), and checks only our side of it. */
 
-export const FAKE = fileURLToPath(new URL('./fakes/fake-term.mjs', import.meta.url));
-export const FAKE_CODEX = fileURLToPath(new URL('./fakes/fake-codex-term.mjs', import.meta.url));
-export const FAKE_KIMI = fileURLToPath(new URL('./fakes/fake-kimi-term.mjs', import.meta.url));
 export const SECRET = 'sk-fake-0123456789abcdef';
-const LOST_END_MS = 60_000;
-
-export const hasTmux = (() => {
-  try {
-    execFileSync('tmux', ['-V']);
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 /* Kimi Code's input box and footer as it draws them (fixtures/real-screens). */
 export const kimiScreen = (input: string) => {
@@ -38,98 +18,28 @@ export const kimiScreen = (input: string) => {
   return `Welcome to Kimi Code!\n╭${'─'.repeat(70)}╮\n${rows.join('\n')}\n╰${'─'.repeat(70)}╯\ncontext: 0% (0/256k)\n`;
 };
 
-export const until = (check: () => boolean | Promise<boolean>, ms = 15_000) => eventually(check, { ms, every: 50, message: 'timed out' });
+export const until = (check: () => boolean | Promise<boolean>) => eventually(check);
 
-export let host: TerminalHost;
-export let tmux: Tmux;
-export let sent: NodeMessage[];
 export const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
-
-/* A Hornhoof that answers every tool call, and the tokens they came with. */
-async function answering(auths: string[] = []): Promise<Server> {
-  const hornhoof = createServer((req, res) => {
-    auths.push(req.headers.authorization ?? '');
-    req.resume().on('end', () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } })));
-  });
-  await new Promise<void>(r => hornhoof.listen(0, '127.0.0.1', r));
-  return hornhoof;
-}
-const urlOf = (hornhoof: Server) => `http://127.0.0.1:${(hornhoof.address() as AddressInfo).port}`;
-/* Antigravity gets Hornhoof's prompt only once it has listed Hornhoof's tools. */
-const HORNHOOF = urlOf((await answering()).unref());
-
-export function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}, path = process.env.PATH ?? '') {
-  sent = [];
-  tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: path, HOME: home } });
-  host = new TerminalHost({ tmux, hornhoof: HORNHOOF, send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, toolsMs: 300, ...more });
-  return host.start();
-}
 
 export const job = (key: string, prompt: string, more: Partial<TermJob['input']> = {}): TermJob & { events: AgentEvent[] } => {
   const events: AgentEvent[] = [];
   return {
     key,
     program: claudeProgram,
-    bin: FAKE,
+    bin: 'claude',
     home,
     signedOut: /not logged in/i,
     events,
     input: { prompt, sessionId: null, model: null, workDir: join(home, 'work', key), secret: null, timeoutMs: 20_000, instructions: 'Be brief.', tools: { url: 'http://x/mcp', token: 'tok-turn' }, onEvent: e => events.push(e), env: { FAKE_SECRET: SECRET }, ...more },
   };
 };
-
-export const codexJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: codexProgram, bin: FAKE_CODEX });
+export const codexJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: codexProgram, bin: 'codex' });
 /* Kimi keeps its settings in its home, which these tests give each agent of their own. */
 export const kimiJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({
   ...job(key, prompt, more),
   program: { ...kimiProgram, limits: async () => ({ status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }] }) },
-  bin: FAKE_KIMI,
+  bin: 'kimi',
   home: join(home, 'kimi', key),
   signedOut: SCREEN_SIGNED_OUT,
 });
-export const done = (jobId: string) => sent.find(m => m.type === 'job.done' && m.jobId === jobId);
-/* Hornhoof answers the nth turn.open the node sent, naming it by its ref. */
-export const ack = (key: string, jobId: string, nth = 0) => {
-  const asked = sent.filter((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open' && m.agentKey === key)[nth];
-  host.opened({ type: 'turn.opened', agentKey: key, jobId, toolToken: `tok-${jobId}`, ref: asked?.ref });
-};
-/* A person types a line into the agent's terminal, and Hornhoof opens a turn for it. */
-export const typeTurn = async (key: string, termId: string, line: string, jobId: string, nth = 0) => {
-  await host.open({ type: 'term.open', termId, agentKey: key, cols: 80, rows: 24, write: true });
-  host.input({ type: 'term.input', termId, data: `${line}\r` });
-  await until(() => sent.filter(m => m.type === 'turn.open' && m.agentKey === key).length > nth);
-  ack(key, jobId, nth);
-  await until(() => host.typedJobs().includes(jobId) || Boolean(done(jobId)));
-};
-
-/* Advance only the host's clock past three former lost-end windows; tmux and real timers keep running. */
-export function pastLostEndWindows() {
-  const now = Date.now.bind(Date);
-  return vi.spyOn(Date, 'now').mockImplementation(() => now() + 3 * LOST_END_MS + 1000);
-}
-
-/* Lose both end channels, leaving prompts, other log lines and the terminal observer running. */
-export function endsLost(): void {
-  for (const a of host['agents'].values()) {
-    if (!a.tail) continue;
-    const read = a.tail.read.bind(a.tail);
-    vi.spyOn(a.tail, 'read').mockImplementation(() => read().filter(line => {
-      const data = JSON.parse(line);
-      return data.subtype !== 'turn_duration' && data.event !== 'turn_end';
-    }));
-  }
-  const hook = host['hook'].bind(host);
-  vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation((key, event, data) => event === 'stop' ? Promise.resolve() : hook(key, event, data));
-}
-
-/* The test sees the tokens of the tool calls. */
-export async function withTools(test: (auths: string[]) => Promise<void>) {
-  const auths: string[] = [];
-  const hornhoof = await answering(auths);
-  try {
-    await setUp({ hornhoof: urlOf(hornhoof), toolsMs: 5000 });
-    await test(auths);
-  } finally {
-    hornhoof.close();
-  }
-}

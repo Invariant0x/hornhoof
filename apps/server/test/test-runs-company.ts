@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { encryptSecret } from '../src/crypto/secrets.js';
@@ -5,7 +6,9 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { pumpTests } from '../src/modules/testruns/runs.js';
+import type { Ctx } from '../src/app.js';
+import { appFixture, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 export const GIB = 1024 ** 3;
 
@@ -24,29 +27,35 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp({ NODE_PING_MS: '50', NODE_KEY, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
-  const [acme] = await db.select().from(companies);
-  const companyId = acme!.id;
-  const [dev, sales] = await db
-    .insert(departments)
-    .values([
-      { companyId, templateKey: 'development', roleCode: 'DEV', position: 1, repoUrl: 'https://github.com/acme/shop.git', repoTokenEnc: encryptSecret('ghp_shop0123456789', app.ctx.config.secret), repoTokenLast4: '6789' },
-      { companyId, templateKey: 'sales', roleCode: 'SAL', position: 2 },
-    ])
-    .returning();
-  const [sub] = await db.select().from(subscriptions);
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId = dev!.id) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
-  const head = await hire('Hana', 'head', 'DEV-HEAD');
-  const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
-  const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
+  /* Its departments, people and task, made once in a file and put back for each of its tests. */
+  const { companyId, dev, sales, sub, head, bruno, sam, task, ann, bob } = await appFixture(app, 'test-runs company', async () => {
+    const [acme] = await db.select().from(companies);
+    const companyId = acme!.id;
+    const [dev, sales] = await db
+      .insert(departments)
+      .values([
+        { companyId, templateKey: 'development', roleCode: 'DEV', position: 1, repoUrl: 'https://github.com/acme/shop.git', repoTokenEnc: encryptSecret('ghp_shop0123456789', app.ctx.config.secret), repoTokenLast4: '6789' },
+        { companyId, templateKey: 'sales', roleCode: 'SAL', position: 2 },
+      ])
+      .returning();
+    const [sub] = await db.select().from(subscriptions);
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId = dev!.id) =>
+      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const head = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const sam = await hire('Sam', 'worker', 'SAL-AE', sales!.id);
+    const task = (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
+    const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
+    const bob = await invitePerson(app, ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales!.id] } });
+    return { companyId, dev: dev!, sales: sales!, sub: sub!, head, bruno, sam, task, ann, bob };
+  });
   let n = 0;
   /* A running turn of the agent on a task, and its tools. */
   const turn = async (agent: { id: string }, taskId: string | null = task.id) => {
     const token = `tool-token-${++n}-0123456789abcdef0123456789`;
     const [job] = await db
       .insert(jobs)
-      .values({ companyId, subscriptionId: sub!.id, agentId: agent.id, taskId, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(Date.now() - 1000), toolTokenHash: hashToken(token) })
+      .values({ companyId, subscriptionId: sub.id, agentId: agent.id, taskId, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(Date.now() - 1000), toolTokenHash: hashToken(token) })
       .returning();
     const client = await mcp(app, token);
     const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -83,8 +92,6 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
     await until(() => app.ctx.hub.loadOf(nodeIdentity(m.nodeId)) !== null);
     return node;
   };
-  const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
-  const bob = await invitePerson(app, ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales!.id] } });
   /* A file on the task, as an agent puts it there. */
   const putFile = async (name: string, text: string, taskId = task.id) => {
     const [made] = await db.select({ id: jobs.id }).from(jobs).limit(1);
@@ -103,12 +110,24 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
     await until(() => app.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
     return node;
   };
-  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
+  return { app, db, url, ceo, ann, bob, builtin, dev, sales, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
 }
 
-/* Whether a node got a message of this kind within a short wait; what came meanwhile is taken. */
-export async function gets(node: FakeNode, type: ServerMessage['type'], ms = 300): Promise<boolean> {
-  await new Promise(r => setTimeout(r, ms));
+/* The node's mark comes back after everything the server sent it before, as one socket keeps their order, and after every
+   message the node sent before it was handled. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
+
+/* Whether a node got a message of this kind from everything the server has given it so far; what came meanwhile is taken.
+   What the node said is handled first, then every round of giving out tests under way ends, and what it gave out has
+   arrived: no clock decides it. */
+export async function gets(ctx: Ctx, node: FakeNode, type: ServerMessage['type']): Promise<boolean> {
+  await marked(node);
+  await pumpTests(ctx);
+  await marked(node);
   let got = false;
   for (let n = node.queued(); n > 0; n--) if ((await node.next()).type === type) got = true;
   return got;

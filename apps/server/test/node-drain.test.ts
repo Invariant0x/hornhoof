@@ -73,7 +73,7 @@ describe('planned node updates', () => {
     expect(notices[0]!.prompt).toContain('built-in node');
     expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]).toMatchObject({ status: 'running', error: null });
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
-    await until(async () => (await f.prepare()).json().ready === true, 5000);
+    await until(async () => (await f.prepare()).json().ready === true);
   });
 
   it('names the machine and the turn on it to the head of Operations, and no turn elsewhere', async () => {

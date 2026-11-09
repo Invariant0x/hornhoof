@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { readCommit, REFS_MAX_BYTES } from '../src/modules/testruns/refs.js';
+import { listenIn, testPort } from '../../../test-support/ports.mjs';
 
 const ADVERTISEMENT = 'application/x-git-upload-pack-advertisement';
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
@@ -13,7 +14,7 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd,
 /* A web server for one test, on its own port. */
 async function serve(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<string> {
   const server = createServer(handler);
-  await new Promise<void>(ready => server.listen(0, '127.0.0.1', ready));
+  await listenIn(server);
   onTestFinished(() => new Promise<void>(done => {
     server.closeAllConnections();
     server.close(() => done());
@@ -206,10 +207,7 @@ describe('reading a commit from a repository', () => {
 
   it('says so when the repository cannot be reached', async () => {
     const url = await serve(() => undefined);
-    const closed = createServer();
-    await new Promise<void>(ready => closed.listen(0, '127.0.0.1', ready));
-    const port = (closed.address() as AddressInfo).port;
-    await new Promise<void>(done => closed.close(() => done()));
+    const port = await testPort();
     expect(url).not.toContain(String(port));
     expect(await readCommit({ url: `http://127.0.0.1:${port}/r.git`, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('could not be reached') });
   });

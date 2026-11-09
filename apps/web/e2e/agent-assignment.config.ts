@@ -1,9 +1,10 @@
 /// <reference types="node" />
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
+import { browserPort } from './browser-port';
 
 /* Workers inherit the runner's chosen port instead of recomputing it from their own PID. */
-process.env.HORNHOOF_BROWSER_PORT ??= String(4300 + process.pid % 1000);
+process.env.HORNHOOF_BROWSER_PORT ??= String(browserPort(process.pid, 4300));
 const port = process.env.HORNHOOF_BROWSER_PORT;
 const origin = `http://127.0.0.1:${port}`;
 

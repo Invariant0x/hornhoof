@@ -10,6 +10,7 @@ import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
+import { listenAt } from '../../../test-support/ports.mjs';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
 const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
@@ -110,7 +111,7 @@ async function fakeRegistry(
     if (b.migrations !== undefined) labels['io.hornhoof.migrations'] = String(b.migrations);
     return { created: b.created ?? '2026-10-30T01:00:00Z', config: { Labels: labels } };
   });
-  await reg.listen({ port: 0, host: '127.0.0.1' });
+  await listenAt(port => reg.listen({ port, host: '127.0.0.1' }));
   onTestFinished(() => reg.close());
   return {
     base: `http://127.0.0.1:${(reg.server.address() as AddressInfo).port}`,

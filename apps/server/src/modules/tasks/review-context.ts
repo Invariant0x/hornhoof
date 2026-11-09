@@ -38,6 +38,9 @@ type Part = typeof testParts.$inferSelect;
 
 /* CompareResult carries validated hunk patches, whose increment/decrement lines count too. */
 export const changedLines = (diff: string): number => diff.split('\n').filter(line => /^[+-]/.test(line)).length;
+/* The lines of a comparison: those its patches show, and those GitHub counted in a file it showed no patch of. */
+const comparedLines = (compared: Extract<CompareResult, { complete: true }>): number =>
+  changedLines(compared.diff) + (compared.omitted ?? []).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 export const exactComparison = (result: CompareResult, base: string, head: string): result is Extract<CompareResult, { complete: true }> => result.complete && result.baseSha === base && result.headSha === head;
 
 export async function authorVendor(db: Store, authorId: string): Promise<string | null> {
@@ -82,7 +85,7 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: 
   try { compared = ctx.readCompare ? await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000) : null; }
   catch { /* An incomplete source is refused below, never an invented inventory. */ }
   if (!compared || !exactComparison(compared, input.baseCommit, commit)) throw refuse(409, 'repo_invalid', `The change from ${input.baseCommit} to ${commit} could not be compared. Check that the base is in the branch's history.`);
-  return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: changedLines(compared.diff) };
+  return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
 }
 
 async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts']> {

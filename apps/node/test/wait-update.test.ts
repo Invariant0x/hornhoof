@@ -8,6 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { command } from '../src/main.js';
 import { writeState } from '../src/state.js';
 import { waitUpdate } from '../src/wait-update.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const KEY = 'node-key-1234567890';
 const waiting = { ready: false, drain: { state: 'waiting', turnsLeft: 2, partsLeft: 1, until: '2026-11-04T18:30:00.000Z' }, pollAfterMs: 7 };
@@ -30,7 +31,7 @@ async function server(answers: Answer[]) {
     req.on('data', chunk => (body += chunk));
     req.on('end', () => respond(req, res, body));
   });
-  await new Promise<void>(r => http.listen(0, '127.0.0.1', r));
+  await listenIn(http);
   onTestFinished(() => void http.close());
   return { url: `http://127.0.0.1:${(http.address() as AddressInfo).port}`, requests };
 }

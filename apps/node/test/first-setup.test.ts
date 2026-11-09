@@ -7,6 +7,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 /* A signed-in program that may wait for a first setup only the plan's owner passes, such as agy's terms. */
 const program = (setup: { pending: boolean }): ProviderAdapter => ({
@@ -19,7 +20,7 @@ const program = (setup: { pending: boolean }): ProviderAdapter => ({
 });
 
 async function node(adapter: ProviderAdapter) {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];

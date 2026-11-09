@@ -10,8 +10,11 @@ async function company() {
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
-  const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
-  const [marketing] = await db.insert(departments).values({ companyId, name: 'Marketing', roleCode: 'CMO' }).returning();
+  /* Departments come in their order on the company's map, as the build gives each new one the next position; two made at once share
+     their creation time on a coarse clock, so the time alone orders nothing. */
+  const createdAt = new Date('2026-11-09T00:00:00.000Z');
+  const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL', position: 100, createdAt }).returning();
+  const [marketing] = await db.insert(departments).values({ companyId, name: 'Marketing', roleCode: 'CMO', position: 101, createdAt }).returning();
   const [social] = await db.insert(teams).values({ companyId, departmentId: marketing!.id, name: 'Social' }).returning();
   return { app, db, ceo, companyId, sales: sales!, marketing: marketing!, social: social! };
 }

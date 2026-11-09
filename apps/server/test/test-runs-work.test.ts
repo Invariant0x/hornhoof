@@ -79,7 +79,7 @@ describe('a run of other work', () => {
     await away(ivan);
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Work run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:]*: its machine went offline, and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable/);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
 
     await call('run_work', { command: 'make report', repeatable: true });
     expect(await nextOf(ann.node, 'tests.run')).toMatchObject({ command: 'make report' });
@@ -130,14 +130,14 @@ describe('a run of other work', () => {
     const old = await c.machine(c.ceo, 'old-mac', idle(), { work: false });
     const { call } = await c.turn(c.bruno);
     expect((await call('run_work', { command: 'small' })).text).toMatch(/waits for a free machine/);
-    expect(await gets(old.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, old.node, 'tests.run')).toBe(false);
     const ann = await c.machine(c.ann, 'ann-pc', idle({ memFree: 6 * GIB }));
     const small = await nextOf(ann.node, 'tests.run');
     expect(small).toMatchObject({ kind: 'work', command: 'small' });
     ann.node.send(done(small, { commit: null }));
     await nextOf(ann.node, 'tests.ack');
     expect((await call('run_work', { command: 'big', memory: 8 })).text).toMatch(/waits for a free machine/);
-    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ann.node, 'tests.run')).toBe(false);
     ann.node.send({ type: 'load', ...idle({ memFree: 9 * GIB }) });
     const big = await nextOf(ann.node, 'tests.run');
     expect(big.command).toBe('big');
@@ -243,7 +243,7 @@ describe('the pool of machines', () => {
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
-    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, ivan.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
     expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-mac', online: true, noRuns: 'This node runs without a user of its own for runs.' })]);
@@ -255,7 +255,7 @@ describe('the pool of machines', () => {
     const phone = await c.machine(c.ceo, 'ivan-phone', idle(), { kind: 'phone' });
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
-    expect(await gets(phone.node, 'tests.run')).toBe(false);
+    expect(await gets(c.app.ctx, phone.node, 'tests.run')).toBe(false);
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
     expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-phone', kind: 'phone', online: true, lent: true, parts: [] })]);

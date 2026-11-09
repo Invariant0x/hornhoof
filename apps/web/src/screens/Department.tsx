@@ -23,13 +23,13 @@ import { AgentState } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { arrowD, CY, FT, FW, HH, HW, PH, PW, leadsStage, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
 
 export { employeeGroups };
 
 const frameTitle = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
-  f.echelon ? t.tasks.echelons.stages[f.echelon] : f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
+  f.team ? f.team.name : f.role ? f.role.title[language] : t.dept.others;
 
 function frameDescription(role: NonNullable<Frame['role']>, language: 'en' | 'ru', t: ReturnType<typeof useT>): string {
   if (role.schema === 'final_check') return t.dept.finalTurnCheck;
@@ -44,7 +44,6 @@ function FrameHeading({ frame: f, language, canGive }: { frame: Frame; language:
       <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
         <span className="fn">{frameTitle(f, language, t)}</span>
         {f.role && <span className="fa">{frameDescription(f.role, language, t)}</span>}
-        {f.status && <span className="fc">{t.tasks.echelons.statuses[f.status]}</span>}
         <span className="fc">{t.dept.agents(f.members.length)}</span>
       </span>
     </Edge>
@@ -458,7 +457,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           <section aria-labelledby={`${id}-members`} className="slayer">
           <h3 id={`${id}-members`} className="sr">{t.dept.members}</h3>
           {s.frames.map(f => (
-            <div key={f.key || 'others'} className="frame" role={f.echelon ? 'group' : undefined} aria-label={f.echelon ? t.tasks.echelons.stages[f.echelon] : undefined} data-echelon={f.echelon} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+            <div key={f.key || 'others'} className={`frame${f.check ? ' gt' : ''}`} role="group" aria-label={frameTitle(f, language, t)} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
               <FrameHeading frame={f} language={language} canGive={canGive} />
               {f.role && canGive && (
                 <input
@@ -471,22 +470,31 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
                   onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
                 />
               )}
-              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - FT} on={selected === m.e.id} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
+              <div className="slayer">{f.members.map(m => <Chip key={m.e.id} e={shown(m.e)} x={m.x - f.x} y={m.y - FT} on={selected === m.e.id} lead={leadsStage(m.e)} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />)}</div>
             </div>
           ))}
           </section>
           <svg className="wires" width={s.right} height={s.h} viewBox={`0 0 ${s.right} ${s.h}`} aria-hidden="true">
+            {lines('gate')}
             {lines('tr', 'tick')}
             {s.vias.map(([x, y]) => (
               <circle key={`${x}-${y}`} className="via" cx={x} cy={y} r="4" />
             ))}
             {lines('pl')}
+            {s.gates.map(g => (
+              <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
+            ))}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={x.speed} once tone={x.tone} />
             ))}
           </svg>
+          {s.gates.map(g => (
+            <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
+              {t.dept.gate(g.n)}
+            </span>
+          ))}
           {s.report && (
             <span className="llab" style={{ left: s.report.label[0], top: s.report.label[1] }}>
               {t.dept.reportLine}

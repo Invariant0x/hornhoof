@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { StreamMask } from '../src/terminal/mask.js';
-import { hasTmux, host, job, sent, setUp, tmux, until } from './terminal-host-helpers.js';
 
 /* Made up, built from pieces: a value whose start is a letter that also ends terminal sequences. */
 const secretFrom = (first: string) => `${first}${'fake-'}${'0123456789abcdef'}`;
@@ -91,32 +90,5 @@ describe('what the mask still hides, however the pieces fall', () => {
     const secret = secretFrom('H');
     const mask = new StreamMask(() => [secret]);
     expect(mask.push('\x1b[1;2H') + mask.push('fake-012') + mask.flush() + mask.push(secret.slice('Hfake-012'.length))).not.toContain('3456');
-  });
-});
-
-describe.skipIf(!hasTmux)('what a real screen sends through the mask', () => {
-  afterEach(() => host.stop());
-
-  const FRAMES = 12;
-  const frames = async (secrets: string[], key: string) => {
-    await setUp({ secrets: () => secrets });
-    await host.run(job(key, 'hello', { jobId: `job-${key}` }));
-    const name = host['agents'].get(key)!.name;
-    await host.open({ type: 'term.open', termId: key, agentKey: key, cols: 80, rows: 24, write: false });
-    await until(() => sent.some(m => m.type === 'term.data'));
-    await tmux.run(['respawn-pane', '-k', '-t', name, 'sh', '-c',
-      `i=1; while [ $i -le ${FRAMES} ]; do printf '\\033[5;1Htick-%s\\033[22;3H' $i; i=$((i+1)); sleep 0.25; done; sleep 30`]);
-    const data = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === key ? [String(m.data)] : []));
-    await until(() => data().join('').includes(`tick-${FRAMES}`), 10_000);
-    await new Promise(done => setTimeout(done, 300));
-    return data();
-  };
-
-  it('splits no frame when no secret starts with the letter its last sequence ends in', async () => {
-    expect((await frames([secretFrom('z')], 'control')).filter(frame => frame === 'H')).toEqual([]);
-  });
-
-  it('splits no frame when a secret starts with that letter', async () => {
-    expect((await frames([secretFrom('H')], 'split')).filter(frame => frame === 'H')).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import type { LightMyRequestResponse } from 'fastify';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
 
@@ -10,11 +11,6 @@ export function sessionFrom(res: LightMyRequestResponse): string {
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });
 
-/* Waits until check() is true, for state that changes after a socket message. */
-export async function until(check: () => Promise<boolean> | boolean, ms = 2000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > end) throw new Error('Timed out waiting.');
-    await new Promise(r => setTimeout(r, 15));
-  }
-}
+/* Waits until check() is true, for state that changes after a socket message: it looks again after every turn of the
+   event loop, with no clock and no deadline, so the machine's speed never decides a test. */
+export const until = (check: () => Promise<boolean> | boolean): Promise<void> => eventually(check);

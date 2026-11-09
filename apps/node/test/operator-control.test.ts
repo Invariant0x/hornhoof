@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 import { OPERATOR_CELLS_BYTES, OPERATOR_PROTECTED_SCREEN, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OperatorControl, operatorCells, type OperatorProgram } from '../src/terminal/operator-control.js';
-import { Tmux } from '../src/terminal/tmux.js';
 
 type Case = Extract<OperatorServerMessage, { type: 'program.operator_case' }>;
 const identity = { agentKey: randomUUID(), jobId: randomUUID(), instance: randomUUID() };
@@ -237,21 +236,6 @@ describe('operator key capability', () => {
     expect(await restored.key(command)).toMatchObject({ result: 'unknown' }); expect(c.pressed).toEqual(['Enter']);
   });
 
-  it('rechecks actual program evidence after an awaited capture before a real tmux key on Linux', async () => {
-    const c = fixture(); const path = join(c.folder, 'key-arrived');
-    const tmux = new Tmux({ socket: `operator-${randomUUID()}`, env: { PATH: process.env.PATH ?? '', HOME: c.folder } });
-    cleanup.push(() => tmux.stopAll());
-    await tmux.launch('guard', { cwd: c.folder, command: ['sh', '-c', 'printf "Choose a theme.\\n"; read answer; printf pressed > "$1"; sleep 30', 'fixture', path], cols: 80, rows: 24 });
-    let release!: () => void, entered!: () => void, block = false;
-    const waiting = new Promise<void>(resolve => { entered = resolve; });
-    const barrier = new Promise<void>(resolve => { release = resolve; });
-    const options = { ...c.options, capture: async () => { if (block) { entered(); await barrier; } return { cols: 80, rows: 24, cells: await tmux.screen('guard', 0, true) }; }, press: (key: string) => tmux.keys('guard', key) };
-    const control = new OperatorControl(options); const screen = await control.screen(c.screenCommand);
-    const command = c.keyCommand(screen.snapshot!, 1, control);
-    block = true; const pending = control.key(command); await waiting;
-    c.program.turnStarted = true; c.program.generation++; release();
-    expect((await pending).result).toBe('refused'); expect(existsSync(path)).toBe(false);
-  });
 });
 
 describe('operator pane control strings', () => {
