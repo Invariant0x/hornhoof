@@ -15,7 +15,8 @@ export type HarnessRemote = {
   failed(key: string, error: string | null, lease: HarnessLease): Promise<void>;
 };
 type UnitInfo = Omit<HarnessUnit, 'key'>;
-type ShareOptions = { renewMs?: number; tail?: () => string };
+/* waitMs: how long a part waits for a unit another machine builds before it builds the unit itself. */
+type ShareOptions = { renewMs?: number; tail?: () => string; waitMs?: number };
 
 /* A claim lasts a few minutes and a build may take longer, so it is said again until it ends. */
 const RENEW_MS = 60_000;
@@ -24,6 +25,15 @@ const PAUSE_MS = 10_000;
 /* Letting a unit go runs while the cache lock and the machine's turn are held, often after the work's own signal has
    stopped, so it never waits long for an answer. A unit left unanswered goes back when its claim runs out. */
 const RELEASE_MS = 10_000;
+/* A request that brings nothing for this long is tried again as a refused one is, so that a part never stands silent on a
+   stalled link until its whole time runs out; one that still moves, however slowly, goes on. A part of a bundle going out
+   shows no progress here, so it has five times as long. */
+const QUIET_MS = 60_000;
+const SENDING_QUIETS = 5;
+const WAIT_MS = 10 * 60_000;
+
+const span = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Number((ms / 1000).toFixed(2))} s`);
+const sized = (bytes: number) => (bytes >= 1024 ** 2 ? `${Math.round(bytes / 1024 ** 2)} MB` : `${bytes} bytes`);
 
 function sleep(ms: number, context: CacheContext): Promise<void> {
   checkCacheContext(context);
@@ -34,8 +44,9 @@ function sleep(ms: number, context: CacheContext): Promise<void> {
   });
 }
 
-async function fetched(remote: HarnessRemote, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'ready' }>, context: CacheContext): Promise<CacheEntry | null> {
+async function fetched(remote: HarnessRemote, unit: HarnessUnit, entry: CacheEntry, claim: Extract<HarnessClaim, { state: 'ready' }>, context: CacheContext): Promise<CacheEntry | null> {
   const file = bundleName(dirname(entry.path));
+  context.log(`Taking the prepared ${unit.unit} ${entry.key.slice(0, 12)} (${sized(claim.size)}) that another machine built, from Hornhoof.`);
   try {
     await remote.download(entry.key, file, claim, context.signal);
     return { ...entry, hit: true, fetched: true, ready: await unpackBundle(file, entry, context) };
@@ -82,21 +93,32 @@ async function askedClaim(remote: HarnessRemote, unit: HarnessUnit, context: Cac
   }
 }
 
-/* Where a tree this machine lacks comes from: from whichever machine built it, or from here when none did. */
+/* Where a tree this machine lacks comes from: from whichever machine built it, or from here when none did.
+   A unit another machine builds is waited for only so long: then it is built here, and the part says so. */
 export function harnessShare(remote: HarnessRemote, info: UnitInfo, options: ShareOptions = {}): CacheShare {
+  const waitMs = options.waitMs ?? WAIT_MS;
   return async (entry, context, publish) => {
-    const unit: HarnessUnit = { ...info, key: entry.key };
+    const unit: HarnessUnit = { ...info, key: entry.key }, named = `the prepared ${unit.unit} ${entry.key.slice(0, 12)}`;
+    let waiting: number | null = null;
     for (;;) {
       const claim = await askedClaim(remote, unit, context);
       switch (claim.state) {
         case 'ready': {
-          const taken = await fetched(remote, entry, claim, context);
+          const taken = await fetched(remote, unit, entry, claim, context);
           return taken ?? { ...entry, fetched: false, ready: await publish() };
         }
         case 'build': return builtHere(remote, unit, entry, claim, context, publish, options);
         case 'local': return { ...entry, fetched: false, ready: await publish() };
         case 'failed': throw new Error(`The harness unit ${unit.unit} failed to build: ${claim.error}`);
-        case 'wait': await sleep(claim.afterMs, context);
+        case 'wait': {
+          if (waiting === null) { waiting = Date.now(); context.log(`Waiting for ${named} that another machine builds.`); }
+          const left = waiting + waitMs - Date.now();
+          if (left <= 0) {
+            context.log(`Another machine did not finish ${named} within ${span(waitMs)}, so it is built here.`);
+            return { ...entry, fetched: false, ready: await publish() };
+          }
+          await sleep(Math.min(claim.afterMs, left), context);
+        }
       }
     }
   };
@@ -120,16 +142,38 @@ async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise
   }
 }
 
+/* A request stopped once nothing came for quietMs; moved says something came. */
+async function quietFor<T>(signal: AbortSignal, quietMs: number, run: (signal: AbortSignal, moved: () => void) => Promise<T>): Promise<T> {
+  const quiet = new AbortController();
+  let timer = setTimeout(() => { quiet.abort(); }, quietMs);
+  const moved = () => { clearTimeout(timer); timer = setTimeout(() => { quiet.abort(); }, quietMs); };
+  try { return await run(AbortSignal.any([signal, quiet.signal]), moved); }
+  catch (error) {
+    if (quiet.signal.aborted && !signal.aborted) throw new Error(`Hornhoof sent nothing for ${span(quietMs)}.`);
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+async function readAll(response: Response, moved: () => void): Promise<Buffer> {
+  const reader = response.body?.getReader(), chunks: Uint8Array[] = [];
+  moved();
+  for (;;) {
+    const read = await reader?.read();
+    if (!read || read.done) return Buffer.concat(chunks);
+    chunks.push(read.value); moved();
+  }
+}
+
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
-export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS): HarnessRemote {
+export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS, quietMs = QUIET_MS): HarnessRemote {
   const at = (path: string) => `${server}/api/harness${path}`;
   const headers = { authorization: `Bearer ${nodeKey}` };
   const fenced = (lease: HarnessLease) => ({ ...headers, 'x-harness-company': lease.companyId, 'x-harness-attempt': lease.attempt });
   const json = (body: unknown) => ({ method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return {
     async claim(unit, signal) {
-      return HarnessClaim.parse(await (await answered(await fetch(at('/claim'), { ...json({ ...unit, fencing: 1 }), signal }))).json());
+      return HarnessClaim.parse(await quietFor(signal, quietMs, async quiet => (await answered(await fetch(at('/claim'), { ...json({ ...unit, fencing: 1 }), signal: quiet }))).json()));
     },
     async upload(key, path, digest, size, partBytes, signal, lease) {
       const file = await open(path, 'r');
@@ -137,17 +181,17 @@ export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_M
         for (let index = 0; index * partBytes < size; index++) {
           const { buffer, bytesRead } = await file.read(Buffer.alloc(partBytes), 0, partBytes, index * partBytes);
           const body = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-          await again(signal, pauseMs, async () => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal })));
+          await again(signal, pauseMs, () => quietFor(signal, quietMs * SENDING_QUIETS, async sending => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal: sending }))));
         }
       } finally { await file.close(); }
-      await answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal }));
+      await quietFor(signal, quietMs, async quiet => answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: quiet })));
     },
     async download(key, path, claim, signal) {
       const out = await open(path, 'wx', 0o600);
       try {
         for (let start = 0; start < claim.size; start += claim.partBytes) {
           const range = `bytes=${start}-${Math.min(start + claim.partBytes, claim.size) - 1}`;
-          const part = await again(signal, pauseMs, async () => Buffer.from(await (await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal }))).arrayBuffer()));
+          const part = await again(signal, pauseMs, () => quietFor(signal, quietMs, async (quiet, moved) => readAll(await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal: quiet })), moved)));
           await out.writeFile(part);
         }
       } finally { await out.close(); }

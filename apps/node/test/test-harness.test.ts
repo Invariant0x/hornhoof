@@ -163,6 +163,19 @@ describe('one build for all the machines', () => {
     expect(entry.fetched).toBe(true); expect(asked).toEqual([KEY, KEY, KEY]);
   });
 
+  it('builds here when another machine does not finish within the time a part waits for it, and says so', async () => {
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [], { remote, uploaded } = registry([{ state: 'wait', afterMs: 5 }]);
+    const started = Date.now();
+    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT, { waitMs: 50 }));
+    expect(entry).toMatchObject({ fetched: false });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(uploaded).toEqual([]);
+    expect(said).toEqual([
+      `Waiting for the prepared dependencies ${KEY.slice(0, 12)} that another machine builds.`,
+      `Another machine did not finish the prepared dependencies ${KEY.slice(0, 12)} within 0.05 s, so it is built here.`,
+    ]);
+  });
+
   it('builds here when the machine building it stopped answering and the registry hands it over', async () => {
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, uploaded } = registry([{ state: 'wait', afterMs: 1 }, { state: 'build', ...LEASE, partBytes: 1024 }]);
     await prepareCache(here.dir, KEY, INPUT, here, async () => source, harnessShare(remote, UNIT));
@@ -228,7 +241,7 @@ describe('the registry over HTTP', () => {
   const unit = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: INPUT, unit: 'dependencies', key: KEY, commitSha: 'e'.repeat(40), platform: 'linux-arm64' };
   type Asked = { method: string; url: string; authorization: string | undefined; range: string | undefined; body: Buffer; company: string | string[] | undefined; attempt: string | string[] | undefined };
   /* A server that answers each request as told, and keeps what it was asked. */
-  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1, releaseMs?: number) {
+  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1, releaseMs?: number, requestMs?: number) {
     const heard: Asked[] = [];
     const running = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -241,7 +254,7 @@ describe('the registry over HTTP', () => {
     await new Promise<void>(resolve => { running.listen(0, '127.0.0.1', resolve); });
     onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
     const address = running.address() as { port: number };
-    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs) };
+    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs, requestMs) };
   }
   const send = (response: ServerResponse<IncomingMessage>, status: number, body = '') => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body); };
   async function file(text: string) {
@@ -333,6 +346,37 @@ describe('the registry over HTTP', () => {
     for (const request of heard) expect(request).toMatchObject({ company: LEASE.companyId, attempt: LEASE.attempt });
     expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=3-5', 'bytes=3-5', 'bytes=6-7']);
     await expect(remote.download(KEY, join(root, 'other'), { state: 'ready', ...LEASE, digest: sha('other bytes'), size: 8, partBytes: 3 }, SIGNAL)).rejects.toThrow('differs from what Hornhoof holds');
+  });
+
+  /* A machine that took a part waited for a build another machine made and never got it: the part stood until its whole time
+     ran out, and said nothing. Each request has its own time, tried again as a refused one is. */
+  it('gives up on a range that never comes after three tries of its own time, and says so', async () => {
+    const { heard, remote } = await server(() => {}, 1, undefined, 100);
+    const { root } = await file('');
+    const started = Date.now();
+    await expect(remote.download(KEY, join(root, 'came'), { state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL)).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=0-2', 'bytes=0-2']);
+  });
+
+  it('gives up on a claim that is never answered, so the machine builds it itself', async () => {
+    const { remote } = await server(() => {}, 1, undefined, 100);
+    await expect(remote.claim(unit, SIGNAL)).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
+    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    expect(entry.fetched).toBe(false);
+    expect(said.join('\n')).toContain('Hornhoof keeps no prepared dependencies for this machine now: Hornhoof sent nothing for 0.1 s.');
+  });
+
+  it('builds here when a bundle that is ready never comes, and says which build it waited for and from where', async () => {
+    const { remote } = await server((asked, response) => { if (asked.url === '/api/harness/claim') send(response, 200, JSON.stringify({ state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 })); }, 1, undefined, 100);
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
+    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    expect(entry).toMatchObject({ fetched: false });
+    expect(said).toEqual([
+      `Taking the prepared dependencies ${KEY.slice(0, 12)} (3 bytes) that another machine built, from Hornhoof.`,
+      `The prepared ${KEY.slice(0, 12)} could not be taken from Hornhoof, so it is built here: Hornhoof sent nothing for 0.1 s.`,
+    ]);
   });
 
   it('fails a download it cannot store, so the machine stays up and builds it itself', async () => {
