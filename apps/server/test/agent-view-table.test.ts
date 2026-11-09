@@ -123,6 +123,8 @@ const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
+  'GET /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
+  'PUT /api/departments/:id/briefing': 'briefings.test.ts: a person with the department or the whole company, 403 for another one',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
