@@ -60,7 +60,7 @@ describe('browser launch readiness before handing out work', () => {
       work: true,
       load: load(),
       browserError: 'libnss3.so: cannot open shared object file',
-      noRuns: 'Playwright Chromium could not start: libnss3.so: cannot open shared object file',
+      noRuns: 'Playwright browsers could not start: libnss3.so: cannot open shared object file',
     });
     await until(() => app.ctx.hub.isReady(nodeIdentity(nodeId)));
 
@@ -99,7 +99,7 @@ describe('browser launch readiness before handing out work', () => {
     const poolBefore = await poolOf(app, ceo);
     expect(poolBefore.machines[0]).toMatchObject({
       name: 'worker-1',
-      noRuns: 'Playwright Chromium could not start: libnss3.so: cannot open shared object file',
+      noRuns: 'Playwright browsers could not start: libnss3.so: cannot open shared object file',
     });
     expect(poolBefore.waiting[0]?.why).toContain('worker-1 (libnss3.so: cannot open shared object file)');
 

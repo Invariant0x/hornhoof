@@ -376,6 +376,6 @@ describe('browser status and prepare-browser command', () => {
     vi.stubEnv('PATH', '/nonexistent-hh-bin');
     const failed = await run(['prepare-browser', repo]);
     expect(failed.code).toBe(1);
-    expect(failed.err).toContain('Playwright Chromium could not start:');
+    expect(failed.err).toContain('Playwright browsers could not start:');
   });
 });

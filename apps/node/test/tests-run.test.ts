@@ -95,11 +95,11 @@ describe('a part of a test run on a node', () => {
       user: null,
       hidden: [],
       prepareRepoBrowser: async () => {
-        throw new Error('Playwright Chromium could not start: libgbm.so.1 missing');
+        throw new Error('Playwright browsers could not start: libgbm.so.1 missing');
       },
     });
     expect(failed).toMatchObject({ ok: false, error: 'failed', exitCode: null });
-    expect(failed.log).toContain('Playwright Chromium could not start: libgbm.so.1 missing');
+    expect(failed.log).toContain('Playwright browsers could not start: libgbm.so.1 missing');
     expect(failed.log).not.toContain('should-not-run');
   });
 

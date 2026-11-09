@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,7 +52,7 @@ function unzipOnPath(body: string): string {
   return executable + '.args';
 }
 
-function fakePlaywrightPackage(root: string, version: string, rev: string): string {
+function fakePlaywrightPackage(root: string, version: string, rev: string, engines: string[] = []): string {
   const pkgDir = join(root, 'node_modules', 'playwright');
   const coreDir = join(pkgDir, 'node_modules', 'playwright-core');
   mkdirSync(coreDir, { recursive: true });
@@ -65,6 +65,7 @@ function fakePlaywrightPackage(root: string, version: string, rev: string): stri
         { name: 'chromium', revision: rev, installByDefault: true },
         { name: 'chromium-headless-shell', revision: rev, installByDefault: true },
         { name: 'ffmpeg', revision: '1013', installByDefault: true },
+        ...engines.map(name => ({ name, revision: `${rev}0`, installByDefault: true })),
       ],
     }),
   );
@@ -367,7 +368,7 @@ describe('prepareBrowser', () => {
     expect(invocations).toHaveLength(2);
     expect(invocations[0]!.bin).toBe('npm');
     expect(invocations[0]!.args).toContain('playwright@1.65.0');
-    expect(invocations[1]!.args).toEqual([join(first.playwrightDir, 'cli.js'), 'install', 'chromium']);
+    expect(invocations[1]!.args).toEqual([join(first.playwrightDir, 'cli.js'), 'install', 'chromium', 'firefox', 'webkit']);
     expect(invocations[1]!.env.PATH).toBeTruthy();
     expect(invocations[1]!.env.PLAYWRIGHT_BROWSERS_PATH).toBe(browsersDir(dir));
     expect(invocations[1]!.env.PLAYWRIGHT_SKIP_BROWSER_GC).toBe('1');
@@ -578,9 +579,73 @@ describe('links in the shared browsers', () => {
   });
 });
 
+/* A Playwright package whose engines start as named: each one with a version, or fails with its words. */
+function enginesPackage(engines: Record<string, string | Error>): string {
+  const pkgDir = join(makeTemp('hh-engines-'), 'playwright');
+  const core = join(pkgDir, 'node_modules', 'playwright-core');
+  mkdirSync(core, { recursive: true });
+  writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: 'playwright', version: '1.64.1' }));
+  writeFileSync(join(core, 'package.json'), JSON.stringify({ name: 'playwright-core', version: '1.64.1', main: 'index.js' }));
+  const body = Object.entries(engines).map(([name, answer]) => answer instanceof Error
+    ? `exports.${name} = { launch: async () => { throw new Error(${JSON.stringify(answer.message)}); } };`
+    : `exports.${name} = { launch: async options => { if (!options.headless) throw new Error('not headless'); return { version: () => ${JSON.stringify(answer)}, close: async () => {} }; } };`);
+  writeFileSync(join(core, 'index.js'), body.join('\n'));
+  return pkgDir;
+}
+
+const runNode = async (bin: string, args: string[], env: NodeJS.ProcessEnv) => {
+  const ran = spawnSync(bin, args, { env, encoding: 'utf8' });
+  return { code: ran.status, output: `${ran.stdout}${ran.stderr}`, timedOut: false };
+};
+
+describe('the three browser engines', () => {
+  it('installs Chromium, Firefox and WebKit where the image brought Chromium only', async () => {
+    const dir = makeTemp();
+    const seedDir = makeTemp('hh-seed-');
+    const globalPw = fakePlaywrightPackage(makeTemp('hh-global-'), '1.64.1', '1248', ['firefox', 'webkit']);
+    markInstalled(seedDir, ['chromium-1248', 'chromium_headless_shell-1248', 'ffmpeg-1013']);
+    const installs: string[][] = [];
+    const res = await prepareBrowser({
+      dir, seedDir, globalPlaywrightDir: globalPw,
+      runCommand: async (_bin, args, env) => {
+        installs.push(args.slice(1));
+        markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, ['firefox-12480', 'webkit-12480']);
+        return { code: 0, output: '', timedOut: false };
+      },
+    });
+    expect(res).toMatchObject({ status: 'ready', downloaded: true });
+    expect(installs).toEqual([['install', 'chromium', 'firefox', 'webkit']]);
+
+    const again = await prepareBrowser({ dir, seedDir, globalPlaywrightDir: globalPw, runCommand: async () => { throw new Error('no second install'); } });
+    expect(again).toMatchObject({ status: 'ready', downloaded: false });
+  });
+
+  it('seeds every engine the image brought without a download', async () => {
+    const dir = makeTemp();
+    const seedDir = makeTemp('hh-seed-');
+    const globalPw = fakePlaywrightPackage(makeTemp('hh-global-'), '1.64.1', '1248', ['firefox', 'webkit']);
+    markInstalled(seedDir, ['chromium-1248', 'chromium_headless_shell-1248', 'ffmpeg-1013', 'firefox-12480', 'webkit-12480']);
+    const res = await prepareBrowser({ dir, seedDir, globalPlaywrightDir: globalPw, runCommand: async () => { throw new Error('no install'); } });
+    expect(res).toMatchObject({ status: 'ready', downloaded: false });
+    expect(existsSync(join(browsersDir(dir), 'webkit-12480', 'INSTALLATION_COMPLETE'))).toBe(true);
+  });
+
+  it('starts each engine headless and names the version of each', async () => {
+    const playwrightDir = enginesPackage({ chromium: '130.0.6723.31', firefox: '132.0', webkit: '18.2' });
+    expect(await verifyBrowser({ browsersDir: makeTemp(), playwrightDir, runCommand: runNode })).toEqual({ ok: true, browserVersion: 'chromium 130.0.6723.31, firefox 132.0, webkit 18.2' });
+  });
+
+  it('names the engine that does not start, and why', async () => {
+    const playwrightDir = enginesPackage({ chromium: '130.0.6723.31', firefox: new Error('browserType.launch: Executable doesn\'t exist at /data/browsers/firefox-1466/firefox/firefox'), webkit: '18.2' });
+    expect(await verifyBrowser({ browsersDir: makeTemp(), playwrightDir, runCommand: runNode })).toEqual({ ok: false, error: "firefox: Executable doesn't exist at /data/browsers/firefox-1466/firefox/firefox" });
+  });
+});
+
 describe('verifyBrowser and prepareAndVerifyBrowser', () => {
-  it('launches real Chromium headless from a prepared browser folder and names the cause when broken', async () => {
-    if (!existsSync(GLOBAL_PLAYWRIGHT_DIR) || !existsSync(SEED_BROWSERS_PATH)) return;
+  it('launches real Chromium, Firefox and WebKit headless from a prepared browser folder and names the cause when broken', async () => {
+    /* An image before 0.17.1 brought Chromium alone; a node of it downloads the other two as it starts. */
+    const seeded = existsSync(SEED_BROWSERS_PATH) && ['firefox-', 'webkit-'].every(engine => readdirSync(SEED_BROWSERS_PATH).some(entry => entry.startsWith(engine)));
+    if (!existsSync(GLOBAL_PLAYWRIGHT_DIR) || !seeded) return;
     const dir = makeTemp('hh-real-pw-');
     const target = browsersDir(dir);
     mkdirSync(target, { recursive: true });
@@ -591,7 +656,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
 
     const ok = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
     expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.browserVersion).toMatch(/^\d+\.\d+/);
+    if (ok.ok) expect(ok.browserVersion).toMatch(/^chromium \d+\.\d+.*, firefox \d+\.\d+.*, webkit \d+\.\d+/);
 
     /* Break the headless shell binary to prove launch failure reports a clear, named reason. */
     const shellDir = readdirSync(target).find(entry => entry.startsWith('chromium_headless_shell-'))!;
@@ -602,7 +667,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
 
     const broken = await verifyBrowser({ browsersDir: target, playwrightDir: GLOBAL_PLAYWRIGHT_DIR });
     expect(broken.ok).toBe(false);
-    if (!broken.ok) expect(broken.error).toContain('libnss3.so');
+    if (!broken.ok) expect(broken.error).toMatch(/^chromium: .*libnss3\.so/);
   });
 
   it('extracts concise reasons from Playwright launch errors without ASCII box borders', () => {
@@ -614,8 +679,8 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     ].join('\n');
     expect(summarizeBrowserError(boxed, 1, false)).toContain("Executable doesn't exist at /data/browsers/chromium-1248");
     expect(summarizeBrowserError(boxed, 1, false)).not.toContain('╔');
-    expect(summarizeBrowserError('', null, true)).toBe('Playwright Chromium launch timed out.');
-    expect(summarizeBrowserError('', 127, false)).toBe('Playwright Chromium exited with code 127.');
+    expect(summarizeBrowserError('', null, true)).toBe('Playwright browser launch timed out.');
+    expect(summarizeBrowserError('', 127, false)).toBe('Playwright browser check exited with code 127.');
     expect(summarizeBrowserError('\n\nX\n', 1, false)).toBe('X');
     expect(summarizeBrowserError('x'.repeat(300), 1, false)).toHaveLength(240);
   });
@@ -693,7 +758,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
         browsers: [
           null,
           { name: 123, revision: 456 },
-          { name: 'firefox', revision: '1000' },
+          { name: 'android', revision: '1000' },
           { name: 'chromium', revision: 'not-a-number' },
           { name: 'chromium', revision: '1248' },
           { name: 'chromium-headless-shell', revision: '1248' },
@@ -742,7 +807,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
       repoDir: repo,
       globalPlaywrightDir: join(brokenPw, 'node_modules', 'playwright'),
     });
-    expect(missingManifest).toEqual({ ok: false, error: expect.stringContaining('No Chromium revisions listed') });
+    expect(missingManifest).toEqual({ ok: false, error: expect.stringContaining('No browser revisions listed') });
   });
 
   it('persists and clears browser-error files and runs startupBrowserCheck / ensureRepoBrowser with passwd setup', async () => {
@@ -772,7 +837,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     writeFileSync(join(badRepo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@playwright/test': { version: '9.9.9' } } }));
     mkdirSync(join(badRepo, 'node_modules', 'playwright'), { recursive: true });
     writeFileSync(join(badRepo, 'node_modules', 'playwright', 'package.json'), JSON.stringify({ version: '9.9.9' }));
-    await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright Chromium could not start:');
+    await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright browsers could not start:');
 
     if (existsSync(GLOBAL_PLAYWRIGHT_DIR) && existsSync(SEED_BROWSERS_PATH)) {
       expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null)).toBeNull();

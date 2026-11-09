@@ -247,7 +247,7 @@ export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<Br
 export async function browserHoldReason(ctx: Ctx, companyId: string, run: Pick<Run, 'kind'>, department: Department | null): Promise<string | null> {
   const held = (await browserHeldPlaces(ctx, companyId)).filter(p => mayTake(p, run, department));
   if (!held.length) return null;
-  return `Playwright Chromium failed to start on ${held.map(p => `${p.name} (${p.browserError})`).join('; ')}.`;
+  return `Playwright browsers failed to start on ${held.map(p => `${p.name} (${p.browserError})`).join('; ')}.`;
 }
 
 /* A failed browser's word on why a run has nowhere to go: only when no place may take it. */

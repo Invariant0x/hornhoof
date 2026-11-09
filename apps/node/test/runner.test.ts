@@ -267,7 +267,7 @@ describe('runJob', () => {
     const broken = await runJob(adapter, job({ jobId: 'job-2', workspace: { key: 'dev-1', repo } }), dir, {
       git,
       prepareRepoBrowser: async () => {
-        throw new Error('Playwright Chromium could not start: libnss3.so missing');
+        throw new Error('Playwright browsers could not start: libnss3.so missing');
       },
     });
     expect(broken).toMatchObject({ ok: true, result: 'ready', error: null });

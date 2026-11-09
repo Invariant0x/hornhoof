@@ -116,7 +116,7 @@ type RunOptions = {
   describeEnvironment?: typeof readTestEnvironment;
   /* The node build it says in its hello; none from a node built by hand. */
   build?: string;
-  /* Verifies that Playwright Chromium launches before Hornhoof hands tasks or runs to this node. */
+  /* Verifies that the Playwright browsers launch before Hornhoof hands tasks or runs to this node. */
   checkBrowser?: () => Promise<string | null>;
   browserCheckMs?: number;
 };
@@ -166,7 +166,7 @@ class PlanLimits {
 
 /* Why a node takes no part of any run; none when it takes them. */
 const noRunsBecause = (testUser: JobUser | null, browserError: string | null): string | null =>
-  !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
+  !testUser ? NO_RUNS : browserError ? `Playwright browsers could not start: ${browserError}` : null;
 
 /* A server that never confirms the ends of jobs leaves the node with only the last few. */
 function keepLast(kept: Map<string, NodeMessage>, id: string, m: NodeMessage): void {
@@ -317,7 +317,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const readLimits = async () => (single?.limits ? single.limits().catch(() => null) : null);
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
-  if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
+  if (browserError) log(`Playwright browsers could not start: ${browserError}`);
   const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, harness: syncOne, emit });
@@ -624,8 +624,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (next === browserError) return;
     browserError = next;
     writeBrowserError(dir, browserError);
-    if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
-    else log('Playwright Chromium is ready.');
+    if (browserError) log(`Playwright browsers could not start: ${browserError}`);
+    else log('Playwright Chromium, Firefox and WebKit are ready.');
     await status();
   };
   const checkingBrowser = setInterval(() => void recheckBrowser(), browserCheckMs);
@@ -772,11 +772,11 @@ async function status(dir: string, io: Io): Promise<number> {
 async function prepareBrowserCommand(dir: string, repoArg: string | undefined, io: Io): Promise<number> {
   const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), verifyUser: agentUser() });
   if (!res.ok) {
-    io.stderr.write(`Playwright Chromium could not start: ${res.error}\n`);
+    io.stderr.write(`Playwright browsers could not start: ${res.error}\n`);
     return 1;
   }
   if (res.status === 'not_needed') io.stdout.write('not_needed\n');
-  else io.stdout.write(`ready: playwright@${res.version} chromium ${res.browserVersion} (downloaded: ${res.downloaded})\n`);
+  else io.stdout.write(`ready: playwright@${res.version} ${res.browserVersion} (downloaded: ${res.downloaded})\n`);
   return 0;
 }
 

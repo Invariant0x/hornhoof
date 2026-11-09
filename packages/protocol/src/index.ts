@@ -457,7 +457,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     testRuntimes: z.array(RuntimeCapability).max(64).optional(),
     /* It takes the harness of a product ahead of any run, and shares what it builds through Hornhoof. */
     testHarness: z.literal(1).optional(),
-    /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
+    /* Why the Playwright browsers could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),

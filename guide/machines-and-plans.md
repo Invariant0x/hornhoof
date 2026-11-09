@@ -41,7 +41,7 @@ The tab also names the tier each plan runs on, as "Codex, Pro". A free Codex pla
 
 ## What can agents use on a machine?
 
-Every node carries git, ripgrep and a headless Chromium with Playwright, so agents can open and check web pages. Anything else they need they install into their own folder.
+Every node carries git, ripgrep and headless Chromium, Firefox and WebKit with Playwright, so agents can open and check web pages in all three browser engines. Anything else they need they install into their own folder.
 
 ## Who can give work to my agents?
 

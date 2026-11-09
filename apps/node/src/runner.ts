@@ -190,7 +190,7 @@ type RunOptions = {
   untimed?: boolean;
   /* The superpowers copy whose skills a program without its plugin gets; the image's by default. */
   superpowers?: string | null;
-  /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the turn starts. */
+  /* Ensures the repository lockfile's Playwright browsers are ready and launchable before the turn starts. */
   prepareRepoBrowser?: (repoDir: string, verifyUser: JobUser | null) => Promise<void>;
   /* The task's folder this turn runs in. */
   workspace?: ProgramWorkspace;
@@ -244,7 +244,7 @@ async function placeDependencies(adapter: ProviderAdapter, msg: JobRun, place: T
 async function openRepo(repo: JobRepo, workDir: string, owner: { user: JobUser | null; home: string | null }, dir: string, git: Git | undefined, prepareRepoBrowser: NonNullable<RunOptions['prepareRepoBrowser']>): Promise<Record<string, string>> {
   const env = await prepareRepo(workDir, repo, owner, git);
   await prepareRepoBrowser(join(workDir, repoFolder(repo.url)), owner.user).catch((err: unknown) =>
-    writeBrowserError(dir, message(err).replace(/^Playwright Chromium could not start:\s*/, '')),
+    writeBrowserError(dir, message(err).replace(/^Playwright browsers could not start:\s*/, '')),
   );
   return env;
 }

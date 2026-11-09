@@ -43,7 +43,7 @@ type Options = {
   env?: NodeJS.ProcessEnv;
   /* The task's files of a part of work, in and out. */
   files?: PartFiles;
-  /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the check runs. */
+  /* Ensures the repository lockfile's Playwright browsers are ready and launchable before the check runs. */
   prepareRepoBrowser?: (repoDir: string) => Promise<void>;
   /* Where a harness unit this machine lacks comes from. None: what a part needs is built here. */
   harness?: HarnessRemote;

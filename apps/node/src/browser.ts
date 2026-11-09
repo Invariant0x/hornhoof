@@ -10,6 +10,9 @@ export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const VERIFY_TIMEOUT_MS = 30_000;
+const SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
+/* Three engines start one after another. */
+const LAUNCH_TIMEOUT_MS = 90_000;
 const STARTUP_TOOLS: { bin: string; args: string[] }[] = [
   { bin: 'unzip', args: ['-v'] },
   ...['gh', 'shellcheck', '/usr/bin/time', 'strings', 'patch', 'ss', 'objdump'].map(bin => ({ bin, args: ['--version'] })),
@@ -19,7 +22,9 @@ const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const PLAYWRIGHT_PACKAGES = ['@playwright/test', 'playwright', 'playwright-core'] as const;
 /* The folder of the shared browsers that holds the Playwright packages the node installed, one folder for each version. */
 const PACKAGES = '.playwright';
-const CHROMIUM_COMPONENTS = new Set(['chromium', 'chromium-headless-shell', 'ffmpeg']);
+/* The engines a page is checked in, as Playwright names them, and what Playwright installs with them. */
+const ENGINES = ['chromium', 'firefox', 'webkit'] as const;
+const BROWSER_COMPONENTS = new Set<string>([...ENGINES, 'chromium-headless-shell', 'ffmpeg']);
 const SPECIFIC_CAUSE = /shared libraries|Executable doesn't exist|EACCES|ENOENT|permission denied|Exec format error|Download failed|cannot open/i;
 const NOISE_LINE = /^[╔║╚╠╣═─┌┐└┘│]|^(?:Call log:|Browser logs:|<launching>|<launched>)/i;
 
@@ -27,12 +32,19 @@ const LAUNCH_CHECK_SCRIPT = [
   "const { createRequire } = require('node:module');",
   "const path = require('node:path');",
   "const req = createRequire(path.join(process.argv[1], 'package.json'));",
-  "const { chromium } = req('playwright-core');",
+  "const engines = req('playwright-core');",
   '(async () => {',
-  '  const browser = await chromium.launch({ headless: true });',
-  '  const version = browser.version();',
-  '  await browser.close();',
-  '  console.log(version);',
+  '  const versions = [];',
+  `  for (const name of ${JSON.stringify(ENGINES)}) {`,
+  '    const browser = await engines[name].launch({ headless: true }).catch(err => {',
+  "      console.error('engine ' + name);",
+  '      console.error(err && err.message ? err.message : String(err));',
+  '      process.exit(1);',
+  '    });',
+  "    versions.push(name + ' ' + browser.version());",
+  '    await browser.close();',
+  '  }',
+  "  console.log(versions.join(', '));",
   '})().catch(err => {',
   '  console.error(err && err.message ? err.message : String(err));',
   '  process.exit(1);',
@@ -227,9 +239,9 @@ function isInstalled(baseDir: string, folder: string): boolean {
   return existsSync(join(baseDir, folder, 'INSTALLATION_COMPLETE'));
 }
 
-function chromiumFolder(item: unknown): string | null {
+function browserFolder(item: unknown): string | null {
   const rec = asRecord(item);
-  const name = typeof rec?.name === 'string' && CHROMIUM_COMPONENTS.has(rec.name) ? rec.name : null;
+  const name = typeof rec?.name === 'string' && BROWSER_COMPONENTS.has(rec.name) ? rec.name : null;
   const rev = typeof rec?.revision === 'string' && /^\d+$/.test(rec.revision) ? rec.revision : null;
   return name && rev ? `${name.replace(/-/g, '_')}-${rev}` : null;
 }
@@ -242,8 +254,8 @@ function requiredFolders(playwrightDir: string): string[] {
   const file = candidates.find(existsSync);
   const data = file ? readJsonRecord(file) : null;
   const list = Array.isArray(data?.browsers) ? data.browsers : [];
-  const folders = list.map(chromiumFolder).filter((f): f is string => f !== null);
-  if (!folders.length) throw new Error(`No Chromium revisions listed in ${playwrightDir}.`);
+  const folders = list.map(browserFolder).filter((f): f is string => f !== null);
+  if (!folders.length) throw new Error(`No browser revisions listed in ${playwrightDir}.`);
   return folders;
 }
 
@@ -307,15 +319,22 @@ function cleanErrorLine(line: string): string {
 }
 
 export function summarizeBrowserError(output: string, code: number | null, timedOut: boolean): string {
-  if (timedOut) return 'Playwright Chromium launch timed out.';
+  if (timedOut) return 'Playwright browser launch timed out.';
   const lines = stripEscapes(output)
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0 && !NOISE_LINE.test(line));
   const specific = lines.find(line => SPECIFIC_CAUSE.test(line));
-  const fallback = `Playwright Chromium exited with code ${code === null ? 'unknown' : code}.`;
+  const fallback = `Playwright browser check exited with code ${code === null ? 'unknown' : code}.`;
   const chosen = cleanErrorLine(specific || lines[0] || fallback);
   return chosen.length > MAX_REASON_LENGTH ? `${chosen.slice(0, MAX_REASON_LENGTH - 3)}...` : chosen;
+}
+
+/* Why the browsers did not start, with the engine that did not when the check got as far as one. */
+function launchError(done: CommandResult): string {
+  const engine = /^engine (\w+)$/m.exec(done.output)?.[1];
+  const reason = summarizeBrowserError(done.output.replace(/^engine \w+$/m, ''), done.code, done.timedOut);
+  return engine ? `${engine}: ${reason}` : reason;
 }
 
 async function withTempHome<T>(prefix: string, user: JobUser | null, work: (homeDir: string) => Promise<T>): Promise<T> {
@@ -373,10 +392,12 @@ async function withBrowserLock<T>(key: string, work: () => Promise<T>): Promise<
   }
 }
 
-function hasRequiredInstall(targetDir: string, folders: string[], fullChromium: boolean): boolean {
-  if (fullChromium) return folders.every(folder => isInstalled(targetDir, folder));
-  const browsers = folders.filter(folder => folder.startsWith('chromium'));
-  return browsers.some(folder => isInstalled(targetDir, folder));
+/* A repository's browsers are every folder its Playwright lists. The node's own are one installed folder of each engine it
+   lists, whatever else the image brought. */
+function hasRequiredInstall(targetDir: string, folders: string[], full: boolean): boolean {
+  if (full) return folders.every(folder => isInstalled(targetDir, folder));
+  const engines = ENGINES.map(engine => folders.filter(folder => folder.startsWith(engine))).filter(found => found.length);
+  return engines.every(found => found.some(folder => isInstalled(targetDir, folder)));
 }
 
 export async function prepareBrowser({
@@ -390,7 +411,7 @@ export async function prepareBrowser({
   const workspaceVersion = repoDir ? null : findWorkspacePlaywrightVersion(dir);
   const version = repoDir ? playwrightVersionIn(repoDir) : workspaceVersion || readPackageVersion(globalPlaywrightDir);
   if (!version) return { status: 'not_needed' };
-  const fullChromium = Boolean(repoDir || workspaceVersion);
+  const full = Boolean(repoDir || workspaceVersion);
 
   const targetDir = browsersDir(dir);
   return withBrowserLock(targetDir, async () => {
@@ -398,7 +419,7 @@ export async function prepareBrowser({
     const playwrightDir = await resolvePlaywrightDir(targetDir, version, { repoDir, globalPlaywrightDir, isRoot, runCommand });
     const folders = requiredFolders(playwrightDir);
     seedFromImage(targetDir, seedDir, folders, isRoot);
-    if (hasRequiredInstall(targetDir, folders, fullChromium)) {
+    if (hasRequiredInstall(targetDir, folders, full)) {
       return { status: 'ready', version, playwrightDir, downloaded: false };
     }
     return withTrustedInstall(async (trustedEnv, cwd) => {
@@ -406,7 +427,7 @@ export async function prepareBrowser({
         ...trustedEnv,
         ...browserEnv(dir),
       };
-      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', 'chromium'], env, null, cwd);
+      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', ...ENGINES], env, null, cwd);
       if (done.code !== 0) throw new Error(summarizeBrowserError(done.output, done.code, done.timedOut));
       shareTree(targetDir, isRoot);
       return { status: 'ready', version, playwrightDir, downloaded: true };
@@ -418,7 +439,7 @@ export async function verifyBrowser({
   browsersDir: targetDir,
   playwrightDir = GLOBAL_PLAYWRIGHT_DIR,
   user = null,
-  runCommand = defaultRunner(VERIFY_TIMEOUT_MS),
+  runCommand = defaultRunner(LAUNCH_TIMEOUT_MS),
 }: {
   browsersDir: string;
   playwrightDir?: string;
@@ -427,7 +448,8 @@ export async function verifyBrowser({
 }): Promise<VerifyBrowserResult> {
   return withTempHome('hh-pw-verify-', user, async homeDir => {
     const env: NodeJS.ProcessEnv = {
-      PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+      /* WebKit starts through a shell script of its own, which calls the system's tools wherever the node's are. */
+      PATH: [process.env.PATH, SYSTEM_PATH].filter(Boolean).join(':'),
       HOME: homeDir,
       TMPDIR: homeDir,
       LANG: 'C.UTF-8',
@@ -437,7 +459,7 @@ export async function verifyBrowser({
     const done = await runCommand(process.execPath, ['-e', LAUNCH_CHECK_SCRIPT, playwrightDir], env, user);
     const version = stripEscapes(done.output).trim().split('\n')[0]!.trim();
     if (done.code === 0 && version) return { ok: true, browserVersion: version };
-    return { ok: false, error: summarizeBrowserError(done.output, done.code, done.timedOut) };
+    return { ok: false, error: launchError(done) };
   });
 }
 
@@ -486,7 +508,7 @@ export function readBrowserError(dir: string): string | null {
   }
 }
 
-/* verifyUser only checks that Chromium starts: the shared browsers stay out of its hands. */
+/* verifyUser only checks that the browsers start: the shared browsers stay out of its hands. */
 export async function ensureRepoBrowser(
   dir: string,
   repoDir: string,
@@ -495,7 +517,7 @@ export async function ensureRepoBrowser(
 ): Promise<void> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
   const res = await prepareAndVerifyBrowser({ dir, repoDir, verifyUser });
-  if (!res.ok) throw new Error(`Playwright Chromium could not start: ${res.error}`);
+  if (!res.ok) throw new Error(`Playwright browsers could not start: ${res.error}`);
 }
 
 async function startupToolError(bin: string, args: string[], verifyUser: JobUser | null): Promise<string | null> {

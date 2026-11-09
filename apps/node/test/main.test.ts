@@ -1255,9 +1255,9 @@ describe('runNode', () => {
       type: 'hello',
       browserError: 'libnss3.so: cannot open shared object file',
       noRuns: expect.stringContaining('libnss3.so: cannot open shared object file'),
-      nodeLog: expect.stringContaining('Playwright Chromium could not start: libnss3.so: cannot open shared object file'),
+      nodeLog: expect.stringContaining('Playwright browsers could not start: libnss3.so: cannot open shared object file'),
     });
-    expect(lines.some(line => line.includes('Playwright Chromium could not start: libnss3.so'))).toBe(true);
+    expect(lines.some(line => line.includes('Playwright browsers could not start: libnss3.so'))).toBe(true);
     expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so: cannot open shared object file');
 
     server.send({ type: 'job.run', jobId: 'j-agent', subscriptionId: 's1', provider: 'claude', prompt: 'hello', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
@@ -1269,7 +1269,7 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p-broken')).toMatchObject({
       ok: false,
       error: 'failed',
-      log: 'Playwright Chromium could not start: libnss3.so: cannot open shared object file',
+      log: 'Playwright browsers could not start: libnss3.so: cannot open shared object file',
     });
 
     currentError = null;
@@ -1279,7 +1279,7 @@ describe('runNode', () => {
       browserError: null,
       noRuns: null,
     });
-    expect(lines).toContain('Playwright Chromium is ready.');
+    expect(lines).toContain('Playwright Chromium, Firefox and WebKit are ready.');
     expect(existsSync(join(dir, 'browser-error'))).toBe(false);
   });
 });

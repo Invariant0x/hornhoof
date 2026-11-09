@@ -31,7 +31,7 @@ COPY --from=manifests /app/ ./
 RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force \
   && rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web
 
-# A browser for agents: Playwright with Chromium for the target at the repository lockfile's version, and the Debian packages Chromium, Firefox and WebKit need.
+# Browsers for agents: Playwright with Chromium, Firefox and WebKit for the target at the repository lockfile's version, and the Debian packages they need.
 # Playwright picks the download by the machine it runs on; the override names the target instead.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS browser
 ARG TARGETARCH
@@ -42,7 +42,7 @@ RUN npm install -g "playwright@$(cat /tmp/playwright-version)" \
   && npm cache clean --force
 COPY apps/node/browser-packages.cjs /opt/browser-packages.cjs
 RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGETARCH" ;; esac)" \
-  && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium \
+  && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium firefox webkit \
   && node /opt/browser-packages.cjs /usr/local/lib/node_modules/playwright/node_modules/playwright-core/lib/coreBundle.js "$target" > /opt/browser-packages \
   && chmod -R a+rX /opt/ms-playwright
 

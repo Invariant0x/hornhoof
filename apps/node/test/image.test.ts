@@ -121,7 +121,7 @@ describe('the node image', () => {
     expect(credit).toContain(`word for word at commit ${commit}`);
   });
 
-  it('installs full Playwright Chromium at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {
+  it('installs full Playwright Chromium, Firefox and WebKit at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {
     const browserStage = dockerfile.slice(dockerfile.indexOf('AS browser\n'), dockerfile.indexOf('AS quality\n'));
     expect(browserStage).not.toContain('ARG PLAYWRIGHT_VERSION=');
     /* Only the version: a release, which moves the lockfile's own versions, downloads no browser again. */
@@ -131,7 +131,8 @@ describe('the node image', () => {
     const manifestsStage = dockerfile.slice(dockerfile.indexOf('AS manifests\n'), dockerfile.indexOf('AS build\n'));
     expect(manifestsStage).toContain("packages['node_modules/@playwright/test'].version\" > /playwright-version");
     expect(browserStage).not.toContain('--only-shell');
-    expect(browserStage).toContain('PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium');
+    /* A design is checked in the three engines, so the image brings all three and a node downloads none. */
+    expect(browserStage).toContain('PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium firefox webkit \\\n');
     expect(browserStage).toContain('chmod -R a+rX /opt/ms-playwright');
 
     expect(runtime).toContain('$(cat /opt/browser-packages)');

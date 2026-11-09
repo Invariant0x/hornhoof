@@ -242,7 +242,7 @@ describe('live program metadata in the hub', () => {
     expect(hub.browserHoldOf(node)).toBe('libnss3.so: cannot open shared object file');
     expect(hub.noteStatus(node, 'browser_failed: libnss3.so: cannot open shared object file')).toBe(false);
     expect(hub.browserHoldOf(node)).toBe('libnss3.so: cannot open shared object file');
-    expect(hub.noteStatus(node, 'Playwright Chromium could not start: libnss3.so: cannot open shared object file')).toBe(false);
+    expect(hub.noteStatus(node, 'Playwright browsers could not start: libnss3.so: cannot open shared object file')).toBe(false);
     expect(hub.browserHoldOf(node)).toBe('libnss3.so: cannot open shared object file');
 
     /* Leaving fields undefined in status preserves the current readiness state and reports no recovery. */
