@@ -87,7 +87,9 @@ A release needs no turns of the agent programs on real nodes: the tests are its 
 
 1. After the owner approved the exact commit, move `main` to it by fast-forward: a merge commit is another commit, which the owner did not approve.
 2. The push to `main` runs the Images workflow by itself. Once the tests passed, a commit with a new version builds the app, node and updater images under the tag of the commit; then the publish job finds the three images by the digests that tag points at, moves the version and `latest` onto exactly those, the app image last, and checks that `latest` holds them. A build that failed moves nothing: run the workflow's failed jobs again. A commit whose version is out already builds and moves nothing. A run of the workflow by hand builds the images of any branch under the tag of its commit and moves nothing else.
-3. The release job then tags the version. Servers offer it by themselves, and the nodes of each server follow its build as their work ends.
+3. The release job then creates the version tag `v<version>` and its GitHub release. Servers offer it by themselves, and the nodes of each server follow its build as their work ends.
+
+Never make the version tag or its GitHub release by hand: the workflow makes both. The images and publish jobs read an existing tag of the version as a version that is out already: with a tag made before they ran, the push builds no images and moves nothing, and the release job makes no release. If such a tag was made, delete it and its release, then run all jobs of the workflow for that push again.
 
 ## Rules for the code and the words
 
