@@ -233,6 +233,13 @@ describe('templates', () => {
     expect(trouble).toMatch(/Database repair is not permission to change people or protected access through SQL/);
   });
 
+  it('tells everyone that a reply in its window reaches only people, so an answer to an agent goes as a message', () => {
+    const hornhoof = body('hh-hornhoof');
+    expect(hornhoof).toMatch(/orchestrator and other employees [^.]*your reply here never reaches them/);
+    expect(hornhoof).toMatch(/Answer one of them with "message_employee"/);
+    expect(hornhoof).not.toMatch(/Answer in your reply or with/);
+  });
+
   it('asks for reports to people and heads in ordinary words with spaces', () => {
     for (const id of ['hh-report-to-head', 'hh-hornhoof']) expect(body(id), id).toMatch(/ordinary words[^.]*with spaces/);
   });
