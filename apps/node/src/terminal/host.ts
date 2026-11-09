@@ -477,7 +477,7 @@ export class TerminalHost {
 
   /* The input holds nothing but Hornhoof's own words that never went, and nobody pressed a key since they went in. */
   private ownWordsOnly(a: Agent, input: string): boolean {
-    return !this.stillTyping(a) && isOwnLeft(a.ownLeft, a.typedAt, input);
+    return !this.stillTyping(a) && isOwnLeft(untakenOwn(a), a.typedAt, input);
   }
 
   private async operatorPane(key: string): Promise<{ cols: number; rows: number; cells: string }> {
@@ -2677,6 +2677,7 @@ export class TerminalHost {
     a.typing = text;
     await this.inputLane(a, () => this.opts.tmux.paste(a.name, text));
     const pastedAt = Date.now();
+    a.pastedAt = pastedAt;
     await sleep(pasteWait(text));
     a.restarting = false;
     await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Enter'));
@@ -3168,6 +3169,15 @@ function programAsks(a: Agent): Pick<ProgramFacts, 'tool' | 'question'> {
 /* Hornhoof's words wait to go in: they stand unsent in the input, are typed and not taken yet, or wait for the turn. */
 function wordsUndelivered(a: Agent): boolean {
   return Boolean(a.ownLeft) || (a.typing != null && !a.took) || Boolean(a.turn?.words.pending().length);
+}
+
+/* Hornhoof's words that already went into the input and have not been taken, in the running turn or left from the last. */
+function untakenOwn(a: Agent): OwnLeft | null | undefined {
+  return pastedAndUntaken(a) ? { text: a.typing!, jobId: null, at: a.pastedAt! } : a.ownLeft;
+}
+
+function pastedAndUntaken(a: Agent): boolean {
+  return a.typing != null && !a.promptWaits && !a.took;
 }
 
 function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {

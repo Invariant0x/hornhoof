@@ -104,8 +104,13 @@ function program() {
     await host.operatorMessage({ type: 'program.recovery_state_get', agentKey: key, jobId: null, instance: randomUUID(), request, case: randomUUID() });
     return frames.find(frame => frame.type === 'program.recovery_state' && frame.request === request);
   };
+  const view = async () => {
+    const request = randomUUID();
+    await host.operatorMessage({ type: 'program.view_get', agentKey: key, request });
+    return frames.find(frame => frame.type === 'program.view' && frame.request === request);
+  };
   stops.push(async () => { state.takes = true; await host.stop(); rmSync(home, { recursive: true, force: true }); });
-  return { host, key, frames, state, job, pastes, recovery, agent: () => host['agents'].get(key)! };
+  return { host, key, frames, state, job, pastes, recovery, view, agent: () => host['agents'].get(key)! };
 }
 
 /* An assignment the program never took: its words stay in the input, the server's case for them closes, the turn ends. */
@@ -114,6 +119,7 @@ async function heldWithOwnWords(c: ReturnType<typeof program>, source: OperatorD
   const running = c.host.run(c.job(jobId, { operatorDelivery: source }));
   await waitFor(() => c.state.input === PROMPT);
   await waitFor(() => c.frames.some(frame => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded'));
+  expect(await c.view()).toMatchObject({ result: 'ok', input: 'hornhoof', undelivered: true });
   const needed = c.frames.find(frame => frame.type === 'program.operator_needed')!;
   const incident = { agentKey: c.key, jobId, instance: needed.instance, case: randomUUID(), capability: randomUUID(), reason: 'assignment_unrecorded' as const };
   meanwhile();
@@ -168,6 +174,7 @@ it('leaves words a person typed after Hornhoof alone: no Enter, no erasing, no r
   expect(c.state.keys.slice(pressed)).toEqual([]);
   expect(c.state.input).toBe(`${PROMPT} ${PERSON}`);
   expect(c.state.prompts).toEqual([]);
+  expect(await c.view()).toMatchObject({ result: 'ok', input: 'words', undelivered: true });
   expect(await c.recovery()).toMatchObject({ program: 'here', input: 'words' });
 });
 
@@ -202,6 +209,7 @@ it('presses Enter again for the words a restarted program shows but did not take
   expect(restarted).toEqual({ ok: true, reason: null });
   expect(c.state.launches).toBe(2);
   expect(c.state.input).toBe('Continue.');
+  expect(await c.view()).toMatchObject({ result: 'ok', input: 'hornhoof', undelivered: true });
   await vi.advanceTimersByTimeAsync(5000);
   c.state.takes = true;
   let ended = false;
