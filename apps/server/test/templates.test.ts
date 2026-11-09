@@ -553,6 +553,17 @@ describe('templates', () => {
     for (const part of ['any employee', 'program_screen', 'program_keys', 'any keys', 'any question', 'subscription owner', 'values of secrets', 'program_recovery_release']) expect(text, part).toContain(part);
   });
 
+  /* An employee keeps the skills it was hired with, but reads its role's line from the template every turn. */
+  it('tells a head of Operations hired before it got the operator skill, in its own line, that it lifts a hold with program_recovery_release', () => {
+    expect(templates.roles.get('OPS-HEAD')!.body).toContain('program_recovery_release');
+  });
+
+  it('names in orch-trouble exactly who acts on another employee\'s program, and why a release is refused', () => {
+    const trouble = templates.skills.get('orch-trouble')!.body;
+    for (const part of ['the head of Operations', 'the program operator', 'no one else', 'reliability engineer']) expect(trouble, part).toContain(part);
+    for (const part of ['still runs', 'program_busy', 'no_plan', 'node_unavailable', 'protected_screen', 'input_not_proven']) expect(trouble, part).toContain(part);
+  });
+
   it('teaches the failure collector to file an improvement as a short case, part by part as the tool takes it', () => {
     const review = templates.skills.get('ops-failure-review')!.body;
     for (const part of ['title', 'problem', 'facts', 'source', 'guesses', 'why', 'change', 'gain']) expect(review, part).toContain(`${part}:`);
