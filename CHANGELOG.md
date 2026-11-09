@@ -8,7 +8,15 @@ The middle number is the turn; the last counts releases between turns.
 ## [0.17.1] - 2026-11-09
 
 Let an employee hand in work that adds a database migration: GitHub shows no patch of a migration's large snapshot, and
-0.17.0 refused every such handoff.
+0.17.0 refused every such handoff. The department schema stands its roles by gates again, and the release tests check
+only Hornhoof's own side.
+
+### Changed
+
+- Release tests check Hornhoof's own side only: what it starts, what it types and what it makes of a program's recorded
+  output. They no longer run tmux, the agents' programs, npm or the operating system's refusals, depend on the machine's
+  speed, or take random ports: every test port comes from a narrow range of its own. Skills and role templates name this
+  principle first.
 
 ### Fixed
 
@@ -20,12 +28,20 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
   mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
 - On a busy machine a turn no longer ends with "The program did not take Hornhoof's prompt" when the program took it
   during the node's last look: the node looks once more after its time is up, and so does its wait for a program's screen.
+- The department schema stands its roles left to right by gates again, as before 0.17.0: architecture, development, then
+  each check in order, with "Gate 1", "Gate 2" between them. An employee always stays in its role's frame, and whoever
+  leads a stage now is marked there; only teams such as Matrix and observers stand apart.
 
 ### Russian
 
 Сотрудник снова может сдать работу с новой миграцией базы: GitHub не показывает patch большого снимка миграции, и 0.17.0
-отказывала в каждой такой сдаче.
+отказывала в каждой такой сдаче. Схема отдела снова ставит роли по рубежам, а тесты выпуска проверяют только сторону
+Hornhoof.
 
+- Тесты выпуска проверяют только сторону Hornhoof: что он запускает, что вводит и как разбирает записанный вывод
+  программы. Они больше не запускают tmux, программы агентов, npm и отказы операционной системы, не зависят от скорости
+  машины и не берут случайные порты: каждый тестовый порт берется из своего узкого коридора. Навыки и шаблоны ролей
+  называют этот принцип первым.
 - Сдача больше не считает сравнение с базой неизвестным, когда GitHub перечисляет файл, но не показывает его patch, как
   бывает с большим файлом вроде снимка миграции. Путь файла остается в кандидате и проверяется по путям задачи, как
   раньше, diff называет файл с числом добавленных и удаленных строк, а число измененных строк их учитывает. Patch, который
@@ -35,6 +51,9 @@ Let an employee hand in work that adds a database migration: GitHub shows no pat
 - На загруженной машине ход больше не кончается сообщением "The program did not take Hornhoof's prompt", когда программа
   взяла задание во время последней проверки ноды: нода смотрит еще раз, когда время вышло, и так же ждет нужный экран
   программы.
+- Схема отдела снова ставит роли слева направо по рубежам, как до 0.17.0: архитектура, разработка, затем каждая проверка
+  по порядку, с пометками «Рубеж 1», «Рубеж 2» между ними. Сотрудник всегда в рамке своей роли, а кто сейчас ведет этап,
+  выделен там же; отдельно стоят только подотряды вроде Matrix и наблюдатели.
 
 ## [0.17.0] - 2026-11-09
 
