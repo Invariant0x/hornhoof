@@ -9,6 +9,7 @@ import { sweepWaits } from '../../src/modules/tasks/wait-escalation.js';
 import { deliverWaitNotices } from '../../src/modules/tasks/wait-notices.js';
 import { replanWait, syncSourceWaits, waitForSourceKey } from '../../src/modules/tasks/wait-state.js';
 import { backendPid, privatePostgres, runFixture } from './helpers.js';
+import { eventually } from '../../../../test-support/eventually.mjs';
 
 const HOUR = 3_600_000;
 const after = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -68,7 +69,7 @@ it('leaves a wait alone when someone gave it new dates while the sweep waited fo
   const sweepPid = await backendPid(c.two.pool);
   const swept = sweepWaits(c.two.ctx, c.at(1.5 * HOUR));
   const blockers = async () => (await c.pg.admin.query<{ blockers: number[] }>('SELECT pg_blocking_pids($1) AS blockers', [sweepPid])).rows[0]!.blockers;
-  await expect.poll(blockers).not.toEqual([]);
+  await eventually(async () => (await blockers()).length > 0);
   letGo();
   await Promise.all([replanned, swept]);
   expect(await c.row()).toMatchObject({ level: 0, generation: 2 });
