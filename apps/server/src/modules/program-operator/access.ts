@@ -185,5 +185,5 @@ function masked(text: string, secrets: string[]): string {
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
-  return question ? { ...question, tool: masked(question.tool, secrets), text: masked(question.text, secrets), callId: question.callId && masked(question.callId, secrets) } : null;
+  return question ? { ...question, tool: question.tool && masked(question.tool, secrets), text: masked(question.text, secrets), callId: question.callId && masked(question.callId, secrets) } : null;
 }

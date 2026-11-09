@@ -83,7 +83,7 @@ export class ProgramAccess {
 }
 
 function maskedQuestion(question: OperatorQuestion | null, secrets: string[]): OperatorQuestion | null {
-  return question ? { ...question, tool: redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
+  return question ? { ...question, tool: question.tool && redact(question.tool, secrets), text: redact(question.text, secrets), callId: question.callId && redact(question.callId, secrets) } : null;
 }
 
 function bounded(pane: Pane): boolean {
