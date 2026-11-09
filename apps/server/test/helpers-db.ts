@@ -6,7 +6,7 @@ import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from '
 import * as schema from '../src/db/schema.js';
 
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
-type Shared = { client: PGlite; shape: string; planner: string };
+type Shared = { client: PGlite; shape: string; planner: string; pointedAtBy: ReadonlyMap<string, readonly string[]> };
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
@@ -79,10 +79,31 @@ export async function shapeOf(client: PGlite): Promise<string> {
 const PLANNER_VIEW = `select coalesce(json_agg(json_build_object('oid', c.oid, 'relpages', c.relpages, 'reltuples', c.reltuples, 'relallvisible', c.relallvisible)), '[]')::text as view
   from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'i')`;
 
+/* Each table, with the tables whose foreign keys point at it. */
+const POINTED_AT_BY = `select format('public.%I', t.relname) as table, format('public.%I', f.relname) as by
+  from pg_constraint c join pg_class t on t.oid = c.confrelid join pg_class f on f.oid = c.conrelid where c.contype = 'f'`;
+
 async function openShared(): Promise<Shared> {
   const client = copyOfMigrated();
   const { rows } = await client.query<{ view: string }>(PLANNER_VIEW);
-  return { client, shape: await shapeOf(client), planner: rows[0]!.view };
+  const pointedAtBy = new Map<string, string[]>();
+  for (const { table, by } of (await client.query<{ table: string; by: string }>(POINTED_AT_BY)).rows) pointedAtBy.set(table, [...(pointedAtBy.get(table) ?? []), by]);
+  return { client, shape: await shapeOf(client), planner: rows[0]!.view, pointedAtBy };
+}
+
+/* Those of the tables a truncate may empty with them: it must name every table whose foreign keys point at one it
+   empties, and a table that stays out keeps out every table it points at. */
+export function truncatable(tables: readonly string[], pointedAtBy: ReadonlyMap<string, readonly string[]>): string[] {
+  const kept = new Set(tables);
+  for (let dropped = true; dropped; ) {
+    dropped = false;
+    for (const table of kept) {
+      if ((pointedAtBy.get(table) ?? []).every(by => kept.has(by))) continue;
+      kept.delete(table);
+      dropped = true;
+    }
+  }
+  return tables.filter(table => kept.has(table));
 }
 
 /* Only a table with pages can hold rows. */
@@ -99,20 +120,29 @@ const RESTART_NUMBERS = `select setval(format('%I.%I', schemaname, sequencename)
 
 const pagedTables = async (client: PGlite) => (await client.query<{ name: string }>(WITH_PAGES)).rows.map(t => t.name);
 
-/* Empties the tables a test wrote, and their numbers start over. A truncate of all of them took most of a test's time:
-   through the foreign keys it reaches every table, and each costs a new file for it and each of its indexes. Discarding
-   first clears what the connection holds: role, settings, temporary tables, prepared statements and locks, and waits
-   for any transaction the last test left running. */
-async function emptyRows({ client, planner }: Shared): Promise<void> {
+/* Empties the tables a test wrote, and their numbers start over; each table and index is left with the pages of a new
+   copy. A truncate of all of them took most of a test's time: through the foreign keys it reaches every table, and each
+   costs a new file for it and each of its indexes. So a truncate empties only the written tables it may, and the others
+   lose their rows to a delete, their pages to a vacuum and the pages their indexes grew to a reindex, which together cost
+   less than the rewrite of a vacuum full. Discarding first clears what the connection holds: role, settings, temporary
+   tables, prepared statements and locks, and waits for any transaction the last test left running. */
+async function emptyRows({ client, planner, pointedAtBy }: Shared): Promise<void> {
   await client.exec('discard all');
   const tables = await pagedTables(client);
   if (tables.length) {
+    const truncated = truncatable(tables, pointedAtBy);
+    const deleted = tables.filter(name => !truncated.includes(name));
     await client.transaction(async tx => {
       /* No trigger or foreign key has a say, as in a truncate. */
       await tx.exec('set local session_replication_role = replica');
-      for (const name of tables) await tx.exec(`delete from ${name}`);
+      for (const name of deleted) await tx.exec(`delete from ${name}`);
+      if (truncated.length) await tx.exec(`truncate ${truncated.join(', ')}`);
     });
-    await client.exec(`vacuum full ${tables.join(', ')}`);
+    if (deleted.length) {
+      /* Only a page whose dead rows left the indexes too is free to give back. */
+      await client.exec(`vacuum (index_cleanup on, truncate on) ${deleted.join(', ')}`);
+      await client.exec(deleted.map(name => `reindex table ${name}`).join(';\n'));
+    }
   }
   await client.query(NO_STATISTICS);
   await client.query(PLANNER_AS_OPENED, [planner]);
