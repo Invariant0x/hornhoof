@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
 import { agentEvents, nodes, programDeliveries, programInstances } from '../src/db/schema.js';
+import { listEvents } from '../src/modules/events/store.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
@@ -22,6 +23,16 @@ it('stores evidence and delivery state durably before its acknowledgement, then 
   expect(acknowledgements).toBe(2);
   expect(await c.db.select().from(programInstances)).toHaveLength(1);
   expect((await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.agent.id))).filter(event => (event.data as { operatorEvidenceId?: string }).operatorEvidenceId === c.fact.evidenceId)).toHaveLength(1);
+});
+
+it('keeps program evidence out of the employee feed while its record stays', async () => {
+  const c = await fixture();
+  await receiveNodeMessage(c.ctx, c.identity, c.fact);
+  const stored = (await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.agent.id))).filter(event => (event.data as { operatorEvidenceId?: string }).operatorEvidenceId === c.fact.evidenceId);
+  expect(stored).toHaveLength(1);
+  const feed = await listEvents(c.db, c.agent.id, 0);
+  expect(feed.map(e => e.seq)).not.toContain(stored[0]!.seq);
+  expect(JSON.stringify(feed)).not.toContain('Program evidence recorded.');
 });
 
 it('refuses another node, mismatched words and ordinal, and a conflicting replay without changing the record', async () => {

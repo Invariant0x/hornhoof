@@ -103,13 +103,13 @@ export async function appendOutgoing(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>,
   await appendEvent(ctx, { ...e, kind: 'message', data: { text: e.text }, message: { direction: 'out', from: await agentParty(ctx, e.companyId, e.agentId), to: e.to } });
 }
 
-/* An agent's events after seq, oldest first. */
+/* An agent's events after seq, oldest first. A program's evidence is the operator's record, said to nobody. */
 export async function listEvents(db: Db, agentId: string, after: number, limit = 500): Promise<EventView[]> {
   const rows = await db
     .select(columns)
     .from(agentEvents)
     .leftJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(eq(agentEvents.agentId, agentId), gt(agentEvents.seq, after)))
+    .where(and(eq(agentEvents.agentId, agentId), gt(agentEvents.seq, after), sql`${agentEvents.data}->>'operatorEvidenceId' is null`))
     .orderBy(asc(agentEvents.seq))
     .limit(limit);
   return rows.map(view);
