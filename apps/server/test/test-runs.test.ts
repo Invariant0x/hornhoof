@@ -359,7 +359,7 @@ async function productNode(c: Awaited<ReturnType<typeof company>>) {
   return node;
 }
 
-async function productDescription(request: Extract<ServerMessage, { type: 'tests.describe' }>) {
+async function productDescription(request: Extract<ServerMessage, { type: 'tests.describe' }>, runtimeCapabilities: { id: string; version: string; fingerprint: string; platform?: { os: string; arch: string; libc: string } }[] = [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }]) {
   const manifest = {
     version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'npm', inputs: ['package-lock.json'], install: [], paths: ['node_modules'], cache: 'copy' as const }, services: [], prepare: [], reset: null,
@@ -370,7 +370,7 @@ async function productDescription(request: Extract<ServerMessage, { type: 'tests
   const manifestSource = JSON.stringify(manifest);
   return { type: 'tests.described' as const, requestId: request.requestId, commitSha: request.commitSha, result: { status: 'ready' as const, description: {
     version: 1 as const, repositoryScope: request.repositoryScope, commitSha: request.commitSha, manifestSource, manifestHash: await hashTestEnvironment(manifestSource), manifest,
-    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }],
+    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities,
   } } };
 }
 
@@ -417,9 +417,9 @@ describe('pinned product environment runs', () => {
   });
 });
 
-function productDone(part: TestsRun) {
+function productDone(part: TestsRun, runtimes = part.environment!.snapshot.description.runtimeCapabilities) {
   const { snapshot, selection } = part.environment!;
-  return done(part, { commit: part.commitSha, environmentReceipt: { version: 1, commitSha: part.commitSha, manifestHash: snapshot.description.manifestHash, ...selection, runtimes: snapshot.description.runtimeCapabilities, dependencies: { key: 'd'.repeat(64), hit: false }, environments: [], phases: { checkoutMs: 1, dependenciesMs: 1, environmentMs: 0, servicesMs: 0, commandMs: 1, cleanupMs: 1 } } });
+  return done(part, { commit: part.commitSha, environmentReceipt: { version: 1, commitSha: part.commitSha, manifestHash: snapshot.description.manifestHash, ...selection, runtimes, dependencies: { key: 'd'.repeat(64), hit: false }, environments: [], phases: { checkoutMs: 1, dependenciesMs: 1, environmentMs: 0, servicesMs: 0, commandMs: 1, cleanupMs: 1 } } });
 }
 
 it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful product result with %s receipt evidence', async kind => {
@@ -478,7 +478,7 @@ it('selects a capable sibling volume, holds no machine to where it ran before as
   await call('stop_tests', { run: 3 });
 });
 
-it('gives a part only to a node with the very runtimes that described its run, the ones the part\'s receipt is checked against', async () => {
+it('gives a part to a node of another build and processor of the class that described its run, and the Tests report accepts its receipt, but not to another system or Node major', async () => {
   const c = await company();
   const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
   const code = connect.json().command.split('--join ')[1];
@@ -490,39 +490,42 @@ it('gives a part only to a node with the very runtimes that described its run, t
     await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null); connected.push({ node, id: entry.nodeId });
   }
   const { testCapabilities } = await import('../src/modules/testruns/describe.js');
-  const { passedProductPart, runsAsDescribed } = await import('../src/modules/testruns/receipts.js');
-  const runtimes = (fingerprint: string) => [{ id: 'node', version: '22.15.0', fingerprint }];
-  const advertise = async (entry: { node: FakeNode; id: string }, testRuntimes: { id: string; version: string; fingerprint: string }[]) => {
+  const { passedProductPart } = await import('../src/modules/testruns/receipts.js');
+  const { runsInClass } = await import('@hornhoof/protocol');
+  type Runtime = { id: string; version: string; fingerprint: string; platform: { os: string; arch: string; libc: string } };
+  const runtime = (fingerprint: string, platform: Partial<Runtime['platform']> = {}, version = '22.15.0'): Runtime[] => [{ id: 'node', version, fingerprint, platform: { os: 'linux', arch: 'x64', libc: 'glibc', ...platform } }];
+  const x64 = runtime('b'.repeat(64)), arm64 = runtime('c'.repeat(64), { arch: 'arm64' }), darwin = runtime('d'.repeat(64), { os: 'darwin', arch: 'arm64' }), node24 = runtime('e'.repeat(64), {}, '24.1.0');
+  const advertise = async (entry: { node: FakeNode; id: string }, testRuntimes: Runtime[]) => {
     entry.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes });
     await until(() => JSON.stringify(testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testRuntimes) === JSON.stringify(testRuntimes));
   };
   /* The machine gives a run without a snapshot to its first node, so that one describes it. */
   const order = await c.db.select({ id: nodes.id }).from(nodes).where(inArray(nodes.id, connected.map(entry => entry.id))).orderBy(asc(nodes.createdAt), asc(nodes.id));
   const [describer, other] = order.map(row => connected.find(entry => entry.id === row.id)!) as [typeof connected[number], typeof connected[number]];
-  await advertise(describer, runtimes('b'.repeat(64)));
+  await advertise(describer, x64);
   const { call } = await c.turn(c.bruno);
   expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
   const request = await nextOf(describer.node, 'tests.describe');
-  /* The describer takes no part now. The other node has the same Node version from another build, as a machine of another
-     architecture has: a receipt from it names runtimes the description does not. */
+  /* The describer, an x64 machine, takes no part now. */
   await advertise(describer, []);
-  await advertise(other, runtimes('c'.repeat(64)));
-  describer.node.send(await productDescription(request));
+  describer.node.send(await productDescription(request, x64));
   await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null, 15_000);
-  await pumpTests(c.app.ctx);
-  expect((await c.db.select().from(testParts)).map(part => [part.status, part.nodeId])).toEqual([['queued', null], ['queued', null]]);
   const snapshot = (await c.db.select().from(testRuns))[0]!.environmentSnapshot!;
-  expect(runsAsDescribed(snapshot, runtimes('c'.repeat(64)))).toBe(false);
-  expect(runsAsDescribed(snapshot, runtimes('b'.repeat(64)))).toBe(true);
-  /* A node that has the described runtimes takes the parts, and the Tests report accepts what it proves. */
-  await advertise(other, runtimes('b'.repeat(64)));
-  const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first));
-  const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final));
+  for (const foreign of [darwin, node24]) {
+    await advertise(other, foreign); await pumpTests(c.app.ctx);
+    expect((await c.db.select().from(testParts)).map(part => [part.status, part.nodeId])).toEqual([['queued', null], ['queued', null]]);
+    expect(runsInClass(snapshot, foreign)).toBe(false);
+  }
+  /* An arm64 machine of the same system, libc and Node major takes the parts, and the Tests report accepts what it proves. */
+  await advertise(other, arm64);
+  const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first, arm64));
+  const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final, arm64));
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed', 15_000);
   const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
   expect(parts.map(part => part.nodeId)).toEqual([other.id, other.id]);
+  expect(parts.map(part => part.environmentReceipt?.runtimes)).toEqual([arm64, arm64]);
   expect(parts.every(part => passedProductPart(snapshot, part))).toBe(true);
-  expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: runtimes('c'.repeat(64)) } })).toBe(false);
+  for (const foreign of [darwin, node24]) expect(passedProductPart(snapshot, { ...parts[0]!, environmentReceipt: { ...parts[0]!.environmentReceipt!, runtimes: foreign } })).toBe(false);
 });
 
 it('fails a run at once when the node that described it lacks a runtime its profile needs, as no part could prove it on the described runtimes', async () => {

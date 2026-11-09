@@ -95,9 +95,23 @@ describe('the fingerprint of a test file', () => {
     expect(await changed(base(), input({ ...app, 'docs/new.md': 'New' }, manifest(suites)))).toEqual([]);
   });
 
-  it('changes everywhere with dependency inputs, runtime version or runtime build conditions', async () => {
+  const linux = { os: 'linux', arch: 'x64', libc: 'glibc' };
+  const on = (version: string, fingerprint: string, platform = linux) => input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version, fingerprint, platform }] });
+  it('changes everywhere with dependency inputs, and with the major version, system or libc of a runtime', async () => {
     const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
     expect(await changed(base(), edit('package-lock.json', '{"new":1}'))).toEqual(everyone);
+    expect(await changed(on('22.1.0', 'a'.repeat(64)), on('24.0.0', 'a'.repeat(64)))).toEqual(everyone);
+    expect(await changed(on('22.1.0', 'a'.repeat(64)), on('22.1.0', 'a'.repeat(64), { ...linux, os: 'darwin' }))).toEqual(everyone);
+    expect(await changed(on('22.1.0', 'a'.repeat(64)), on('22.1.0', 'a'.repeat(64), { ...linux, libc: 'musl' }))).toEqual(everyone);
+  });
+
+  /* Our tests come out the same on every machine of a class, so a file proved on one of them need not run again on another. */
+  it('stays the same on another build, processor or minor version of a runtime of the same class', async () => {
+    expect(await changed(on('22.1.0', 'a'.repeat(64)), on('22.3.4', 'b'.repeat(64), { ...linux, arch: 'arm64' }))).toEqual([]);
+  });
+
+  it('counts the version and build of a runtime that does not name its system', async () => {
+    const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
     expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.2.0', fingerprint: 'a'.repeat(64) }] }))).toEqual(everyone);
     expect(await changed(base(), input(app, manifest(suites), { runtimeCapabilities: [{ id: 'node', version: '22.1.0', fingerprint: 'b'.repeat(64) }] }))).toEqual(everyone);
   });

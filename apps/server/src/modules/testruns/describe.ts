@@ -1,4 +1,4 @@
-import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
+import { candidateTestUnits, MAX_TEST_PARTS, EnvironmentSnapshot, requiredTestRuntimes, runsInClass, runtimeVersionMatches, TestExecution, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type TestsDescribed, type UnitFingerprint, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -16,7 +16,6 @@ import { planProductParts, type ProductPlan } from './plan-product.js';
 import type { PlanningHistory } from './plan-history.js';
 import { runPurpose } from './purpose.js';
 export { productReceipt } from './receipts.js';
-import { runsAsDescribed } from './receipts.js';
 import { reuseFor, runModeOf, type ReuseDecision } from './reuse.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
@@ -156,13 +155,13 @@ function runSnapshot(supplied: EnvironmentSnapshot, request: TestEnvironmentRequ
 function candidateReuseMode(mode: RunMode, snapshot: EnvironmentSnapshot): RunMode {
   return mode && snapshot.candidate ? { ...mode, mode: 'cached', profile: snapshot.profile } : mode;
 }
-/* A part runs only on the runtimes that described its run, so a run its describing node could not run itself runs nowhere: it ends
-   now with what it lacks, not at its queue deadline. */
+/* A part runs only on runtimes of the class that described its run, so a run its describing node could not run itself runs nowhere:
+   it ends now with what it lacks, not at its queue deadline. */
 function unrunnable(snapshot: EnvironmentSnapshot): EnvironmentProblem | null {
   const own = snapshot.description.runtimeCapabilities;
-  if (runsAsDescribed(snapshot, own)) return null;
+  if (runsInClass(snapshot, own)) return null;
   const lacks = requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).filter(needed => !own.some(actual => actual.id === needed.id && runtimeVersionMatches(needed.version, actual.version)));
-  const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on the runtimes that described its run, so no node can run it.`;
+  const detail = `The node that described this run lacks ${lacks.map(runtime => `${runtime.id} ${runtime.version}`).join(', ')}, which profile ${snapshot.profile} needs. A part runs only on runtimes of the class that described its run, so no node can run it.`;
   return { code: 'runtime_missing', detail: detail.slice(0, 2000) };
 }
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription, prints: UnitFingerprint[], base: DescribedBase, mutation: DescribedReady['mutation']): Promise<EnvironmentProblem | null> {
