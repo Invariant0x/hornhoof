@@ -501,7 +501,7 @@ const MANIFEST = {
 const UNITS = [unit('apps/node/test/a.test.ts'), { suiteId: 'scripts', file: 'scripts/test/a.test.mjs', selectionUnit: 'scripts/test/a.test.mjs' }, { suiteId: 'ruby', file: 'lib/a_test.rb', selectionUnit: 'lib' }, { suiteId: 'pg', file: 'apps/node/test/a.pg.ts', selectionUnit: 'apps/node/test/a.pg.ts' }];
 function selector(answer = {}) {
   const seen = { collected: [], select: [], collectCalls: 0 };
-  return { seen, listTestUnits: () => UNITS, read: () => null, namedAfter: () => false,
+  return { seen, listTestUnits: () => UNITS, read: () => null, namedAfter: () => false, readers: async input => new Map(input.paths.map(path => [path, { named: [], reached: [] }])),
     collectVitestImpact: async (input, collect) => { seen.vitest = input; if (input.changed.length) await collect(input.changed[0]); return { adapter: 'vitest-related', status: 'ready', units: [] }; },
     collect: async changed => { seen.collectCalls += 1; seen.collected = changed; return { projects: [], all: [], selected: [] }; },
     selectAffectedTests: input => { seen.select.push(input); return { status: 'ready', problems: [], packages: input.changes.length ? [{ packageId: 'node', mode: 'related', units: [UNITS[0]], reasons: [] }] : [], ...answer }; } };
@@ -819,6 +819,33 @@ for (const path of ['AGENTS.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'apps/server
     assert.ok(!result.notes.some(note => note === `document without tests: ${path}`));
   });
 }
+
+test('a document runs the tests that name it, leaves those that reach it through their code to the full run, and one no test reads has none', async () => {
+  const reader = unit('apps/node/test/style.test.ts'), through = unit('apps/node/test/through.test.ts');
+  const asked = [];
+  const ports = { ...selector(), listTestUnits: () => [...UNITS, reader, through], readers: async input => {
+    asked.push(input);
+    return new Map(input.paths.map(path => [path, path === 'docs/style.md' ? { named: [reader.file], reached: [reader.file, through.file] } : { named: [], reached: [] }]));
+  } };
+  const changes = [{ path: 'docs/style.md', kind: 'modified' }, { path: 'docs/notes.md', kind: 'modified' }];
+  const result = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(asked.map(input => input.paths), [['docs/style.md', 'docs/notes.md']]);
+  assert.ok(asked[0].tests.includes(reader.file) && !asked[0].tests.includes('apps/node/test/a.pg.ts'), 'the tests of the fast profile');
+  assert.deepEqual(result.packages.map(item => [item.packageId, item.mode, item.units.map(each => each.file)]), [['node', 'related', [reader.file]]]);
+  assert.deepEqual(result.packages[0].reasons, [{ code: 'reads_document', path: 'docs/style.md' }]);
+  assert.deepEqual(result.leftToFullRun, [through.file]);
+  assert.ok(result.notes.includes('document without tests: docs/notes.md'));
+  assert.ok(!result.notes.includes('document without tests: docs/style.md'));
+  assert.deepEqual(ports.seen.select[0].changes, [], 'a document is no change of code for the import graph');
+});
+
+test('a document a test also reaches through a changed source still runs that test', async () => {
+  const reader = unit('apps/node/test/style.test.ts');
+  const ports = { ...graphReaching([near, reader], { [near.file]: "import '../src/a.js';" }), listTestUnits: () => [...UNITS, near, reader], readers: async input => new Map(input.paths.map(path => [path, { named: [reader.file], reached: [reader.file] }])) };
+  const result = await selectTests({ changes: [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: 'docs/style.md', kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages[0].units.map(each => each.file), [near.file, reader.file]);
+  assert.deepEqual(result.leftToFullRun, []);
+});
 
 test('moving a checked fixture to ordinary docs still checks its former readers', async () => {
   const ports = selector();

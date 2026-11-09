@@ -21,7 +21,7 @@ It runs where it is called: in the workspace of whoever builds or reviews the ch
 
 A suite run by neither Vitest nor `node --test` has no adapter: its whole package runs by its own one command from `test-environment.json`, its counts and CRAP stay unknown, and the record's scope says `package`.
 
-A change the selector answers with the whole fast suite does not run it: `tests` says `selection_is_whole_suite`, unless a shared package changed. Add `--allow-whole` only when you were asked to run everything. Documents outside `templates/` select nothing.
+A change the selector answers with the whole fast suite does not run it: `tests` says `selection_is_whole_suite`, unless a shared package changed. Add `--allow-whole` only when you were asked to run everything. A document outside `templates/` leads nowhere in the import graph, but a test may read it by its path: the tests of the fast profile that name its path themselves run, found by the graph the fingerprints follow, the rest that reach it through the code they run are left to the full run, and a document no test reads says `document without tests`.
 
 ## What a change runs
 

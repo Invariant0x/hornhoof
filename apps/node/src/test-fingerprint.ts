@@ -291,6 +291,8 @@ class Graph {
     if (!scan) { scan = scanFile(this.tree, path); this.scans.set(path, scan); }
     return scan;
   }
+  /* What a file reads itself. */
+  reads(path: string): string[] { return this.scan(path).edges; }
   async scanAll(pause: Pause): Promise<void> {
     for (const [index, path] of this.tree.paths.entries()) {
       this.scan(path);
@@ -335,6 +337,21 @@ class Graph {
 
 export function testGraph(input: FingerprintInput): { closure: (starts: string | string[]) => Set<string> } {
   return new Graph(new Tree(input));
+}
+
+export type Readers = { named: string[]; reached: string[] };
+/* The tests that read each of these files, as a fingerprint follows them: those that name it themselves, and all that reach it
+   through what they run. A document leads nowhere, but a test that names one by its path reads it. */
+export function readersOf(input: FingerprintInput, paths: string[], tests: string[]): Map<string, Readers> {
+  const graph = new Graph(new Tree(input)), found = new Map(paths.map(path => [path, { named: [], reached: [] } as Readers]));
+  for (const test of tests) {
+    const named = graph.reads(test), reached = graph.closure(test);
+    for (const [path, readers] of found) {
+      if (named.includes(path)) readers.named.push(test);
+      if (reached.has(path)) readers.reached.push(test);
+    }
+  }
+  return found;
 }
 
 /* Suites of one folder share a package: what the selector takes whole for it, it takes whole for each of them. */

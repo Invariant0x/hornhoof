@@ -144,6 +144,21 @@ function nearTests(packages, changes, reached, ports) {
   return { packages: kept, leftToFullRun: [...left].sort() };
 }
 
+/* A document leads nowhere in an import graph, but a test may read one by its path, as a fingerprint sees. The tests that name a
+   changed document themselves run, and those that reach it through the code they run are left to the full run. */
+async function documentReaders(documents, environment, { manifest, tracked }, ports) {
+  const paths = [...new Set(documents.flatMap(change => [change.path, change.previousPath ?? change.path]))];
+  if (!paths.length) return { packages: [], left: [], unread: [] };
+  const found = await ports.readers({ manifest, tracked, paths, tests: [...new Set(environment.inventory.map(unit => unit.file))] });
+  const packages = paths.flatMap(path => {
+    const named = new Set(found.get(path)?.named ?? []), units = environment.inventory.filter(unit => named.has(unit.file));
+    return [...new Set(units.map(unit => unit.suiteId))].map(packageId => ({ packageId, mode: 'related', units: units.filter(unit => unit.suiteId === packageId), reasons: [{ code: 'reads_document', path }] }));
+  });
+  const left = paths.flatMap(path => found.get(path)?.reached ?? []);
+  const unread = documents.filter(change => [change.path, change.previousPath ?? change.path].every(path => !found.get(path)?.reached.length)).map(change => change.path);
+  return { packages, left, unread };
+}
+
 export async function selectTests({ changes, manifest, tracked, allowWhole }, ports) {
   const suites = fastSuites(manifest);
   const units = ports.listTestUnits(manifest, tracked);
@@ -155,12 +170,16 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
   const rest = kept.filter(change => graphOrPolicy(suites, change));
   const selection = await adapterSelection(environment, rest, suites, ports);
-  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
+  const read = await documentReaders(documents, environment, { manifest, tracked }, ports);
+  const notes = [...read.unread.map(path => `document without tests: ${path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
   const reached = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
   if (isWholeSuite(reached, suites) && !allowWhole && !reachesEveryone(reached)) return { unavailable: 'selection_is_whole_suite', notes };
-  const { packages, leftToFullRun } = nearTests(reached, changes, selection.reached ?? [], ports);
+  const near = nearTests(reached, changes, selection.reached ?? [], ports);
+  const packages = mergePackages([...near.packages, ...read.packages]);
+  const selected = new Set(packages.flatMap(item => item.units.map(unit => unit.file)));
+  const leftToFullRun = [...new Set([...near.leftToFullRun, ...read.left])].filter(file => !selected.has(file)).sort();
   if (leftToFullRun.length) notes.push(`left to the full run: ${leftToFullRun.length} test files the import graph reaches, listed in the record`);
   return { packages, notes, leftToFullRun };
 }
