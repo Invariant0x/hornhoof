@@ -191,6 +191,8 @@ export const teams = pgTable('teams', {
   gate: boolean('gate').notNull().default(false),
   /* Its members take urgent work only. */
   urgentOnly: boolean('urgent_only').notNull().default(false),
+  /* Each member does a task end to end alone, with no echelons and no other member of the department. */
+  turnkey: boolean('turnkey').notNull().default(false),
   createdAt: createdAt(),
 });
 

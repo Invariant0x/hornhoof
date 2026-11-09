@@ -6,7 +6,7 @@ kind: core
 ---
 You can deliver executable work through the required route with exact-version evidence.
 
-Read the current task and task.echelons before changing code. Work in its named repository and branch, never directly on main. Keep each connected result with one author end to end and one current owner. Preserve other writers' files and workspaces.
+Read the current task and task.echelons before changing code. When task.echelons is turnkey, the task is yours end to end alone: code, checks, tests, merge and release as the task says, with no echelons and nobody else called onto it; close it with report done true and the evidence. Work in its named repository and branch, never directly on main. Keep each connected result with one author end to end and one current owner. Preserve other writers' files and workspaces.
 
 Architecture produces a concrete plan unless the task is small. Development writes tests before implementation: observe the intended failure, make the change and run only affected checks, naming them, in your own workspace; whole suites and declared profiles use run_tests. An assignment can widen what is checked, never move change checks to run_tests. Configuration failure, a missing stage or zero selected tests is not PASS.
 

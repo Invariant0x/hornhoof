@@ -109,3 +109,16 @@ describe('the base a review compares with', () => {
     expect(body(id)).toMatch(/task\.review[^.]*`source\.baseCommit`[^.]*`commit`/);
   });
 });
+
+describe('turnkey work', () => {
+  it('tells heads and the orchestrator that a turnkey team\'s task goes through no echelons and that echelons never go into a task\'s text', () => {
+    for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-company', 'orch-plan-turn', 'hh-brief-members']) {
+      expect(body(id), id).toMatch(/turnkey team[^.]*no echelons/);
+      expect(body(id), id).toMatch(/never write the echelons[^.]*into a task's text/i);
+    }
+  });
+
+  it('tells the member of a turnkey team to carry its task end to end alone and close it with report', () => {
+    expect(body('dev-task-flow')).toMatch(/turnkey[^.]*end to end alone[^.]*report done true/);
+  });
+});

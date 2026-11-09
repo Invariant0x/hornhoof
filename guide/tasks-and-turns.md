@@ -55,6 +55,8 @@ Development uses one route for each executable task:
 - Security checks sensitive work when the head requires it or Review discovers the risk.
 - Tests verifies the final candidate, including repairs, using applicable checks and verified results at the same influencing fingerprint. Mutations cover only changed pure functions with fast tests.
 
+A task given to a member of a sub-unit marked "Works turnkey" goes through none of these stages: that member does it alone from start to finish and closes it.
+
 Each stage has one current owner. Review is required even when only one provider or subscription is available. The checker must use a model at least as capable as the producer's; an eligible different provider is preferred when available.
 
 A coordination task with no executable result closes with a checked report and valid reviewed child results. An unfinished, unaccepted or stale child blocks that report. A parent that produces its own executable result follows the route above.

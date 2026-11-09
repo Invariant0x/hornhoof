@@ -76,6 +76,20 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
   );
 }
 
+/* Whether the sub-unit's members each do a task alone from start to finish; tasks given from then on follow it. */
+function TurnkeyMark({ departmentId, team, onFail }: { departmentId: string; team: Team; onFail: (err: unknown) => void }) {
+  const t = useT();
+  return (
+    <label className="check">
+      <input type="checkbox" checked={team.turnkey} onChange={e => void runAction(onFail, () => api.patch(`/api/departments/${departmentId}/teams/${team.id}`, { turnkey: e.target.checked }))} />
+      <span>
+        <b>{t.dept.turnkey}</b>
+        <small>{t.dept.turnkeyHint}</small>
+      </span>
+    </label>
+  );
+}
+
 function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team: Team; onFail: (err: unknown) => void }) {
   const t = useT();
   const id = useId();
@@ -102,6 +116,7 @@ function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team
       ) : (
         <>
           <b>{team.name}</b>
+          <TurnkeyMark departmentId={departmentId} team={team} onFail={onFail} />
           <div className="f">
             <button className="btn small ghost" type="button" onClick={() => { setName(team.name); setRenaming(true); }}>
               {t.dept.renameSubUnit}

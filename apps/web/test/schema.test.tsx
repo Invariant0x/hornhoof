@@ -182,7 +182,7 @@ describe('the department schema', () => {
   });
 
   it('places a sub-unit in its own frame with a direct line from the head, outside any stage or gate', () => {
-    const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false };
+    const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
     const simon = { ...emp('simon', 'DEV-BE'), teamId: 'u1' };
     const d: Department = { ...dept([...TEAM, simon], ROLES), teams: [urgent] };
     const s = schemaLayout(d, 0);

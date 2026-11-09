@@ -8,6 +8,7 @@ import { producedCandidate, currentCandidate, requireRepairHistory } from './ech
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
+import { turnkeyReport, turnkeyWork } from './turnkey.js';
 import { createRoute, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
@@ -573,7 +574,9 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
 export async function submissionTask(ctx: Live, agentId: string, taskId: string): Promise<Task> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
-  if ((await routeOf(ctx.db, task)).state.resultKind !== 'code') throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
+  const kind = (await routeOf(ctx.db, task)).state.resultKind;
+  if (kind === 'turnkey') throw turnkeyWork(task);
+  if (kind !== 'code') throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not waiting for your work');
   refusePaused(task);
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
@@ -664,9 +667,10 @@ async function reportToResolver(ctx: Live, agentId: string, task: Task, summary:
 }
 
 type ReportInput = { done: boolean; summary: string; verification?: Verification; acceptance?: AcceptanceInput };
-type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination';
+type ReportStage = 'acceptance' | 'tests' | 'architecture' | 'coordination' | 'turnkey';
 
 function reportedStage(route: Route, done: boolean): ReportStage | null {
+  if (route.state.resultKind === 'turnkey') return done ? 'turnkey' : null;
   if (done && route.state.phase === 'ready') return 'acceptance';
   if (route.state.stage === 'tests' && route.state.phase === 'active') return 'tests';
   if (done && route.state.stage === 'architecture') return 'architecture';
@@ -682,6 +686,9 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
     case 'tests': return testsReport(ctx, task, route, agentId, input.summary, input.verification, input.done);
     case 'architecture': return architectureReport(ctx, task, route, agentId, input.summary);
     case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
+    case 'turnkey':
+      if (input.verification || input.acceptance) throw turnkeyWork(task);
+      return turnkeyReport(ctx, task, route, agentId, input.summary);
   }
 }
 
@@ -691,7 +698,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: Repo
   const route = await routeOf(ctx.db, task);
   const stage = reportedStage(route, r.done);
   if (stage) return reportStage(ctx, task, route, agentId, r, stage);
-  if (route.state.resultKind !== 'coordination') throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
+  if (route.state.resultKind === 'code') throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };

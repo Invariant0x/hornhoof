@@ -903,6 +903,8 @@ export const ru: Messages = {
     deleteSubUnit: 'Удалить подотдел',
     inPipeline: 'В конвейере',
     subUnitOf: (name: string) => `Подотдел для ${name}`,
+    turnkey: 'Работает под ключ',
+    turnkeyHint: 'Каждый участник сам делает задачу от начала до конца: код, проверки, тесты, слияние и выпуск. Больше никто в отделе ее не проверяет.',
     close: 'Закрыть',
   },
   failures: {
@@ -1019,6 +1021,7 @@ export const ru: Messages = {
   tasks: {
     echelons: {
       coordination: 'Проверенный отчет по дочерним результатам',
+      turnkey: 'Под ключ: сотрудник сам делает ее от начала до конца, без этапов',
       findings: { heading: 'Находки по этапам', unique: n => `Уникальных находок: ${n}`, reported: n => `Найдено: ${n}`, confirmed: n => `Подтверждено: ${n}` },
       heading: 'Маршрут задачи',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },

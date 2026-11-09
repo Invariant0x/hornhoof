@@ -1,12 +1,12 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
+import { LanguageProvider, type Language } from '../src/i18n';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../src/ui/SubUnits';
 import { DEV_ORG, mockApi } from './api-mock';
 
 const [devBase] = DEV_ORG.departments;
-const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false };
+const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
 const [dana, bruno] = devBase!.employees;
 const simon = { ...bruno!, id: 'b2', name: 'Simon', teamId: 'u1' };
 const loose = { ...bruno!, id: 'b3', name: 'Leo', roleId: 'UNKNOWN-ROLE' };
@@ -86,5 +86,30 @@ describe('SubUnits', () => {
     await user.click(within(subUnits).getByRole('button', { name: 'Add sub-unit' }));
     expect(within(subUnits).queryByRole('alert')).not.toBeInTheDocument();
     expect(within(subUnits).queryByLabelText('Sub-unit name')).not.toBeInTheDocument();
+  });
+
+  it.each<[Language, string]>([['en', 'Works turnkey'], ['ru', 'Работает под ключ']])('lets a person mark a sub-unit as working turnkey, in %s', async (language, label) => {
+    const user = userEvent.setup();
+    const calls = mockApi({ 'PATCH /api/departments/d2/teams/u1': () => [200, { team: { ...urgent, turnkey: true } }] });
+    localStorage.setItem('hh-lang', language);
+    render(
+      <LanguageProvider>
+        <DeptSubUnits department={dept} company />
+      </LanguageProvider>,
+    );
+    localStorage.removeItem('hh-lang');
+    const box = screen.getByRole('checkbox', { name: new RegExp(label) });
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    expect(calls.find(c => c.path === '/api/departments/d2/teams/u1')?.body).toEqual({ turnkey: true });
+  });
+
+  it('shows a sub-unit marked turnkey as such, and only to someone who may change it', () => {
+    const marked = { ...dept, teams: [{ ...urgent, turnkey: true }] };
+    const { unmount } = render(<LanguageProvider><DeptSubUnits department={marked} company /></LanguageProvider>);
+    expect(screen.getByRole('checkbox', { name: /Works turnkey/ })).toBeChecked();
+    unmount();
+    render(<LanguageProvider><DeptSubUnits department={marked} company={false} /></LanguageProvider>);
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });

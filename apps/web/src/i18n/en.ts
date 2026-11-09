@@ -873,6 +873,8 @@ export const en = {
     deleteSubUnit: 'Delete sub-unit',
     inPipeline: 'In the pipeline',
     subUnitOf: (name: string) => `Sub-unit for ${name}`,
+    turnkey: 'Works turnkey',
+    turnkeyHint: 'Each member does a task alone from start to finish: code, checks, tests, merge and release. Nobody else in the department checks it.',
     close: 'Close',
   },
   failures: {
@@ -984,6 +986,7 @@ export const en = {
   tasks: {
     echelons: {
       coordination: 'Checked coordination report',
+      turnkey: 'Turnkey: the employee does it alone from start to finish, with no stages',
       findings: { heading: 'Findings by stage', unique: (n: number) => `Unique findings: ${n}`, reported: (n: number) => `Reported: ${n}`, confirmed: (n: number) => `Confirmed: ${n}` },
       heading: 'Task workflow',
       stages: { architecture: 'Architecture', development: 'Development', review: 'Review', cleanup: 'Cleanup', security: 'Security', tests: 'Tests' },

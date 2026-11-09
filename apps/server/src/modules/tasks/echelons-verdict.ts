@@ -9,6 +9,7 @@ import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
 import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { bindReviewEvidence, type ReviewVerdict } from './review-verdict.js';
 import { refusePaused } from './pause.js';
+import { turnkeyWork } from './turnkey.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 type Verdict = ReviewVerdict & { comment: string };
@@ -39,6 +40,7 @@ function verdictData(route: Route, candidate: EchelonCandidate, identity: Checke
 export async function echelonVerdict(ctx: Reader, agentId: string, taskId: string, verdict: Verdict): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   const route = await routeOf(ctx.db, task);
+  if (route.state.resultKind === 'turnkey') throw turnkeyWork(task);
   requireCheckingOwner(task, route, agentId);
   refusePaused(task);
   if (!verdict.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');

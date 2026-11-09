@@ -78,7 +78,7 @@ function org(employees: Employee[]): Org {
     about: '',
     agents: { total: employees.length, working: employees.filter(e => e.status === 'working').length },
     products: [],
-    teams: [{ id: 'matrix', name: 'Matrix', about: '', stage: 0, gate: false }],
+    teams: [{ id: 'matrix', name: 'Matrix', about: '', stage: 0, gate: false, turnkey: false }],
     people: [],
     employees,
     roles: ROLES,

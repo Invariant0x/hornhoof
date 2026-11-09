@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { jobs } from '../src/db/schema.js';
+import { eq } from 'drizzle-orm';
+import { agents, jobs, teams } from '../src/db/schema.js';
 import { loadTask, submit } from '../src/modules/tasks/engine.js';
 import { listen, mcp } from './helpers.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
@@ -38,5 +39,16 @@ describe('the echelon public tools', () => {
     const rows = JSON.parse(created.content[0]!.text);
     const task = rows.find((row: { title: string }) => row.title === 'Refactor totals');
     expect(task.echelons).toMatchObject({ resultKind: 'code', stage: 'development', stages: expect.arrayContaining([expect.objectContaining({ stage: 'cleanup', status: 'pending' })]) });
+  });
+  it('gives a member of a turnkey team its task with no echelons and no paths to keep to', async () => {
+    const f = await fixture();
+    const [team] = await f.db.insert(teams).values({ companyId: f.task.companyId, departmentId: f.task.departmentId!, name: 'Lane', turnkey: true }).returning();
+    const player = await f.hire('Player', 'worker', 'DEV-BE', f.claude.id, 'claude-opus-5-5');
+    await f.db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, player.id));
+    const tools = await client(f, f.head);
+    const result = await tools.call('create_task', { title: 'Speed up totals', brief: 'Totals in a millisecond.', body: 'Do it end to end.', executor: player.id });
+    expect(result.isError).not.toBe(true);
+    const rows = JSON.parse((await tools.call('tasks', {})).content[0]!.text);
+    expect(rows.find((row: { title: string }) => row.title === 'Speed up totals').echelons).toMatchObject({ resultKind: 'turnkey', stages: [] });
   });
 });

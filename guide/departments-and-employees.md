@@ -115,6 +115,8 @@ The checker must use a model at least as capable as the producer's. Hornhoof pre
 
 Cleanup is optional and off by default. When the head enables it for a task or turn, it follows Review and uses the existing dev-cleanup skill. Tests checks the exact final candidate after all repairs. Findings retain their stage and candidate history; they are counted once.
 
+A department's sub-unit can be marked "Works turnkey" on the department's screen. Each of its members then does a task alone from start to finish: code, checks, tests, merge and release. Such a task goes through no stages, and nobody else in the department checks it, whatever its text says. The mark holds for tasks given from then on.
+
 ## How hard does an employee think?
 
 Hornhoof picks the configured level when a turn starts. It stays until that turn ends.

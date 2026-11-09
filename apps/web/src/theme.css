@@ -183,11 +183,11 @@ select:disabled { opacity: .55; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
 /* A switch with its line and a hint under it, like opening Hornhoof on the internet, or the deputy in a person's window. */
-.card label.check, .panel-form label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
-.card label.check input, .panel-form label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
-.card label.check span, .panel-form label.check span { display: grid; gap: 2px; }
-.card label.check b, .panel-form label.check b { font-weight: 600; }
-.card label.check small, .panel-form label.check small { font-size: 12px; color: var(--muted); }
+.card label.check, .panel-form label.check, .dv-list label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
+.card label.check input, .panel-form label.check input, .dv-list label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.card label.check span, .panel-form label.check span, .dv-list label.check span { display: grid; gap: 2px; }
+.card label.check b, .panel-form label.check b, .dv-list label.check b { font-weight: 600; }
+.card label.check small, .panel-form label.check small, .dv-list label.check small { font-size: 12px; color: var(--muted); }
 .panel-form label.check { grid-column: 1 / -1; }
 /* The narrow column for the name, link and sign-in code, so they stay readable inside the wide template step. */
 .setup-lead { display: grid; gap: 14px; max-width: 440px; }
