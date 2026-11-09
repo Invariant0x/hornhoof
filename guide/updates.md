@@ -11,13 +11,9 @@ Hornhoof checks for a newer build every 30 minutes. People who see the whole com
 
 Running the install line again updates too.
 
-## Why is a new version not offered?
+## Why is 0.8.4 not offered on my server?
 
-A version reaches machines only after a real node of exactly that build ran Claude, Codex, Kimi and Antigravity: each one got its words, wrote them down, answered and ended its turn the usual way. Until that check is published next to the version's images, Hornhoof shows no banner for it, "Update" says why it cannot install it, and a node that asks for its server's build stays as it is. This holds for security updates too, and for going back to an earlier version with no check of its own. An update that fails still goes back by itself.
-
-The installer holds to the same check. A command that joins a machine, moves its nodes or goes with `--urgent` stops with the reason and leaves the machine as it is, and `install.sh server` changes nothing on a server, for a build with no check. A version from before 0.7.0 has none to show, so `HORNHOOF_VERSION=0.6.1` still takes you back to it. The one way past is the check itself: `install.sh check-node` moves one named node of a plan to a commit's build, for the turn the check speaks of, and `install.sh back-node` puts that node back.
-
-How a release goes through the check is in [CONTRIBUTING.md](../CONTRIBUTING.md#releasing-a-version).
+A server on 0.8.0 to 0.8.3 offers a version only after a check on real Claude, Codex, Kimi and Antigravity that later versions no longer have, so it shows no banner for 0.8.4 and "Update" says it cannot install it. Run the install line once on the server's computer. It moves the server to the latest version, and from then on the banner offers each new one.
 
 ## Why does a machine say it is waiting to update?
 
@@ -27,7 +23,11 @@ If the work does not finish in time, nothing stops. The update is put off, the c
 
 Each node on the computer goes by itself: one that has no work left restarts at once, whatever the others still wait for. Versions in the account menu says of each node what it waits for and until when.
 
-A plan's node goes this way only when the server knows it runs on the server's own computer, by the `HORNHOOF_HOST_ID` line in `.env`. The install line writes that line; an update through the updater does not. A node the server does not know is not replaced by itself: it goes on working on its build, and Machines says it is of another build. Run the install line once on that computer: what runs goes on, and the updater replaces such a node when its work ends.
+On the server's own computer, the updater next to the server replaces the nodes. It knows that computer by the `HORNHOOF_HOST_ID` line in `.env`, which `install.sh server` writes; an update through the updater does not.
+
+Every other computer with nodes has a small updater of its own, one for each Hornhoof whose nodes run there, which the install line starts. Every five minutes it asks the server which build its nodes should run. It first moves itself to that build's updater. When a node runs another build, it asks the server to let that node's work end and replaces the node once it is free, so no turn stops. It runs nothing the server sends: what replaces the nodes comes inside its own image, which Hornhoof published, and the server only names the images by their digests. `install.sh --uninstall` removes it with the nodes. When the server goes back to a build from before 0.8.4, the nodes stay where they are until you run the install line on that computer.
+
+A computer set up before 0.8.4 has no such updater yet, and Machines says its nodes are of another build. Run the install line once on that computer: what runs goes on, and from then on its nodes follow the server by themselves.
 
 The orchestrator and the heads wait for such a node for three minutes at most. After that their next turn goes to another machine of their plan or, when the plan has no other, to the node that waits, whose work runs on. Other agents' turns wait for the update.
 

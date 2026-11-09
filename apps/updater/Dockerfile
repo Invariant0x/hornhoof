@@ -3,4 +3,6 @@
 FROM docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
 RUN apk add --no-cache bash curl jq gzip
 COPY apps/updater/updater.sh /usr/local/bin/hornhoof-updater
+# The installer of the same build, which the updater of a server's nodes on another computer runs: it never runs one it downloads.
+COPY scripts/install.sh /usr/local/share/hornhoof/install.sh
 ENTRYPOINT ["hornhoof-updater"]

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # What apps/node/Dockerfile copies from the repository, and what Docker leaves out of it.
-INPUTS=(apps/node packages/protocol package.json package-lock.json tsconfig.base.json apps/server/package.json apps/web/package.json .dockerignore)
+INPUTS=(apps/node packages/protocol package.json package-lock.json tsconfig.base.json apps/server/package.json apps/web/package.json scripts/release/workspace-versions.mjs .dockerignore)
 
 cd "$(dirname "$0")/.."
 # In a shallow clone the one commit there seems to change every file, so the build would be that commit every time.

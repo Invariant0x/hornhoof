@@ -393,14 +393,14 @@ function heldTurn() {
   };
   return { slot, release, asked, inside, grants };
 }
-/* A machine's registry that notes what it was told and did, and which of its turns it held meanwhile (0: none). */
+/* A machine's registry that notes what it was told and did, and whether it held the machine's turn meanwhile. */
 function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
-  const claims: { state: string; inside: number; turn: number }[] = [], downloads: number[] = [];
+  const claims: { state: string; inside: number }[] = [], downloads: number[] = [];
   return {
     claims, downloads,
     remote: {
       ...remote,
-      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count, turn: turn.inside.count ? turn.grants.count : 0 }); return claim; },
+      async claim(unit, signal) { const claim = await remote.claim(unit, signal); claims.push({ state: claim.state, inside: turn.inside.count }); return claim; },
       async download(key, file, claim, signal) { downloads.push(turn.inside.count); return remote.download(key, file, claim, signal); },
     } satisfies HarnessRemote,
   };
@@ -553,13 +553,15 @@ describe("an agent's worktree", () => {
     shared.builds.set(shared.keysSeen[0]!, { builder: 'two' });
     turn.release();
     await until(() => mine.claims.some(claim => claim.state === 'wait'));
-    expect(await worktreeHarness(await worktree(f, two), two)).toMatch(PLACED);
+    /* It builds them as a harness sync does, holding its claim until the build is up. A worktree there would first give the
+       claim back and then take it again in its own turn, and this machine, asking every few milliseconds, may take the
+       build in between and build them itself. */
+    expect(await syncHarness(asked(f), two)).toMatchObject({ result: { status: 'ready' } });
     expect(await placing).toMatch(PLACED);
     expect(await installed(f)).toBe(1);
-    /* A busy machine may go round more than once, as the other machine's claim comes and goes; each time it holds the
-       machine's turn, the first wait gives the turn back. */
-    const waitsInTurns = mine.claims.filter(claim => claim.inside > 0 && claim.state === 'wait').map(claim => claim.turn);
-    expect(new Set(waitsInTurns).size).toBe(waitsInTurns.length);
+    /* In its turn it asked once, was told to wait and gave the turn back. */
+    expect(mine.claims.filter(claim => claim.inside > 0).map(claim => claim.state)).toEqual(['wait']);
+    expect(turn.grants.count).toBe(1);
     expect(mine.downloads).toEqual([0]);
   });
 

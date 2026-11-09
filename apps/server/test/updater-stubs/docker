@@ -13,8 +13,20 @@ tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' 
 ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
 ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
 running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
-image_by_id() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+image_by_id() {
+  for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done
+  for w in ${STUB_PLAN_NODES:-}; do [ "$(ref_id "${w##*=}")" = "$1" ] && { printf '%s' "${w##*=}"; return; }; done
+}
 case "$1 $2" in
+  # The running nodes of one server, on a computer that is not the server's: STUB_FOREIGN_NODES work for another server.
+  'ps --filter')
+    for w in ${STUB_PLAN_NODES:-}; do
+      case " $* " in *' label=hornhoof.server='*) case " ${STUB_FOREIGN_NODES:-} " in *" ${w%%=*} "*) continue ;; esac ;; esac
+      rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"
+    done ;;
+  # STUB_NODES_UPDATERS: the containers of the updater of a server's nodes there are now, and STUB_NODES_UPDATER_IMAGE the
+  # image the one of its name runs.
+  'ps -aq') for w in ${STUB_NODES_UPDATERS:-}; do echo "$w"; done ;;
   'ps -a')
     for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
   'compose ps')
@@ -44,6 +56,7 @@ case "$1 $2" in
           *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;;
           *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
         esac ;;
+      *.Config.Image*) printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}" ;;
       *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
     esac ;;
   *)

@@ -4,6 +4,11 @@
 # each for a server that says of each node whether it is free, STUB_FREE being those it names.
 printf 'curl %s\n' "$*" >> "$STUB_LOG"
 case " $* " in
+  # The installer a server serves, STUB_SERVED; it does not answer with STUB_SERVED_DOWN.
+  *'/install.sh '*)
+    [ -z "${STUB_SERVED_DOWN:-}" ] || { echo "curl: (7) Failed to connect" >&2; exit 7; }
+    while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$STUB_SERVED" "$2"; shift; done
+    exit 0 ;;
   *'/api/nodes/update '*)
     cat > "$STUB_STATE/curl-config"
     answer=''
@@ -13,7 +18,6 @@ case " $* " in
       each) jq -cn --arg free "${STUB_FREE:-}" '{ready: false, free: ($free | split(" ") | map(select(length > 0))), drain: null, pollAfterMs: 5000}' > "$answer"; printf 200 ;;
       old) echo '{"error":{"code":"not_found"}}' > "$answer"; printf 404 ;;
       refused) echo '{"error":{"code":"unauthorized"}}' > "$answer"; printf 401 ;;
-      unproven) echo '{"error":{"code":"conflict","reason":"live_check_missing"}}' > "$answer"; printf 409 ;;
       waiting) echo '{"ready":false,"drain":{"state":"waiting","turnsLeft":2,"partsLeft":0,"until":"2026-11-04T18:30:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
       postponed) echo '{"ready":false,"drain":{"state":"postponed","turnsLeft":1,"partsLeft":0,"retryAt":"2026-11-04T18:45:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;
       ready) echo '{"ready":true,"drain":{"state":"restarting","since":"2026-11-04T18:46:00.000Z"},"pollAfterMs":5000}' > "$answer"; printf 200 ;;

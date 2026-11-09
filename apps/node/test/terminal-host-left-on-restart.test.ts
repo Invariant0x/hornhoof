@@ -82,7 +82,8 @@ describe.skipIf(!hasTmux)('words left in the input of a program that starts anew
       expect(refs().size).toBe(1);
       expect(keysBefore).not.toContain('Escape');
       expect(c.paste.mock.calls.map(call => call[1])).toEqual(['Second assignment.']);
-      expect(await c.line()).not.toContain(WORDS);
+      // The new program redraws its input as it takes the assignment, and a screen read in that moment finds no input line.
+      await until(async () => { const now = await c.line(); return now !== null && !now.includes(WORDS); });
     });
   });
 

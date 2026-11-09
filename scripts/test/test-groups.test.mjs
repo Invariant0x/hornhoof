@@ -175,6 +175,9 @@ test('on GitHub, a change of one file of the server runs the server tests the se
     assert.equal(whole.plan, null, path);
     assert.match(whole.why, /whole suite/, path);
   }
+  /* A release where only our own versions moved leaves no change: the checks run, and no test. */
+  const none = await chooseTests(base, [], root);
+  assert.deepEqual(none.plan?.parts, [{}], none.why);
 });
 
 /* The script as a step of the workflow runs it, in this checkout, outside this test runner: a node --test it starts reports as its own. */

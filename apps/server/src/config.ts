@@ -26,8 +26,6 @@ export type Config = {
   nodeBuild: string | null;
   /* Where newer builds are published, and how often to look; 0 looks only when someone asks. */
   image: string;
-  /* This server runs a build to check it, on a machine with no real work, so it gives its nodes that build unproven. */
-  liveCheckStand: boolean;
   registryUrl?: string;
   updateCheckMs: number;
   nodeDrainMs: number;
@@ -135,7 +133,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     migrations: migrationCount(),
     nodeBuild: nodeBuildOf(env),
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
-    liveCheckStand: env.HORNHOOF_LIVE_CHECK_STAND === '1',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
     nodeDrainMs: set.NODE_DRAIN_MS,

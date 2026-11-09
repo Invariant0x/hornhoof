@@ -13,7 +13,7 @@ describe('what the build runs', () => {
   });
 
   /* Every company updates to :latest, so no build, of main or of a branch, may move it: only the publish job does, after the
-     live check, and scripts/test/live-check-workflow.test.mjs holds that job to it. */
+     tests passed on main, and scripts/test/images-workflow.test.mjs holds that job to it. */
   it('pushes a build under its commit tag alone', () => {
     const tags = read('.github/workflows/images.yml').split('\n').filter(l => /^\s+tags: /.test(l)).map(l => l.trim());
     expect(tags).toEqual(['tags: ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}']);
@@ -22,7 +22,7 @@ describe('what the build runs', () => {
   /* A tag can point at another image tomorrow; a digest is the one image the build was checked with. */
   it('builds every image from a base image pinned by digest', () => {
     const from = ['Dockerfile', 'apps/node/Dockerfile', 'apps/updater/Dockerfile'].flatMap(f => read(f).split('\n').filter(l => l.startsWith('FROM ')));
-    expect(from).toHaveLength(9);
+    expect(from).toHaveLength(11);
     for (const line of from) expect(line).toMatch(/ [\w.-]+:[\w.-]+@sha256:[0-9a-f]{64}( AS \w+)?$/);
   });
 

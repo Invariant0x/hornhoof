@@ -116,7 +116,8 @@ describe.skipIf(!hasTmux)('words left unsent in the input of a program, when a n
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
     expect(keys.mock.calls.flat()).not.toContain('Escape');
     expect(lefts()).toEqual([]);
-    expect(await c.line()).toBe('');
+    // The program redraws its input once it takes the words, and a screen read in that moment finds no input line.
+    await until(async () => (await c.line()) === '');
   });
 
   it('keeps words a person added to such a prompt, as Hornhoof repeats only its own', async () => {

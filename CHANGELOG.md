@@ -5,12 +5,51 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
-## [Unreleased]
+## [0.8.4] - 2026-11-08
+
+Let the nodes on every computer follow the server to a new build by themselves, release a version without turns of the
+programs on real nodes, let GitHub test each commit once and only where its change reaches, and tell an employee once that
+someone waits for them.
+
+### Before you update
+
+- A server on 0.8.0 to 0.8.3 does not offer this version, as it waits for a check on real programs that no longer comes.
+  Run the install line once on the server's computer to update it.
+- On every computer other than the server's own, run the install line once more after the update. It starts the updater
+  of that computer's nodes; from then on they follow the server by themselves.
+
+### Added
+
+- Nodes on every computer move to the server's build by themselves, each once its work ends: the install line starts a
+  small updater next to them. It reads what the server serves only as data and runs only Hornhoof's own images, each by
+  its digest.
 
 ### Changed
 
+- A release no longer needs turns of Claude, Codex, Kimi and Antigravity on real nodes. Once the tests passed on main, the
+  images built for that commit go out, every published build is offered and installed, and the nodes follow it. The live
+  check, its proof, the live check stand, `install.sh check-node` and `install.sh back-node` are gone.
 - GitHub tests each commit once, and runs only the tests its change reaches since the last commit whose tests passed. A
   change that reaches everything, such as one of the lockfile, still runs every test.
+- A release no longer runs every test on GitHub because it moves the version in the package files and the lockfile:
+  where only our own versions moved, the file counts as unchanged. Any other change of them still runs every test.
+- A release builds its images faster. A new version alone no longer installs the dependencies or downloads the browser
+  of an image again, and each image keeps its build cache next to it on GitHub, so a builder that dropped its own, or a
+  new one, does not build the heavy parts again. GitHub's own cache, which took longer to fill than the build, is no
+  longer used.
+
+### Fixed
+
+- An employee hears once that someone waits for them on a task. The one who waits can say its wait again with new words
+  or a new date while it stands, or within ten minutes after the employee answered on the task, and that tells the
+  employee nothing new. A wait on someone else, one after an older answer, or one after the last ran out or its holder
+  ended it still tells them.
+- An employee can no longer wait for itself by writing its own id in capitals, and is never told that it waits for itself.
+- A push to main whose version is out already no longer shows as a failed run on GitHub: the publish job sees the
+  version's tag and moves nothing.
+- Two node tests that failed now and then on a busy GitHub runner pass every time. In the shared harness test the other
+  machine now holds its claim while it builds, so the waiting machine cannot take the build in between, and the Kimi Code
+  test waits for the input line to come back after the new program redraws it.
 
 ## [0.8.3] - 2026-11-08
 
