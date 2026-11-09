@@ -152,6 +152,30 @@ describe('templates', () => {
     expect(rules.description.en).toMatch(/your company's rules, those rules win/);
   });
 
+  it('puts a preface above the ub-mode quote that wins where they differ', () => {
+    const rules = templates.skills.get('dev-engineering-rules')!.body;
+    const preface = rules.slice(0, rules.indexOf('Every time you are asked to make a change follow:'));
+    expect(preface).toMatch(/Where the quote below differs from these lines, these lines win/);
+    expect(preface).toMatch(/never push or merge to the main line unless the task names that action/);
+    expect(preface).toMatch(/the report is the result and its evidence, not a log of every action/);
+    expect(preface).toMatch(/run crapper, dryer and mutator only when the task assigns them/);
+    expect(preface).toMatch(/question the premise after three failed fixes, not two/);
+  });
+
+  it('says in SOURCES which part of dev-engineering-rules is quoted and which is written for Hornhoof', () => {
+    const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
+    const row = sources.split('\n').find(line => line.startsWith('| `skills/dev-engineering-rules.md`'))!;
+    expect(row).toMatch(/word for word from "Every time you are asked to make a change follow:" to the end/);
+    expect(row).toMatch(/the lines above the quote are written for Hornhoof/);
+    expect(sources.split('\n').find(line => line.startsWith('Every role and skill text'))).toMatch(/The lines above the quote are Hornhoof's own/);
+    expect(sources.split('\n').find(line => line.startsWith('| unclebob/ub-mode |'))).toMatch(/below a preface of Hornhoof's own/);
+  });
+
+  it('names one number of failed fixes before the premise is questioned', () => {
+    for (const id of ['dev-debugging', 'ops-incident-response', 'orch-trouble']) expect(body(id), id).toMatch(/three failed fixes|fails three times/);
+    for (const [id, skill] of templates.skills) expect(skill.body, id).not.toMatch(/two failed fixes|fails twice/);
+  });
+
   it('retains all testing-policy capabilities without a fixed downstream tester', () => {
     const policy = body('dev-testing-policy');
     for (let n = 1; n <= 11; n++) expect(policy, `T${n}`).toContain(`T${n}:`);
@@ -515,7 +539,8 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
-    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules'), id).toBeUndefined();
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
   });
 
@@ -1226,7 +1251,7 @@ const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (s: OrchestratorOutageSkil
     id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
     holds: ({ trouble: text }) =>
       matchesAll(text, [
-        /\bsame internal fix fails (?:a second time|twice)\b/i,
+        /\bsame internal fix fails (?:a third time|three times)\b/i,
         /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
         /\bordinary safe retry of a transient external failure needs no extra permission\b/i,
       ]) &&
