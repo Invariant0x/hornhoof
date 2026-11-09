@@ -5,7 +5,7 @@ import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.
 import { setPaused } from '../src/modules/tasks/pause.js';
 import { startRun } from '../src/modules/testruns/runs.js';
 import { taskForWake } from '../src/modules/tasks/wake-state.js';
-import { as } from './helpers.js';
+import { as, invitePerson } from './helpers.js';
 import { BASE, fixture } from './development-echelons-fixture.js';
 
 const code = { summary: 'Keep totals.', evidence: 'Focused checks passed.', review: { baseCommit: BASE } };
@@ -59,6 +59,8 @@ describe('a paused task wakes nobody until it is resumed', () => {
     const put = await f.app.inject({ method: 'PUT', url: `/api/tasks/${f.task.id}/paused`, payload: { paused: true, reason: 'Hold for the release.' }, ...as(f.ceoToken) });
     expect(put.statusCode).toBe(200);
     expect(put.json().task).toMatchObject({ paused: { reason: 'Hold for the release.' }, mayPause: true });
+    const whole = await invitePerson(f.app, f.ceoToken, { name: 'Wes', email: 'wes@acme.com', access: { whole: true } });
+    expect((await f.app.inject({ method: 'PUT', url: `/api/tasks/${f.task.id}/paused`, payload: { paused: false }, ...as(whole) })).statusCode).toBe(403);
     await cancel(f.ctx, { agentId: f.head.id }, f.task.id, 'Not needed any more.');
     expect((await loadTask(f.db, f.task.id)).paused).toBeNull();
     expect(await refused(setPaused(f.ctx, { agentId: f.head.id }, f.task.id, true, 'Hold.'))).toMatchObject({ status: 409 });

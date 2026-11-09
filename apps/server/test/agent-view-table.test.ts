@@ -122,6 +122,7 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/wait-cards/:id/ack': 'agent-view-waits.test.ts: delivered card recipient only, 404 for another person even the CEO',
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
   'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
+  'PUT /api/tasks/:id/paused': 'task-pause.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
