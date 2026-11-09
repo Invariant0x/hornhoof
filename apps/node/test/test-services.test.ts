@@ -1,5 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { runInNewContext } from 'node:vm';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'node:fs';
@@ -62,6 +64,84 @@ beforeEach(() => {
   fakePostgres();
 });
 afterEach(() => { vi.restoreAllMocks(); for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+/* Execute the node's inline guardian as its child process would, with recorded process and /proc boundaries. The timers
+   belong to the test's virtual clock; no program starts and no signal reaches the machine. */
+function recordedGuardian(exitGraceMs?: number) {
+  const source = readFileSync(new URL('../src/test-services.ts', import.meta.url), 'utf8');
+  const script = /const LEASE_GUARDIAN = String.raw`([\s\S]*?)`;/.exec(source)?.[1];
+  if (!script) throw new Error('The inline lease guardian is missing');
+  const group = { alive: true };
+  const signals: { pid: number; signal: NodeJS.Signals | number }[] = [];
+  const messages: { supervisionFailed: boolean }[] = [];
+  const job = Object.assign(new EventEmitter(), { pid: 123, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  const guardian = Object.assign(new EventEmitter(), {
+    connected: true,
+    exitCode: undefined as number | undefined,
+    stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    kill(pid: number, signal: NodeJS.Signals | number) {
+      if (!group.alive) throw Object.assign(new Error('No such process group'), { code: 'ESRCH' });
+      signals.push({ pid, signal });
+      if (signal === 'SIGKILL') group.alive = false;
+    },
+    send(message: { supervisionFailed: boolean }, done: () => void) { messages.push(message); done(); },
+    disconnect() { guardian.connected = false; guardian.emit('disconnect'); },
+  });
+  runInNewContext(script, {
+    process: guardian, setTimeout, clearTimeout, setInterval, clearInterval,
+    require(name: string) {
+      if (name === 'node:child_process') return { spawn: () => job };
+      if (name === 'node:fs') return { readdirSync: () => ['456'], readFileSync: () => '456 (recorded writer) S 1 123 0' };
+      throw new Error(`Unexpected guardian dependency: ${name}`);
+    },
+  });
+  guardian.emit('message', { program: 'recorded-service', args: [], cwd: '/recorded', env: {}, uid: 1001, gid: 1002, ...(exitGraceMs === undefined ? {} : { exitGraceMs }) });
+  return { job, guardian, group, signals, messages };
+}
+
+describe('lease guardian after its leader exits', () => {
+  it.each([
+    { name: 'the unchanged default', given: undefined, expected: 2000 },
+    { name: 'the configured grace', given: 321, expected: 321 },
+  ])('marks forced supervision after $name expires, with no stop request', ({ given, expected }) => {
+    vi.useFakeTimers();
+    try {
+      const recorded = recordedGuardian(given);
+      recorded.job.emit('exit', 0);
+      vi.advanceTimersByTime(expected - 1);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([]);
+      expect(recorded.messages).toEqual([]);
+      expect(recorded.guardian.connected).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([{ pid: -123, signal: 'SIGKILL' }]);
+      vi.advanceTimersByTime(5);
+      expect(recorded.messages).toEqual([{ supervisionFailed: true }]);
+      expect(recorded.guardian.exitCode).toBe(1);
+      expect(recorded.guardian.connected).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the lease until descendants leave and clears escalation when they finish on their own', () => {
+    vi.useFakeTimers();
+    try {
+      const recorded = recordedGuardian();
+      recorded.job.emit('exit', 0);
+      vi.advanceTimersByTime(100);
+      expect(recorded.messages).toEqual([]);
+      expect(recorded.guardian.connected).toBe(true);
+      recorded.group.alive = false;
+      vi.advanceTimersByTime(5);
+      expect(recorded.messages).toEqual([{ supervisionFailed: false }]);
+      expect(recorded.guardian.exitCode).toBe(0);
+      expect(recorded.guardian.connected).toBe(false);
+      vi.advanceTimersByTime(2000);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([]);
+      expect(recorded.messages).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
 const prep = () => prepareServiceArtifacts(definitions, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
 const part = (attempt: string) => ({ ...context, attemptRoot: join(root, 'runs', attempt), checkout: root });
 
