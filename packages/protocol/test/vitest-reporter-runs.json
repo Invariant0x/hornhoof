@@ -1,0 +1,192 @@
+{
+  "recorded": "Vitest 5.0.5 on Node 22.23.4: npx vitest run --root <root> on these specs, with a reporter that wrote down what onInit and onTestRunEnd were handed. root is relative to packages/protocol, moduleId to root.",
+  "sampleOnly": {
+    "specs": {
+      "sample.test.ts": "import { expect, it, onTestFinished } from 'vitest';\nconst pause = (ms: number) => new Promise(r => setTimeout(r, ms));\nit('is quick', () => expect(1).toBe(1));\nit('is quick too', () => expect(2).toBe(2));\nit('opens a database', async ({ task }) => {\n  await pause(60);\n  task.meta.setupMs = 60;\n  onTestFinished(async () => {\n    await pause(40);\n    task.meta.teardownMs = 40;\n  });\n  await pause(100);\n});\n"
+    },
+    "root": "test/.timings-MQQp4Z",
+    "modules": [
+      {
+        "moduleId": "sample.test.ts",
+        "relativeModuleId": "sample.test.ts",
+        "state": "passed",
+        "diagnostic": {
+          "environmentSetupDuration": 0.07662499999999994,
+          "prepareDuration": 2.2241669999999942,
+          "collectDuration": 9.065500000000007,
+          "setupDuration": 0,
+          "duration": 206.277083,
+          "importDurations": {},
+          "concurrencyId": 1,
+          "workerId": 1
+        },
+        "tests": [
+          {
+            "fullName": "is quick",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 0.8753750000000053,
+              "startTime": 1794224791686,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {}
+          },
+          {
+            "fullName": "is quick too",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 0.11249999999999716,
+              "startTime": 1794224791687,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {}
+          },
+          {
+            "fullName": "opens a database",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 204.20158300000003,
+              "startTime": 1794224791687,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {
+              "setupMs": 60,
+              "teardownMs": 40
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "withFailingAndSkipped": {
+    "specs": {
+      "sample.test.ts": "import { expect, it, onTestFinished } from 'vitest';\nconst pause = (ms: number) => new Promise(r => setTimeout(r, ms));\nit('is quick', () => expect(1).toBe(1));\nit('is quick too', () => expect(2).toBe(2));\nit('opens a database', async ({ task }) => {\n  await pause(60);\n  task.meta.setupMs = 60;\n  onTestFinished(async () => {\n    await pause(40);\n    task.meta.teardownMs = 40;\n  });\n  await pause(100);\n});\n",
+      "failing.test.ts": "import { expect, it } from 'vitest';\nit('fails', () => expect(1).toBe(2));\n",
+      "skipped.test.ts": "import { it } from 'vitest';\nit.skip('waits', () => {});\n"
+    },
+    "root": "test/.timings-8sJsgs",
+    "modules": [
+      {
+        "moduleId": "failing.test.ts",
+        "relativeModuleId": "failing.test.ts",
+        "state": "failed",
+        "diagnostic": {
+          "environmentSetupDuration": 0.07287500000000335,
+          "prepareDuration": 1.9136670000000038,
+          "collectDuration": 10.016749999999995,
+          "setupDuration": 0,
+          "duration": 4.777417,
+          "importDurations": {},
+          "concurrencyId": 2,
+          "workerId": 2
+        },
+        "tests": [
+          {
+            "fullName": "fails",
+            "state": "failed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 3.671458000000001,
+              "startTime": 1794224792362,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {}
+          }
+        ]
+      },
+      {
+        "moduleId": "sample.test.ts",
+        "relativeModuleId": "sample.test.ts",
+        "state": "passed",
+        "diagnostic": {
+          "environmentSetupDuration": 0.11791600000000102,
+          "prepareDuration": 1.9571250000000049,
+          "collectDuration": 12.321125000000002,
+          "setupDuration": 0,
+          "duration": 206.80679200000003,
+          "importDurations": {},
+          "concurrencyId": 1,
+          "workerId": 1
+        },
+        "tests": [
+          {
+            "fullName": "is quick",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 0.8950829999999996,
+              "startTime": 1794224792363,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {}
+          },
+          {
+            "fullName": "is quick too",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 0.0908330000000035,
+              "startTime": 1794224792364,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {}
+          },
+          {
+            "fullName": "opens a database",
+            "state": "passed",
+            "diagnostic": {
+              "slow": false,
+              "duration": 204.93116700000002,
+              "startTime": 1794224792364,
+              "retryCount": 0,
+              "repeatCount": 0,
+              "flaky": false
+            },
+            "meta": {
+              "setupMs": 60,
+              "teardownMs": 40
+            }
+          }
+        ]
+      },
+      {
+        "moduleId": "skipped.test.ts",
+        "relativeModuleId": "skipped.test.ts",
+        "state": "skipped",
+        "diagnostic": {
+          "environmentSetupDuration": 0.07283300000000281,
+          "prepareDuration": 1.9470829999999992,
+          "collectDuration": 9.783874999999995,
+          "setupDuration": 0,
+          "duration": 0,
+          "importDurations": {},
+          "concurrencyId": 3,
+          "workerId": 3
+        },
+        "tests": [
+          {
+            "fullName": "waits",
+            "state": "skipped",
+            "diagnostic": null,
+            "meta": {}
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,10 +1,11 @@
+import { UNHEARD_MS } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
-import { enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, openTypedTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
 import { nextOf as next } from './helpers.js';
@@ -904,6 +905,17 @@ describe('words a person typed in a running turn, which the program takes after 
     return next(at.builtin, 'turn.opened');
   };
   const refusal = async (at: At) => (await state(at.app, at.ceo)).turnRefused;
+  /* The next turn waits while the program may still take its waiting words, and goes out once that chance is over: here
+     the server's pump runs past that deadline at once, instead of the test waiting it out. */
+  const pastWordsDeadline = async (at: At) => {
+    const now = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + UNHEARD_MS + 1);
+    try {
+      await pump(at.app.ctx, at.orchestratorId);
+    } finally {
+      clock.mockRestore();
+    }
+  };
 
   it.each([
     ['the CEO', async () => { const at = await live(); const [p] = await at.db.select().from(people).where(eq(people.isOwner, true)); return { at, token: at.ceo, personId: p!.id, answersCeo: true }; }],
@@ -946,6 +958,7 @@ describe('words a person typed in a running turn, which the program takes after 
     const at = await live();
     const turn = await pressedIn(at, at.ceo);
     await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'next' }, ...as(at.ceo) });
+    await pastWordsDeadline(at);
     const other = await next(at.builtin, 'job.run');
     at.builtin.send({ type: 'job.done', jobId: other.jobId, ok: true, sessionId: 'sess-1', result: 'Next.', tail: '', error: null });
     await until(async () => !(await state(at.app, at.ceo)).busy);
@@ -957,6 +970,7 @@ describe('words a person typed in a running turn, which the program takes after 
     const at = await lent();
     const turn = await pressedIn(at, at.zed);
     await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(at.ceo) });
+    await pastWordsDeadline(at);
     const other = await next(at.builtin, 'job.run');
     const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
     expect(await decisionPrincipal(at.db, other.jobId)).toMatchObject({ personId: owner!.id });

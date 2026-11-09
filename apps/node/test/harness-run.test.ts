@@ -24,6 +24,7 @@ import { dependencyCacheKey, environmentCacheKey, harnessVersion, readTestEnviro
 import { type HarnessRemote } from '../src/test-harness.js';
 import { agentFs, ownFs } from '../src/agent-fs.js';
 import { runTests, syncHarness, worktreeHarness, type Worktree } from '../src/tests.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) { await rm(root, { recursive: true, force: true }); } });
@@ -405,12 +406,7 @@ function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
     } satisfies HarnessRemote,
   };
 }
-const until = async (check: () => boolean) => {
-  for (const end = Date.now() + 5_000; !check();) {
-    if (Date.now() > end) throw new Error('timed out');
-    await new Promise(resolve => { setTimeout(resolve, 5); });
-  }
-};
+const until = (check: () => boolean) => eventually(check, { every: 5, message: 'timed out' });
 const STILL_WAITING = 'still waiting';
 const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
 

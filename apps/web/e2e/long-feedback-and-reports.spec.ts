@@ -60,8 +60,10 @@ import { applyMissingMigrations, MIGRATIONS } from './src/db/client.js';
 import * as schema from './src/db/schema.js';
 import { setupCode } from './src/modules/setup/code.js';
 import { ask, createTask, submit, verdict } from './src/modules/tasks/engine.js';
+import { testPort } from '../../test-support/ports.mjs';
 
 const secret = Buffer.alloc(32, 9).toString('base64');
+const base = 'a'.repeat(40);
 const commit = 'b'.repeat(40);
 const client = new PGlite();
 const db = drizzle(client, { schema });
@@ -78,7 +80,7 @@ const app = await buildApp({
   config,
   readCommit: async (_repo, want) => ({ branch: 'branch' in want ? want.branch : 'task-' + want.task, commitSha: commit }),
   markCommit: async () => ({ ok: true }),
-  readCompare: async () => ({ complete: true, baseSha: commit, headSha: commit, paths: [], diff: '' }),
+  readCompare: async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['docs/report.md'], diff: '@@ -1 +1 @@\\n-old\\n+new' }),
 });
 
 let fx = null;
@@ -94,7 +96,10 @@ app.post('/__e2e/scenario', async req => {
     departmentId: fx.dev.id,
     assigneeAgentId: fx.worker.id,
     executor: true,
-    gates: [fx.reviewer.id],
+    reviewerAgentId: fx.reviewer.id,
+    paths: ['docs/report.md'],
+    small: true,
+    riskClass: 'none',
   })).task;
 
   const checklistBytes = Buffer.from('1. Check RU/EN\\n2. Check light/dark\\n3. Check 1440/375\\n', 'utf8');
@@ -111,14 +116,17 @@ app.post('/__e2e/scenario', async req => {
   await submit(app.ctx, fx.worker.id, mainTask.id, {
     summary: body.submitSummary,
     evidence: body.submitEvidence,
+    review: { baseCommit: base },
   });
   await verdict(app.ctx, fx.reviewer.id, mainTask.id, {
     pass: false,
     comment: body.verdictComment,
+    reviewedCommit: commit,
     findings: 1,
   });
 
-  const choiceReq = (await ask(app.ctx, fx.worker.id, mainTask.id, {
+  /* A failing verdict keeps the work with Review, which repairs it itself, so the one who holds it asks. */
+  const choiceReq = (await ask(app.ctx, fx.reviewer.id, mainTask.id, {
     kind: 'choice',
     topic: body.withPickTask ? 'release' : 'task',
     text: body.lang === 'ru'
@@ -151,7 +159,8 @@ app.post('/__e2e/scenario', async req => {
       departmentId: fx.dev.id,
       assigneeAgentId: fx.designer.id,
       executor: true,
-      gates: [],
+      paths: ['docs/report.md'],
+      small: true,
     })).task;
     const pickReq = (await ask(app.ctx, fx.designer.id, pickTask.id, {
       kind: 'choice',
@@ -205,7 +214,7 @@ if (!ceoSession) throw new Error('Setup failed: ' + setupRes.statusCode + ' ' + 
 const [acme] = await db.select().from(schema.companies);
 const [ceo] = await db.select().from(schema.people);
 const [sub] = await db.select().from(schema.subscriptions);
-const [dev] = await db.insert(schema.departments).values({ companyId: acme.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+const [dev] = await db.insert(schema.departments).values({ companyId: acme.id, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
 const [ops] = await db.insert(schema.departments).values({ companyId: acme.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
 
 async function makePersonSession(name, email, deptId) {
@@ -240,7 +249,9 @@ const hire = async (name, kind, roleKey) => {
     kind,
     name,
     roleKey,
-    model: '',
+    /* A known model with the abilities of its role, so the required route can hand the work to a checker. */
+    model: 'claude-opus-5-5',
+    skills: app.ctx.templates.roles.get(roleKey)?.skills.filter(skill => skill.on).map(skill => skill.id) ?? [],
   }).returning();
   return agent;
 };
@@ -251,7 +262,7 @@ const reviewer = await hire('Rita', 'worker', 'DEV-REV');
 const designer = await hire('Interface Designer', 'worker', 'DEV-FE');
 fx = { acme, ceo, dev, head, worker, reviewer, designer };
 
-const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
 process.stdout.write(JSON.stringify({
   origin,
   ceoSession,

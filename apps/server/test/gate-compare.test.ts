@@ -27,7 +27,12 @@ describe('trusted repository comparison', () => {
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: true, paths: ['ordinary.ts', 'auth/session.ts'] });
   });
 
-  it.each([{}, { files: [{ filename: 'binary.png', additions: 0, deletions: 0 }] }, { files: [{ filename: 'a.ts', patch: '+cut', additions: 10, deletions: 0 }] }, { files: Array.from({ length: 300 }, (_, i) => ({ filename: `${i}.ts`, patch: '+x', additions: 1, deletions: 0 })) }])('treats malformed, omitted, truncated or capped patches as incomplete', async change => {
+  it('names a file GitHub shows no patch of, a binary or a large one, instead of taking the comparison for unknown', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(fixture([{ filename: 'binary.png', additions: 0, deletions: 0 }])))));
+    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: true, paths: ['binary.png'], diff: 'GitHub shows no patch of binary.png: 0 lines added, 0 removed.', omitted: [{ path: 'binary.png', additions: 0, deletions: 0 }] });
+  });
+
+  it.each([{}, { files: [{ filename: 'a.ts', patch: '+cut', additions: 10, deletions: 0 }] }, { files: Array.from({ length: 300 }, (_, i) => ({ filename: `${i}.ts`, patch: '+x', additions: 1, deletions: 0 })) }])('treats malformed, truncated or capped patches as incomplete', async change => {
     const body = Object.keys(change).length ? { ...fixture(), ...change } : {};
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))));
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toMatchObject({ complete: false });
@@ -35,7 +40,7 @@ describe('trusted repository comparison', () => {
 
   it('pins an identical comparison and fails closed when a non-identical result names no head commit', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...fixture(), commits: [], total_commits: 0, status: 'identical', files: [] }))));
-    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: true, baseSha: 'b'.repeat(40), headSha: 'b'.repeat(40), paths: [], diff: '' });
+    expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: true, baseSha: 'b'.repeat(40), headSha: 'b'.repeat(40), paths: [], diff: '', omitted: [] });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...fixture(), commits: [], files: [] }))));
     expect(await readCompare(repo, { base: 'main', head: 'turn-8' })).toEqual({ complete: false, reason: 'incomplete-comparison' });
   });

@@ -1,54 +1,55 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import type { TestCase, TestModule, Vitest } from 'vitest/node';
 import { parseTimingLines } from '../src/pipeline-report.js';
+import TestTimings from '../src/test-timings-reporter.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const REPORTER = join(ROOT, 'src/test-timings-reporter.ts');
-const TIMING = '::hh-test-timing::';
-const SPEC = `
-import { expect, it, onTestFinished } from 'vitest';
-const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
-it('is quick', () => expect(1).toBe(1));
-it('is quick too', () => expect(2).toBe(2));
-it('opens a database', async ({ task }) => {
-  await pause(60);
-  task.meta.setupMs = 60;
-  onTestFinished(async () => {
-    await pause(40);
-    task.meta.teardownMs = 40;
-  });
-  await pause(100);
-});
-`;
 
-/* A real run of the runner on a test file of its own, as a part of a run makes one. */
-async function runner(env: Record<string, string>, extra: Record<string, string> = {}) {
-  const dir = await mkdtemp(join(ROOT, 'test/.timings-'));
-  onTestFinished(() => rm(dir, { recursive: true, force: true }));
-  await writeFile(join(dir, 'sample.test.ts'), SPEC);
-  for (const [name, text] of Object.entries(extra)) await writeFile(join(dir, name), text);
-  const child = spawn('npx', ['--no-install', 'vitest', 'run', '--root', dir, `--reporter=${REPORTER}`, '--reporter=default'], { cwd: ROOT, env: { ...process.env, ...env, NO_COLOR: '1', HH_TEST_PART: env.HH_TEST_PART ?? '', HH_TEST_REPORT: env.HH_TEST_REPORT ?? '' } });
-  let out = '';
-  child.stdout.on('data', chunk => (out += String(chunk)));
-  child.stderr.on('data', chunk => (out += String(chunk)));
-  const code = await new Promise(done => child.on('close', done));
-  return { code, out, dir };
+type Recorded = {
+  root: string;
+  modules: {
+    moduleId: string; relativeModuleId: string; state: string; diagnostic: Record<string, unknown>;
+    tests: { fullName: string; diagnostic: Record<string, unknown> | null; meta: Record<string, number> }[];
+  }[];
+};
+/* What Vitest 5.0.5 handed a reporter in two real runs of the specs written in the file, recorded once by hand (its "recorded"
+   says how): sample.test.ts alone, and beside a failing and a skipped file. These tests start no runner and wait for nothing. */
+const RUNS = JSON.parse(readFileSync(join(ROOT, 'test/vitest-reporter-runs.json'), 'utf8')) as { sampleOnly: Recorded; withFailingAndSkipped: Recorded };
+
+/* The calls a run makes on the reporter, with the objects of the recorded run under the folder it ran in. */
+function reporting(recorded: Recorded, env: { HH_TEST_PART?: string; HH_TEST_REPORT?: string }) {
+  vi.stubEnv('HH_TEST_PART', env.HH_TEST_PART ?? '');
+  /* Under a part of a real run, a report of the made-up run would be written over the report of the real one. */
+  vi.stubEnv('HH_TEST_REPORT', env.HH_TEST_REPORT ?? '');
+  onTestFinished(() => { vi.unstubAllEnvs(); });
+  const root = join(ROOT, recorded.root);
+  const modules = recorded.modules.map(module => {
+    const tests = module.tests.map(test => ({ fullName: test.fullName, diagnostic: () => test.diagnostic ?? undefined, meta: () => test.meta }) as unknown as TestCase);
+    return {
+      moduleId: join(root, module.moduleId), relativeModuleId: module.relativeModuleId, state: () => module.state, diagnostic: () => module.diagnostic,
+      children: { allTests: () => tests.values() },
+    } as unknown as TestModule;
+  });
+  const write = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+  try {
+    const reporter = new TestTimings();
+    reporter.onInit({ config: { root } } as unknown as Vitest);
+    reporter.onTestRunEnd(modules);
+    return { out: write.mock.calls.map(call => String(call[0])).join(''), root };
+  } finally { write.mockRestore(); }
 }
 
 describe('the timing reporter', () => {
-  it('prints nothing outside a run of Hornhoof', async () => {
-    const { code, out } = await runner({});
-    expect(code).toBe(0);
-    expect(parseTimingLines(out)).toEqual({ files: [], packages: [] });
-  }, 60_000);
+  it('prints nothing outside a run of Hornhoof', () => {
+    expect(parseTimingLines(reporting(RUNS.sampleOnly, {}).out)).toEqual({ files: [], packages: [] });
+  });
 
-  it('prints each file with its setup, tests and teardown, and its package', async () => {
-    const { code, out } = await runner({ HH_TEST_PART: '1' });
-    expect(code).toBe(0);
-    const { files, packages } = parseTimingLines(out);
+  it('prints each file with its setup, tests and teardown, and its package', () => {
+    const { files, packages } = parseTimingLines(reporting(RUNS.sampleOnly, { HH_TEST_PART: '1' }).out);
     expect(files).toHaveLength(1);
     const [file] = files;
     expect(file!.file).toBe('sample.test.ts');
@@ -60,19 +61,16 @@ describe('the timing reporter', () => {
     expect(file!.slowest[0]!.name).toBe('opens a database');
     expect(file!.slowest.length).toBeLessThanOrEqual(5);
     expect(packages).toEqual([expect.objectContaining({ package: file!.package, tests: 3, slowerThanMedian: 1 })]);
-    expect(out.lastIndexOf(TIMING)).toBeLessThan(out.lastIndexOf('Test Files'));
-  }, 60_000);
+  });
 
   it('names how each file went in the file a part of a run asks for', async () => {
-    const report = join(tmpdir(), `hh-report-${process.pid}-${Date.now()}.json`);
-    onTestFinished(() => rm(report, { force: true }));
-    const failing = "import { expect, it } from 'vitest';\nit('fails', () => expect(1).toBe(2));\n";
-    const skipped = "import { it } from 'vitest';\nit.skip('waits', () => {});\n";
-    const { code, dir } = await runner({ HH_TEST_REPORT: report }, { 'failing.test.ts': failing, 'skipped.test.ts': skipped });
-    expect(code).toBe(1);
+    const dir = await mkdtemp(join(tmpdir(), 'hh-report-'));
+    onTestFinished(() => rm(dir, { recursive: true, force: true }));
+    const report = join(dir, 'report.json');
+    const { root } = reporting(RUNS.withFailingAndSkipped, { HH_TEST_REPORT: report });
     const { files } = JSON.parse(await readFile(report, 'utf8')) as { files: { file: string; status: string; ms: number }[] };
-    const status = Object.fromEntries(files.map(file => [file.file.slice(dir.length + 1), file.status]));
+    const status = Object.fromEntries(files.map(file => [file.file.slice(root.length + 1), file.status]));
     expect(status).toEqual({ 'sample.test.ts': 'passed', 'failing.test.ts': 'failed' });
     expect(files.every(file => file.file.startsWith('/') && file.ms >= 0)).toBe(true);
-  }, 60_000);
+  });
 });

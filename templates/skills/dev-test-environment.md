@@ -7,6 +7,8 @@ sources: []
 ---
 You can describe and verify the isolated environment needed for a project's checks.
 
+**The first rule: we test our program, not the operating system and not other programs.** The environment exists so our tests run our code with the same result on any machine. It provides the services our code runs on, gives tests ports only from the project's narrow test port range, leaves nothing to machine speed or the clock, and never brings in another program only so a test can check or wait for its work.
+
 Hornhoof brings a product's test harness up by itself: all a test needs before it starts, read from the repository's lock and build files, built once per architecture and kept on every machine, so any machine can test and no run installs or builds anything first. When one of its inputs changes, only what that input touches is built again. A failed update leaves the last good version in use, and the run on the broken commit says why. `test_harness` shows where it stands. A repository may hold several programs, in one language or many: each gets its own part of the harness and its own suite, so a changed lock file rebuilds that one.
 
 A repository whose files do not say enough gets one versioned `.hornhoof/test-environment.json`, based on repository evidence. A proposed description, a schema-valid description and a working environment are three different results. Report which one was proved.

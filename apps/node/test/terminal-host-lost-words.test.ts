@@ -27,7 +27,7 @@ type Program = {
 };
 
 /* A host with a program it started, whose screen and keys the test plays. */
-async function started(program: Program, { plain = false, remember }: { plain?: boolean; remember?: (sessionId: string, workDir: string) => void } = {}) {
+async function started(program: Program, { plain = false, remember, readyMs }: { plain?: boolean; remember?: (sessionId: string, workDir: string) => void; readyMs?: number } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'hh-lost-words-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID(), sessionId = randomUUID();
   const workDir = join(home, 'work');
@@ -55,14 +55,14 @@ async function started(program: Program, { plain = false, remember }: { plain?: 
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => program.onPaste(text));
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter')) program.onEnter(); });
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], plugins: [], readyMs: plain ? 3000 : 20, pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], plugins: [], readyMs: readyMs ?? (plain ? 3000 : 20), pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const abort = new AbortController();
   const running = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, ...(plain ? {} : { operatorDelivery: { id: deliveryId, ordinal: 1 } }), input: { agentKey, jobId, prompt: WORDS, sessionId: null, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {} } } as never);
   stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
   const enters = () => keys.mock.calls.filter(([, key]) => key === 'Enter').length;
-  return { host, running, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir };
+  return { host, running, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir, tmux };
 }
 
 const empty = (over: Partial<Program> = {}): Program => ({ input: '', status: 'idle', onPaste() {}, onEnter() {}, ...over });
@@ -218,6 +218,22 @@ describe('a program a node types into without a receipt, as a plan with no opera
     await until(() => c.paste.mock.calls.length > 1);
     c.finish();
     expect(await c.running).toMatchObject({ ok: true });
+  });
+
+  /* On a busy machine the last look before the deadline can be slow, and the program take the words while it lasts. */
+  it('takes the words the program took during its last look before the deadline', async () => {
+    let entered = false, slowed = false;
+    const c = await started(empty({ onEnter: () => { entered = true; } }), { plain: true, readyMs: 60 });
+    vi.mocked(c.tmux.alive).mockImplementation(async () => {
+      if (entered && !slowed) {
+        slowed = true;
+        c.finish();
+        await new Promise(done => setTimeout(done, 120));
+      }
+      return true;
+    });
+    expect(await c.running).toMatchObject({ ok: true });
+    expect(slowed).toBe(true);
   });
 
   it('leaves the input to a person who started typing', async () => {

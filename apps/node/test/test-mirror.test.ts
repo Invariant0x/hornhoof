@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import * as mirror from '../src/test-mirror.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -33,7 +34,7 @@ describe('pinned independent checkouts', () => {
   it.each([['AbortError', 'cancelled'], ['TimeoutError', 'timeout']])('normalizes failed mirror cancellation %s without losing its child outcome', async (name, stopped) => {
     const f = await fixture(), controller = new AbortController();
     const server = createServer(() => controller.abort(new DOMException('Preparation stopped.', name)));
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenIn(server);
     onTestFinished(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing controlled Git endpoint.');

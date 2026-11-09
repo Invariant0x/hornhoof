@@ -50,13 +50,14 @@ export function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): v
   );
 }
 
-export const Chip = memo(function Chip({ e, x, y, on, flash, serverNow, onOpen, onSwitch, row }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; serverNow?: string; onOpen(event: MouseEvent<HTMLButtonElement>): void; onSwitch?(on: boolean): void; row?: string }) {
+/* lead: the employee leads a stage of a task now, and its chip is marked in its role's frame. */
+export const Chip = memo(function Chip({ e, x, y, on, lead = false, flash, serverNow, onOpen, onSwitch, row }: { e: Employee; x: number; y: number; on: boolean; lead?: boolean; flash: boolean; serverNow?: string; onOpen(event: MouseEvent<HTMLButtonElement>): void; onSwitch?(on: boolean): void; row?: string }) {
   const t = useT();
   return (
     <div className={`sslot dept-chip${e.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} data-row={row} style={{ left: x, top: y, width: CW, height: CH }}>
       <button
         type="button"
-        className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`}
+        className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${lead ? ' lead' : ''}${flash ? ' flash' : ''}`}
         aria-pressed={on}
         onClick={onOpen}
       >

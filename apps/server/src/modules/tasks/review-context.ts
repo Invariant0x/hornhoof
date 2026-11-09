@@ -37,6 +37,9 @@ const UNAVAILABLE: Pin = { commit: null, branch: null, status: 'degraded', reaso
 
 /* CompareResult carries validated hunk patches, whose increment/decrement lines count too. */
 export const changedLines = (diff: string): number => diff.split('\n').filter(line => /^[+-]/.test(line)).length;
+/* The lines of a comparison: those its patches show, and those GitHub counted in a file it showed no patch of. */
+const comparedLines = (compared: Extract<CompareResult, { complete: true }>): number =>
+  changedLines(compared.diff) + (compared.omitted ?? []).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 export const exactComparison = (result: CompareResult, base: string, head: string): result is Extract<CompareResult, { complete: true }> => result.complete && result.baseSha === base && result.headSha === head;
 
 export async function authorVendor(db: Store, authorId: string): Promise<string | null> {
@@ -76,7 +79,7 @@ async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string | null, i
   if (!commit || !input || !ctx.readCompare) return null;
   try {
     const compared = await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000);
-    if (exactComparison(compared, input.baseCommit, commit)) return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: changedLines(compared.diff) };
+    if (exactComparison(compared, input.baseCommit, commit)) return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: comparedLines(compared) };
   } catch { /* An incomplete source is degraded, never an invented inventory. */ }
   return null;
 }

@@ -156,6 +156,7 @@
         "apps/server/drizzle/meta/_journal.json",
         "apps/server/src/db/schema.ts",
         "apps/server/src/db/client.ts",
+        "apps/server/src/db/agent-sql.ts",
         "packages/protocol/dist/**",
         "apps/server/test/prepare-environment.ts",
         "apps/server/test/global-setup.ts"
@@ -195,6 +196,7 @@
         "apps/server/drizzle/meta/_journal.json",
         "apps/server/src/db/schema.ts",
         "apps/server/src/db/client.ts",
+        "apps/server/src/db/agent-sql.ts",
         "packages/protocol/dist/**",
         "apps/server/test/prepare-environment.ts"
       ],

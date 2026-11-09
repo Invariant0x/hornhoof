@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 import { GitAdapter, fetchTarget, parseGitMarker, type GitGrant, type GitJob, type GitOperationPort, type GitReconciliation, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const SHIM = fileURLToPath(new URL('../hh-git.cjs', import.meta.url));
 const FAKE = fileURLToPath(new URL('./fakes/fake-git.mjs', import.meta.url));
@@ -158,7 +159,7 @@ async function serve(s: Stand, port: GitOperationPort | null, bound = true, opti
       void adapter.serve(KEY, Buffer.concat(parts), stop.signal, res);
     });
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   onTestFinished(() => { adapter.stop(); server.closeAllConnections(); server.close(); });
   const hook = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook/secret`;
   return { adapter, server, env: baseEnv(s, { HH_BRIDGE: hook }), hits: () => hits };
@@ -167,7 +168,7 @@ async function serve(s: Stand, port: GitOperationPort | null, bound = true, opti
 async function refusingBridge(s: Stand, status: number): Promise<{ env: Env; hits: () => number }> {
   let hits = 0;
   const server = createServer((req, res) => { hits += 1; req.resume(); res.writeHead(status); res.end(); });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   onTestFinished(() => { server.closeAllConnections(); server.close(); });
   return { env: baseEnv(s, { HH_BRIDGE: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook/secret` }), hits: () => hits };
 }
@@ -181,7 +182,7 @@ async function scriptedBridge(s: Stand, frames: unknown[], ending: 'end' | 'dest
     if (ending === 'end') res.end();
     else setTimeout(() => res.destroy(), 20);
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   onTestFinished(() => { server.closeAllConnections(); server.close(); });
   return baseEnv(s, { HH_BRIDGE: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook/secret` });
 }

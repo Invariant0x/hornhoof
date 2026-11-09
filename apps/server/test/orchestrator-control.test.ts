@@ -14,10 +14,8 @@ import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan, ownDatabases } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
-
-ownDatabases();
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -438,6 +436,8 @@ describe('the orchestrator reads and changes the database itself', () => {
   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app, TOKEN);
+    /* The tool refuses every statement here, so none changes the database this file shares. */
+    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The agent's statements are refused, and the file's end check would find one that was not.
     for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
@@ -593,6 +593,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       `DELETE FROM tasks WHERE id = '${task.id}'`,
       `INSERT INTO companies (name) VALUES ('Other')`,
       `SET TRANSACTION READ WRITE; UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'`,
+      // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The reader's statements are refused, and the file's end check would find one that was not.
       'CREATE TABLE notes (id int)',
     ];
     for (const sql of writes) {

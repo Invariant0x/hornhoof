@@ -1,0 +1,182 @@
+{
+  "recorded": "Playwright 1.64.1 on Node 22.23.4: npx playwright test with workers: 1 and the options below, on these specs (each after an import of expect and test from @playwright/test), with a reporter that wrote down each test of the suite onBegin handed it, as it stood at onEnd. location.file is relative to the folder of the specs.",
+  "mixed": {
+    "options": "",
+    "specs": {
+      "good.spec.ts": "test('a', () => {});\ntest('b', () => {});\n",
+      "mixed.spec.ts": "test('a', () => {});\ntest('b', () => expect(1).toBe(2));\n",
+      "waiting.spec.ts": "test.skip('a', () => {});\ntest('b', () => test.skip());\n"
+    },
+    "tests": [
+      {
+        "title": "a",
+        "location": {
+          "file": "good.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "expected",
+        "results": [
+          {
+            "retry": 0,
+            "status": "passed",
+            "duration": 1
+          }
+        ]
+      },
+      {
+        "title": "b",
+        "location": {
+          "file": "good.spec.ts",
+          "line": 3,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "expected",
+        "results": [
+          {
+            "retry": 0,
+            "status": "passed",
+            "duration": 0
+          }
+        ]
+      },
+      {
+        "title": "a",
+        "location": {
+          "file": "mixed.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "expected",
+        "results": [
+          {
+            "retry": 0,
+            "status": "passed",
+            "duration": 0
+          }
+        ]
+      },
+      {
+        "title": "b",
+        "location": {
+          "file": "mixed.spec.ts",
+          "line": 3,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "unexpected",
+        "results": [
+          {
+            "retry": 0,
+            "status": "failed",
+            "duration": 4
+          }
+        ]
+      },
+      {
+        "title": "a",
+        "location": {
+          "file": "waiting.spec.ts",
+          "line": 2,
+          "column": 6
+        },
+        "expectedStatus": "skipped",
+        "outcome": "skipped",
+        "results": [
+          {
+            "retry": 0,
+            "status": "skipped",
+            "duration": 0
+          }
+        ]
+      },
+      {
+        "title": "b",
+        "location": {
+          "file": "waiting.spec.ts",
+          "line": 3,
+          "column": 1
+        },
+        "expectedStatus": "skipped",
+        "outcome": "skipped",
+        "results": [
+          {
+            "retry": 0,
+            "status": "skipped",
+            "duration": 2
+          }
+        ]
+      }
+    ]
+  },
+  "maxFailures": {
+    "options": "maxFailures: 1",
+    "specs": {
+      "first.spec.ts": "test('a', () => expect(1).toBe(2));\n",
+      "second.spec.ts": "test('a', () => {});\n"
+    },
+    "tests": [
+      {
+        "title": "a",
+        "location": {
+          "file": "first.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "unexpected",
+        "results": [
+          {
+            "retry": 0,
+            "status": "failed",
+            "duration": 4
+          }
+        ]
+      },
+      {
+        "title": "a",
+        "location": {
+          "file": "second.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "skipped",
+        "results": []
+      }
+    ]
+  },
+  "retries": {
+    "options": "retries: 1",
+    "specs": {
+      "shaky.spec.ts": "test('a', ({}, info) => expect(info.retry).toBe(1));\n"
+    },
+    "tests": [
+      {
+        "title": "a",
+        "location": {
+          "file": "shaky.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        "expectedStatus": "passed",
+        "outcome": "flaky",
+        "results": [
+          {
+            "retry": 0,
+            "status": "failed",
+            "duration": 5
+          },
+          {
+            "retry": 1,
+            "status": "passed",
+            "duration": 3
+          }
+        ]
+      }
+    ]
+  }
+}

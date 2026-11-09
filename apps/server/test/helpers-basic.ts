@@ -10,8 +10,9 @@ export function sessionFrom(res: LightMyRequestResponse): string {
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });
 
-/* Waits until check() is true, for state that changes after a socket message. */
-export async function until(check: () => Promise<boolean> | boolean, ms = 2000): Promise<void> {
+/* Waits until check() is true, for state that changes after a socket message. The deadline is for a machine busy with
+   other tests: a check that comes true ends the wait at once, whatever the deadline. */
+export async function until(check: () => Promise<boolean> | boolean, ms = 15_000): Promise<void> {
   const end = Date.now() + ms;
   while (!(await check())) {
     if (Date.now() > end) throw new Error('Timed out waiting.');

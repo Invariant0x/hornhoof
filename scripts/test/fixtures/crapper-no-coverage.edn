@@ -1,0 +1,3 @@
+{:entries [
+  {:name "f", :namespace "deep.moved", :complexity 3, :coverage nil, :crap nil}
+]}

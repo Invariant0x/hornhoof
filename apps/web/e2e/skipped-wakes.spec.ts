@@ -1,3 +1,4 @@
+import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test } from '@playwright/test';
 import { serveApi, TASKS } from './api';
 
@@ -19,7 +20,7 @@ for (const language of ['en', 'ru']) {
         await page.route('**/api/version', route => route.fulfill({ json: current }));
         await page.route('**/api/updates', route => route.fulfill({ json: { current, latest: null, versions: [], available: false, checkedAt: null, error: null, updater: { present: false, status: null, waiting: null } } }));
         const task = {
-          ...TASKS[0]!, status: 'done', body: '', after: [], parent: null, gates: [], subtasks: [], requests: [], createdBy: null, executor: null,
+          ...TASKS[0]!, echelonFindings: emptyEchelonFindings(), status: 'done', body: '', after: [], parent: null, subtasks: [], requests: [], createdBy: null, executor: null,
           log: ['restart', 'merge', 'continue', 'assigned'].map(wake => ({
             kind: 'wake_skipped', text: 'Server text stays in English.', data: { wake, job: 'aaaaaaaa-0000-4000-8000-000000000001' },
             by: { kind: 'agent', id: 'b1', name: 'Bruno with a long employee name' }, at: '2026-11-03T21:00:00.000Z',

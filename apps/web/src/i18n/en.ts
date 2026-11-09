@@ -835,7 +835,7 @@ export const en = {
     roleOn: (role: string) => `${role} takes part in the work`,
     roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'everyone on' : 'everyone switched off'}`,
     needsSubscription: 'Needs a subscription to work',
-    gate: (n: number) => `gate ${n}`,
+    gate: (n: number) => `Gate ${n}`,
     lastGate: 'last gate',
     reportLine: 'Report to the head',
     finalTurnCheck: 'final turn check, once per turn',
@@ -843,7 +843,7 @@ export const en = {
     stats: (working: number, total: number, roles: number) =>
       [`${working} of ${total} ${plural('en', total, { one: 'agent', other: 'agents' })} working`, `${roles} ${plural('en', roles, { one: 'role', other: 'roles' })}`].join(', '),
     agents: (n: number) => (n ? `${n} ${plural('en', n, { one: 'agent', other: 'agents' })}` : 'Nobody yet'),
-    hint: 'The map shows the current task stages and their owners.',
+    hint: 'Work goes left to right through the gates. Whoever leads a stage now is marked in its role.',
     about: 'About the department',
     tasksButton: 'Department tasks',
     leads: 'Leads the department',

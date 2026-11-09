@@ -37,7 +37,22 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(graph.getByRole('button', { name: /#121/ })).not.toHaveCount(0);
           await expect(graph.locator('.seg.al').first()).toHaveCSS('stroke', theme === 'light' ? 'rgb(211, 47, 47)' : 'rgb(255, 107, 107)');
           expect(await graph.evaluate(svg => [...svg.querySelectorAll<SVGGraphicsElement>('.bdg')].every(b => b.getBBox().x + b.getBBox().width <= (svg as SVGSVGElement).viewBox.baseVal.width))).toBe(true);
-          expect(await graph.locator('.ic-ok').count()).toBeGreaterThanOrEqual(during ? 4 : 5);
+          /* Since 0.17.0 a check is a task of its own: its card shows the stage, the stage's owner and the findings, not verdict marks. */
+          await expect(graph.locator('.ic-ok')).toHaveCount(0);
+          const route = (lang === 'en' ? en : ru).tasks.echelons;
+          for (const [name, number, stage, findings] of [['Vera', 121, 'review', 2], ['Rita', 122, 'tests', 0], ['Gleb', 123, 'security', 0]] as const) {
+            const check = graph.getByRole('button', { name: new RegExp(`^${name}, #${number} `) }).first();
+            await check.scrollIntoViewIfNeeded();
+            await check.focus();
+            await page.keyboard.press('Enter');
+            const card = page.locator('.tv-card'), step = card.locator('li[aria-current="step"]');
+            await expect(card.getByRole('button', { name: `#${number} Check checkout step ${number}` })).toBeVisible();
+            await expect(step).toContainText(route.stages[stage]);
+            await expect(step).toContainText(route.owner(name));
+            await expect(card.getByRole('region', { name: route.findings.heading })).toContainText(route.findings.unique(findings));
+            await page.keyboard.press('Escape');
+            await expect(card).toHaveCount(0);
+          }
           const oldAlarm = graph.getByRole('button', { name: lang === 'en' ? /Hana: program frozen since 06:11/ : /Hana: программа замерла с 06:11/ }).first();
           await oldAlarm.scrollIntoViewIfNeeded();
           await oldAlarm.focus();

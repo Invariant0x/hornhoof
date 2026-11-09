@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { clearShared, partFiles, partFolders, putOutputs, removeOldParts, runTests, type PartFiles } from '../src/tests.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -480,7 +481,7 @@ describe("a part's files through Hornhoof", () => {
         res.end(req.method === 'GET' ? 'a,b\n' : '{}');
       });
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     onTestFinished(() => void server.close());
     const files = partFiles(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'node-key-1234567890');
     expect((await files.get('part-1', 'data 1.csv')).toString('utf8')).toBe('a,b\n');
@@ -496,7 +497,7 @@ describe("a part's files through Hornhoof", () => {
         res.write('a,');
       }
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     onTestFinished(() => {
       server.closeAllConnections();
       server.close();
