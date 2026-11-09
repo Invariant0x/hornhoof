@@ -412,8 +412,16 @@ async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise
     .set({ status: 'failed', error, finishedAt: new Date(), ...(tail ? { tail } : {}) })
     .where(and(which, inArray(testParts.status, ['queued', 'running'])))
     .returning();
+  for (const p of ended) await stopWithPreparation(ctx, p);
   for (const runId of new Set(ended.map(p => p.runId))) await settleRun(ctx, runId);
   return ended;
+}
+
+/* The batches of a run start beside its preparation, but a preparation that failed decides the run: none of them keeps a machine
+   for it. What runs stops on its machine, and what waits never starts. */
+async function stopWithPreparation(ctx: Ctx, part: Part): Promise<void> {
+  if (part.status !== 'failed' || part.environmentSelection?.selection.kind !== 'prepare') return;
+  cancelParts(ctx, await endParts(ctx, eq(testParts.runId, part.runId), 'prerequisite_failed', 'The preparation failed; this part was stopped.'));
 }
 
 const lostAt = (ctx: Ctx, part: Part, why: string): LostRun => {
@@ -499,6 +507,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
       if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
+      if (ended) await stopWithPreparation(ctx, ended);
       if (ended) await settleRun(ctx, found.run.id);
     }
   }

@@ -45,12 +45,13 @@ async function fixture(once = true, native = true) {
 }
 
 describe('persisted versioned product batches', () => {
-  it.each([true, false])('persists preparation once and gates every remaining part on outcome=%s', async ok => {
+  /* The batch waits for no preparation, only for the one machine here; the final checks of the prepared suite wait for it. */
+  it.each([true, false])('persists preparation once and decides every remaining part by it on outcome=%s', async ok => {
     const f = await fixture();
     await acceptDescription(f.app.ctx, BUILTIN, f.reply); await pumpTests(f.app.ctx);
     const before = await f.parts();
     expect(before.map(part => ({ kind: part.environmentSelection!.selection.kind, after: part.environmentSelection!.after, status: part.status }))).toEqual([
-      { kind: 'prepare', after: [], status: 'running' }, { kind: 'batch', after: [1], status: 'queued' }, { kind: 'final', after: [1], status: 'queued' },
+      { kind: 'prepare', after: [], status: 'running' }, { kind: 'batch', after: [], status: 'queued' }, { kind: 'final', after: [1], status: 'queued' },
     ]);
     await acceptDescription(f.app.ctx, BUILTIN, f.reply); expect((await f.parts()).map(part => part.id)).toEqual(before.map(part => part.id));
     await f.complete(ok);
