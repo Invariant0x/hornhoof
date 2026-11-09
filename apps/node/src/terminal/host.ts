@@ -142,6 +142,8 @@ type Agent = {
   pastedAt?: number;
   /* The prompt of a turn that ended as its program never took it: Hornhoof repeats those words itself. */
   ownLeft?: OwnLeft | null;
+  /* A copy of a prompt the program took, typed again while it was on its way in: none of it is to go. */
+  ownCopy?: OwnLeft | null;
   /* This turn's prompt has not gone in yet: what the program takes meanwhile is a person's. */
   promptWaits?: boolean;
   /* A person sent words meanwhile that the program has not finished answering. */
@@ -1144,7 +1146,12 @@ export class TerminalHost {
   }
 
   private leftByOthers(a: Agent, input: string): boolean {
-    return !this.stillTyping(a) && !isOwnLeft(a.ownLeft, a.typedAt, input) && !holdsFoldedPaste(input);
+    return !this.stillTyping(a) && !this.ownInInput(a, input) && !holdsFoldedPaste(input);
+  }
+
+  /* What the input holds is Hornhoof's own words: a prompt never taken, or a copy of one taken. */
+  private ownInInput(a: Agent, input: string): boolean {
+    return isOwnLeft(a.ownLeft, a.typedAt, input) || isOwnLeft(a.ownCopy, a.typedAt, input);
   }
 
   private secretsOf(job: TermJob): string[] {
@@ -1160,10 +1167,11 @@ export class TerminalHost {
   /* An input that holds nothing, or only what is safe elsewhere, which then goes. It takes no Escape, which stops a program. */
   private async inputCleared(a: Agent, job: TermJob, input: string): Promise<boolean> {
     if (!input) return true;
-    const own = isOwnLeft(a.ownLeft, a.typedAt, input);
-    if (this.stillTyping(a) || !(own || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input)))) return false;
+    const own = isOwnLeft(a.ownLeft, a.typedAt, input), copy = isOwnLeft(a.ownCopy, a.typedAt, input);
+    if (this.stillTyping(a) || !(own || copy || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input)))) return false;
     if (!(await this.eraseLeft(a))) return false;
     if (own) this.forgetOwnLeft(a);
+    if (copy) a.ownCopy = null;
     return true;
   }
 
@@ -1206,7 +1214,7 @@ export class TerminalHost {
     if (!typedSinceStart(a)) return true;
     await this.keepLeftInput(a, job);
     const input = await this.readInput(a);
-    return !input || isOwnLeft(a.ownLeft, a.typedAt, input) || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input));
+    return !input || this.ownInInput(a, input) || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input));
   }
 
   private async whilePromptWaits<T>(a: Agent, work: () => Promise<T>): Promise<T> {
@@ -1274,7 +1282,15 @@ export class TerminalHost {
       await this.inputLane(a, () => this.repeatLostWords(a, job, prompt, lost));
       await sleep(this.pollMs);
     }
+    this.ownCopyLeft(a, job, prompt, lost);
     return null;
+  }
+
+  /* A busy program can take the words and say so only after it stood still long enough for them to go in again. That copy
+     stays in its input, where the next words would wait on it: it is Hornhoof's own, so it goes before they do. It is no
+     words that never went, which whoever looks at the program would send. */
+  private ownCopyLeft(a: Agent, job: TermJob, prompt: string, lost: LostWords): void {
+    if (lost.typedAgain && !a.ownerTyped && !job.input.signal?.aborted) a.ownCopy = { text: prompt, jobId: job.input.jobId ?? null, at: a.pastedAt ?? -Infinity };
   }
 
   /* A program can miss the Enter or lose the words, more so as it starts or resumes a long session: the same turn tries again,

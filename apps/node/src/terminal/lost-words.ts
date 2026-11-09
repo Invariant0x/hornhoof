@@ -26,6 +26,11 @@ export class LostWords {
     this.quietSince = this.typedAt = this.pressedAt = now;
   }
 
+  /* Whether the words went in more than once: a copy may stay in the input after the program took the first. */
+  get typedAgain(): boolean {
+    return this.typings > 1;
+  }
+
   step(kind: TermProgram['kind'], screen: string, now: number): 'enter' | 'type' | null {
     if (screen !== this.screen) { this.screen = screen; this.quietSince = now; }
     const input = inputOf(kind, screen);
