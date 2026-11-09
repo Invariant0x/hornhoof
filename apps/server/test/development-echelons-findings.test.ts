@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { submit, verdict } from '../src/modules/tasks/engine.js';
+import type { AgentViewer } from '../src/auth/agent-view.js';
+import { loadTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { detailFor } from '../src/modules/tasks/sight.js';
 import { confirmFinding } from '../src/modules/tasks/review-findings.js';
 import { BASE, HEAD, fixture } from './development-echelons-fixture.js';
 
@@ -33,5 +35,17 @@ describe('immutable echelon finding provenance', () => {
     await confirmFinding(f.ctx, f.head.id, current, confirmation);
     await confirmFinding(f.ctx, f.head.id, current, confirmation);
     expect(findings(await f.detail())).toMatchObject({ uniqueReported: 1, uniqueConfirmed: 1, review: { reported: 1, confirmed: 1 } });
+  });
+  /* A person who sees the task reads how many findings each stage reported and confirmed, and nothing of what they say. */
+  it('shows a person who sees the task the true counts of its findings and none of their details', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, code);
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, reviewedCommit: HEAD, comment: 'Fixing the boundary.', issues: [{ ...issue, blocking: true }] });
+    const task = await loadTask(f.db, f.task.id);
+    const viewer: AgentViewer = { full: false, personId: 'someone', access: { whole: false, departments: new Set([task.departmentId!]), teams: new Set() }, plans: new Set(), agents: new Set([f.reviewer.id, f.author.id]) };
+    const shown = await detailFor(f.ctx, viewer, task);
+    expect(findings(shown)).toMatchObject({ uniqueReported: 1, uniqueConfirmed: 0, review: { reported: 1, confirmed: 0 }, issues: [] });
+    expect(JSON.stringify(findings(shown))).not.toContain(issue.harm);
+    expect((shown.echelonFindings as { byVendor?: { findingIds: string[] }[] }).byVendor?.every(vendor => vendor.findingIds.length === 0)).toBe(true);
   });
 });

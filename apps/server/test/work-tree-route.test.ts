@@ -245,9 +245,10 @@ describe('GET /api/departments/:id/tree', () => {
     expect(tree.lines.find(line => line.taskId === task.id)).toMatchObject({
       echelons: { stage: 'review', ownerAgentId: c.rita.id, candidateId: null, assignment: null,
         stages: expect.arrayContaining([expect.objectContaining({ stage: 'security', ownerAgentId: null, inputCandidateId: null, candidateId: null })]) },
-      echelonFindings: { uniqueReported: 0, uniqueConfirmed: 0, issues: [] },
+      echelonFindings: { uniqueReported: 1, uniqueConfirmed: 0, review: { reported: 1, confirmed: 0 }, issues: [] },
     });
     expect(response.body).not.toContain('logic/totals.ts');
+    expect(response.body).not.toContain('The boundary needs a contract.');
     expect(response.body).not.toContain(HEAD);
   });
 

@@ -1,4 +1,4 @@
-import { emptyEchelonFindings, type EchelonsSnapshot } from '@hornhoof/protocol/echelons';
+import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { canReach } from '../../auth/access.js';
@@ -47,6 +47,13 @@ export function shownEchelons(viewer: AgentViewer, route: EchelonsSnapshot): Ech
   };
 }
 
+/* A person who sees the task reads how many findings each stage reported and confirmed, never what they say: their paths,
+   lines, harm, commits and candidates are the repository's. */
+function shownFindings<T extends EchelonFindingsView & { byVendor?: { vendor: string; count: number; findingIds: string[] }[] }>(viewer: AgentViewer, findings: T): T {
+  if (viewer.full) return findings;
+  return { ...findings, issues: [], ...(findings.byVendor ? { byVendor: findings.byVendor.map(vendor => ({ ...vendor, findingIds: [] })) } : {}) };
+}
+
 function maskLine<T extends TaskLine>(viewer: AgentViewer, line: T, parentSeen: boolean): T {
   return { ...line, echelons: shownEchelons(viewer, line.echelons), waits: maskWaits(viewer, line.waits), assignee: shownRef(viewer, line.assignee), parentId: parentSeen ? line.parentId : null, externalWait: shownWait(viewer, line), independentPart: shownIndependent(viewer, line.independentPart) };
 }
@@ -84,7 +91,7 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
   const sees = (id: string | undefined) => seesAgentId(viewer, id);
   return {
     ...maskLine(viewer, detail, detail.parent !== null),
-    echelonFindings: emptyEchelonFindings(),
+    echelonFindings: shownFindings(viewer, detail.echelonFindings),
     executor: shownRef(viewer, detail.executor),
     createdBy: detail.createdBy?.kind === 'agent' && !sees(detail.createdBy.id) ? null : detail.createdBy,
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
@@ -107,7 +114,7 @@ export function factsFor(viewer: AgentViewer, facts: TreeFacts): TreeFacts {
   const sees = (id: string | null | undefined) => seesAgentId(viewer, id);
   return {
     ...facts,
-    tasks: facts.tasks.map(t => ({ ...t, echelons: shownEchelons(viewer, t.echelons), echelonFindings: emptyEchelonFindings(), waits: t.waits ? maskWaits(viewer, t.waits) : [] })),
+    tasks: facts.tasks.map(t => ({ ...t, echelons: shownEchelons(viewer, t.echelons), echelonFindings: shownFindings(viewer, t.echelonFindings), waits: t.waits ? maskWaits(viewer, t.waits) : [] })),
     agents: facts.agents.filter(a => sees(a.id)),
     events: facts.events.map(e => (sees(e.agentId) ? e : { ...e, text: '' })),
     requests: facts.requests.filter(r => sees(r.agentId)),
