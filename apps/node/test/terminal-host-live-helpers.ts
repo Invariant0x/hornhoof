@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { vi } from 'vitest';
 import type { Limits, NodeMessage } from '@hornhoof/protocol';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { TerminalHost } from '../src/terminal/host.js';
 import type { OperatorOptions } from '../src/terminal/operator-runtime.js';
 import { withProgramExit } from '../src/program-exit.js';
@@ -33,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -56,7 +57,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   const display = () => kind === 'kimi' ? kimiScreen(input)
     : kind === 'claude' ? `────────────\n❯ ${input}\n────────────\n  ? for shortcuts\n` : `OpenAI Codex\n${codexPrompt(input)}`;
   /* tmux itself never runs: a command no stand-in below answers gets an empty answer. */
-  vi.spyOn(tmux, 'run').mockResolvedValue('');
+  vi.spyOn(tmux, 'run').mockImplementation(async args => (args.includes('#{pane_width} #{pane_height}') ? '100 30' : ''));
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'has').mockResolvedValue(true);
   vi.spyOn(tmux, 'clients').mockResolvedValue([]);
@@ -99,13 +100,13 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => options.secrets ?? [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [], ...(options.operator ? { operator: options.operator } : {}), ...options.host });
   await host.start();
   const results: Promise<unknown>[] = [];
-  const run = (prompt = 'HANG', jobId = 'job-receipt') => {
+  const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt') => {
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob('receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
-    const running = host.run({ ...base, program, home }).then(result => {
+    const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));
       return result;
     });

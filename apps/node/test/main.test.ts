@@ -15,6 +15,7 @@ import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost } from '../src/terminal/host.js';
+import { StreamMask } from '../src/terminal/mask.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
@@ -305,6 +306,36 @@ describe('a node that runs agents in terminals', () => {
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 5000);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(server.received.filter(m => m.type === 'agent.said')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
+  });
+
+  it('learns a renewed program token between turns and gives it to an existing terminal mask', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const tokens: string[] = [];
+    const tmux = new Tmux({ env: { HOME: dir } });
+    const stopAll = vi.spyOn(tmux, 'stopAll').mockResolvedValue();
+    const start = vi.spyOn(TerminalHost.prototype, 'start').mockResolvedValue();
+    const stop = vi.spyOn(TerminalHost.prototype, 'stop').mockResolvedValue();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let node: Awaited<ReturnType<typeof runNode>> | undefined;
+    try {
+      node = await runNode({ dir, adapter: { ...adapter, secrets: async () => [...tokens] }, log: () => {}, learnMs: 100,
+        terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i },
+      });
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      const host = start.mock.instances[0]! as TerminalHost;
+      const mask = new StreamMask(host['opts'].secrets);
+      const token = 'late-token-1234567890';
+      expect(host['opts'].secrets()).not.toContain(token);
+      tokens.push(token);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(host['opts'].secrets()).toContain(token);
+      expect(mask.push(`renewed ${token} here\n`) + mask.flush()).toBe('renewed [hidden] here\n');
+      expect(server.received.some(m => m.type === 'job.done' || m.type === 'turn.open')).toBe(false);
+    } finally {
+      node?.stop();
+      vi.useRealTimers();
+      stopAll.mockRestore(); start.mockRestore(); stop.mockRestore();
+    }
   });
 
   it("says it writes an agent's skills as files, so Hornhoof sends them as files", async () => {

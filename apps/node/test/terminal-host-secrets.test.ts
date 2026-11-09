@@ -15,6 +15,18 @@ const frames = (sent: NodeMessage[], termId: string) => sent.flatMap(m => (m.typ
 const shows = (text: string, secret = SECRET) => pieces(secret).some(piece => text.includes(piece));
 
 describe('a view of an agent at work', () => {
+  it('hides a token learned after the view opened, without another turn', async () => {
+    const secrets: string[] = [];
+    const t = await liveTerminal('claude', 'queued', { secrets });
+    await t.host.open({ type: 'term.open', termId: 'renewed', agentKey: 'receipt', cols: 100, rows: 30, write: true });
+    const [{ view }] = t.views;
+    secrets.push(SECRET);
+    view.stdout.write(`renewed ${SECRET} here\n`);
+    await until(() => frames(t.sent, 'renewed').includes('here'));
+    expect(frames(t.sent, 'renewed')).toContain('renewed [hidden] here');
+    expect(shows(frames(t.sent, 'renewed'))).toBe(false);
+  });
+
   it('shows people the live screen without a known secret, even one that comes in two pieces', async () => {
     const t = await liveTerminal('claude', 'queued', { secrets: [SECRET] });
     await t.host.open({ type: 'term.open', termId: 'v1', agentKey: 'receipt', cols: 100, rows: 30, write: true });
@@ -62,6 +74,28 @@ describe('a view of an agent at work', () => {
 });
 
 describe('what a turn tells Hornhoof', () => {
+  it('hides a multiline secret before clipping a typed turn that ended before its acknowledgement', async () => {
+    const secret = 'multiline-private-token\nprivate-suffix-0123456789';
+    const t = await liveTerminal('claude', 'queued', { prompt: '', openMs: 15_000, secrets: [secret] });
+    const prompted = t.hook('prompt', { prompt: 'typed request' });
+    await until(() => t.sent.some(m => m.type === 'turn.open'));
+    const opened = t.sent.find((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open')!;
+    const lines = Array.from({ length: 49 }, (_, i) => `ordinary-${i}`);
+    t.ends(`${secret}\n${lines.join('\n')}\n`, 3);
+    await until(() => t.host['agents'].get('receipt')?.turn === null);
+    expect(t.sent.some(m => m.type === 'job.done' && m.jobId === 'typed-result')).toBe(false);
+    t.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed-result', toolToken: 'typed-token', ref: opened.ref });
+    await prompted;
+    await until(() => t.sent.some(m => m.type === 'job.done' && m.jobId === 'typed-result'));
+    const done = t.sent.find((m): m is Extract<NodeMessage, { type: 'job.done' }> => m.type === 'job.done' && m.jobId === 'typed-result')!;
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed', exit: { code: 3, signal: null } });
+    expect(done.tail).not.toContain(secret.split('\n')[1]);
+    expect(done.tail).toContain('[hidden]');
+    expect(done.tail.split('\n').filter(line => line.startsWith('ordinary-'))).toHaveLength(49);
+    expect(Buffer.byteLength(done.tail)).toBeLessThanOrEqual(4096);
+    expect(done.tail.split('\n').at(-1)).toMatch(/^Program ended: code 3, signal none, at /);
+  });
+
   it('hides a known secret in what a program said as it ended during a turn', async () => {
     const t = await liveTerminal('claude', 'queued', { secrets: [SECRET] });
     t.ends(`boom ${SECRET}\n`, 3);
