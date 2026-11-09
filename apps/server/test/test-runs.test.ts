@@ -509,7 +509,7 @@ it('gives a part to a node of another build and processor of the class that desc
   /* The describer, an x64 machine, takes no part now. */
   await advertise(describer, []);
   describer.node.send(await productDescription(request, x64));
-  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null, 15_000);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
   const snapshot = (await c.db.select().from(testRuns))[0]!.environmentSnapshot!;
   for (const foreign of [darwin, node24]) {
     await advertise(other, foreign); await pumpTests(c.app.ctx);
@@ -520,7 +520,7 @@ it('gives a part to a node of another build and processor of the class that desc
   await advertise(other, arm64);
   const first = await nextOf(other.node, 'tests.run'); other.node.send(productDone(first, arm64));
   const final = await nextOf(other.node, 'tests.run'); other.node.send(productDone(final, arm64));
-  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed', 15_000);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed');
   const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
   expect(parts.map(part => part.nodeId)).toEqual([other.id, other.id]);
   expect(parts.map(part => part.environmentReceipt?.runtimes)).toEqual([arm64, arm64]);
@@ -537,7 +537,7 @@ it('fails a run at once when the node that described it lacks a runtime its prof
   reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
   const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
   node.send(reply);
-  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed', 15_000);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
   expect((await c.db.select().from(testParts))).toMatchObject([{ status: 'failed', error: 'runtime_missing', tail: expect.stringContaining('python 3.12') }]);
   expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ environmentStatus: 'failed', environmentProblem: { code: 'runtime_missing' } });
 });

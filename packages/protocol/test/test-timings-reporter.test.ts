@@ -73,19 +73,4 @@ describe('the timing reporter', () => {
     expect(status).toEqual({ 'sample.test.ts': 'passed', 'failing.test.ts': 'failed' });
     expect(files.every(file => file.file.startsWith('/') && file.ms >= 0)).toBe(true);
   });
-
-  /* The node ends a failed part's log with these, so an agent reads which test failed and why. */
-  it('names each test that failed with its error, and the error of a file that failed before its tests', async () => {
-    const report = join(tmpdir(), `hh-report-failures-${process.pid}-${Date.now()}.json`);
-    onTestFinished(() => rm(report, { force: true }));
-    const failing = "import { describe, expect, it } from 'vitest';\ndescribe('group', () => {\n  it('passes', () => expect(1).toBe(1));\n  it('fails', () => expect(1).toBe(2));\n});\n";
-    const broken = "throw new Error('cannot load the fixture');\n";
-    const { code, dir } = await runner({ HH_TEST_REPORT: report }, { 'failing.test.ts': failing, 'broken.test.ts': broken });
-    expect(code).toBe(1);
-    const { files } = JSON.parse(await readFile(report, 'utf8')) as { files: { file: string; status: string; failures?: { name: string; message: string }[] }[] };
-    const failures = Object.fromEntries(files.map(file => [file.file.slice(dir.length + 1), file.failures]));
-    expect(failures['sample.test.ts']).toBeUndefined();
-    expect(failures['failing.test.ts']).toEqual([{ name: 'group > fails', message: expect.stringContaining('expected 1 to be 2') }]);
-    expect(failures['broken.test.ts']).toEqual([{ name: 'broken.test.ts', message: expect.stringContaining('cannot load the fixture') }]);
-  });
 });

@@ -58,7 +58,7 @@ it('lays a run out by what each machine took for the same files before, and give
     await c.db.insert(testPartTimings).values({ partId: part!.id, companyId: run!.companyId, runId: earlier!.id, files: timings(host, files, pace) });
   }
   describer.node.send(await described(request));
-  await until(async () => (await c.db.select().from(testParts).where(eq(testParts.runId, run!.id))).length === 2, 15_000);
+  await until(async () => (await c.db.select().from(testParts).where(eq(testParts.runId, run!.id))).length === 2);
   await pumpTests(c.app.ctx);
   const parts = await c.db.select().from(testParts).where(eq(testParts.runId, run!.id)).orderBy(asc(testParts.part));
   const filesOf = (part: typeof parts[number]) => { const selection = part.environmentSelection!.selection; return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : []; };
