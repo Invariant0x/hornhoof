@@ -151,7 +151,7 @@ describe('ensurePasswd', () => {
 describe('runProgram as a user', () => {
   it('passes the uid and gid to the program', async () => {
     const user = { uid: process.getuid!(), gid: process.getgid!() };
-    const done = await runProgram({ bin: 'node', args: ['-e', 'console.log(process.getuid())'], env: process.env, timeoutMs: 10000, user });
+    const done = await runProgram({ bin: 'node', args: ['-e', 'console.log(process.getuid())'], env: process.env, timeoutMs: 2_147_483_647, user });
     expect(done).toMatchObject({ code: 0, output: `${user.uid}\n` });
   });
 });

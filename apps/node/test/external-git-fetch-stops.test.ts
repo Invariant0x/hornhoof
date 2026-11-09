@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { calls, clones, detached, FakePort, KEY, noUpstream, planFor, type Prepare, realGit, refsOf, refusedFirst, runShim, serve, type Stand, stand, tracking } from './external-git-helpers.js';
 
 describe('a fetch by the settings of the remote', () => {
@@ -53,7 +54,7 @@ describe('a fetch by the settings of the remote', () => {
       const port = new FakePort();
       const { env, adapter } = await serve(s, port);
       const ran = runShim(['fetch', 'origin'], agent, env);
-      await vi.waitFor(() => { expect(calls(s, 'symbolic-ref')).toHaveLength(2); }, { timeout: 5000 });
+      await eventually(() => calls(s, 'symbolic-ref').length === 2);
       adapter.unbind(KEY);
       const ended = await ran;
       expect(ended.code).toBe(128);
@@ -88,7 +89,7 @@ describe('a fetch by the settings of the remote', () => {
       port.registration = { disposition: 'wait', attemptId: null, nextAttemptAt: null };
       const { env } = await serve(s, port);
       const ran = runShim(['fetch', 'origin'], agent, env);
-      await vi.waitFor(() => { expect(ran.partial().stderr).toContain('keeps waiting'); }, { timeout: 5000 });
+      await eventually(() => ran.partial().stderr.includes('keeps waiting'));
       change(s, agent);
       await stoppedBy(s, ran, port, words, 0);
     });

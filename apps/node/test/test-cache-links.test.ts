@@ -14,7 +14,7 @@ const folders: string[] = [];
 afterEach(async () => { vi.mocked(link).mockReset(); vi.mocked(link).mockImplementation((await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).link); await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 async function stored() {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-links-')); folders.push(cacheRoot);
-  const context = { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} }, source = join(cacheRoot, 'source');
+  const context = { cacheRoot, deadline: Date.now() + 2_147_483_647, signal: new AbortController().signal, log: () => {} }, source = join(cacheRoot, 'source');
   await mkdir(join(source, 'deps'), { recursive: true }); await writeFile(join(source, 'deps', 'file'), 'locked');
   const entry = await prepareCache(join(cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), context, async () => ({ root: source, paths: ['deps'] }));
   return { context, entry, part: join(cacheRoot, 'part'), kept: join(entry.path, 'payload', 'deps', 'file') };

@@ -20,6 +20,7 @@ import { CheckClient } from '../src/check-client.js';
 import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 /* Playwright's browsers stand in for themselves only in the tests of preparing them; elsewhere they are ready at once. */
 const browsersReady = async () => ({ ok: true as const, status: 'not_needed' as const });
@@ -240,21 +241,30 @@ describe('prepareBrowser', () => {
       return true;
     });
     client.online(true); setCheckClient(client);
-    let settled = false, fixturePid = 0;
+    /* The node's grace and its hold run on a clock the test moves. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let settled = false, fixturePid = 0, programEnded = false;
+    vi.spyOn(programs, 'runProgram').mockImplementation(options => realRunProgram(options).finally(() => { programEnded = true; }));
     const pending = withCheckSlot(() => prepareBrowser({ dir, repoDir: repo, seedDir, globalPlaywrightDir, isRoot: false })).finally(() => { settled = true; });
     void pending.catch(() => {});
     onTestFinished(async () => {
       if (fixturePid) { try { process.kill(-fixturePid, 'SIGKILL'); } catch { /* Already gone. */ } }
       await pending.catch(() => {}); client.online(false); setCheckClient(null);
     });
-    await expect.poll(() => existsSync(started)).toBe(true);
+    onTestFinished(async () => { await vi.runAllTimersAsync(); vi.useRealTimers(); });
+    await eventually(() => existsSync(started));
     fixturePid = Number(readFileSync(started, 'utf8'));
-    const at = performance.now();
     client.online(false);
-    await expect.poll(() => existsSync(stopped), { timeout: 15_000 }).toBe(true);
+    await eventually(() => existsSync(stopped));
     expect(settled).toBe(false);
+    /* The program takes no notice of TERM, so it is killed at the end of its grace of 2 s, and the slot is held through
+       the cleanup, 5 s after the stop. */
+    await vi.advanceTimersByTimeAsync(2000);
+    await eventually(() => programEnded);
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await pending.catch(() => {});
-    expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
   });
 
   it('seeds matching revisions from the image seed without downloading and makes binaries readable for job users', async () => {

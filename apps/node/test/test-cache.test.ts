@@ -3,15 +3,18 @@ import { once } from 'node:events';
 import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import * as cache from '../src/test-cache.js';
 import { deferred } from '../../../test-support/deferred.mjs';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 const folders: string[] = [];
+/* A deadline no test reaches: the code waits at most until it, and a timer waits at most 2_147_483_647 ms. */
+const NEVER_MS = 2_147_483_647;
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 async function context() {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-prepared-')); folders.push(cacheRoot);
-  return { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} };
+  return { cacheRoot, deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} };
 }
 describe('restoring a stored tree', () => {
   it('never takes a root for the checkout itself, whose parent would go to the part', async () => {
@@ -52,7 +55,7 @@ describe('cache writer locking', () => {
 
   it('rejects an expired deadline without starting a build', async () => {
     const ctx = await context(); let called = false;
-    await expect(cache.withCacheLock(join(ctx.cacheRoot, 'writer.lock'), { ...ctx, deadline: Date.now() - 1 }, async () => { called = true; })).rejects.toThrow(/deadline/i);
+    await expect(cache.withCacheLock(join(ctx.cacheRoot, 'writer.lock'), { ...ctx, deadline: 0 }, async () => { called = true; })).rejects.toThrow(/deadline/i);
     expect(called).toBe(false);
   });
 
@@ -131,7 +134,7 @@ describe('immutable preparation payloads', () => {
 it('automatically releases a lock after the owning process is killed', async () => {
   const ctx = await context(), path = join(ctx.cacheRoot, 'crash.lock');
   const modulePath = new URL('../src/test-cache.ts', import.meta.url).href;
-  const script = `import { withCacheLock } from ${JSON.stringify(modulePath)}; await withCacheLock(process.argv[1], { cacheRoot:process.argv[2], deadline:Date.now()+10000, signal:new AbortController().signal, log:()=>{} }, async()=>{ process.stdout.write('locked'); process.stdin.resume(); await new Promise(resolve=>process.stdin.once('end',resolve)); });`;
+  const script = `import { withCacheLock } from ${JSON.stringify(modulePath)}; await withCacheLock(process.argv[1], { cacheRoot:process.argv[2], deadline:Date.now()+2147483647, signal:new AbortController().signal, log:()=>{} }, async()=>{ process.stdout.write('locked'); process.stdin.resume(); await new Promise(resolve=>process.stdin.once('end',resolve)); });`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, path, ctx.cacheRoot], { stdio: ['pipe', 'pipe', 'pipe'] });
   onTestFinished(() => { child.kill('SIGKILL'); });
   expect(String((await once(child.stdout, 'data'))[0])).toBe('locked');
@@ -171,7 +174,22 @@ it('retains a writer lock in a trusted descendant until that descendant exits', 
   });
   onTestFinished(() => { child.kill('SIGKILL'); });
   await once(child.stdout!, 'data');
-  await expect(cache.withCacheLock(path, { ...ctx, deadline: Date.now() + 300 }, async () => 'taken')).rejects.toThrow();
+  /* The wait for the lock runs out at its deadline, on a clock the test moves, as the descendant holds the lock meanwhile. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+    const timer = new AbortController();
+    setTimeout(() => { timer.abort(new DOMException('The operation timed out.', 'TimeoutError')); }, ms);
+    return timer.signal;
+  });
+  onTestFinished(() => { timeout.mockRestore(); vi.useRealTimers(); });
+  let ended = false;
+  const taking = cache.withCacheLock(path, { ...ctx, deadline: Date.now() + 300 }, async () => 'taken').finally(() => { ended = true; }), refused = expect(taking).rejects.toThrow();
+  await eventually(() => timeout.mock.calls.length > 0);
+  await vi.advanceTimersByTimeAsync(299);
+  expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  await refused;
+  timeout.mockRestore(); vi.useRealTimers();
   const closed = once(child, 'exit'); child.kill('SIGKILL'); await closed;
   await expect(cache.withCacheLock(path, ctx, async () => 'released')).resolves.toBe('released');
 });
@@ -213,7 +231,7 @@ it('never serves a payload whose publisher was killed before READY and lets a la
   const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'environments');
   await mkdir(source); await writeFile(join(source, 'template'), 'unfinished');
   const modulePath = new URL('../src/test-cache.ts', import.meta.url).href;
-  const script = `import { prepareCache } from ${JSON.stringify(modulePath)}; await prepareCache(process.argv[1], 'a'.repeat(64), 'd'.repeat(64), {cacheRoot:process.argv[2],deadline:Date.now()+10000,signal:new AbortController().signal,log:()=>{}},async()=>{process.stdout.write('building');process.stdin.resume();await new Promise(resolve=>process.stdin.once('end',resolve));return {root:process.argv[3],paths:['template']};});`;
+  const script = `import { prepareCache } from ${JSON.stringify(modulePath)}; await prepareCache(process.argv[1], 'a'.repeat(64), 'd'.repeat(64), {cacheRoot:process.argv[2],deadline:Date.now()+2147483647,signal:new AbortController().signal,log:()=>{}},async()=>{process.stdout.write('building');process.stdin.resume();await new Promise(resolve=>process.stdin.once('end',resolve));return {root:process.argv[3],paths:['template']};});`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, directory, ctx.cacheRoot, source], { stdio: ['pipe', 'pipe', 'pipe'] });
   onTestFinished(() => { child.kill('SIGKILL'); });
   expect(String((await once(child.stdout, 'data'))[0])).toBe('building');
@@ -283,8 +301,9 @@ describe('sharing one prepared tree between parts', () => {
     const second = await cache.prepareCache(directory, key, digest, ctx, build);
     expect(second.hit).toBe(true);
     await chmod(join(second.path, 'payload', 'template'), 0o644);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    await writeFile(join(second.path, 'payload', 'template'), 'MIGRATED');
+    /* Written a second after it was stored, whatever the clock of the file system. */
+    const later = new Date((await stat(join(second.path, 'READY.json'))).mtimeMs + 1000);
+    await writeFile(join(second.path, 'payload', 'template'), 'MIGRATED'); await utimes(join(second.path, 'payload', 'template'), later, later);
     expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
     expect(builds).toBe(3);
   });
