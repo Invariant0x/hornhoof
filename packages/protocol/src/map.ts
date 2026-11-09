@@ -19,6 +19,9 @@ export const TOOL_QUIET_ALARM_MS = 7_200_000;
    out. Claude Code ends a dead wait itself after its retries, about 66 minutes; Codex never does; Kimi Code logs every
    retry, so half an hour without one is past its own; Antigravity's run ends by itself. */
 export const RESTART_AFTER_MS: Record<'claude' | 'codex' | 'kimi' | 'antigravity', number | null> = { claude: 4_500_000, codex: 1_800_000, kimi: 1_800_000, antigravity: null };
+/* Programs that take words typed into a running turn as a turn of their own, after the one they run: Hornhoof gives them a
+   message with their next turn instead of typing it into this one. */
+export const NEXT_TURN_WORDS: readonly string[] = ['antigravity'];
 
 /* The program's own retry, with its next try in epoch milliseconds when known. */
 export type ProgramRetry = { attempt: number; max: number | null; nextAt: number | null };

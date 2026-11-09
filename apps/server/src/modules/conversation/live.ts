@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { NEXT_TURN_WORDS } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -47,13 +48,16 @@ export async function sayLive(
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId);
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
-  /* A node without live terminals never takes words into a turn: they wait for the next one. */
-  if (!ctx.hub.hasTerminals(node)) return null;
+  if (!takesLiveWords(ctx, node, running.sub.provider)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
   if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
   return missedLive(required);
 }
+
+/* A node without live terminals never takes words into a turn, nor a program that takes typed words as a turn of its own:
+   they wait for the next one. */
+const takesLiveWords = (ctx: Ctx, node: NodeIdentity, provider: string): boolean => ctx.hub.hasTerminals(node) && !NEXT_TURN_WORDS.includes(provider);
 
 function missedLive(required: boolean): null {
   if (required) throw messageNotDelivered();

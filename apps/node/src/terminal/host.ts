@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { cut, isProgramOwnPrompt, isTerminalReport, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, isProgramOwnPrompt, isTerminalReport, NEXT_TURN_WORDS, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { programDirOf, toldPlace } from '../program-folder.js';
@@ -2467,8 +2467,8 @@ export class TerminalHost {
   }
 
   private async livePasteWait(a: Agent, words: LiveWords): Promise<number | null> {
-    /* Antigravity queues typed words as a separate turn, so these wait for Hornhoof's next turn. */
-    if (words.program.kind === 'antigravity') {
+    /* Antigravity queues typed words as a separate turn, so these wait for Hornhoof's next turn. Hornhoof sends none. */
+    if (NEXT_TURN_WORDS.includes(words.program.kind)) {
       this.refuseWords(words, 'this program takes live words as a separate turn');
       return null;
     }

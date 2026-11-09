@@ -114,6 +114,27 @@ describe('task messages reach their recipient', () => {
       expect((await c.messages(c.agent.id)).find(e => e.message?.direction === 'in')).toMatchObject({ jobId: queued[0]!.id });
     });
 
+    it.each([{ bound: true }, { bound: false }])('keeps a message for an Antigravity employee at work for its next turn, as Antigravity takes typed words as a turn of its own: %j', async ({ bound }) => {
+      const c = await messaging();
+      await c.db.update(subscriptions).set({ provider: 'antigravity' }).where(eq(subscriptions.id, c.sub.id));
+      /* The node turns down live words for Antigravity, every time. */
+      c.sent.mockImplementation((_node, message) => {
+        if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, false));
+        return true;
+      });
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      const worker = await c.run(c.agent.id, task.id);
+      const result = await send(head.client, c.agent.id, 'Run the browser checks.', bound ? task.number : undefined);
+      expect(result.isError).toBeFalsy();
+      expect(result.content[0]!.text).toBe(IN_LINE);
+      expect(c.sent.mock.calls.map(([, m]) => m).filter(m => m.type === 'agent.say')).toEqual([]);
+      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect(queued).toHaveLength(1);
+      expect(queued[0]!.prompt).toContain('Run the browser checks.');
+      expect((await c.jobOf(worker.job.id)).status).toBe('running');
+    });
+
     it('keeps a message behind a turn that waits ahead of it', async () => {
       const c = await messaging();
       const head = await c.run(c.head.id);

@@ -172,7 +172,7 @@ export const CLAUDE_ALIASES: ModelOption[] = [
 
 /* Effort rules live apart from the message schemas so the web uses the same ones. */
 export { effortFor, effortsOf, ORCHESTRATOR_EFFORT, ROLE_EFFORTS, type RoleEffort } from './efforts.js';
-export { lineState, yellowUntil, QUIET_ALARM_MS, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
+export { lineState, yellowUntil, NEXT_TURN_WORDS, QUIET_ALARM_MS, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 
