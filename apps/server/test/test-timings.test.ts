@@ -1,6 +1,6 @@
 import { timingLine } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it, TestRunner } from 'vitest';
+import { describe, expect, it, TestRunner, vi } from 'vitest';
 import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testPartTimings, testParts, testRuns, turns } from '../src/db/schema.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
@@ -136,7 +136,14 @@ describe('keeping what the logs of a turn said', () => {
 
 describe('what a test spends on its database and app', () => {
   it('counts as setup for the report of test times', async () => {
-    await testApp();
+    /* A clock that moves a millisecond each time it is read, so what the setup took is known without the real one. */
+    let ms = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => ++ms);
+    try {
+      await testApp();
+    } finally {
+      clock.mockRestore();
+    }
     expect((TestRunner.getCurrentTest()!.meta as { setupMs?: number }).setupMs).toBeGreaterThan(0);
   });
 });

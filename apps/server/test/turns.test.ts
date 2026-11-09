@@ -39,15 +39,13 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  /* What a person wrote to the orchestrator, as the window or his terminal stores it. Times count in milliseconds and
-     people write seconds apart, so it waits a little first. */
+  /* What a person wrote to the orchestrator, as the window or his terminal stores it. A turn tells its words apart by their
+     order, not by their time. */
   const say = async (text: string, personId = ceo!.id) => {
-    await new Promise(r => setTimeout(r, 5));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
   };
   /* A person's message to the orchestrator with the turn it makes: queued, or running with his tools. */
   const message = async (text: string, status: 'running' | 'queued' = 'running') => {
-    await new Promise(r => setTimeout(r, 5));
     const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: `Ivan (CEO): ${text}`, timeoutMs: 900000, status: 'queued', createdBy: ceo!.id }).returning();
     await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text }, personId: ceo!.id });
     const run = async () => {

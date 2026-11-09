@@ -134,8 +134,9 @@ async function company(registry: { base: string }, commit = 'aaa', control = mkd
   return { app, db, control, ceo: await setUpCompany(app) };
 }
 
-/* The updater is alive when it touched alive in the last 30 seconds. */
-const updaterAlive = (control: string, ageSeconds = 0) => {
+/* The updater is alive when it touched alive in the last 30 seconds. A touch an hour ahead of the clock stays that fresh
+   all through a test on any machine; one more than 30 seconds back is old already. */
+const updaterAlive = (control: string, ageSeconds = -3600) => {
   writeFileSync(join(control, 'alive'), '');
   const when = Date.now() / 1000 - ageSeconds;
   utimesSync(join(control, 'alive'), when, when);

@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,20 +69,25 @@ function bundled(dir: string): string {
   return file;
 }
 
-function updater(args: string[], env: Record<string, string> = {}, served: Served = {}) {
+/* The updater with these arguments, as long as it takes: only the runner's limit for the test ends one that never ends. */
+async function updater(args: string[], env: Record<string, string> = {}, served: Served = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-updater-nodes-'));
   const log = join(dir, 'stub.log');
   writeFileSync(log, '');
-  const res = spawnSync('bash', [SCRIPT, ...args], {
-    encoding: 'utf8',
-    timeout: 30_000,
+  const child = spawn('bash', [SCRIPT, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`, HOME: dir, STUB_LOG: log, STUB_STATE: dir, STUB_SERVED: serve(dir, served), HORNHOOF_INSTALLER: bundled(dir), ...env },
   });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
+  child.stderr.setEncoding('utf8').on('data', (text: string) => (stderr += text));
+  const [code] = (await once(child, 'close')) as [number | null];
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
   /* Whatever happens, nothing of what the server served ran. */
   expect(existsSync(join(dir, 'pwned'))).toBe(false);
   expect(calls).not.toContain('served installer ran');
-  return { code: res.status, out: res.stdout + res.stderr, calls };
+  return { code, out: stdout + stderr, calls };
 }
 
 const look = (env: Record<string, string> = {}, served: Served = {}) => updater(['nodes', SERVER, SELF, HOST, '--once'], { STUB_PLAN_NODES: BEHIND, ...env }, served);
@@ -94,8 +100,8 @@ describe('updater of a server\'s nodes on another computer', () => {
     if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
   });
 
-  it('replaces each node on another image than the server\'s build through the installer in its own image, side by side', () => {
-    const r = look();
+  it('replaces each node on another image than the server\'s build through the installer in its own image, side by side', async () => {
+    const r = await look();
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('curl') && c.includes(`${SERVER}/install.sh`))).toBe(true);
     expect(r.calls).toContain(`docker ps --filter label=hornhoof.subscription --filter label=hornhoof.server=${SERVER} --format {{.Names}} {{.Label "hornhoof.subscription"}}`);
@@ -105,11 +111,11 @@ describe('updater of a server\'s nodes on another computer', () => {
     expect(r.out).toContain('Starting the node.');
   });
 
-  it('runs nothing the server serves, also a value that carries a command', () => {
-    const r = look({}, { build: `${NEW_NODE}$(touch "$STUB_STATE/pwned")`, extra: ['$(touch "$STUB_STATE/pwned")', '`touch "$STUB_STATE/pwned"`'] });
+  it('runs nothing the server serves, also a value that carries a command', async () => {
+    const r = await look({}, { build: `${NEW_NODE}$(touch "$STUB_STATE/pwned")`, extra: ['$(touch "$STUB_STATE/pwned")', '`touch "$STUB_STATE/pwned"`'] });
     expect(r.code).toBe(0);
     expect(installers(r.calls)).toEqual([]);
-    expect(installers(look({}, { extra: ['$(touch "$STUB_STATE/pwned")'] }).calls)).toHaveLength(2);
+    expect(installers((await look({}, { extra: ['$(touch "$STUB_STATE/pwned")'] })).calls)).toHaveLength(2);
   });
 
   it.each([
@@ -118,8 +124,8 @@ describe('updater of a server\'s nodes on another computer', () => {
     ['in another repository', `ghcr.io/acme/hornhoof-node@sha256:${'2'.repeat(64)}`],
     ['by a digest of another length', `${NODE}@sha256:${'2'.repeat(63)}`],
     ['by a digest with a command after it', `${NEW_NODE};touch /tmp/x`],
-  ])('changes nothing when the server names its node image %s', (_, build) => {
-    const r = look({}, { build });
+  ])('changes nothing when the server names its node image %s', async (_, build) => {
+    const r = await look({}, { build });
     expect(r.code).toBe(0);
     expect(installers(r.calls)).toEqual([]);
     expect(moves(r.calls)).toEqual([]);
@@ -130,80 +136,80 @@ describe('updater of a server\'s nodes on another computer', () => {
     ['as a local build', 'local'],
     ['in another repository', `ghcr.io/acme/hornhoof-updater@sha256:${'4'.repeat(64)}`],
     ['not at all, as a build from before 0.8.4', null],
-  ])('changes nothing when the server names its updater image %s', (_, updater) => {
-    const r = look({}, { updater });
+  ])('changes nothing when the server names its updater image %s', async (_, updater) => {
+    const r = await look({}, { updater });
     expect(r.code).toBe(0);
     expect(installers(r.calls)).toEqual([]);
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it('changes nothing when the server names its own computer in a way no hash is written', () => {
-    const r = look({}, { host: 'not-a-hash' });
+  it('changes nothing when the server names its own computer in a way no hash is written', async () => {
+    const r = await look({}, { host: 'not-a-hash' });
     expect(installers(r.calls)).toEqual([]);
   });
 
-  it('moves itself to the updater image of the server\'s build first, through a helper that outlives it, and replaces no node meanwhile', () => {
-    const r = look({}, { updater: NEXT });
+  it('moves itself to the updater image of the server\'s build first, through a helper that outlives it, and replaces no node meanwhile', async () => {
+    const r = await look({}, { updater: NEXT });
     expect(r.code).toBe(0);
     const name = `hornhoof-updater-${createHash('sha256').update(SERVER).digest('hex').slice(0, 12)}`;
     expect(moves(r.calls)).toEqual([`docker run -d --rm --name ${name}-move -v /var/run/docker.sock:/var/run/docker.sock ${NEXT} start-nodes ${SERVER} ${NEXT} ${HOST}`]);
     expect(installers(r.calls)).toEqual([]);
-    expect(moves(look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` }, { updater: NEXT }).calls)).toHaveLength(1);
+    expect(moves((await look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` }, { updater: NEXT })).calls)).toHaveLength(1);
   });
 
-  it('stays as it is on the updater image of the server\'s build', () => {
-    const r = look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
+  it('stays as it is on the updater image of the server\'s build', async () => {
+    const r = await look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
     expect(r.code).toBe(0);
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it('leaves the nodes of another server on this computer alone', () => {
-    const r = look({ STUB_FOREIGN_NODES: CODEX });
+  it('leaves the nodes of another server on this computer alone', async () => {
+    const r = await look({ STUB_FOREIGN_NODES: CODEX });
     expect(installers(r.calls)).toEqual([ran(PLAN_A)]);
   });
 
-  it('changes nothing when every node runs the server\'s build', () => {
-    const r = look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
+  it('changes nothing when every node runs the server\'s build', async () => {
+    const r = await look({ STUB_PLAN_NODES: `${KIMI}=${PLAN_C}=${NEW_NODE}` });
     expect(r.code).toBe(0);
     expect(installers(r.calls)).toEqual([]);
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it('moves the nodes to every build the server names by digest, whatever else the installer it serves says', () => {
-    const r = look({}, { extra: ['NO_NODE="This build has no live check."'] });
+  it('moves the nodes to every build the server names by digest, whatever else the installer it serves says', async () => {
+    const r = await look({}, { extra: ['NO_NODE="This build has no live check."'] });
     expect(r.code).toBe(0);
     expect(installers(r.calls).sort()).toEqual([ran(PLAN_A), ran(PLAN_B)].sort());
   });
 
-  it('stands aside on the server\'s own computer, whose own updater moves the nodes', () => {
-    const r = look({}, { host: HOST, updater: NEXT });
+  it('stands aside on the server\'s own computer, whose own updater moves the nodes', async () => {
+    const r = await look({}, { host: HOST, updater: NEXT });
     expect(r.code).toBe(0);
     expect(installers(r.calls)).toEqual([]);
     expect(moves(r.calls)).toEqual([]);
   });
 
-  it('looks again later after the server did not answer', () => {
-    const r = look({ STUB_SERVED_DOWN: '1' });
+  it('looks again later after the server did not answer', async () => {
+    const r = await look({ STUB_SERVED_DOWN: '1' });
     expect(r.code).toBe(1);
     expect(installers(r.calls)).toEqual([]);
     expect(r.out).toContain(`Could not reach ${SERVER}`);
   });
 
-  it('looks again later after an installer failed, and says what it said', () => {
-    const r = look({ STUB_INSTALLER_FAILS: '1' });
+  it('looks again later after an installer failed, and says what it said', async () => {
+    const r = await look({ STUB_INSTALLER_FAILS: '1' });
     expect(r.code).toBe(1);
     expect(r.out).toContain('Could not start the node.');
   });
 
-  it('refuses a server address or an image it cannot take as they are', () => {
+  it('refuses a server address or an image it cannot take as they are', async () => {
     for (const args of [['nodes', 'https://x.test/"; rm -rf /', SELF, HOST, '--once'], ['nodes', SERVER, 'ubuntu:latest', HOST, '--once'], ['nodes', SERVER, `${UPDATER}:${'c'.repeat(40)}`, HOST, '--once'], ['nodes', SERVER, SELF, 'not-a-host', '--once']]) {
-      const r = updater(args, { STUB_PLAN_NODES: BEHIND });
+      const r = await updater(args, { STUB_PLAN_NODES: BEHIND });
       expect(r.code).not.toBe(0);
       expect(r.calls.filter(c => c.startsWith('curl') || c.startsWith('docker'))).toEqual([]);
     }
   });
 
-  it('runs the installer its own image carries, which fills in every value the server fills in', () => {
+  it('runs the installer its own image carries, which fills in every value the server fills in', async () => {
     expect(readFileSync(DOCKERFILE, 'utf8')).toMatch(/^COPY scripts\/install\.sh \/usr\/local\/share\/hornhoof\/install\.sh$/m);
     const updaterScript = readFileSync(SCRIPT, 'utf8');
     expect(updaterScript).toContain('INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"');
@@ -216,8 +222,8 @@ describe('updater of a server\'s nodes on another computer', () => {
 describe('updater start-nodes', () => {
   const name = `hornhoof-updater-${createHash('sha256').update(SERVER).digest('hex').slice(0, 12)}`;
 
-  it('starts the one updater of a server\'s nodes, named after the server, with the Docker socket, once the ones before it are gone', () => {
-    const r = updater(['start-nodes', SERVER, NEXT, HOST], { STUB_NODES_UPDATERS: 'old-1 old-2', STUB_NODES_UPDATER_IMAGE: SELF });
+  it('starts the one updater of a server\'s nodes, named after the server, with the Docker socket, once the ones before it are gone', async () => {
+    const r = await updater(['start-nodes', SERVER, NEXT, HOST], { STUB_NODES_UPDATERS: 'old-1 old-2', STUB_NODES_UPDATER_IMAGE: SELF });
     expect(r.code).toBe(0);
     const run = r.calls.findIndex(c => c.startsWith('docker run -d'));
     expect(r.calls[run]).toBe(`docker run -d --name ${name} --label hornhoof.updater=nodes --label hornhoof.server=${SERVER} --restart unless-stopped -v /var/run/docker.sock:/var/run/docker.sock ${NEXT} nodes ${SERVER} ${NEXT} ${HOST}`);
@@ -225,14 +231,14 @@ describe('updater start-nodes', () => {
     for (const old of ['old-1', 'old-2']) expect(r.calls.indexOf(`docker rm -f ${old}`)).toBeLessThan(run);
   });
 
-  it('keeps the one that runs that image already', () => {
-    const r = updater(['start-nodes', SERVER, NEXT, HOST], { STUB_NODES_UPDATERS: 'old-1', STUB_NODES_UPDATER_IMAGE: NEXT });
+  it('keeps the one that runs that image already', async () => {
+    const r = await updater(['start-nodes', SERVER, NEXT, HOST], { STUB_NODES_UPDATERS: 'old-1', STUB_NODES_UPDATER_IMAGE: NEXT });
     expect(r.code).toBe(0);
     expect(r.calls.filter(c => c.startsWith('docker rm') || c.startsWith('docker run'))).toEqual([]);
   });
 
-  it.each(['ubuntu:latest', `${UPDATER}:${'c'.repeat(40)}`])('starts nothing on an image that is not Hornhoof\'s updater by its digest: %s', image => {
-    const r = updater(['start-nodes', SERVER, image, HOST], { STUB_NODES_UPDATERS: 'old-1' });
+  it.each(['ubuntu:latest', `${UPDATER}:${'c'.repeat(40)}`])('starts nothing on an image that is not Hornhoof\'s updater by its digest: %s', async image => {
+    const r = await updater(['start-nodes', SERVER, image, HOST], { STUB_NODES_UPDATERS: 'old-1' });
     expect(r.code).not.toBe(0);
     expect(r.calls.filter(c => c.startsWith('docker rm') || c.startsWith('docker run'))).toEqual([]);
   });

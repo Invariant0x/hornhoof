@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, taskEvents, tasks, waitNotices } from '../src/db/schema.js';
 import { comment } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -48,6 +48,9 @@ describe('wait recipient notices', () => {
   it('retries a durable request after a restart and lease expiry without duplicating accepted input', async () => {
     const c = await waitCompany();
     const task = await c.task();
+    /* A claim takes the later of the given time and the clock: one that stands still leaves the given times to decide. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const now = new Date();
     const wait = { reason: 'Acceptance', since: now.toISOString(), until: new Date(now.getTime() + 3_600_000).toISOString(), on: { kind: 'employee' as const, employee: c.head.id, name: c.head.name } };
     await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, task.id));

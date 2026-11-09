@@ -205,15 +205,13 @@ describe('the people\'s words a turn keeps, over a long history', () => {
   it('reads 10,000 turns once, including when only one fresh message is needed', async () => {
     const h = await accountedHistory(9999);
     const ran = statements();
-    const start = performance.now();
     expect(await h.db.transaction(async tx => {
       await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, h.companyId)).for('update');
       return newWords(tx, h.by(), TURN_MESSAGES);
     })).toEqual([]);
-    const elapsedMs = performance.now() - start;
     const measured = await explain(h.db, ran.find(s => s.sql.includes('from "turns"'))!);
     expect(readIn(measured.Plan, 'turns')).toBe(10000);
-    console.info('10,000 turns, all accounted:', JSON.stringify({ elapsedMs, ...measured }));
+    console.info('10,000 turns, all accounted:', JSON.stringify(measured));
     ran.splice(0);
     const message = await h.say('Fresh point', Date.now(), true);
     expect(await h.db.transaction(tx => newWords(tx, h.by(), 1))).toEqual([message]);

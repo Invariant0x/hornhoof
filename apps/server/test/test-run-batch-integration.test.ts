@@ -11,7 +11,7 @@ import { planningEnvironment } from './fixtures/run-planning/environment.js';
 const NODE_KEY = 'batch-integration-node-0123456789abcdef';
 const runtimes = [{ id: 'node', version: '22.23.4', fingerprint: 'b'.repeat(64) }, { id: 'python', version: '3.12.0', fingerprint: 'c'.repeat(64) }, { id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: 'd'.repeat(64) }];
 async function fixture(once = true, native = true) {
-  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '50' }), url = await listen(app);
+  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://example.test/fixture.git' }).returning();

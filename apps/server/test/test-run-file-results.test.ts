@@ -29,7 +29,7 @@ const manifest = (everyTurns = 5, preparation = false) => parseTestEnvironment({
 });
 
 async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
-  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '50' }), url = await listen(app);
+  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' }), url = await listen(app);
   await setUpCompany(app);
   const [agent] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator')), companyId = agent!.companyId;
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://example.test/fixture.git' }).returning();
