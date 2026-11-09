@@ -120,6 +120,7 @@ advance the same candidate independently.
 | Wrong goal at any stage | Phase escalated, owner is department head, preserve stage/candidate and evidence; no Development wake. |
 | Infrastructure failure in Tests | Stay in Tests, retry the same candidate or wait for the external run. |
 | Content failure in Tests | Escalate to head with exact failing run evidence. Tests does not silently edit candidate or send it to the author. |
+| Candidate's own change passed, only the main line is missing | Stay in Tests. Its owner merges the main line into the candidate branch and submits the merge with the main commit as its new base; the server takes it only when the base moved along the main line and the merge changes nothing that line did not bring. Tests checks the new candidate. |
 | Tests passes | Phase ready; atomically assign the department head, or its explicitly designated integration owner, and notify it under existing rights. No author merge return. |
 | Authorized integration completes | Phase done only after exact-candidate inclusion evidence; merge/release approvals retain their existing meaning. |
 

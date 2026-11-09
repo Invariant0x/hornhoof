@@ -5,6 +5,7 @@ import { agents, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Task, Tx } from './engine.js';
 import type { Route } from './echelons-store.js';
+import { checkedProducer } from './echelons-candidates.js';
 import { modelCapability, modelProvider, reviewEligibility, sameChecker, type CheckerIdentity } from './echelons-policy.js';
 
 type Reader = { db: Ctx['db'] | Tx };
@@ -45,7 +46,7 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
 export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
   const ability = route.state.stage === 'tests' ? 'dev-test-environment' : route.state.stage === 'review' ? 'dev-review-diff' : route.state.stage === 'security' ? 'dev-security-review' : 'dev-cleanup';
-  const identity = await checkerFor(ctx, task, candidate.producedBy, ability, task.assigneeAgentId);
+  const identity = await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, candidate), ability, task.assigneeAgentId);
   if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
   return identity;
 }

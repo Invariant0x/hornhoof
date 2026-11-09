@@ -94,6 +94,13 @@ describe('who repairs a finding', () => {
       expect(body(id), id).not.toMatch(/verification\.defect|comes back (to you )?after your verdict|passes the route again|since (their|your) last verdict|sends? (it |the task |the candidate )?back to (its|the) author/);
     }
   });
+
+  it('lets Tests take the main line into a candidate whose own change passed and check it again there', () => {
+    for (const id of ['dev-task-flow', 'dev-gates']) {
+      expect(body(id), id).toMatch(/own change passed[^.]*main line[^.]*stays at Tests/);
+      expect(body(id), id).toMatch(/"submit"[^.]*review\.baseCommit[^.]*main/);
+    }
+  });
 });
 
 describe('the base a review compares with', () => {

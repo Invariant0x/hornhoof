@@ -7,6 +7,7 @@ import { agentIdentity, checkerFor, checkingIdentity, heldCheckingIdentity } fro
 import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
 import { CHECK_ABILITIES, forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
+import { takeMainAtTests } from './echelons-main.js';
 import { createRoute, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
@@ -601,13 +602,14 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: Subm
 
 function requireSubmissionStage(task: Task, route: Route): void {
   if (route.state.resultKind === 'coordination') throw refuse(400, 'task_invalid', 'A coordination result has no code candidate. Report its checked child results.');
-  if (!['development', 'review', 'security', 'cleanup'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
+  if (!['development', 'review', 'security', 'cleanup', 'tests'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
 }
 
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
+  if (route.state.stage === 'tests') return takeMainAtTests(ctx, agentId, task, route, r, operation);
   const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
   const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, inputCandidate?.branch);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);

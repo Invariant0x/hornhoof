@@ -23,12 +23,21 @@ export function producedCandidate(route: Route, producer: CheckerIdentity, revie
   });
 }
 
-export async function currentCandidate(db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> {
+async function candidateOf(db: Db | Tx, task: Task, id: string | null): Promise<EchelonCandidate> {
   const [event] = await db.select({ data: taskEvents.data, agentId: taskEvents.agentId }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.companyId, task.companyId), eq(taskEvents.kind, 'submitted'),
-    sql`${taskEvents.data}->'candidate'->>'id' = ${route.state.candidateId}`)).orderBy(desc(taskEvents.id)).limit(1);
+    sql`${taskEvents.data}->'candidate'->>'id' = ${id}`)).orderBy(desc(taskEvents.id)).limit(1);
   const parsed = EchelonCandidate.safeParse(event?.data.candidate);
   if (!parsed.success || event?.agentId !== parsed.data.producedBy.agentId) throw refuse(409, 'task_invalid', 'The current candidate has no immutable producer submission.');
   return parsed.data;
+}
+
+export const currentCandidate = (db: Db | Tx, task: Task, route: Route): Promise<EchelonCandidate> => candidateOf(db, task, route.state.candidateId);
+
+/* Whose work the current stage checks: the producer of what it received, also once Tests took the main line into it. */
+export async function checkedProducer(db: Db | Tx, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+  if (candidate.producedBy.stage !== route.state.stage) return candidate.producedBy;
+  const input = route.state.stages.find(step => step.stage === route.state.stage)?.inputCandidateId ?? null;
+  return (await candidateOf(db, task, input)).producedBy;
 }
 
 /* A repair extends the assigned branch while keeping the full change relative to the original base. */

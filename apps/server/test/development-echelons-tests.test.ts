@@ -95,8 +95,9 @@ describe('Tests verifies the final candidate without changing it', () => {
     const ids = problem === 'missing' ? [randomUUID()] : problem === 'duplicate' ? [run.id, run.id] : [run.id];
     await expect(report(f.ctx, f.tester.id, f.task.id, f.verified(ids)).then(() => null)).rejects.toMatchObject({ status: 409 });
   });
-  it('refuses code submission from Tests', async () => {
+  it('refuses code of its own from Tests, which may take in only the main line', async () => {
     const f = await testsFixture();
-    await expect(submit(f.ctx, f.tester.id, f.task.id, { summary: 'Tests must not edit code.', evidence: 'None.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 403 });
+    await expect(submit(f.ctx, f.tester.id, f.task.id, { summary: 'Tests must not edit code.', evidence: 'None.', review: { baseCommit: BASE } })).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons).toMatchObject({ stage: 'tests', phase: 'active', candidateId: f.snapshot.candidateId });
   });
 });
