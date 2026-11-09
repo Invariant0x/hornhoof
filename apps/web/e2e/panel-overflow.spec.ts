@@ -1,10 +1,9 @@
-import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, NoteView, PersonView, ShownCommand } from '../src/types';
 import { openAgent } from './agent-window-panels-api';
-import { serveApi, TASKS } from './api';
+import { detail as taskDetail, serveApi, TASKS } from './api';
 import { serveRoutes } from './routes-api';
 import { captureWith } from './capture';
 
@@ -122,16 +121,17 @@ for (const lang of ['en', 'ru'] as const) {
         const current = { version: '0.7.0', commit: 'panel-overflow-test' };
         await page.route('**/api/version', route => route.fulfill({ json: current }));
         await page.route('**/api/updates', route => route.fulfill({ json: { current, available: false, latest: null, updater: { status: null, waiting: null } } }));
-        await page.route('**/api/tasks?status=all', route => route.fulfill({ json: { tasks: [task, ...TASKS.slice(1)] } }));
-        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...task, echelonFindings: emptyEchelonFindings(), body: LONG_TEXT, parent: null, after: [], executor: task.assignee, createdBy: null, subtasks: [], log: [], requests: [] } } }));
+        await page.route('**/api/tasks?status=all&department=d2', route => route.fulfill({ json: { tasks: [task, ...TASKS.slice(1)] } }));
+        await page.route('**/api/tasks/t1', route => route.fulfill({ json: { task: { ...taskDetail(task), body: LONG_TEXT, executor: task.assignee, createdBy: null } } }));
         await page.goto('/tasks');
-        const row = page.locator('button.trow').first();
-        const brief = row.locator('.trow-brief');
-        await expect(brief).toBeVisible();
+        await page.getByRole('row', { name: '#1 Checkout step 1', exact: true }).getByRole('button').click();
+        const summary = page.locator('tr.det .task-sum');
+        const brief = summary.locator('p').first();
+        await expect(brief).toHaveText(LONG_TEXT);
         await capture(page, info, `tasks-${look}`);
         await expectWrappedText(brief);
-        await expectInside(row, [brief]);
-        await row.click();
+        await expectInside(summary, [brief]);
+        await summary.getByRole('button', { name: MESSAGES[lang].tasks.table.open, exact: true }).click();
         const detail = page.getByRole('complementary', { name: /#1 Checkout step 1/ });
         await expect(detail.locator('.tp-brief')).toHaveText(LONG_TEXT);
         const actions = detail.locator('.ac-actions .entry-actions');

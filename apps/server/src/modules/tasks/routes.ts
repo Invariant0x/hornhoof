@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
+import { departmentsHad, requireDepartmentHad } from '../../auth/departments.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
@@ -54,7 +55,9 @@ const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: T
 
 const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positive(), ownerBinding: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) });
 const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
-const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
+/* department: one of the person's own, or none for the work given to the orchestrator itself, which only people with the
+   whole company read. */
+const ListQuery = z.object({ department: z.union([z.uuid(), z.literal('none')]), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
@@ -209,15 +212,26 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The task as this person reads it. */
   const detail = async (me: Person, task: Task) => ({ ...(await detailFor(ctx, await viewerOf(db, me), task)), mayPause: actsAsCeo(me) });
 
+  /* The departments whose tasks this person reads, for the Tasks screen to choose from. */
+  app.get('/api/task-departments', async req => {
+    const me = await requirePerson(req, db);
+    const had = await departmentsHad(db, me);
+    return { whole: (await accessOf(db, me)).whole, departments: had.map(d => ({ id: d.id, name: d.name, templateKey: d.templateKey })) };
+  });
+
+  /* One department's tasks, as this person sees them. Another department's are refused, not just left out. */
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
+    if (q.department === 'none' && !(await accessOf(db, me)).whole) throw refuse(403, 'not_your_department', 'Only people with the whole company read the work given to the orchestrator itself.');
+    if (q.department !== 'none') await requireDepartmentHad(db, me, q.department);
     const viewer = await viewerOf(db, me);
+    const place = q.department === 'none' ? isNull(tasks.departmentId) : eq(tasks.departmentId, q.department);
     const page = (state: SQL) =>
       db
         .select()
         .from(tasks)
-        .where(and(eq(tasks.companyId, me.companyId), state, q.department ? eq(tasks.departmentId, q.department) : undefined))
+        .where(and(eq(tasks.companyId, me.companyId), state, place))
         .orderBy(desc(tasks.number))
         .limit(500);
     /* All of them: every open one stays even under many closed ones, the newest closed ones come with them. */

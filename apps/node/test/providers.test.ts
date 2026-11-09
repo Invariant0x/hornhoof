@@ -62,7 +62,7 @@ afterEach(() => {
   for (const k of ['FAKE_LOG', 'FAKE_MODE', 'FAKE_ERROR_SECRET', 'NODE_KEY', 'HORNHOOF_DATA']) delete process.env[k];
 });
 
-const adapter = (provider: ProviderId, secret: string | null = null) => adapterFor(provider, { home, tools, bin: join(FAKES, FAKE_BIN[provider]), secret, plugins: [] });
+const adapter = (provider: ProviderId, secret: string | null = null) => adapterFor(provider, { home, tools, bin: join(FAKES, FAKE_BIN[provider]), secret });
 /* Limits no run reaches: the longest a timer waits, and a job's, which the runner gives up to 30 s more. */
 const NEVER_MS = 2_147_483_647, NEVER_JOB_MS = NEVER_MS - 30_000;
 const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: NEVER_MS, instructions: null, tools: null, ...over });
@@ -926,13 +926,9 @@ function withTools(provider: ProviderId) {
 }
 
 describe('Hornhoof tools and instructions', () => {
-  it.each([null, CLAUDE_SESSION])('give Claude Code the plugins the node has, for the run only (session %s)', async sessionId => {
-    const sp = join(dir, 'superpowers');
-    mkdirSync(sp);
-    await adapterFor('claude', { home, tools, bin: join(FAKES, FAKE_BIN.claude), plugins: [sp] }).run(input({ sessionId }));
-    const { argv } = lastRun();
-    expect(argv[argv.indexOf('--plugin-dir') + 1]).toBe(sp);
-    expect(argv.indexOf('--plugin-dir')).toBeLessThan(argv.indexOf('--'));
+  it.each([null, CLAUDE_SESSION])('give Claude Code no plugin (session %s)', async sessionId => {
+    await adapter('claude').run(input({ sessionId }));
+    expect(lastRun().argv).not.toContain('--plugin-dir');
   });
 
   it('give Claude Code the instructions in a file of its folder, as one argument may hold only 128 KiB on Linux', async () => {

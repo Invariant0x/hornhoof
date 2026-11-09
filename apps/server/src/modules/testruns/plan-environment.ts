@@ -14,7 +14,7 @@ export type EnvironmentPartPlan = {
   manifestHash: string;
   profile: string;
   testPlan: TestPartPlan;
-  parts: { selections: SuiteSelection[]; suiteShards: SuiteShard[] }[];
+  parts: { selections: SuiteSelection[]; suiteShards: SuiteShard[]; machine?: { key: string; ms: number } }[];
   postSuiteChecks: { suiteId: string; commands: Command[] }[];
   ports: { suiteBatch: 'required' | 'not-required'; finalPreparation: 'missing' | 'not-required' };
 };
@@ -68,7 +68,7 @@ export async function planEnvironmentParts(input: PreparedEnvironmentPlanInput):
   suiteSelections(snapshot, units);
   if (input.purpose === 'final') finalInventory(snapshot, units);
   const testPlan = planTestParts({ ...input, units });
-  const parts = withSuiteShards(testPlan.parts.map(part => ({ selections: suiteSelections(snapshot, part.units) })));
+  const parts = withSuiteShards(testPlan.parts.map(part => ({ selections: suiteSelections(snapshot, part.units), ...(part.machine ? { machine: part.machine } : {}) })));
   return { commitSha: snapshot.description.commitSha, manifestHash: snapshot.description.manifestHash, profile: snapshot.profile,
     testPlan, parts, postSuiteChecks: postSuiteChecks(snapshot, units),
     ports: { suiteBatch: parts.some(part => part.selections.length > 1) ? 'required' : 'not-required',

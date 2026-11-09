@@ -8,7 +8,7 @@ import { CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLA
 import { fakeStream } from './fake-stream';
 import { taskRoute } from './task-route';
 
-const ALL = '/api/tasks?status=all';
+const ALL = '/api/tasks?status=all&department=d2';
 const PLANNED = { ...TASKS[1]!, id: 't14', number: 14, title: 'Refund button', brief: '', status: 'planned' as const, assignee: null, turn: 4 };
 const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief: '', status: 'open' as const, parentId: 't12' };
 const CHECKING_CART = { ...TASKS[1]!, status: 'review' as const, assignee: TASKS[0]!.assignee, echelons: taskRoute('review', TASKS[0]!.assignee!.id) };
@@ -39,82 +39,6 @@ describe('the tracker', () => {
   it('counts what waits for people in the navigation', async () => {
     shell();
     expect(await screen.findByRole('button', { name: 'Tasks, 2 waiting for you' })).toBeInTheDocument();
-  });
-
-  it('shows the running turn with its title, main point, progress and tasks, and nothing to start or close', async () => {
-    const user = userEvent.setup();
-    shell();
-    await openTasks(user);
-    const turn = screen.getByRole('region', { name: 'Turn 3' });
-    expect(turn).toHaveTextContent('Running');
-    expect(within(turn).getByRole('heading', { name: 'Payments' })).toBeInTheDocument();
-    expect(turn).toHaveTextContent('Take card payments in the shop.');
-    expect(turn).toHaveTextContent('2 of 5 tasks done');
-    expect(within(turn).getByRole('progressbar', { name: '2 of 5 tasks done' })).toHaveAttribute('aria-valuenow', '40');
-    expect(within(turn).getByRole('button', { name: /#12/ })).toHaveTextContent('In review');
-    for (const name of ['Start turn', 'Close turn']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
-    /* Decision text fields stay in the waiting section. */
-    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
-    for (const box of screen.queryAllByRole('textbox')) expect(waiting).toContainElement(box);
-  });
-
-  it.each([
-    { done: 0, total: 0, percent: '0' },
-    { done: 1, total: 3, percent: '33' },
-    { done: 17, total: 17, percent: '100' },
-  ])('shows server progress $done/$total independently of the listed task rows', async ({ done, total, percent }) => {
-    const user = userEvent.setup();
-    shell({ 'GET /api/turns': [200, { turns: [{ ...TURN, tasks: { done, total } }] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
-    await openTasks(user);
-    const progress = screen.getByRole('progressbar', { name: `${done} of ${total} tasks done` });
-    expect(progress).toHaveAttribute('aria-valuenow', percent);
-    expect(progress).toHaveAttribute('aria-valuemin', '0');
-    expect(progress).toHaveAttribute('aria-valuemax', '100');
-    expect(progress.querySelector('i')).toHaveStyle({ width: `${percent}%` });
-  });
-
-  it("shows the words a turn came from on click", async () => {
-    const user = userEvent.setup();
-    shell();
-    await openTasks(user);
-    const turn = screen.getByRole('region', { name: 'Turn 3' });
-    const words = within(turn).getByText('The words it came from');
-    expect(within(turn).getByText(/Stripe is fine/)).not.toBeVisible();
-    await user.click(words);
-    expect(within(turn).getByText(/Stripe is fine/)).toBeVisible();
-    expect(turn).toHaveTextContent('Ivan');
-  });
-
-  it('nests a task under the one it serves', async () => {
-    const user = userEvent.setup();
-    shell();
-    await openTasks(user);
-    const parent = screen.getByRole('button', { name: /#12/ }).closest('li')!;
-    expect(within(parent as HTMLElement).getByRole('button', { name: /#13/ })).toHaveTextContent('Card form');
-  });
-
-  it('lists the planned turns after the running one, and folds the finished ones away', async () => {
-    const user = userEvent.setup();
-    shell();
-    await openTasks(user);
-    const next = screen.getByRole('region', { name: 'Planned next' });
-    const planned = within(next).getByRole('region', { name: 'Turn 4' });
-    expect(planned).toHaveTextContent('Refunds');
-    expect(planned).toHaveTextContent('1 task waiting for this turn');
-    expect(within(planned).getByRole('button', { name: /#14/ })).toHaveTextContent('Planned');
-    const finished = screen.getByRole('region', { name: 'Finished turns' });
-    expect(finished).toHaveTextContent('Login');
-    expect(within(finished).getByRole('button', { name: /#8/ })).not.toBeVisible();
-  });
-
-  it('keeps open tasks outside turns in view and folds the closed ones away', async () => {
-    const user = userEvent.setup();
-    shell({ [`GET ${ALL}`]: [200, { tasks: [{ ...TASKS[1]!, turn: null }, { ...CLOSED_TASKS[0]!, turn: null }] }] });
-    await openTasks(user);
-    expect(within(screen.getByRole('region', { name: 'Outside turns' })).getByRole('button', { name: /#11/ })).toBeVisible();
-    expect(screen.getByRole('button', { name: /#8/ })).not.toBeVisible();
-    await user.click(screen.getByText('Closed outside turns: 1'));
-    expect(screen.getByRole('button', { name: /#8/ })).toBeVisible();
   });
 
   it('opens the orchestrator to write to him, for people who see the whole company', async () => {
@@ -237,20 +161,6 @@ describe('the tracker', () => {
     expect(within(approval).queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
   });
 
-  it('filters the tasks by department', async () => {
-    const user = userEvent.setup();
-    const calls = shell({ 'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS.slice(0, 1) }] });
-    await openTasks(user);
-    const review = screen.getByRole('button', { name: /#12/ });
-    expect(review).toHaveTextContent('Checkout API');
-    expect(review).toHaveTextContent('Review');
-    expect(review).toHaveTextContent('Owner: Rita');
-    expect(review).toHaveTextContent('Development');
-    await user.selectOptions(screen.getByLabelText('Department'), 'd2');
-    await waitFor(() => expect(screen.queryByRole('button', { name: /#11/ })).not.toBeInTheDocument());
-    expect(calls.some(c => c.path === '/api/tasks?status=all&department=d2')).toBe(true);
-  });
-
   it('fetches the tasks again when one changes', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
@@ -259,9 +169,9 @@ describe('the tracker', () => {
     await openTasks(user);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita'));
-    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('In review');
-    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Review');
+    await waitFor(() => expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita'));
+    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('In review');
+    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Review');
   });
 
   it('keeps the newest list when an older answer comes after it', async () => {
@@ -283,16 +193,19 @@ describe('the tracker', () => {
     stream.send({ type: 'task', id: 't11' });
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita'));
+    await waitFor(() => expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita'));
     await act(async () => {
       late();
       /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
       await new Promise(r => setImmediate(r));
     });
-    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Owner: Rita');
-    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Review');
+    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita');
+    expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Review');
   });
 });
+
+/* The rows of tasks in a table, without its heads. */
+const taskRows = (table: HTMLElement) => within(table).getAllByRole('row').filter(row => row.classList.contains('rm'));
 
 describe('task search', () => {
   const archived = { ...PLANNED, id: 'abcdef14-1234-4567-8901-123456789abc', status: 'done', turn: 2 };
@@ -303,13 +216,13 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [mention, { ...PLANNED, id: 't114', number: 114 }, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
-    const matches = within(results).getAllByRole('button');
+    const results = screen.getByRole('table', { name: 'Search results' });
+    const matches = taskRows(results);
     expect(matches).toHaveLength(2);
     expect(matches[0]).toHaveTextContent('#14 Refund button');
     expect(matches[0]).toBeVisible();
     expect(matches[1]).toHaveTextContent('#13 Notes for #14');
-    expect(within(results).queryByRole('button', { name: /#114/ })).not.toBeInTheDocument();
+    expect(within(results).queryByRole('row', { name: /#114/ })).not.toBeInTheDocument();
   });
 
   it.each(['abcdef14-1234-4567-8901-123456789abc', 'ABCDEF14'])('finds a task by its id or prefix: %s', async query => {
@@ -317,9 +230,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, archived] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
-    expect(within(results).getAllByRole('button')).toHaveLength(1);
-    expect(within(results).getByRole('button', { name: /#14 Refund button/ })).toBeVisible();
+    const results = screen.getByRole('table', { name: 'Search results' });
+    expect(taskRows(results)).toHaveLength(1);
+    expect(within(results).getByRole('row', { name: /#14 Refund button/ })).toBeVisible();
   });
 
   it('does not use id prefixes shorter than eight characters', async () => {
@@ -339,9 +252,9 @@ describe('task search', () => {
     shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, russian] }] });
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
-    const results = screen.getByRole('region', { name: 'Search results' });
-    expect(within(results).getAllByRole('button')).toHaveLength(1);
-    expect(within(results).getByRole('button', { name: new RegExp(title) })).toBeVisible();
+    const results = screen.getByRole('table', { name: 'Search results' });
+    expect(taskRows(results)).toHaveLength(1);
+    expect(within(results).getByRole('row', { name: new RegExp(title) })).toBeVisible();
   });
 
   it('shows no matches without changing the decisions waiting for the person', async () => {
@@ -350,41 +263,10 @@ describe('task search', () => {
     await openTasks(user);
     await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'Checkout missing');
     expect(screen.getByRole('status')).toHaveTextContent('No tasks found');
-    expect(screen.queryByRole('button', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Stripe or Adyen?');
   });
 
-  it('keeps the department filter when searching and clearing, then restores the ordinary tracker', async () => {
-    const user = userEvent.setup();
-    shell({
-      [`GET ${ALL}`]: [200, { tasks: [TASKS[0], { ...PLANNED, title: 'Checkout marketing', department: { id: 'd1', name: 'Marketing' } }] }],
-      'GET /api/tasks?status=all&department=d2': [200, { tasks: [TASKS[0]] }],
-    });
-    await openTasks(user);
-    const search = screen.getByRole('searchbox', { name: 'Search tasks' });
-    await user.type(search, 'checkout');
-    expect(within(screen.getByRole('region', { name: 'Search results' })).getAllByRole('button')).toHaveLength(2);
-    await user.selectOptions(screen.getByLabelText('Department'), 'd2');
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Search results' })).getAllByRole('button')).toHaveLength(1));
-    expect(screen.queryByRole('button', { name: /Checkout marketing/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Clear search' }));
-    expect(search).toHaveValue('');
-    expect(search).toHaveFocus();
-    expect(screen.getByLabelText('Department')).toHaveValue('d2');
-    expect(screen.queryByRole('region', { name: 'Search results' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Turn 3' })).getByRole('button', { name: /Checkout API/ })).toBeVisible();
-    await user.type(search, '   ');
-    expect(screen.queryByRole('region', { name: 'Search results' })).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Turn 3' })).toBeVisible();
-  });
-
-  it('offers search even when there are no departments', async () => {
-    const user = userEvent.setup();
-    shell({ 'GET /api/org': [200, { ...DEV_ORG, departments: [] }] });
-    await openTasks(user);
-    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'cart');
-    expect(within(screen.getByRole('region', { name: 'Search results' })).getByRole('button', { name: /Cart page/ })).toBeVisible();
-  });
 });
 
 /* Development with Dan as its only person; Ivan, the CEO, and Maria, a deputy, sit next to the hub. */

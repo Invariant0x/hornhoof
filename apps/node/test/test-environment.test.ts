@@ -83,7 +83,9 @@ describe('literal test invocations', () => {
   it('versioned node execution advertises its actual executor capability', async () => {
     const f = await fixture();
     const capabilities = await environment.trustedTestRuntimes(f.context);
-    expect(capabilities).toContainEqual({ id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const platform = { os: process.platform, arch: process.arch, libc: (process.report.getReport() as { header: { glibcVersionRuntime?: string } }).header.glibcVersionRuntime ? 'glibc' : 'other' };
+    expect(capabilities).toContainEqual({ id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/), platform });
+    expect(capabilities.every(runtime => JSON.stringify(runtime.platform) === JSON.stringify(platform))).toBe(true);
   });
 
   it('native Vitest shard adapter passes its local coordinates and bounded JSON selection', async () => {

@@ -1,6 +1,8 @@
 import { emptyEchelonFindings } from '@hornhoof/protocol/echelons';
 import { taskRoute } from '../test/task-route';
 import type { Locator, Page } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import type { AgentCardView, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -65,7 +67,9 @@ const ROUTES: Record<string, unknown> = {
   '/api/nodes/commands': { commands: [] },
   '/api/computer': { available: false, until: null, asked: null },
   '/api/turns': { turns: [TURN] },
-  '/api/tasks?status=all': { tasks: TASKS },
+  '/api/task-departments': { whole: true, departments: [{ id: DEV.id, name: DEV.name, templateKey: null }] },
+  '/api/tasks?status=all&department=d2': { tasks: TASKS },
+  '/api/departments/d2/backlog': { items: [] },
   '/api/improvements': { improvements: [IMPROVEMENT] },
   '/api/agents/orchestrator': {
     id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
@@ -96,4 +100,14 @@ export async function box(locator: Locator) {
   const b = await locator.boundingBox();
   if (!b) throw new Error('not on screen');
   return b;
+}
+
+const OPEN_TASK = new RegExp(`^(${en.tasks.table.open}|${ru.tasks.table.open})$`);
+
+/* A task opens from the table of the Tasks screen: its row unfolds, and the button in what it shows opens the panel. */
+export async function openTaskRow(page: Page, number: number) {
+  const row = page.getByRole('row', { name: new RegExp(`^#${number} `) });
+  const card = row.getByRole('button');
+  if ((await card.getAttribute('aria-expanded')) !== 'true') await card.click();
+  await row.locator('xpath=following-sibling::tr[1]').getByRole('button', { name: OPEN_TASK }).click();
 }

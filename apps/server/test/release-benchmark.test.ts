@@ -61,7 +61,7 @@ describe('release benchmark report', () => {
   expect(measured.coldReadyMs).toBeGreaterThan(measured.appReadyMs);
   expect(measured.dbSetupMs).toBeGreaterThan(0);
   expect(measured.memory.rss).toBeGreaterThan(0);
-  expect(measured.requests.map(r => r.url)).toEqual(['/api/me', '/api/org', '/api/tasks']);
+  expect(measured.requests.map(r => r.url)).toEqual(['/api/me', '/api/org', '/api/tasks?department=none']);
   expect(measured.requests.every(r => r.statusCode === 200 && r.errors === 0)).toBe(true);
   expect(measured.requests.every(r => r.medianMs > 0 && r.p95Ms >= r.medianMs)).toBe(true);
   expect(report.comparison.status).toBe('baseline-missing');

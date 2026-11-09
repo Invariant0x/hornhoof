@@ -14,7 +14,7 @@ import { privateCacheRoot, pruneCache, readReady, restoreCache, type CacheContex
 import { EnvironmentFailure, MANIFEST, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, preparationInputDigest, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext, type PreparedDependencies } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
-import { collectKept, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept } from './test-report.js';
+import { collectKept, parseFailedTests, parseFileReport, parseMutationReport, readJobFile, REPORT_BYTES, restoreKept, type FailedTest } from './test-report.js';
 import { gitEnv } from './workspace.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
@@ -673,7 +673,7 @@ type PreparationState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
   base: Record<string, string>; options: Options; builder?: string;
 };
-type ProductState = PreparationState & { receipt: TestEnvironmentReceipt; exitCode: number | null; reports: SuiteReport[]; files: FileOutcome[]; kept: KeptFiles };
+type ProductState = PreparationState & { receipt: TestEnvironmentReceipt; exitCode: number | null; reports: SuiteReport[]; files: FileOutcome[]; failed: FailedTest[]; kept: KeptFiles };
 type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
 function environmentError(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail: `${code}: ${detail}` }); }
 function productUser(user: JobUser | null): { user: JobUser; nodeOwner: JobUser } {
@@ -827,7 +827,9 @@ function collectProductMutations(execution: TestExecution, state: ProductState):
 function collectProductResults(execution: TestExecution, state: ProductState, restored: KeptFiles): void {
   try {
     const checkout = realpathSync(state.repo);
-    state.files = state.reports.flatMap(report => parseFileReport(readJobFile(report.path, state.user.uid, REPORT_BYTES), { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
+    const said = state.reports.map(report => ({ report, text: readJobFile(report.path, state.user.uid, REPORT_BYTES) }));
+    state.files = said.flatMap(({ report, text }) => parseFileReport(text, { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
+    state.failed = said.flatMap(({ report, text }) => report.failed ? parseFailedTests(text, { checkout, selected: report.selected }) : []);
     state.kept = keptBySuites(execution, state, checkout, restored);
   } catch (error) { state.out.line(`The results of the part's test files could not be read: ${error instanceof Error ? error.message : String(error)}`); }
   collectProductMutations(execution, state);
@@ -890,7 +892,7 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
   await productDescription(description);
   const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
-  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], kept: [], base: partBase(root, options.dir) };
+  return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, reports: [], files: [], failed: [], kept: [], base: partBase(root, options.dir) };
 }
 async function productFolders(state: PreparationState): Promise<void> {
   await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
@@ -918,12 +920,26 @@ function partResults(state: ProductState | undefined): Pick<TestsDone, 'files' |
 function productDone(msg: TestRun, state: ProductState | undefined, error: TestError | null, out: Output, hidden: string[]): TestsDone {
   return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}), ...partResults(state) };
 }
+/* The last lines of a part's log are what its agent reads of it, so they name the tests that failed and their errors, whatever the
+   services said as they stopped. They go into the log before its secrets are hidden, like the rest of it. */
+const FAILED_SHOWN = 10;
+const FAILED_LINE = 150;
+function sayFailedTests(out: Output, failed: FailedTest[]): void {
+  if (!failed.length) return;
+  out.line('Failed tests:');
+  for (const test of failed.slice(0, FAILED_SHOWN)) {
+    const line = `${test.file} > ${test.name}: ${test.message}`;
+    out.line(line.length > FAILED_LINE ? `${line.slice(0, FAILED_LINE - 3)}...` : line);
+  }
+  if (failed.length > FAILED_SHOWN) out.line(`and ${failed.length - FAILED_SHOWN} more`);
+}
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
   const out = new Output(), hidden = productSecrets(msg, options.hidden);
   let error: TestError | null = null, state: ProductState | undefined;
   try { state = await productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
   catch (failure) { out.line(failure instanceof Error ? failure.message : String(failure)); error = productFailure(failure, failedProductSignal(state, options)); }
   finally { error = await cleanupProduct(state, out) ?? error; }
+  sayFailedTests(out, state?.failed ?? []);
   return productDone(msg, state, error, out, hidden);
 }
 

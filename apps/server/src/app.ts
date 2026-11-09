@@ -15,6 +15,7 @@ import { departmentRoutes } from './modules/departments/routes.js';
 import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
 import { improvementRoutes } from './modules/improvements/routes.js';
+import { backlogRoutes } from './modules/backlog/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
@@ -146,6 +147,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   notebookRoutes(app, ctx);
   briefingRoutes(app, ctx);
   improvementRoutes(app, ctx);
+  backlogRoutes(app, ctx);
   startTimers(app, ctx);
   startOperationsCheck(app, ctx);
   terminalRoutes(app, ctx);

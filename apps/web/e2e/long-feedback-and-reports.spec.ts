@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { openTaskRow } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_CWD = process.env.HH_E2E_SERVER_CWD ?? resolve(HERE, '../../server');
@@ -384,7 +385,8 @@ for (const lang of LANGUAGES) {
         await expect(card).toBeHidden();
 
         /* Open the task in TaskPanel to read full 12,000-char inline feedback, files, and full 12,400-char verdict. */
-        await page.locator('.ttree').getByRole('button', { name: new RegExp(`#${sc.taskNumber}\\b`) }).click();
+        await page.getByRole('group', { name: t.tasks.department }).locator('label', { hasText: t.templates.development.name }).click();
+        await openTaskRow(page, sc.taskNumber);
         const panel = page.locator('aside');
         await expect(panel).toBeVisible();
 
@@ -549,7 +551,8 @@ test('preserves 12,000-char input on refusal, supports pick: 0 + 12k comment and
   expect(pickReqState.request).toMatchObject({ status: 'answered', picked: 0, answer: pickComment12k });
 
   /* 5. Post a 12,000-character task comment in TaskPanel and expand both submit evidence and the new comment. */
-  await page.locator('.ttree').getByRole('button', { name: new RegExp(`#${sc.taskNumber}\\b`) }).click();
+  await page.getByRole('group', { name: ru.tasks.department }).locator('label', { hasText: ru.templates.development.name }).click();
+  await openTaskRow(page, sc.taskNumber);
   const panel = page.locator('aside');
   await expect(panel).toBeVisible();
 

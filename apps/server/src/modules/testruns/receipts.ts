@@ -1,4 +1,4 @@
-import { mutationResultMatches, TestExecution, TestEnvironmentReceipt, supportsTestProfile, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
+import { mutationResultMatches, runsInClass, TestExecution, TestEnvironmentReceipt, type EnvironmentSnapshot, type RuntimeCapability } from '@hornhoof/protocol';
 import type { TestEnvironmentSelection, testParts } from '../../db/schema.js';
 
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
@@ -21,16 +21,12 @@ function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironment
   if (message.commit !== receipt.commitSha || receipt.outcomes.length !== expectedOutcomes(snapshot, receipt)) return false;
   return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
 }
-const among = (known: RuntimeCapability[], actual: RuntimeCapability): boolean =>
-  known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version);
-/* A part proves its files only on the very runtimes that described its run: their fingerprints name them. The scheduler gives a part
-   only to a node whose runtimes pass this, and a receipt is accepted only when the runtimes it names pass it, so a part never goes
-   where its proof would be refused. */
-export function runsAsDescribed(snapshot: EnvironmentSnapshot, runtimes: RuntimeCapability[]): boolean {
-  return supportsTestProfile(snapshot, runtimes) && runtimes.every(actual => among(snapshot.description.runtimeCapabilities, actual));
-}
+const samePlatform = (a: RuntimeCapability['platform'], b: RuntimeCapability['platform']): boolean => a?.os === b?.os && a?.arch === b?.arch && a?.libc === b?.libc;
+const sameRuntime = (a: RuntimeCapability, b: RuntimeCapability): boolean => a.id === b.id && a.fingerprint === b.fingerprint && a.version === b.version && samePlatform(a.platform, b.platform);
+/* A part proves its files on any runtimes of the class that described its run (runsInClass), and only on the very runtimes the
+   node that ran it said it has. */
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
-  return runsAsDescribed(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => among(known, actual));
+  return runsInClass(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => sameRuntime(runtime, actual)));
 }
 function requiredMutationSuites(snapshot: EnvironmentSnapshot, assigned: TestEnvironmentSelection) {
   const { mutation } = snapshot.description.manifest;
@@ -57,8 +53,10 @@ export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: 
   return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) && receiptMutations(snapshot, selection, receipt) ? receipt : null;
 }
 
+/* A part keeps its receipt only when it was accepted against the runtimes its node said it has as the part ended, so the runtimes it
+   names stand for that node here; everything else is checked again. */
 export function passedProductPart(snapshot: EnvironmentSnapshot, part: typeof testParts.$inferSelect): boolean {
   if (part.status !== 'passed' || part.commit !== snapshot.description.commitSha || part.exitCode !== 0 || part.error !== null || !part.finishedAt) return false;
   return productReceipt(snapshot, part.environmentSelection, { type: 'tests.done', partId: part.id, ok: true, commit: part.commit, exitCode: 0, error: null, log: '',
-    ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, snapshot.description.runtimeCapabilities) !== null;
+    ...(part.environmentReceipt ? { environmentReceipt: part.environmentReceipt } : {}) }, part.environmentReceipt?.runtimes ?? []) !== null;
 }

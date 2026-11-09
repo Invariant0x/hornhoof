@@ -233,6 +233,34 @@ describe('reusing green test results', () => {
     expect(shown).toMatchObject({ reuse: { mode: 'cached', fingerprints: 3, kept: 0 } });
   });
 
+  /* Fingerprints name the class of the runtimes, so machines of another build or processor of that class prove the same files. */
+  it('keeps what a part proved on another build and processor of the class its run was described on, and a second run of the commit described there runs no file again', async () => {
+    const f = await fixture();
+    const on = (arch: string, build: string, os = 'linux') => runtimes.map(runtime => ({ ...runtime, fingerprint: build.repeat(64), platform: { os, arch, libc: 'glibc' } }));
+    const x64 = on('x64', '1'), arm64 = on('arm64', '2');
+    noteTestCapabilities(f.app.ctx, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: arm64 });
+    const first = await f.start({ profile: 'final' }, undefined, undefined, x64);
+    expect(await f.ranFiles(first)).toEqual(FILES);
+    await f.finish(first, { runtimes: arm64 });
+    expect(await f.runOf(first)).toMatchObject({ status: 'passed' });
+    expect((await f.greenRows()).map(row => row.file)).toEqual(FILES);
+    /* A candidate's run checks each reused result again at the part that proved it. */
+    const units = fingerprints().map(unit => ({ ...unit, runId: first, commitSha: TEST_COMMIT }));
+    expect(await reusableUnits(f.db, (await f.runOf(first)).environmentSnapshot!.description.repositoryScope, units)).toEqual(units);
+    const second = await f.start({ profile: 'final' }, undefined, undefined, arm64);
+    expect(await f.ranFiles(second)).toEqual([]);
+    expect(await f.runOf(second)).toMatchObject({ status: 'passed', fileCache: { reused: 3 } });
+    /* A machine of another system is not of the class: what its receipt names proves nothing here. */
+    const darwin = on('arm64', '3', 'darwin');
+    await f.db.delete(testFileResults);
+    const third = await f.start({ profile: 'final' }, undefined, undefined, x64);
+    expect(await f.ranFiles(third)).toEqual(FILES);
+    noteTestCapabilities(f.app.ctx, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: darwin });
+    await f.finish(third, { runtimes: darwin });
+    expect(await f.runOf(third)).toMatchObject({ status: 'failed' });
+    expect(await f.greenRows()).toEqual([]);
+  });
+
   it('takes back a green result when the file then fails at the same fingerprint, as in two runs at once', async () => {
     const f = await fixture();
     const one = await f.start({}), two = await f.start({});

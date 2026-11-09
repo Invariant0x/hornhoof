@@ -57,6 +57,28 @@ it('says how each file went when the runner reports it', async () => {
   expect(done.files).toEqual([{ suiteId: 'unit', file: 'test/a.js', status: 'passed', ms: 5 }, { suiteId: 'unit', file: 'test/b.js', status: 'failed' }]);
 });
 
+/* What an agent reads of a failed part is its last lines, and a service it started may say a lot as it stops. */
+it('ends the log of a failed part with the name and error of each test that failed, after whatever a service said', async () => {
+  const noise = "for (let i = 0; i < 300; i++) console.log('2026-11-09 14:32:36.195 UTC [191469] LOG:  checkpoint starting: shutdown immediate ' + i);";
+  const failures = [{ name: 'services > starts postgres', message: 'AssertionError: expected 1 to be 2\n- Expected\n+ Received' }];
+  const f = await fixture(report([{ file: 'test/a.js', status: 'passed' }, { file: 'test/b.js', status: 'failed', failures }]) + noise + 'process.exit(1);');
+  const done = await f.run();
+  expect(done).toMatchObject({ ok: false, exitCode: 1 });
+  const end = done.log.replace(/\s+$/, '').split('\n').slice(-20).join('\n');
+  expect(end.split('\n').slice(-2)).toEqual(['Failed tests:', 'test/b.js > services > starts postgres: AssertionError: expected 1 to be 2']);
+  expect(end.length).toBeLessThanOrEqual(2000);
+  expect(done.files).toEqual([{ suiteId: 'unit', file: 'test/a.js', status: 'passed' }, { suiteId: 'unit', file: 'test/b.js', status: 'failed' }]);
+});
+
+it('names at most ten failed tests at the end, each on one short line, and how many more failed', async () => {
+  const failures = Array.from({ length: 14 }, (_, index) => ({ name: `case ${index} ${'x'.repeat(400)}`, message: `Error: ${'y'.repeat(400)}` }));
+  const done = await (await fixture(report([{ file: 'test/b.js', status: 'failed', failures }]) + 'process.exit(1);')).run();
+  const end = done.log.replace(/\s+$/, '').split('\n').slice(-20).join('\n');
+  expect(end.match(/^test\/b\.js > case/gm)).toHaveLength(10);
+  expect(end).toContain('and 4 more');
+  expect(end.length).toBeLessThanOrEqual(2000);
+});
+
 it('says the same of a run that passed, and nothing when the runner reports nothing', async () => {
   expect((await (await fixture(report([{ file: 'test/a.js', status: 'passed' }]))).run()).files).toEqual([{ suiteId: 'unit', file: 'test/a.js', status: 'passed' }]);
   const silent = await (await fixture('process.exit(0);')).run();

@@ -45,7 +45,7 @@ async function atWork(takePrompt = true) {
       record({ type: 'item_completed', turn_id: 'turn', item: { type: 'UserMessage', content: [{ type: 'text', text }] } });
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], log: logMessage, pollMs: 10, enterWaitMs: 100, plugins: [] });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], log: logMessage, pollMs: 10, enterWaitMs: 100 });
   const job = { ...codexJob('say', 'HANG', { workDir, sessionId: SESSION }), home };
   const running = host.run(job);
   const turns = [running];

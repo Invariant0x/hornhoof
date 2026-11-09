@@ -152,20 +152,14 @@ describe('what a node from before skill files takes', () => {
   const always = (role: Role) => renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: [] }), PLACE);
 
   /* A role is built of as many bricks as it needs: how much such a node takes bounds none of them, and a turn too long for
-     it ends saying the node needs an update. It still gets every brick but superpowers, which come with skill files. */
-  it('gets every brick of a role and of the orchestrator whole, but superpowers', () => {
+     it ends saying the node needs an update. */
+  it('gets every brick of a role and of the orchestrator whole', () => {
     for (const role of shipped.roles.values()) {
-      const { parts, whole, text } = always(role);
-      for (const p of parts.filter(p => p.id !== 'hh-superpowers')) expect(whole, `${role.id} ${p.id}`).toContain(p.text);
-      expect(text, role.id).toContain('<!-- hh:skill hh-superpowers -->');
-      expect(whole, role.id).not.toContain('<!-- hh:skill hh-superpowers -->');
-      for (const p of parts.filter(p => p.id === 'hh-superpowers')) expect(whole, role.id).not.toContain(p.text);
+      const { parts, whole } = always(role);
+      for (const p of parts) expect(whole, `${role.id} ${p.id}`).toContain(p.text);
     }
     const steady = orchestratorSteady(shipped);
-    for (const p of steady.parts.filter(p => p.id !== 'hh-superpowers')) expect(steady.whole, p.id ?? 'base').toContain(p.text);
-    expect(steady.text).toContain('<!-- hh:skill hh-superpowers -->');
-    expect(steady.whole).not.toContain('<!-- hh:skill hh-superpowers -->');
-    for (const p of steady.parts.filter(p => p.id === 'hh-superpowers')) expect(steady.whole).not.toContain(p.text);
+    for (const p of steady.parts) expect(steady.whole, p.id ?? 'base').toContain(p.text);
   });
 });
 
@@ -255,27 +249,28 @@ describe('renderInstructions', () => {
     expect(off.text).not.toContain('## Skills');
   });
 
-  it('names the human partner the superpowers skills speak of, for a member, a head and the orchestrator, in one brick', () => {
+  /* No node gives an agent obra/superpowers any more, so nothing an employee or the orchestrator reads speaks of it. */
+  it('names superpowers in no instructions and no skill an employee of any role or the orchestrator reads', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
-    const partnerOf = (parts: { id: string | null; text: string }[]) => parts.find(p => p.id === 'hh-superpowers')!.text;
-    const member = partnerOf(renderInstructions(shipped, agent(), PLACE).parts);
-    const head = partnerOf(renderInstructions(shipped, agent({ kind: 'head', roleKey: 'DSN-HEAD' }), PLACE).parts);
-    const orchestrator = partnerOf(orchestratorSteady(shipped).parts);
-    expect(head).toBe(member);
-    expect(orchestrator).toBe(member);
-    expect(member).toContain('superpowers');
-    expect(member).toMatch(/human partner is whoever gave you that task or the person who wrote to you/i);
-    expect(member).toMatch(/coordinator's partner is the person authorizing the work/i);
-    expect(member).toMatch(/task already given to you is approved for its stated scope/i);
-    expect(member).toMatch(/proceed without requesting approval for routine design or implementation/i);
-    expect(member).toMatch(/new spend, authority, scope or irreversible actions still need the relevant decision/i);
-    expect(member).toMatch(/company tools, never by waiting for terminal input/i);
-    expect(member).toMatch(/when asked to design[\s\S]*task owner in one concise message[\s\S]*independent work/i);
-    expect(member).toMatch(/do not restart a company interview for an already specified task/i);
-    expect(member).toMatch(/small, clear task[\s\S]*not a separate written plan/i);
-    expect(member).toMatch(/new or large work[\s\S]*concrete plan/i);
-    /* A head of any department reads it, so it names no role of one department. */
-    expect(member).not.toMatch(/architect|developer/i);
+    const read = (told: { text: string; whole: string; skills: { name: string; description: string; body: string }[] }) => [told.text, told.whole, ...told.skills.flatMap(f => [f.name, f.description, f.body])];
+    for (const role of shipped.roles.values()) {
+      const every = role.skills.map(s => s.id);
+      const told = renderInstructions(shipped, agent({ kind: role.kind === 'head' ? 'head' : 'worker', roleKey: role.id, skills: every }), PLACE);
+      for (const text of read(told)) expect(text, role.id).not.toMatch(/superpowers/i);
+    }
+    for (const text of read(orchestratorSteady(shipped))) expect(text).not.toMatch(/superpowers/i);
+    for (const skill of shipped.skills.values()) {
+      for (const text of [skill.id, skill.title.en, skill.title.ru, skill.description.en, skill.description.ru, skill.body]) expect(text, skill.id).not.toMatch(/superpowers/i);
+    }
+  });
+
+  it('tells employees and the orchestrator to reach people through company tools and to keep the effort and model of the job', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text];
+    for (const text of told) {
+      expect(text).toContain('Reach people through company tools, never by waiting for terminal input nobody watches.');
+      expect(text).toContain('Keep the effort and model assigned to the current job. A later job can use a different authorized setting; do not raise it inside a running turn.');
+    }
   });
 
   it("tells employees and the orchestrator that Claude Code's SendMessage reaches no one in Hornhoof", () => {
@@ -292,8 +287,7 @@ describe('renderInstructions', () => {
     expect(whole.startsWith('You are Bruno')).toBe(true);
     expect(whole).toContain('\n\nYou own the server side.\n\n');
     expect(whole.endsWith(parts.filter(p => p.kind === 'skill').map(p => p.text).join('\n\n'))).toBe(true);
-    /* Such a node has no superpowers and no files to list. */
-    expect(whole).not.toContain('superpowers');
+    /* Such a node has no files to list. */
     expect(whole).not.toContain('## Skills');
   });
 

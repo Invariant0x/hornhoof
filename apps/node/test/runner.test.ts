@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
@@ -181,15 +181,17 @@ describe('runJob', () => {
     const written: string[] = [];
     const fs = { ...ownFs, write: async (path: string, data: string) => void (written.push(path), await ownFs.write(path, data)) };
     const owned = { ...adapter, owner: { user: me, home: dir, prepare: () => {}, fs } };
-    await runJob(owned, job({ provider: 'kimi', workspace: { key: 'agent-1', repo: null }, skills: [skill] }), dir, { superpowers: null });
+    await runJob(owned, job({ provider: 'kimi', workspace: { key: 'agent-1', repo: null }, skills: [skill] }), dir);
     expect(seen).toEqual([true]);
     expect(written).toContain(join(dir, 'work', 'agents', 'agent-1', '.agents', 'skills', 'dev-tdd', 'SKILL.md'));
+    /* Only the agent's own skills, on a machine of any image. */
+    expect(readdirSync(join(dir, 'work', 'agents', 'agent-1', '.agents', 'skills'))).toEqual(['dev-tdd']);
     /* Without file work of its own, the owner's user does it through a helper for the job. */
-    await runJob({ ...adapter, owner: { user: me, home: dir, prepare: () => {} } }, job({ provider: 'claude', workspace: { key: 'agent-2', repo: null }, skills: [skill] }), dir, { superpowers: null });
+    await runJob({ ...adapter, owner: { user: me, home: dir, prepare: () => {} } }, job({ provider: 'claude', workspace: { key: 'agent-2', repo: null }, skills: [skill] }), dir);
     expect(seen).toEqual([true, false]);
     expect(existsSync(join(dir, 'work', 'agents', 'agent-2', '.claude', 'skills', 'dev-tdd', 'SKILL.md'))).toBe(true);
     /* A job that brings none, such as a test of the subscription, leaves the folder as it is. */
-    await runJob(adapter, job({ provider: 'kimi' }), dir, { superpowers: null });
+    await runJob(adapter, job({ provider: 'kimi' }), dir);
     expect(existsSync(join(dir, 'work', 'job-1', '.agents'))).toBe(false);
   });
 

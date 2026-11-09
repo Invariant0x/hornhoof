@@ -159,7 +159,7 @@ describe('Department view', () => {
     const sasha = { ...dev!.people[0]!, pendingDecisions: 2 };
     shell({
       'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: sasha.id }, { ...REQUESTS[1]!, ownerPersonId: sasha.id }])],
-      'GET /api/tasks?status=all': [200, { tasks: TASKS }],
+      'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS }],
       'GET /api/turns': [200, { turns: [] }],
     }, { ...DEV_ORG, departments: [{ ...dev!, people: [sasha] }] });
     await flyIn(user);

@@ -78,10 +78,13 @@ describe('Claude Code in a terminal', () => {
     expect(command).not.toContain('--append-system-prompt-file');
   });
 
-  it('loads the plugins the node has for this session only, such as superpowers', () => {
-    const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS, plugins: ['/opt/hornhoof/superpowers'] });
-    expect(arg(command, '--plugin-dir')).toBe('/opt/hornhoof/superpowers');
-    expect(claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS }).command).not.toContain('--plugin-dir');
+  it("loads no plugin, new or resumed, so every hook of the session is Hornhoof's own", () => {
+    for (const sessionId of [null, 'abc-1']) {
+      const { command } = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
+      expect(command).not.toContain('--plugin-dir');
+      const { hooks } = JSON.parse(arg(command, '--settings')!) as { hooks: Record<string, { hooks: { command: string }[] }[]> };
+      for (const command of Object.values(hooks).flat().flatMap(entry => entry.hooks.map(h => h.command))) expect(command).toMatch(/^hh-hook [a-z]+$/);
+    }
   });
 
   it('thinks as hard as the agent was set to, or at the plan default when nothing is set', () => {

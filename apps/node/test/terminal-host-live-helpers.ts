@@ -106,7 +106,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
       else if (kind === 'kimi' && mode === 'queued') await hook('queued', { prompt: text });
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => options.secrets ?? [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [], ...(options.operator ? { operator: options.operator } : {}), ...options.host });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => options.secrets ?? [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, ...(options.operator ? { operator: options.operator } : {}), ...options.host });
   /* From the bridge handing a hook to the host to the host's answer, the clock runs. */
   const handle = host['hook'].bind(host);
   vi.spyOn(host as unknown as { hook: typeof handle }, 'hook').mockImplementation(async (...args) => {

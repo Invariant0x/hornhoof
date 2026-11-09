@@ -35,12 +35,12 @@ async function company() {
 
 describe('tasks for people', () => {
   it("shows a person only the tasks of agents they see and what waits for them", async () => {
-    const { ctx, db, head, bruno, dev, ceo, oleg, maria, get } = await company();
+    const { ctx, db, head, bruno, dev, sales, ceo, oleg, maria, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' });
     await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
-    expect((await get(oleg, '/api/tasks')).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
-    expect((await get(maria, '/api/tasks')).json().tasks).toEqual([]);
+    expect((await get(oleg, `/api/tasks?department=${dev.id}`)).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
+    expect((await get(maria, `/api/tasks?department=${sales.id}`)).json().tasks).toEqual([]);
     expect((await get(maria, `/api/tasks/${task.id}`)).statusCode).toBe(403);
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task).toMatchObject({ number: 1, title: 'Checkout API', executor: { name: 'Bruno' } });
     expect((await get(oleg, '/api/requests')).json().requests).toMatchObject([{ kind: 'question', text: 'Which currency?', task: { number: 1, title: 'Checkout API' } }]);

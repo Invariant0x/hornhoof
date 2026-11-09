@@ -1,10 +1,11 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useRef, useState } from 'react';
-import { deptLabel, errorText, useT } from '../i18n';
+import { useId, useRef, useState } from 'react';
+import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
-import { placeName, useTasks, useTurns } from '../tasks';
+import { placeName, useTaskDepartments, useTasks, useTurns } from '../tasks';
 import { searchTasks } from '../task-search';
-import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
+import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TaskStatus, TurnView } from '../types';
+import { Backlog } from '../ui/Backlog';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
 import { CEO_DECIDES } from '../ui/DecidedBy';
@@ -12,7 +13,7 @@ import { MachineAway } from '../ui/MachineAway';
 import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
-import { TaskRow } from '../ui/TaskRow';
+import { TaskTable, type TaskGroup } from '../ui/TaskTable';
 import { TurnProgress } from '../ui/TurnProgress';
 
 type Props = {
@@ -31,8 +32,7 @@ type Props = {
 };
 
 const CLOSED: TaskStatus[] = ['done', 'cancelled'];
-
-type Rows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string };
+const NONE = 'none';
 
 function TaskSearch({ query, onChange }: { query: string; onChange: (query: string) => void }) {
   const t = useT();
@@ -53,84 +53,48 @@ function TaskSearch({ query, onChange }: { query: string; onChange: (query: stri
   );
 }
 
-function TaskFilters({ departments, department, onDepartment, query, onQuery }: {
-  departments: Org['departments']; department: string | null; onDepartment: (department: string | null) => void; query: string; onQuery: (query: string) => void;
-}) {
-  const t = useT();
-  return (
-    <div className="task-filters">
-      {departments.length > 0 && (
-        <Field label={t.tasks.department}>
-          {p => (
-            <select {...p} value={department ?? ''} onChange={e => onDepartment(e.target.value || null)}>
-              <option value="">{t.tasks.allDepartments}</option>
-              {departments.map(d => <option key={d.id} value={d.id}>{deptLabel(t, d)}</option>)}
-            </select>
-          )}
-        </Field>
-      )}
-      <TaskSearch query={query} onChange={onQuery} />
-    </div>
-  );
+type Choice = { id: string; label: string };
+
+/* The departments whose tasks the person reads, and the orchestrator's own work for those with the whole company. */
+function choicesOf(t: Messages, places: TaskDepartments | undefined): Choice[] {
+  if (!places) return [];
+  const departments = places.departments.map(d => ({ id: d.id, label: deptLabel(t, d) }));
+  return places.whole ? [...departments, { id: NONE, label: t.tasks.noDepartment }] : departments;
 }
 
-function SearchResults({ tasks, query, rows }: { tasks: TaskLine[] | undefined; query: string; rows: Rows }) {
+/* Which department's tasks show. Someone with one department sees its name and has nothing to pick. */
+function DepartmentPicker({ choices, value, onChange }: { choices: Choice[]; value: string | null; onChange: (id: string) => void }) {
   const t = useT();
-  const matches = tasks && searchTasks(tasks, query);
+  const name = useId();
+  if (choices.length === 1) return <p className="dept-one"><span className="muted">{t.tasks.department}</span> <b>{choices[0]!.label}</b></p>;
   return (
-    <section className="turns" aria-label={t.tasks.searchResults}>
-      <h2>{t.tasks.searchResults}</h2>
-      {matches && !matches.length && <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
-      <ul className="ttree">
-        {matches?.map(task => (
-          <li key={task.id}><TaskRow task={task} on={rows.selected === task.id} place={rows.place(task)} onOpen={rows.onOpenTask} /></li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/* Tasks under the task they serve, in the order they were laid out; a task whose parent is not listed stands at the top. */
-function TaskTree({ tasks, rows, under = null }: { tasks: TaskLine[]; rows: Rows; under?: string | null }) {
-  const ids = new Set(tasks.map(x => x.id));
-  const level = tasks.filter(x => (under ? x.parentId === under : !x.parentId || !ids.has(x.parentId))).sort((a, b) => a.number - b.number);
-  if (!level.length) return null;
-  return (
-    <ul className={under ? 'ttree sub' : 'ttree'}>
-      {level.map(task => (
-        <li key={task.id}>
-          <TaskRow task={task} on={rows.selected === task.id} place={rows.place(task)} onOpen={rows.onOpenTask} showTurn={false} />
-          <TaskTree tasks={tasks} rows={rows} under={task.id} />
-        </li>
+    <fieldset className="segments dept-pick">
+      <legend className="sr">{t.tasks.department}</legend>
+      {choices.map(c => (
+        <label key={c.id} className={c.id === value ? 'on' : ''}>
+          <input type="radio" name={name} value={c.id} checked={c.id === value} onChange={() => onChange(c.id)} />
+          {c.label}
+        </label>
       ))}
-    </ul>
+    </fieldset>
   );
 }
 
-/* One turn: its number and state, the short title and main point, the words it came from on click, then its tasks. */
-function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: Rows }) {
+/* A turn's head in the table: its number and state, its title and main point, how far the whole turn is, and the words it
+   came from on click. */
+function TurnHead({ turn }: { turn: TurnView }) {
   const t = useT();
-  const head = (
-    <>
-      <div className="turn-name">
-        <span className="turn-no">
-          <b>{t.tasks.turn(turn.number)}</b>
-          <span className={`turn-state ${turn.status}`}>{t.tasks.turnStates[turn.status]}</span>
-        </span>
-        <h2>{turn.title}</h2>
-        {turn.goal && turn.goal !== turn.title && <p>{turn.goal}</p>}
-      </div>
-      {turn.status === 'planned' ? (
-        <small className="turn-wait">{t.tasks.plannedTasks(turn.tasks.total)}</small>
-      ) : (
-        <TurnProgress tasks={turn.tasks} />
-      )}
-    </>
-  );
-  const body = (
-    <>
+  return (
+    <span className="grp-head">
+      <span className="turn-no">
+        <b>{t.tasks.turn(turn.number)}</b>
+        <span className={`turn-state ${turn.status}`}>{t.tasks.turnStates[turn.status]}</span>
+      </span>
+      <b className="grp-title">{turn.title}</b>
+      {turn.goal && turn.goal !== turn.title && <span className="muted">{turn.goal}</span>}
+      {turn.status === 'planned' ? <small className="turn-wait">{t.tasks.plannedTasks(turn.tasks.total)}</small> : <TurnProgress tasks={turn.tasks} />}
       {turn.messages.length > 0 && (
-        <details className="turn-words">
+        <details className="turn-words" onClick={e => e.stopPropagation()}>
           <summary>{t.tasks.words(turn.messages.length)}</summary>
           {turn.messages.map((m, i) => (
             <blockquote key={`${i}-${m.at}`}>
@@ -140,69 +104,59 @@ function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: 
           ))}
         </details>
       )}
-      <TaskTree tasks={tasks} rows={rows} />
-    </>
-  );
-  if (turn.status === 'closed') {
-    return (
-      <details className="turn closed" aria-label={t.tasks.turn(turn.number)}>
-        <summary className="turn-head">{head}</summary>
-        {body}
-      </details>
-    );
-  }
-  return (
-    <section className={`turn ${turn.status}`} aria-label={t.tasks.turn(turn.number)}>
-      <header className="turn-head">{head}</header>
-      {body}
-    </section>
+    </span>
   );
 }
 
-function TurnSection({ title, turns, tasks, rows }: { title: string; turns: TurnView[]; tasks: TaskLine[]; rows: Rows }) {
-  if (!turns.length) return null;
-  return (
-    <section className="turns" aria-label={title}>
-      <h2>{title}</h2>
-      {turns.map(turn => <Turn key={turn.id} turn={turn} tasks={tasks.filter(x => x.turn === turn.number)} rows={rows} />)}
-    </section>
-  );
-}
-
-function OutsideTasks({ tasks, rows, closed = false }: { tasks: TaskLine[]; rows: Rows; closed?: boolean }) {
-  const t = useT();
-  if (!tasks.length) return null;
-  if (closed) return (
-    <details className="turns folded">
-      <summary>{t.tasks.closedOutside(tasks.length)}</summary>
-      <TaskTree tasks={tasks} rows={rows} />
-    </details>
-  );
-  return (
-    <section className="turns" aria-label={t.tasks.outsideTurns}>
-      <h2>{t.tasks.outsideTurns}</h2>
-      <TaskTree tasks={tasks} rows={rows} />
-    </section>
-  );
-}
-
-/* Clearing search brings back the turns and folded archives in their usual order. */
-function TaskGroups({ tasks = [], turns, rows }: { tasks: TaskLine[] | undefined; turns: TurnView[] | undefined; rows: Rows }) {
-  const t = useT();
+/* The groups of the department's table: the running turn and the planned ones with what is given outside turns, and
+   apart from them what is over, folded. A turn that runs or waits shows even with no task of this department in it. */
+function groupsOf(t: Messages, tasks: TaskLine[], turns: TurnView[]): { now: TaskGroup[]; past: TaskGroup[] } {
+  const of = (turn: TurnView) => tasks.filter(x => x.turn === turn.number);
+  const turnGroup = (turn: TurnView, folded = false): TaskGroup => ({ key: turn.id, head: <TurnHead turn={turn} />, tasks: of(turn), folded, empty: t.tasks.table.noneHere });
   const outside = tasks.filter(x => x.turn === null);
-  const openOutside = outside.filter(x => !CLOSED.includes(x.status));
-  const listedTurns = turns ?? [];
+  const open = outside.filter(x => !CLOSED.includes(x.status));
+  const closed = outside.filter(x => CLOSED.includes(x.status));
+  const now = [
+    ...turns.filter(x => x.status !== 'closed').map(turn => turnGroup(turn)),
+    ...(open.length ? [{ key: 'outside', head: <b className="grp-title">{t.tasks.table.outside}</b>, tasks: open }] : []),
+  ];
+  const past = [
+    ...turns.filter(x => x.status === 'closed' && of(x).length).reverse().map(turn => turnGroup(turn, true)),
+    ...(closed.length ? [{ key: 'closed-outside', head: <b className="grp-title">{t.tasks.table.closedOutside(closed.length)}</b>, tasks: closed, folded: true }] : []),
+  ];
+  return { now, past };
+}
+
+/* The department's tasks: a search over all of them, or the tables by turn with the department's list for later turns
+   between what runs and what is over. */
+function DepartmentTasks({ department, tasks, turns, rows }: { department: string; tasks: TaskLine[] | undefined; turns: TurnView[] | undefined; rows: Omit<Rows, 'all'> }) {
+  const t = useT();
+  const [query, setQuery] = useState('');
+  const all = tasks ?? [];
+  const table = { ...rows, all };
+  const { now, past } = groupsOf(t, all, turns ?? []);
+  const found = query.trim() ? searchTasks(all, query) : null;
   return (
     <>
-      {turns && !turns.length && !openOutside.length && <p className="muted">{t.tasks.noTurns}</p>}
-      {listedTurns.filter(x => x.status === 'open').map(turn => <Turn key={turn.id} turn={turn} tasks={tasks.filter(x => x.turn === turn.number)} rows={rows} />)}
-      <TurnSection title={t.tasks.nextTurns} turns={listedTurns.filter(x => x.status === 'planned')} tasks={tasks} rows={rows} />
-      <OutsideTasks tasks={openOutside} rows={rows} />
-      <TurnSection title={t.tasks.finishedTurns} turns={listedTurns.filter(x => x.status === 'closed').reverse()} tasks={tasks} rows={rows} />
-      <OutsideTasks tasks={outside.filter(x => CLOSED.includes(x.status))} rows={rows} closed />
+      <TaskSearch query={query} onChange={setQuery} />
+      {found ? (
+        <>
+          {!found.length && <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+          {found.length > 0 && <TaskTable {...table} label={t.tasks.searchResults} groups={[{ key: 'found', head: <b className="grp-title">{t.tasks.searchResults}</b>, tasks: found, found: true }]} />}
+        </>
+      ) : (
+        <>
+          {tasks && turns && !now.length && !past.length && <p className="muted">{t.tasks.noTurns}</p>}
+          <TaskTable {...table} label={t.tasks.table.current} groups={now} />
+          {department !== NONE && <Backlog departmentId={department} />}
+          <TaskTable {...table} label={t.tasks.table.finished} groups={past} />
+        </>
+      )}
     </>
   );
 }
+
+type Rows = { all: TaskLine[]; selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string };
 
 type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'personId' | 'onClearPerson' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator'> & {
   org: Org | null;
@@ -305,18 +259,20 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, .
   );
 }
 
-/* The tracker shows the work and changes nothing by itself: what waits for the person, then the turns as the orchestrator
-   laid them out, the running one first, the planned ones in order and the finished ones folded away. */
+/* The tracker shows a department's work: what waits for the person, then the department's tasks in a table by turn, its
+   list for later turns and what is over. People read only the departments they have. */
 export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
   const { org } = useOrg();
-  const [department, setDepartment] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const { tasks, failure } = useTasks({ status: 'all', department });
+  const { taskDepartments, failure: placesFailure } = useTaskDepartments();
+  const [picked, setPicked] = useState<string | null>(null);
+  const choices = choicesOf(t, taskDepartments);
+  const department = choices.find(c => c.id === picked)?.id ?? choices[0]?.id ?? null;
+  const { tasks, failure } = useTasks({ status: 'all', department: department ?? NONE }, department !== null);
   const { turns, failure: turnsFailure } = useTurns();
   const place = (p: TaskLine['department']) => placeName(t, org, p);
-  const rows: Rows = { selected, onOpenTask, place: task => [place(task.department), task.product?.name].filter(Boolean).join(' / ') };
-  const broken = failure ?? turnsFailure;
+  const rows = { selected, onOpenTask, place: (task: TaskLine) => [department === NONE ? place(task.department) : null, task.product?.name].filter(Boolean).join(' / ') };
+  const broken = placesFailure ?? failure ?? turnsFailure;
   if (unavailableFailure(broken)) return <RouteUnavailable onHome={onHome} />;
 
   return (
@@ -346,14 +302,10 @@ export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personI
         place={place}
       />
 
-      <TaskFilters departments={org?.departments ?? []} department={department} onDepartment={setDepartment} query={query} onQuery={setQuery} />
-
+      <DepartmentPicker choices={choices} value={department} onChange={setPicked} />
+      {taskDepartments && !choices.length && <p className="muted">{t.tasks.noDepartments}</p>}
       {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
-      {query.trim() ? (
-        <SearchResults tasks={tasks} query={query} rows={rows} />
-      ) : (
-        <TaskGroups tasks={tasks} turns={turns} rows={rows} />
-      )}
+      {department && <DepartmentTasks key={department} department={department} tasks={tasks} turns={turns} rows={rows} />}
     </section>
   );
 }

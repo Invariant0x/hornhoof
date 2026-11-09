@@ -26,14 +26,11 @@ describe('templates', () => {
     }
   });
 
-  it('puts virtual time next to testing only our program, above what superpowers teaches on mocks and timed waits', () => {
+  it('puts virtual time next to testing only our program, and names no skill set the agents do not have', () => {
     for (const id of ['dev-testing-policy', 'dev-tdd', 'hh-run-checks', 'dev-e2e-tests']) {
       expect(body(id), id).toMatch(/we test our program, not the operating system and not other programs/);
       expect(body(id), id).toMatch(/time in a test is virtual only/);
-      expect(body(id), id).toMatch(/rank above superpowers/);
-      expect(body(id), id).toMatch(/test-driven-development skill \(SKILL\.md and writing-good-tests\.md\)/);
-      expect(body(id), id).toMatch(/systematic-debugging\/condition-based-waiting\.md says to wait on the real clock with a timeout \(waitFor with timeoutMs\), our rule applies here/);
-      expect(body(id), id).toMatch(/only as recorded samples or fakes, time is only virtual, and nothing waits on the real clock/);
+      expect(body(id), id).not.toMatch(/superpowers|test-driven-development skill|condition-based-waiting/);
     }
     for (const id of ['dev-test-gaps', 'dev-test-environment', 'dev-review-diff']) expect(body(id), id).toMatch(/time in a test is virtual only/);
     for (const role of roles.filter(r => /we test our program/.test(r.body))) expect(role.body, role.id).toMatch(/on virtual time only\.$/);
@@ -217,7 +214,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(50);
-    expect(skills).toHaveLength(179);
+    expect(skills).toHaveLength(178);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -261,12 +258,12 @@ describe('templates', () => {
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
-    for (const id of ['hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
+    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);

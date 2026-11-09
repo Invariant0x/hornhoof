@@ -191,7 +191,10 @@ export async function hashTestEnvironment(source: string | Uint8Array): Promise<
   return [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export const RuntimeCapability = z.strictObject({ id: Id, version: Text.max(200), fingerprint: EnvironmentDigest });
+/* The system a runtime runs on, as its node reads it: process.platform, process.arch and its libc family. */
+const PlatformWord = z.string().regex(/^[a-z0-9_]+$/).max(40);
+export const RuntimePlatform = z.strictObject({ os: PlatformWord, arch: PlatformWord, libc: PlatformWord });
+export const RuntimeCapability = z.strictObject({ id: Id, version: Text.max(200), fingerprint: EnvironmentDigest, platform: RuntimePlatform.optional() });
 export type RuntimeCapability = z.infer<typeof RuntimeCapability>;
 export const ProductCommitSha = z.string().regex(/^[a-f0-9]{40}$/);
 export const TestUnit = z.strictObject({ suiteId: Id, file: RepositoryPath, selectionUnit: RepositoryPath });
@@ -432,4 +435,24 @@ export function requiredTestRuntimes(manifest: TestEnvironmentV1, profile: strin
 }
 export function supportsTestProfile(snapshot: EnvironmentSnapshot, capabilities: RuntimeCapability[]): boolean {
   return requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).every(requested => capabilities.some(actual => actual.id === requested.id && runtimeVersionMatches(requested.version, actual.version)));
+}
+/* What a runtime stands for in a test result: its program and major version, and the system and libc it runs on, not its build
+   or its processor. Our tests come out the same on every machine of a class. What a machine installs and builds stays keyed to
+   its exact build. A runtime that does not name its system has no class. */
+export function runtimeClass(runtime: RuntimeCapability): string | null {
+  const major = /^(\d+)(?:\.|$)/.exec(runtime.version)?.[1];
+  return runtime.platform && major ? JSON.stringify([runtime.id, major, runtime.platform.os, runtime.platform.libc]) : null;
+}
+const sameRuntime = (a: RuntimeCapability, b: RuntimeCapability): boolean => a.id === b.id && a.version === b.version && a.fingerprint === b.fingerprint;
+function sameClass(described: RuntimeCapability | undefined, actual: RuntimeCapability | undefined): boolean {
+  if (!described || !actual) return false;
+  const kind = runtimeClass(described);
+  return kind === null ? runtimeClass(actual) === null && sameRuntime(described, actual) : kind === runtimeClass(actual);
+}
+/* Whether runtimes run a profile of a run as the runtimes that described it would: every runtime the profile needs is of the same
+   class. The scheduler gives a part only to such a node, and a part's receipt is accepted only when the runtimes it names are such,
+   so a part never goes where its proof would be refused. */
+export function runsInClass(snapshot: EnvironmentSnapshot, runtimes: RuntimeCapability[]): boolean {
+  const described = snapshot.description.runtimeCapabilities, find = (list: RuntimeCapability[], id: string) => list.find(runtime => runtime.id === id);
+  return supportsTestProfile(snapshot, runtimes) && requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).every(needed => sameClass(find(described, needed.id), find(runtimes, needed.id)));
 }

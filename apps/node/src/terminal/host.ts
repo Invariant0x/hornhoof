@@ -14,7 +14,6 @@ import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult, type ProgramBinding } from '../runner.js';
-import { claudePlugins } from '../skills.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
@@ -274,8 +273,6 @@ type Options = {
   /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
   user?: JobUser | null;
   fs?: AgentFs;
-  /* Claude Code plugins loaded for each session, such as superpowers from the image; that copy by default. */
-  plugins?: string[];
 };
 
 const WAITING = 'This agent starts with its next turn.';
@@ -382,7 +379,6 @@ export class TerminalHost {
   private readonly views = new Map<string, View>();
   private readonly bridge: Bridge;
   private readonly fs: AgentFs;
-  private readonly plugins: string[];
   private readonly readyMs: number;
   private readonly pollMs: number;
   private readonly openMs: number;
@@ -414,7 +410,6 @@ export class TerminalHost {
       capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
-    this.plugins = opts.plugins ?? claudePlugins();
     const set = { ...DEFAULTS, ...defined(opts) };
     this.readyMs = set.readyMs;
     this.pollMs = set.pollMs;
@@ -575,7 +570,7 @@ export class TerminalHost {
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
     const instructionsFile = await this.writeInstructions(job);
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: programDirOf(input), bound: Boolean(input.programDir), sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: programDirOf(input), bound: Boolean(input.programDir), sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
     return { spec, urls, hash: await this.versionedHash(a, job, spec) };
   }
 
