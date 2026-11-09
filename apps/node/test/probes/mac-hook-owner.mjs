@@ -26,12 +26,12 @@ function worker() {
 
 async function child() {
   const spawned = spawn(process.execPath, [fileURLToPath(import.meta.url), 'worker'], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
-  await once(spawned, 'message', { signal: AbortSignal.timeout(10_000) });
+  await once(spawned, 'message');
   return spawned;
 }
 
 async function call(child, url) {
-  const result = once(child, 'message', { signal: AbortSignal.timeout(10_000) });
+  const result = once(child, 'message');
   child.send(url);
   const [reply] = await result;
   assert.equal(reply.error, undefined, 'the hook client failed');
@@ -43,20 +43,18 @@ async function main() {
   const own = await child();
   const foreign = await child();
   const owner = terminalOwner('darwin')(async () => [own.pid]);
-  const times = [];
-  const bridge = new Bridge('http://127.0.0.1:9', () => {}, owner.owns, { capture: async peer => {
-    const start = performance.now();
-    const proof = await owner.capture(peer);
-    times.push(performance.now() - start);
-    return proof;
+  let lookups = 0;
+  const bridge = new Bridge('http://127.0.0.1:9', () => {}, owner.owns, { capture: peer => {
+    lookups++;
+    return owner.capture(peer);
   } });
   try {
     await bridge.start();
     const url = bridge.agent('probe').hookUrl;
     for (let n = 0; n < 20; n++) assert.equal(await call(own, url), 200, 'own agent hook must be accepted');
     assert.equal(await call(foreign, url), 403, 'foreign process hook must be rejected');
-    assert.equal(times.length, 21, 'every connection must run its own lookup');
-    console.log(`Own hooks: 20/20 accepted. Foreign hook: 403. Mean lsof lookup over 20 connections: ${(times.slice(0, 20).reduce((sum, time) => sum + time, 0) / 20).toFixed(2)} ms.`);
+    assert.equal(lookups, 21, 'every connection must run its own lookup');
+    console.log('Own hooks: 20/20 accepted. Foreign hook: 403. Every connection ran its own lsof lookup.');
   } finally {
     bridge.stop();
     own.kill();

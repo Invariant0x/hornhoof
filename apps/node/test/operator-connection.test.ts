@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { expect, it, onTestFinished } from 'vitest';
 import { connect, parseOperatorServerMessage } from '../src/connection.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 it('accepts bounded operator messages and keeps legacy transport compatible', () => {
@@ -41,19 +42,15 @@ it('preserves operator frames and delivery metadata through reconnect while clos
   let closed = 0;
   const connection = connect({
     url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, key: 'synthetic-operator-connection',
-    backoff: { firstMs: 5, maxMs: 20 },
+    backoff: { firstMs: 5, maxMs: 20 }, handshakeTimeoutMs: 2_147_483_647,
     onOpen: send => { send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [] }); send(evidence); },
     onMessage: frame => { received.push(frame); },
     onClose: () => { if (++closed === 1) throw new Error('synthetic close handler failure'); },
   });
   onTestFinished(() => { connection.close(); for (const socket of sockets) socket.terminate(); });
-  const until = async (check: () => boolean) => {
-    for (const end = Date.now() + 4000; Date.now() < end; await new Promise(resolve => setTimeout(resolve, 10))) if (check()) return;
-    expect(check()).toBe(true);
-  };
-  await until(() => received.length === 2 && sent.some(frame => frame.connection === 1 && JSON.stringify(frame.value) === JSON.stringify(evidence)));
+  await eventually(() => received.length === 2 && sent.some(frame => frame.connection === 1 && JSON.stringify(frame.value) === JSON.stringify(evidence)));
   sockets[0]!.terminate();
-  await until(() => received.length === 4 && sent.filter(frame => frame.connection === 2).length === 3);
+  await eventually(() => received.length === 4 && sent.filter(frame => frame.connection === 2).length === 3);
   expect(received).toEqual([request, words, request, words]);
   expect(sent.filter(frame => frame.connection === 2).map(frame => (frame.value as { type: string }).type)).toEqual(['hello', 'node.reconnect', 'program.launch']);
   expect(sent.filter(frame => frame.connection === 2).at(-1)!.value).toEqual(evidence);

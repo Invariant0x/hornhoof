@@ -9,14 +9,15 @@ import { atEmptyPrompt, inputOf } from '../src/terminal/input.js';
 import { codexProgram, kimiProgram, type TermProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { real, withoutFooter } from './real-screens.js';
-import { until } from './terminal-host-helpers.js';
+import { onClock, untilOnClock } from './terminal-host-helpers.js';
 
 const stops: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.restoreAllMocks(); });
+afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 /* A node with an assignment for a program that waits at its empty prompt, on the screen that program really shows. The
-   paste is what 0.7.0 never got to: its check took the footer for a person's words. */
+   paste is what 0.7.0 never got to: its check took the footer for a person's words. The clock moves only as the test moves it. */
 function assignment(program: TermProgram, ready: string, draft?: string, shown = real(draft ?? ready)) {
+  vi.useFakeTimers();
   const home = mkdtempSync(join(tmpdir(), 'hh-real-screen-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID();
   const workDir = join(home, 'work');
@@ -37,7 +38,7 @@ function assignment(program: TermProgram, ready: string, draft?: string, shown =
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
-  stops.push(async () => { abort.abort(); await host.stop(); await running; rmSync(home, { recursive: true, force: true }); });
+  stops.push(async () => { abort.abort(); await onClock(host.stop()); await onClock(running); rmSync(home, { recursive: true, force: true }); });
   return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
@@ -49,9 +50,9 @@ it.each([
   ['kimi', kimiProgram, 'kimi-2.2.0-first'],
 ] as const)('types the assignment into a ready %s at its empty prompt, on the real screen %s', async (_kind, program, name) => {
   const { paste, sent, deliveryId } = assignment(program, name);
-  await until(() => sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
+  await untilOnClock(() => sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', deliveryId, phase: 'attempt' }));
-  await until(() => paste.mock.calls.length > 0);
+  await untilOnClock(() => paste.mock.calls.length > 0);
   expect(paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
 });
 
@@ -62,7 +63,7 @@ it.each([
 ] as const)('keeps the assignment out of the words a person left in real %s', async (_kind, program, ready, draft) => {
   const { paste, styledLooks } = assignment(program, ready, draft);
   /* The node looked at its input and still did not type: looks at the screen before it does say nothing. */
-  await until(() => styledLooks() > 2);
+  await untilOnClock(() => styledLooks() > 2);
   expect(paste).not.toHaveBeenCalled();
 });
 
@@ -80,14 +81,14 @@ it.each([
   ['kimi-2.5.1-draft', kimiProgram, 'words'],
 ] as const)('tells whoever releases a hold what the real screen %s shows', async (name, program, input) => {
   const c = assignment(program, name, name);
-  await until(() => c.styledLooks() > 0);
+  await untilOnClock(() => c.styledLooks() > 0);
   expect(await recoveryState(c)).toMatchObject({ program: 'here', input });
 });
 
 it('types nothing, presses nothing and clears nothing while nothing proves real Codex has an empty input', async () => {
   /* What a real Codex draft under empty rows would show without a footer: its words are the only thing that may be one. */
   const c = assignment(codexProgram, 'codex-0.166.0-first', undefined, withoutFooter(real('codex-0.166.0-empty-rows-draft')));
-  await until(() => c.styledLooks() > 2);
+  await untilOnClock(() => c.styledLooks() > 2);
   expect(c.paste).not.toHaveBeenCalled();
   expect(c.keys).not.toHaveBeenCalled();
   expect(await recoveryState(c)).toMatchObject({ program: 'here', input: 'unknown' });
@@ -95,7 +96,7 @@ it('types nothing, presses nothing and clears nothing while nothing proves real 
 
 it('says a program is gone once its terminal is, whatever its screen last showed', async () => {
   const c = assignment(codexProgram, 'codex-0.166.0-idle');
-  await until(() => c.styledLooks() > 0);
+  await untilOnClock(() => c.styledLooks() > 0);
   vi.spyOn(c.tmux, 'alive').mockResolvedValue(false);
   expect(await recoveryState(c)).toMatchObject({ program: 'gone', input: 'unknown' });
 });
