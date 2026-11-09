@@ -1292,17 +1292,19 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
+/* The status of a code task at each checking stage of its route: Tests is open work of its owner, the others are reviews. */
+const STATUS_AT_STAGE: Partial<Record<string, Task['status']>> = { tests: 'open', review: 'review', security: 'review', cleanup: 'review' };
+
 /* What a task that waited on a person goes back to once nothing more is asked of anyone: the status of the stage its route is
    at. One whose route waits for an owner stays waiting, where the next eligible owner is looked for. Null leaves it as it is. */
 async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefined): Promise<Task['status'] | null> {
   if (was !== 'waiting') return null;
   const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-  if (Number(left?.n ?? 0)) return null;
+  if (Number(left!.n)) return null;
   const route = await routeOf(tx, task);
   if (route.state.resultKind !== 'code') return 'working';
   if (route.state.phase === 'waiting') return null;
-  if (route.state.stage === 'tests') return 'open';
-  return route.state.stage && ['review', 'security', 'cleanup'].includes(route.state.stage) ? 'review' : 'working';
+  return STATUS_AT_STAGE[route.state.stage ?? 'development'] ?? 'working';
 }
 
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
