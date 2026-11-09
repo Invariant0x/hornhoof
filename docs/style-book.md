@@ -1,8 +1,10 @@
 # Hornhoof style book
 
-**Version 1.1, approved by the head of Design on 2026-11-06.** The head of Design owns this book (section 8).
+**Version 1.2, approved by the head of Design on 2026-11-07.** The head of Design owns this book (section 8).
 
-**Base.** `apps/web/src/theme.css` at commit `2fed0c54662d69d24e5b158200d3ef9c4205642a`, SHA256 `689f607b4abb4879a46972b779e4a0d59474a8fb99ee2bfe6b57a125474daa92`. Colours, type and sizes come from that file. Components, fonts, documents and languages were read at commit `c4053494f51a1f26be4708a0124169ebc90ad4d7`, the newest code the author could read. Between the two commits `theme.css` gains one line, so a component added in that line's commit may be missing here.
+**Base.** `apps/web/src/theme.css` at commit `a354cc276d6f92792e4e602627d7300dfc04f251`, SHA256 `6efe8ccd9c9d420114e212c0cbf6c99d4a1ac97771b8ceebb00c1f8549a412ec`. Colours, type, sizes, components, fonts and languages were read at that commit (#655). Counts of sizes and weights in sections 2 and 3 were taken at `2fed0c54` and not recounted.
+
+**Themes.** The look of Hornhoof changes by theme. This book holds what stays the same in every theme. The token values below are those of the current theme, Cyberpunk. What a theme may change, the sheet of each theme and the checks are in `hornhoof-themes.md`: read it together with this book.
 
 **How to read it.** Everything is a fact read from the code unless it carries one of these marks:
 
@@ -13,7 +15,7 @@
 
 ## 1. Colours
 
-All colours are tokens in `:root` of `theme.css`. Light is the default. Dark applies with `data-theme="dark"`, or when the system asks for dark and no theme was chosen.
+All colours are tokens in `:root` of `theme.css`. Light is the default. Dark applies with `data-theme="dark"`, or when the system asks for dark and no mode was chosen. In the code `data-theme` and the word "theme" mean the mode, light or dark, which is not what this book calls a theme.
 
 **RULE.** New work uses tokens by their meaning, and text uses a token whose contrast below passes.
 
@@ -92,9 +94,9 @@ Lines against what they stand on. The limit of 3:1 is for controls; `--line` onl
 
 **GAP.** `--line2` is the border of controls and stays under 3:1 on its surfaces in both themes.
 
-**GAP.** `:focus-visible` draws its outline in `--cyan`, which is under 3:1 on `--surface` and `--bg` in the light theme.
+**GAP.** The general `:focus-visible` draws its outline in `--cyan`, which is under 3:1 on `--surface` and `--bg` in the light theme. `.btn`, the close button of a panel and some other buttons moved to `--cyan-ink`; other rules, such as `theme.css:1241`, stay on `--cyan`.
 
-**GAP.** 7 uses of raw colours sit outside the tokens. Where: `rgba(10, 20, 30, .35)` in `.dialog-back`, `#15191F` in `.t-term`, `#dcdcdc` in `.t-load`, `#2b323b` in `.t-load .spinner`, `#fff` in `.nav-count`.
+**GAP.** 7 uses of raw colours sit outside the tokens in `theme.css`. Where: `rgba(10, 20, 30, .35)` in `.dialog-back`, `#15191F` in `.t-term`, `#dcdcdc` in `.t-load`, `#2b323b` in `.t-load .spinner`, `#fff` in `.nav-count`. The whole product has 35: see `hornhoof-themes.md`, section 8.
 
 ### Local variables
 
@@ -172,6 +174,7 @@ There are no spacing tokens. Uses per value in `margin`, `padding` and `gap` in 
 | Control | Height | Source |
 |---|---|---|
 | `.btn` | from 40 px | `.btn` |
+| Button in `.entry-actions` or `.form-foot` | from 44 px | Section 6 |
 | `.btn.small` | from 30 px | `.btn.small` |
 | `.btn` in `.dv-acts` | from 44 px | `.dv-acts .btn` |
 | `.act` | 32 px fixed | `.act` |
@@ -186,7 +189,7 @@ Corners: mostly square. The cut corner is a `clip-path` with `--cut`: 7 px on `.
 
 **RULE.** A touch target is at least 44 by 44 px, from `templates/skills/dsn-ui-rules.md`.
 
-**GAP.** `.btn.small`, `.act`, the panel bar's close button and `.t-access-row .btn` are under 44 px, and no rule raises `.act` or `.btn.small` on a phone. Section 6 raises the buttons of a record to 44 px once it is built.
+**GAP.** Outside a group of section 6, `.btn` is 40 px, `.btn.small` 30 px and `.act` 32 px, and the panel bar's close button and `.t-access-row .btn` are also under 44 px. No rule raises them on a phone. Inside `.entry-actions` and `.form-foot` a button is from 44 px.
 
 ## 4. Components
 
@@ -196,7 +199,7 @@ Only what exists in the code. Source paths are relative to `apps/web/src/`. Each
 
 | Class | Look | States in `theme.css` | Source, examples |
 |---|---|---|---|
-| `.btn` | Primary: `--btn` fill, `--on-btn` text, cut corner | hover `brightness(1.08)`; disabled opacity .45; focus see GAP | `ui/Ask.tsx`, `screens/Settings.tsx`, `ui/RepoSettings.tsx` |
+| `.btn` | Primary: `--btn` fill, `--on-btn` text, cut corner | hover `brightness(1.08)`; disabled opacity .45; focus drops the cut and draws a 2 px `--cyan-ink` ring | `ui/Ask.tsx`, `screens/Settings.tsx`, `ui/RepoSettings.tsx` |
 | `.btn.ghost` | Secondary: no fill, `--line2` inner line, no cut | hover `--cyan` inner line; focus outline visible | `ui/Ask.tsx`, `ui/CopyButton.tsx`, `screens/Shell.tsx` |
 | `.btn.small` | Same at 13 px, from 30 px | as above | `ui/Ask.tsx`, `ui/Requests.tsx` |
 | `.act` | Row action: `--surface2` fill, `--line2` border | hover `--cyan` border, `--cyan-ink` text; disabled opacity .45 | `screens/People.tsx`, `screens/Subscriptions.tsx`, `ui/AgentCard.tsx` |
@@ -206,7 +209,7 @@ Only what exists in the code. Source paths are relative to `apps/web/src/`. Each
 | `.hbtn` | Bar button, 44 px | | `screens/Department.tsx` |
 | `.zbtn` | Square map button, 44 px | | `ui/canvas.tsx` |
 
-**GAP.** `.btn` is cut by `clip-path`, which also cuts its focus outline, so a focused `.btn` shows no ring. Only `.t-access-row .btn` removes the cut on focus. See section 6.
+The focus of `.btn` is set in `theme.css:81`. It has not been checked on a picture yet, as rule 7 of section 6 asks.
 
 ### Fields
 
@@ -250,7 +253,7 @@ Only what exists in the code. Source paths are relative to `apps/web/src/`. Each
 
 ### Records and their buttons
 
-There is no single record component yet. These do the same job in different ways, as #469 records:
+The record of section 6 now stands in the notebook, people, requests, confirmations, the task panel and settings (#470). `.entries` and `.entry` exist only inside `.notebook`, and `.fit` only on the people table. These older groups still do the same job in different ways, as #469 records:
 
 | Class | Structure today | Source |
 |---|---|---|
@@ -274,7 +277,7 @@ Which states exist, from the check with Development recorded on #478. That check
 | Notebook | Normal, hover, focus, read error with retry, save error, empty and editing can be told apart. Loading and saving are being added there locally with `aria-busy` and a status |
 | People | Busy and error can be told apart |
 | Shared confirmations | Their own local state of the question |
-| Requests | Normal, hover and focus exist. Loading and empty live in the parent panels. A read error is needed there, but that it reaches the person is not proven yet. A save error is already an alert. There is no confirmation step |
+| Requests | Normal, hover and focus exist. Sending shows a `role="status"` line and `aria-busy`, with the buttons disabled; no spinner is needed there. A save error is an alert, and the draft stays. Read-only shows who decided. Loading and empty live in the parent panels. A read error is needed there, but it does not reach the person yet, by #512. There is no confirmation step |
 
 `Remove` in the notebook has no confirmation. Development decided on #478 that this is not a defect and that no confirmation will be added. `templates/skills/dsn-ui-rules.md` asks for one in general, so the case stands in the exceptions list of section 8.
 
@@ -291,7 +294,7 @@ A question that shows a result carries materials: pictures, documents, files and
 5. A refused or failed material keeps its name and says why in words.
 6. A download mark appears only on what can be downloaded.
 
-Class names are not fixed until it is built. What each field means is decided with Development; a field not in the code yet is marked as proposed.
+Built with the classes `.mat*`, `.mv*`, `.opt*` and `.answer-zone`. What each field means is decided with Development.
 
 ### Tables
 
@@ -320,12 +323,12 @@ Result of #469 at `5c67fb00`, not recomputed here: 1124 shared keys, EN is the s
 
 | What | Count | How it was counted |
 |---|---|---|
-| Physical left and right | 187 | `left` 32, `right` 30, `border-left` 29, `margin-left` 21, `text-align: left` 21, `padding-left` 20, `border-left-color` 17, `margin-right` 7, `padding-right` 6, `text-align: right` 2, `border-right` 1, `border-left-style` 1. Earlier reports said 155 with no written method, so do not compare the two numbers |
-| Logical sides | 1 | `margin-inline` 1 |
-| `text-overflow: ellipsis` | 28 | rules in `theme.css` |
-| `white-space: nowrap` | 47 | rules in `theme.css` |
+| Physical left and right | 189 | 187 at `2fed0c54`, by the same method: `left` 32, `right` 30, `border-left` 29, `margin-left` 21, `text-align: left` 21, `padding-left` 20, `border-left-color` 17, `margin-right` 7, `padding-right` 6, `text-align: right` 2, `border-right` 1, `border-left-style` 1. Earlier reports said 155 with no written method, so do not compare the two numbers |
+| Logical sides | 8 | `*-inline` rules. 83 with `*-block`, `inline-size` and `block-size` |
+| `text-overflow: ellipsis` | 27 | rules in `theme.css` |
+| `white-space: nowrap` | 49 | rules in `theme.css` |
 | Line heights in px | 5 | rules in `theme.css` |
-| `dir` attribute | 0 | search of `apps/web/src` for code that sets it |
+| `dir` on the page | 0 | Nothing sets it. `dir="ltr"` stands only on addresses of materials |
 
 Not every physical side needs to change: `left: 0` on a full-width layer stays correct. The count is the list to review, not the amount of work.
 
@@ -348,6 +351,8 @@ Not every physical side needs to change: `left: 0` on a full-width layer stays c
 11. The order of buttons is the same everywhere and does not depend on width: the main action, then secondary actions, then cancel or a dangerous action.
 12. A list of choices is not a row of actions. Each choice takes its own line across the panel, and cancel stays in the group under the list.
 13. A table keeps its actions column last, its buttons on the end edge of the column. There is no fixed width threshold: the table stays a table while whole words, a whole status and one row of buttons fit, measured only when the data, language, font or size of the place changes.
+14. The action button of a page title is from 44 px and stands on the end edge at any width.
+15. A command or an address with a copy button: the button stands in the group under the text, on the end edge, from 44 px, at any width.
 
 | Number | Value |
 |---|---|
@@ -360,9 +365,9 @@ Not every physical side needs to change: `left: 0` on a full-width layer stays c
 | Button of a record, on every screen | From 44 px, padding 8 px 12 px, `--f-display` 600 14 px, line height 1.4. Chosen by the CEO |
 | Focus ring | 2 px `--cyan-ink`, offset 2 px. On the close button of a panel, offset -2 px, inside the button |
 | How a `.btn` with a cut corner shows focus | It drops the cut while it has focus, as `.t-access-row .btn` already does |
-| Class names | `.fit`, `.entries`, `.entry`, `.entry-main`, `.entry-meta`, `.entry-actions`, `.form-foot`, `.choice-list`, `.facts`. Not in the product until it is built |
+| Class names | `.fit`, `.entries`, `.entry`, `.entry-main`, `.entry-meta`, `.entry-actions`, `.form-foot`, `.choice-list`, `.facts` |
 
-**GAP.** The product does not meet this section yet: #470 applies it after the choice. #469 lists the compact labels of the map, the ticker and `.chip` as a separate case with its own ellipsis. They need an entry in the exceptions list of section 8, or a fix.
+**GAP.** The product meets this section only in part. #470 is in the code at the base of this book. Of the 17 remarks of the verdict on #591, 16 are still in the code; the fixes wait in #593. Requests stand on the start edge against this section: `.req-actions.entry-actions` in `theme.css:1142`. `.entry-actions > :is(.act, .btn)` is set twice, `theme.css:736` and `theme.css:1141`. Tables other than people have no `.fit` and break words, remark M3.
 
 ## 7. Site and marketing
 
@@ -387,7 +392,7 @@ Real sources in the repository:
 | Voice: three words, words we use and never use, good examples | NOT_AVAILABLE | Written by Marketing or the CEO. `templates/skills/mkt-brand-voice.md` expects it |
 | Product marketing context: audience, positioning, competitors | NOT_AVAILABLE | One document, per `templates/skills/mkt-product-context.md`. No Marketing department is open today |
 | Social and email templates, cover images | NOT_AVAILABLE | Decided after the brand guide |
-| Character: how the product should feel | NOT_AVAILABLE as a written decision | The head's decision. The code shows cut corners, square frames and a cyan accent, but nobody has written why |
+| Character: how the product should feel | Written per theme | `hornhoof-themes.md`, section 4 |
 
 **RULE.** Until a section exists, marketing work uses the mark, tokens and fonts above and invents no logo, colour or claim.
 
@@ -395,7 +400,7 @@ Real sources in the repository:
 
 ## 8. Using and changing this book
 
-**Before work.** Every mockup and check of the department starts by rereading the sections it touches. A mockup names the book's version it follows.
+**Before work.** Before any task is given out and before any mockup or check, the head reads this book and `hornhoof-themes.md`; each member rereads the sections the work touches. This was asked by the CEO. A mockup names the book's version it follows.
 
 **A conflict.** The book and a task disagree: ask the head. The book and the code disagree: the code is what runs, so report it and the head decides which one changes. Tokens in this book must match `theme.css`, and `hornhoof-style-book-check.py` proves it.
 
@@ -410,6 +415,7 @@ Real sources in the repository:
 | `Remove` in the notebook, `ui/Notebook.tsx` | Destructive actions ask for confirmation, `templates/skills/dsn-ui-rules.md` | Development decided on #478 that it is not a defect | Development | Reviewed by 2027-02-05 |
 | Compact labels of the map, the ticker and `.chip` | No ellipsis on text, section 6 | Existing compact labels with their own ellipsis, as #469 records; panel text gets no such right | Development | Reviewed by 2027-02-05 |
 | Close button of a panel | Touch target of 44 px, section 3 | The panel bar is 38 px; a change of the bar is its own work | Design | Reviewed by 2027-02-05 |
+| Name in the terminal bar: cut with an ellipsis in Russian at 375 px | No ellipsis on text, section 6 | The terminal bar keeps its own rule, #335 | Development | Reviewed by 2027-02-05 |
 
 ### Change list
 
@@ -417,13 +423,14 @@ Real sources in the repository:
 |---|---|---|---|
 | 1.0 | 2026-11-05 | First version: built from the code, numbers of section 6 after the CEO's choice, rules 11 to 13, section 9 | Head of Design |
 | 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
+| 1.2 | 2026-11-07 | Base moved to `a354cc27` (#655). Themes and modes told apart. GAPs and counts updated. Rules 14 and 15 of section 6, from the verdict on #591. One exception added. Reading before work extended to giving out tasks | Head of Design |
 
 ## 9. Browsers
 
 **RULE.**
 
 1. Do not rely on browser defaults. Every property that shapes a screen is set on purpose: box sizing, margins and padding of built-in elements, font and line height of controls, appearance of buttons and fields, list and table defaults, and the space a scrollbar takes.
-2. Reserve the same room for a scrollbar on every engine, so a layout does not shift when one appears and panels keep their width.
+2. Reserve the same room for a scrollbar on every engine, so a layout does not shift when one appears and panels keep their width. **GAP.** `scrollbar-gutter: stable` stands in 3 of 20 scrolling rules: `.dialog`, `.notebook`, `.ac-body`.
 3. Check on the three browser engines: Chromium, Firefox and WebKit, on desktop and phone sizes. Passing on one engine proves nothing about the others.
 4. Between engines, key sizes differ by at most 1 px and the center of an icon by at most 0.5 px. A bigger difference is a defect, or an entry in the exceptions list of section 8.
 5. A check of this rule measures real rendering in each engine and can fail. Show it failing once. Pictures from all three go to the head of Design for review.
