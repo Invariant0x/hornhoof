@@ -4,7 +4,7 @@ import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, jobs, people } from '../../db/schema.js';
+import { agentEvents, agents, jobs, people, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
@@ -97,6 +97,20 @@ export async function computerPrincipal(db: Reader, jobId: string): Promise<stri
   const turn = await turnWords(db, jobId);
   const personId = turn && (answered(turn)?.personId ?? clickOf(turn));
   return personId ? actingCeo(db, personId) : null;
+}
+
+/* The CEO or the CEO delegate who gave their own answer in a task's card to a question about machines, while that task is
+   still open, or null. Their recorded answer lets the orchestrator change machines for that task as their words in its
+   own turn would; it is no permission for anything else. */
+export async function cardPrincipal(db: Reader, companyId: string, requestId: string): Promise<string | null> {
+  const [found] = await db
+    .select({ topic: requests.decisionTopic, status: requests.status, answeredBy: requests.answeredBy, byAgent: requests.answeredByAgentId, task: tasks.status })
+    .from(requests)
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(and(eq(requests.id, requestId), eq(requests.companyId, companyId)));
+  if (!found || found.topic !== 'machines' || !['answered', 'approved'].includes(found.status)) return null;
+  if (!found.answeredBy || found.byAgent || found.task === 'done' || found.task === 'cancelled') return null;
+  return actingCeo(db, found.answeredBy);
 }
 
 /* Whether the turn answers the CEO or the CEO delegate, now. */

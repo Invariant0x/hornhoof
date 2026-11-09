@@ -677,6 +677,58 @@ describe('what only the CEO may ask for', () => {
     expect((await call(client, 'change_employee', { employee: (await db.select().from(agents).where(eq(agents.name, 'Bruno')))[0]!.id, on: false })).isError).toBeFalsy();
   });
 
+  /* Bruno asks the CEO about a machine in his task's card; the CEO answers there, not in the orchestrator's window. */
+  async function askedInCard(c: Awaited<ReturnType<typeof quiet>>, topic: 'machines' | 'task', answer = true) {
+    const asked = await ask(c.app.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'May ivan-mac leave the test runs while #1 runs its tests?', topic });
+    if (answer) expect((await c.app.inject({ method: 'POST', url: `/api/requests/${asked.request.id}`, payload: { answer: 'Yes, take it out for this run.' }, ...as(c.ceo) })).statusCode).toBe(200);
+    return asked.request.id;
+  }
+
+  it("changes a machine in a turn nobody's words opened, by the CEO's answer about machines in an open task's card", async () => {
+    const c = await quiet();
+    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const permission = await askedInCard(c, 'machines');
+    await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
+    const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
+    expect(text(await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false })), 'no answer named').toBe(ONLY_CEO);
+    const lent = await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });
+    expect(lent.isError, text(lent)).toBeFalsy();
+    expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(false);
+    expect((await call(client, 'lend_machine', { machine: machine!.id, lendsTests: true, permission })).isError, 'the answer holds for the task, once more').toBeFalsy();
+    /* It is no permission for what only the CEO decides about anything else. */
+    const [lena] = await c.db.select().from(people).where(eq(people.name, 'Lena'));
+    expect(text(await call(client, 'change_person', { person: lena!.id, status: 'disabled', permission } as Record<string, unknown>))).toBe(ONLY_CEO);
+    expect(await statusOf(c.db, lena!.id)).toBe('active');
+  });
+
+  it('takes no answer as a permission to change machines but the CEO\'s own one about machines, in the card of a task still open', async () => {
+    const c = await quiet();
+    const [machine] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceoId, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    await c.running(c.orchestrator.id, 'tool-token-timer-0123456789abcdef012');
+    const client = await mcp(c.app, 'tool-token-timer-0123456789abcdef012');
+    const lend = (permission: string) => call(client, 'lend_machine', { machine: machine!.id, lendsTests: false, permission });
+    const NO_PERMISSION = "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
+    const about = await askedInCard(c, 'task');
+    expect(text(await lend(about)), 'an answer about the task').toBe(NO_PERMISSION);
+    await c.db.update(requests).set({ status: 'withdrawn' }).where(eq(requests.id, about));
+    const open = await askedInCard(c, 'machines', false);
+    expect(text(await lend(open)), 'a question not answered yet').toBe(NO_PERMISSION);
+    expect(text(await lend('00000000-0000-4000-8000-0000000000cc')), 'no such answer').toBe(NO_PERMISSION);
+    await c.db.update(requests).set({ status: 'withdrawn' }).where(eq(requests.id, open));
+    const answered = await askedInCard(c, 'machines');
+    await c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, c.task.id));
+    expect(text(await lend(answered)), 'a task that is over').toBe(NO_PERMISSION);
+    await c.db.update(tasks).set({ status: 'working', closedAt: null }).where(eq(tasks.id, c.task.id));
+    await c.db.update(requests).set({ status: 'declined' }).where(eq(requests.id, answered));
+    expect(text(await lend(answered)), 'a declined one').toBe(NO_PERMISSION);
+    await c.db.update(requests).set({ status: 'answered', answeredByAgentId: c.orchestrator.id }).where(eq(requests.id, answered));
+    expect(text(await lend(answered)), 'one the orchestrator gave for the CEO').toBe(NO_PERMISSION);
+    await c.db.update(requests).set({ answeredByAgentId: null }).where(eq(requests.id, answered));
+    await c.db.update(people).set({ isOwner: false }).where(eq(people.id, c.ceoId));
+    expect(text(await lend(answered)), 'a person who is no longer the CEO').toBe(NO_PERMISSION);
+    expect((await c.db.select().from(machines))[0]!.lendsTests).toBe(true);
+  });
+
   it("counts a turn an employee woke as the CEO's once the CEO's message goes into it", async () => {
     const { app, db, ceo, orchestrator, hana, lena, running } = await quiet();
     await running(hana.id, HEAD_TOKEN);

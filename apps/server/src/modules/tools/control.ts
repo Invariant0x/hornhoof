@@ -8,7 +8,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
-import { ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { cardPrincipal, ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
@@ -26,8 +26,9 @@ import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
-/* asCeo: only the CEO may ask for this one call of a tool anyone may ask for. */
-type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true };
+/* asCeo: only the CEO may ask for this one call of a tool anyone may ask for. permission: the CEO's answer in a task's card
+   that lets a machine change go when no CEO's words are in the turn. */
+type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true; permission?: string };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
 
@@ -65,6 +66,16 @@ export const CEO_ONLY = new Set([
   'set_team_urgent_only',
 ]);
 export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+const NO_PERMISSION =
+  "That answer is no permission to change machines: it is the CEO's or the CEO delegate's own answer to a question about machines, in the card of a task that is still open. Nothing was changed. Ask the CEO first.";
+
+/* The tools that change the CEO's machines. They also go by the CEO's own answer about machines in a task's card. */
+const PERMISSION = {
+  permission: z
+    .uuid()
+    .optional()
+    .describe("The id of the CEO's or the CEO delegate's answer in an open task's card to your ask_person with topic machines, when they answered there and not in this window."),
+};
 
 /* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
@@ -225,15 +236,16 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     method: 'POST',
     url: `/api/subscriptions/${subscription}/command`,
   }));
-  tool('machine_command', 'A command that connects a machine of the CEO\'s without a plan: it lends itself to test runs, and add_plan_to_machine puts plans on it later.', {}, () => ({
+  tool('machine_command', 'A command that connects a machine of the CEO\'s without a plan: it lends itself to test runs, and add_plan_to_machine puts plans on it later.', PERMISSION, ({ permission }) => ({
     method: 'POST',
     url: '/api/machines/command',
+    permission,
   }));
   tool(
     'add_plan_to_machine',
     'A command that puts one of the CEO\'s own plans on one more of the CEO\'s machines; it works on that machine only, and the plan signs in there by itself.',
-    { machine: Id('machine'), subscription: Id('subscription') },
-    ({ machine, subscription }) => ({ method: 'POST', url: `/api/machines/${machine}/plans`, payload: { subscription } }),
+    { machine: Id('machine'), subscription: Id('subscription'), ...PERMISSION },
+    ({ machine, subscription, permission }) => ({ method: 'POST', url: `/api/machines/${machine}/plans`, payload: { subscription }, permission }),
   );
   tool('test_subscription', 'Sends a tiny prompt through a subscription to prove it works; view /api/jobs/<id> for the answer.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'POST',
@@ -259,9 +271,10 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     method: 'DELETE',
     url: `/api/subscriptions/${subscription}`,
   }));
-  tool('disconnect_machine', 'Disconnects a machine: everything on it stops, and a plan that runs nowhere else waits for a machine again.', { machine: Id('machine') }, ({ machine }) => ({
+  tool('disconnect_machine', 'Disconnects a machine: everything on it stops, and a plan that runs nowhere else waits for a machine again.', { machine: Id('machine'), ...PERMISSION }, ({ machine, permission }) => ({
     method: 'POST',
     url: `/api/machines/${machine}/disconnect`,
+    permission,
   }));
   tool(
     'pool',
@@ -273,8 +286,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'lend_machine',
     "Lends a machine to the company's test runs and work runs (lendsTests true), which go to whichever lent machine is freest, or takes it back.",
-    { machine: Id('machine'), ...LendBody.shape },
-    ({ machine, ...body }) => ({ method: 'PATCH', url: `/api/machines/${machine}`, payload: body }),
+    { machine: Id('machine'), ...LendBody.shape, ...PERMISSION },
+    ({ machine, permission, ...body }) => ({ method: 'PATCH', url: `/api/machines/${machine}`, payload: body, permission }),
   );
 
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
@@ -359,11 +372,14 @@ async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url,
 
 /* What only the CEO asks for goes as the CEO or the CEO delegate this turn answers now, kept under the input lock from words
    that would change it meanwhile, so the route sees the person it is for and allows that person what their own screen
-   does. */
+   does. A machine change without them goes as the CEO whose answer in a task's card it names. */
 function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
   return withInputLock(ctx, job.agentId, async () => {
     const personId = await ceoPrincipal(ctx.db, job.id);
-    return personId ? send(ctx, app, job, made, personId) : say(ONLY_CEO, true);
+    if (personId) return send(ctx, app, job, made, personId);
+    if (!made.permission) return say(ONLY_CEO, true);
+    const answered = await cardPrincipal(ctx.db, job.companyId, made.permission);
+    return answered ? send(ctx, app, job, made, answered) : say(NO_PERMISSION, true);
   });
 }
 
