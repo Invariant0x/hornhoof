@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { PGlite } from '@electric-sql/pglite';
+import { PGlite, types } from '@electric-sql/pglite';
 import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from 'vitest';
 import * as schema from '../src/db/schema.js';
@@ -20,6 +20,26 @@ function copyOfMigrated(): PGlite {
 
 export const databasesOpened = () => opened;
 
+/* PGlite copies a database's parsers into a new map for each query it answers. With a parser for every array type of
+   Postgres in it, the copy took about half of what a small query cost outside Postgres. Postgres's own types are the same
+   in every database, so their array parsers, built as PGlite builds them, go once into the parsers PGlite falls back on,
+   and a test database keeps only those of the types of its own schema. Every value reads back as before. */
+const BUILT_IN_ARRAYS = `select b.oid, b.typarray from pg_type a join pg_type b on b.oid = a.typelem
+  where a.typcategory = 'A' and b.typarray < 16384 group by b.oid, b.typarray`;
+let builtIn: ReadonlySet<string> | undefined;
+
+async function withOwnParsers(client: PGlite): Promise<PGlite> {
+  await client.waitReady;
+  if (!builtIn) {
+    const { rows } = await client.query<{ oid: number; typarray: number }>(BUILT_IN_ARRAYS);
+    for (const { oid, typarray } of rows) types.parsers[typarray] = (value: string) => types.arrayParser(value, types.parsers[oid]!, typarray);
+    builtIn = new Set(rows.map(row => String(row.typarray)));
+  }
+  const own = client.parsers as Record<string, unknown>;
+  for (const oid of Object.keys(own)) if (builtIn.has(oid) || own[oid] === types.parsers[oid]) delete own[oid];
+  return client;
+}
+
 /* An unmigrated database, as new PGlite() gives, from a dump of one initdb, which costs several times as much. */
 let initdb: File | Blob | undefined;
 export async function freshPglite(): Promise<PGlite> {
@@ -30,7 +50,7 @@ export async function freshPglite(): Promise<PGlite> {
     initdb = await first.dumpDataDir('none');
     await first.close();
   }
-  return new PGlite({ loadDataDir: initdb });
+  return withOwnParsers(new PGlite({ loadDataDir: initdb }));
 }
 
 /* Opening a copy costs far more than emptying one, so the tests of a file share one, emptied before each of them. A file
@@ -84,7 +104,7 @@ const POINTED_AT_BY = `select format('public.%I', t.relname) as table, format('p
   from pg_constraint c join pg_class t on t.oid = c.confrelid join pg_class f on f.oid = c.conrelid where c.contype = 'f'`;
 
 async function openShared(): Promise<Shared> {
-  const client = copyOfMigrated();
+  const client = await withOwnParsers(copyOfMigrated());
   const { rows } = await client.query<{ view: string }>(PLANNER_VIEW);
   const pointedAtBy = new Map<string, string[]>();
   for (const { table, by } of (await client.query<{ table: string; by: string }>(POINTED_AT_BY)).rows) pointedAtBy.set(table, [...(pointedAtBy.get(table) ?? []), by]);
@@ -285,7 +305,7 @@ async function sharedForThisTest(): Promise<PGlite> {
 }
 
 export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
-  const client = ownEach || held ? copyOfMigrated() : await sharedForThisTest();
+  const client = ownEach || held ? await withOwnParsers(copyOfMigrated()) : await sharedForThisTest();
   const db = drizzle(client, { schema });
   return { client, db };
 }
