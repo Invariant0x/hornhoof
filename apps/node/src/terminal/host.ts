@@ -1566,6 +1566,8 @@ export class TerminalHost {
     a.stopped = false;
     a.pressed = null;
     a.unanswered = null;
+    /* The quiet of a turn counts from its start until the program gives its own sign. */
+    a.signAt = Date.now();
   }
 
   private interrupted(a: Agent, id?: string): void {

@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf, onAgent } from '../conversation/queue.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
-import { agentProgramState } from './silent.js';
+import { agentProgramState, signInTurn } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
 
@@ -32,7 +32,7 @@ async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: n
   if (program.signAt === null) return refuse('The node gave no time for the last sign of life. A safe restart cannot be checked.');
   const after = restartAfter(sub.provider);
   if (after === null) return refuse(`Hornhoof never restarts ${sub.provider}; its program must end its own wait. Tell the head if it stays silent.`);
-  const quiet = now - program.signAt;
+  const quiet = now - signInTurn(program, job)!;
   if (quiet < after) return refuse(`The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${sub.provider} needs at least ${after / 60_000} minutes without a sign before a restart.`);
   const node = identityOf(sub, job.nodeId);
   if (!node || !ctx.hub.isOnline(node)) return refuse('The turn\'s node is offline. Bring that machine online first.');

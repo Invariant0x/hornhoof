@@ -25,6 +25,17 @@ async function atWork() {
 describe.skipIf(!hasTmux)('what a hook of a program means', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
+  it('starts each turn with its own sign, never one left from the last turn or none at all', async () => {
+    for (const left of [0, Date.now() - 40 * 60_000]) {
+      const { a } = await quiet();
+      a.signAt = left;
+      const begun = Date.now();
+      host['beginTurn'](a);
+      expect(a.signAt).toBeGreaterThanOrEqual(begun);
+      await host.stop();
+    }
+  });
+
   it('nothing from an agent the host does not know', async () => {
     await quiet();
     await expect(fire('nobody', 'stop')).resolves.toBeUndefined();

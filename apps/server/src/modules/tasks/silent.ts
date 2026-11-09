@@ -117,19 +117,24 @@ export function agentProgramState(
   };
 }
 
-function alarmForProgram(program: TurnProgram, nowMs: number): TurnAlarm | null {
+/* A node says 0 until the program gives its first sign; until then the quiet counts from the turn start. */
+export function signInTurn(program: Pick<TurnProgram, 'signAt'>, job: Pick<Job, 'startedAt' | 'createdAt'>): number | null {
+  return program.signAt === 0 ? (job.startedAt ?? job.createdAt).getTime() : program.signAt;
+}
+
+function alarmForProgram(program: TurnProgram, signAt: number | null, nowMs: number): TurnAlarm | null {
   if (nowMs - program.reportedAt >= SILENT_TURN_MS) return { reason: 'node_silent', since: program.reportedAt };
-  if (program.signAt !== null) {
+  if (signAt !== null) {
     if (program.state === 'asking') return null;
     const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
-    return nowMs - program.signAt >= threshold ? { reason: 'program_stalled', since: program.signAt } : null;
+    return nowMs - signAt >= threshold ? { reason: 'program_stalled', since: signAt } : null;
   }
   const lastChange = Math.max(program.since, program.screenAt);
   return nowMs - lastChange >= SILENT_TURN_MS ? { reason: 'program_stalled', since: lastChange } : null;
 }
 
 function alarmForTurn(job: Job, program: TurnProgram | null, nowMs: number): TurnAlarm | null {
-  if (program) return alarmForProgram(program, nowMs);
+  if (program) return alarmForProgram(program, signInTurn(program, job), nowMs);
   const startedAt = (job.startedAt ?? job.createdAt).getTime();
   return nowMs - startedAt >= SILENT_TURN_MS ? { reason: 'node_silent', since: startedAt } : null;
 }
@@ -275,7 +280,9 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   const iso = new Date(s.alarm.since).toISOString();
   const program = s.program;
   const stateSince = program ? new Date(program.since).toISOString() : 'unreported';
-  const sign = program?.signAt != null ? new Date(program.signAt).toISOString() : 'unreported by this node';
+  const signAt = program ? signInTurn(program, s.job) : null;
+  const start = (s.job.startedAt ?? s.job.createdAt).getTime();
+  const sign = signAt === null ? 'unreported by this node' : program!.signAt === 0 ? `none since the turn started at ${new Date(start).toISOString()}` : new Date(signAt).toISOString();
   const retry = program?.retry ? `${program.retry.attempt} of ${program.retry.max ?? 'an unknown maximum'}, next at ${program.retry.nextAt === null ? 'an unknown time' : new Date(program.retry.nextAt).toISOString()}` : 'none reported';
   const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
   const action = restart.allowed ? 'Use restart_program now to resume this session safely.' : `restart_program is not allowed now: ${restart.reason} Tell the head these facts if the program stays silent.`;

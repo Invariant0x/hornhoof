@@ -98,6 +98,25 @@ describe('silence measured by signs of life', () => {
     expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
   });
 
+  it('counts the quiet from the turn start while the program gave no sign yet', async () => {
+    const c = await failureCompany();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    const job = await c.jobOf(id);
+    const start = (job!.startedAt ?? job!.createdAt).getTime();
+    const report = (now: number) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: start, screenAt: now, signAt: 0 }, new Date(now));
+    await report(start + 2000);
+    await checkSilentTurns(c.ctx, new Date(start + 2000));
+    expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
+    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
+    await report(start + 30 * MIN);
+    await checkSilentTurns(c.ctx, new Date(start + 30 * MIN));
+    expect(agentProgramState(c.ctx, { id }).alarm).toEqual({ reason: 'program_stalled', since: start });
+    const notices = await c.turnsOf(c.watcher.id);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.prompt).not.toContain('1970');
+    expect(notices[0]!.prompt).toContain(`Last sign: none since the turn started at ${new Date(start).toISOString()}`);
+  });
+
   it('never calls a live node asking a person silent, even after two hours without a sign', async () => {
     const c = await failureCompany();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
