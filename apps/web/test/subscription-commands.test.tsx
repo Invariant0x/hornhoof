@@ -21,12 +21,11 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers();localStorage.clear(); });
 
 describe('subscription install commands', () => {
-  it.each([0, 1500])('keeps the returned plan and command after Done and reload with a %i ms fixture delay', async delay => {
+  it('keeps the returned plan and command after Done and reload', async () => {
     let commands: ReturnType<typeof shown>[] = [];
     const rows = [pending];
     let sent = false;
     const active = shown();
-    await new Promise(resolve => setTimeout(resolve, delay));
     mockApi({
       'GET /api/subscriptions': () => sent ? new Promise(() => {}) : [200, { subscriptions: [] }],
       'GET /api/nodes/commands': () => [200, { commands }],

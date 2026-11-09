@@ -17,8 +17,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: process.env.HH_TEST_REPORT ? [['list'], ['./e2e/file-report.ts']] : 'list',
+  /* An expectation, an action or a navigation looks until its state comes, however loaded the machine is: 0 is no limit.
+     Only the runner's limit for a test ends a state that never comes. */
+  expect: { timeout: 0 },
   use: {
     baseURL: `http://localhost:${PORT}`,
+    actionTimeout: 0,
+    navigationTimeout: 0,
     /* Without a GPU every frame is drawn on the CPU, so a page kept rendering takes a whole core from the tests around it, idle
        or not. Running animations and a trace's screenshots each keep it rendering. A failure still keeps the trace's DOM
        snapshots, and e2e/motion.spec.ts asks for motion where it checks motion. */

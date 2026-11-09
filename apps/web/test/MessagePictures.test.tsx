@@ -53,8 +53,9 @@ function HeldWindow() {
 }
 
 const windowBox = () => screen.getByRole('complementary');
-/* A file takes a moment to be looked at before it shows, so that nothing shows yet proves little. */
-const settled = () => act(() => new Promise(done => setTimeout(done)));
+/* A file is looked at in a chain of promises before it shows. That chain has no timer in it, so after one turn of the event
+   loop it has run its course, and that nothing shows then proves the file was not taken. */
+const settled = () => act(() => new Promise(done => setImmediate(done)));
 const line = () => screen.findByRole('textbox', { name: LINE });
 const preview = (name = 'screen.png') => screen.findByRole('img', { name });
 const remove = (name = 'screen.png') => screen.findByRole('button', { name: `Remove ${name}` });

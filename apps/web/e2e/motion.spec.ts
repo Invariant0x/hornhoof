@@ -40,6 +40,26 @@ async function sample(page: Page, selector: string) {
   });
 }
 
+/* The dashes' animations on the live ways. */
+const DASHES = '.wires .tr.live';
+
+/* Holds the SVG's own clock and the dashes' animations, so only the test moves them and no check waits for time to pass. */
+async function hold(page: Page, selector: string) {
+  await page.locator(selector).evaluate((svg, dashes) => {
+    (svg as SVGSVGElement).pauseAnimations();
+    for (const a of document.getAnimations()) if ((a.effect as KeyframeEffect)?.target?.matches(dashes)) a.pause();
+  }, DASHES);
+}
+
+/* Moves the held clocks on by the given seconds. */
+async function run(page: Page, selector: string, seconds: number) {
+  await page.locator(selector).evaluate((svg, [dashes, s]) => {
+    const el = svg as SVGSVGElement;
+    el.setCurrentTime(el.getCurrentTime() + (s as number));
+    for (const a of document.getAnimations()) if ((a.effect as KeyframeEffect)?.target?.matches(dashes as string)) a.currentTime = (a.currentTime as number) + (s as number) * 1000;
+  }, [DASHES, seconds] as const);
+}
+
 const looks = [
   { lang: 'en', theme: 'light', width: 1440 }, { lang: 'en', theme: 'dark', width: 375 },
   { lang: 'ru', theme: 'light', width: 375 }, { lang: 'ru', theme: 'dark', width: 1440 },
@@ -68,19 +88,18 @@ for (const look of looks) {
         const selector = view === 'map' ? '.map svg.wires' : view === 'department' ? '.dcanvas svg.wires' : '.tv-in > svg';
         await expect(page.locator(`${selector} circle.pt`).first()).toBeAttached();
         const original = await page.locator(selector).evaluateHandle(svg => ({ svg, dot: [...svg.querySelectorAll('circle.pt')].at(-1), path: svg.querySelector('.tr.live, .seg.w') }));
+        await hold(page, selector);
         const starting = await sample(page, selector);
-        await expect.poll(async () => {
-          const current = await sample(page, selector);
-          return current.x !== starting.x || current.y !== starting.y;
-        }, { message: 'The signal must start moving before the redraw check' }).toBe(true);
+        await run(page, selector, 0.5);
         const first = await sample(page, selector);
+        expect([first.x, first.y], 'The signal must move as its clock goes before the redraw check').not.toEqual([starting.x, starting.y]);
         change();
         const refresh = page.waitForResponse(r => r.url().endsWith('/api/org'));
         await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
         await refresh;
         await expect(page.getByText('Development refreshed', { exact: true }).last()).toBeVisible();
-        /* Sample the actual clocks one second apart; screenshots can alter SMIL's timeline. Video records both samples. */
-        await page.waitForTimeout(1000);
+        /* The held clocks go one second on past the redraw; screenshots can alter SMIL's timeline. Video records both samples. */
+        await run(page, selector, 1);
         const second = await sample(page, selector);
         const evidence = info.outputPath('motion-clocks.json');
         await writeFile(evidence, JSON.stringify({ view, ...look, first, second, expectedSpeed: { map: 100, department: 160, tree: 60 }[view] / (reduce ? 4 : 1) }, null, 2));
@@ -97,7 +116,8 @@ for (const look of looks) {
           expect(second.animations).toEqual([]);
         } else if (view !== 'tree') {
           expect(second.animations.length).toBeGreaterThan(0);
-          expect(second.animations[0]!.time - first.animations[0]!.time).toBeGreaterThan(900);
+          /* The same held animations, one second on: the redraw started none of them over. */
+          expect(second.animations).toEqual(first.animations.map(a => ({ ...a, time: a.time + 1000 })));
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(errors).toEqual([]);
@@ -112,18 +132,24 @@ test('starts a late message on arrival instead of at the SVG document start', as
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.addInitScript(() => { localStorage.setItem('hh-lang', 'en'); });
   await serveMotion(page);
+  /* The page's timer that takes the message away after its trip waits for the test's clock. */
+  const start = Date.parse('2026-11-09T10:00:00Z');
+  await page.clock.install({ time: start });
   let sentAt = 0;
   await page.route('**/api/stream', async route => {
     const svg = page.locator('.map svg.wires');
     await expect(svg).toBeAttached();
-    /* This SVG is already older than the message's 3.81-second trip. */
-    await expect.poll(() => svg.evaluate(el => (el as SVGSVGElement).getCurrentTime()), { timeout: 10_000 }).toBeGreaterThan(4.5);
+    await page.clock.pauseAt(start + 60_000);
+    /* The SVG's held clock goes past the message's 3.81-second trip before the message comes. */
+    await hold(page, '.map svg.wires');
+    await run(page, '.map svg.wires', 4.5);
     sentAt = await svg.evaluate(el => (el as SVGSVGElement).getCurrentTime());
+    expect(sentAt).toBeGreaterThan(4.5);
     await route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd2' } }) + '\n\n' });
   });
   await page.goto('/');
   const motion = page.locator('.map svg.wires animateMotion[repeatCount="1"]');
-  await expect(motion).toBeAttached({ timeout: 10_000 });
+  await expect(motion).toBeAttached();
   const read = () => page.locator('.map svg.wires').evaluate(svg => {
     const animation = svg.querySelector<SVGAnimationElement>('animateMotion[repeatCount="1"]');
     if (!animation) return null;
@@ -132,10 +158,10 @@ test('starts a late message on arrival instead of at the SVG document start', as
     const matrix = (animation.parentElement as unknown as SVGCircleElement).getCTM()!;
     return { start, now: animation.getCurrentTime(), x: matrix.e, y: matrix.f };
   });
-  await expect.poll(read, { timeout: 2000, message: 'A newly arrived message must have an active SVG interval' }).not.toBeNull();
+  await expect.poll(read, { message: 'A newly arrived message must have an active SVG interval' }).not.toBeNull();
   const first = (await read())!;
   expect(first.start).toBeGreaterThanOrEqual(sentAt - 0.05);
-  await page.waitForTimeout(1000);
+  await run(page, '.map svg.wires', 1);
   const second = await motion.evaluate(m => {
     const matrix = (m.parentElement as unknown as SVGCircleElement).getCTM()!;
     return { now: (m as SVGAnimationElement).getCurrentTime(), x: matrix.e, y: matrix.f };
