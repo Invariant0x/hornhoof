@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import ts from 'typescript';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { configureCheckCommands } from '../src/check-command-runner.js';
 import { classifyAgentCommand } from '../src/command-guard.js';
 import { createAgentCommandGuard } from '../src/check-runtime.js';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import type { JobUser } from '../src/isolation.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bridge } from '../src/terminal/bridge.js';
@@ -12,9 +14,38 @@ import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+/* The runner never runs a command as root. A run of these tests as root, as in a plain node image, hands the commands to an
+   unprivileged user of the machine and the folders they use to that user. */
+function commandUser(): JobUser | null {
+  if (process.getuid?.() !== 0) return null;
+  const users = readFileSync('/etc/passwd', 'utf8').split('\n').map(line => line.split(':'));
+  const found = ['node', 'nobody'].map(name => users.find(entry => entry[0] === name)).find(Boolean);
+  if (!found) throw new Error('Run as root, these tests need an unprivileged user named node or nobody to run check commands as.');
+  return { uid: Number(found[2]), gid: Number(found[3]) };
+}
+const user = commandUser();
+
+function giveToUser(dir: string): void {
+  if (!user) return;
+  chownSync(dir, user.uid, user.gid);
+  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) chownSync(join(entry.parentPath, entry.name), user.uid, user.gid);
+}
+
+/* The CLI as the node ships it, built here from its source with its one package found where it is installed. */
+let cli: string;
+beforeAll(() => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-check-cli-'));
+  const source = readFileSync(fileURLToPath(new URL('../src/check-command.ts', import.meta.url)), 'utf8');
+  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
+  cli = join(dir, 'check-command.mjs');
+  writeFileSync(cli, outputText.replace(/from 'zod'/, `from ${JSON.stringify(import.meta.resolve('zod'))}`));
+  chmodSync(dir, 0o755); chmodSync(cli, 0o644);
+  return () => rmSync(dir, { recursive: true, force: true });
+});
+
 describe('check command bridge', () => {
   beforeEach(() => {
-    configureCheckCommands(null, (_key, input) => classifyAgentCommand({ ...input, workspaceRoot: '/tmp' }));
+    configureCheckCommands(user, (_key, input) => classifyAgentCommand({ ...input, workspaceRoot: '/tmp' }));
     onTestFinished(() => configureCheckCommands(null));
   });
   it('runs a command through a granted slot with its output and exit code', async () => {
@@ -45,7 +76,7 @@ describe('check command bridge', () => {
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
     onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
-    const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/check-command.js', import.meta.url)), '--', process.execPath, '-e', 'process.stdout.write("from CLI");process.exit(7)'], {
+    const child = spawn(process.execPath, [cli, '--', process.execPath, '-e', 'process.stdout.write("from CLI");process.exit(7)'], {
       cwd: '/tmp', env: { PATH: process.env.PATH, HH_BRIDGE: bridge.agent(key).hookUrl }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = ''; child.stdout.on('data', chunk => { stdout += String(chunk); });
@@ -53,7 +84,8 @@ describe('check command bridge', () => {
     expect(code).toBe(7); expect(stdout).toBe('from CLI');
   });
 
-  it('allows nested wrappers and hooks from its own checked command while rejecting another agent', async () => {
+  /* Who owns a request is read from /proc, which only Linux has. */
+  it.runIf(existsSync('/proc/self'))('allows nested wrappers and hooks from its own checked command while rejecting another agent', async () => {
     const key = '10000000-0000-4000-8000-000000000005', other = '10000000-0000-4000-8000-000000000006';
     let acquired = 0, pane = 0;
     const client = new CheckClient(frame => {
@@ -65,7 +97,6 @@ describe('check command bridge', () => {
     const bridge = new Bridge('http://127.0.0.1:1', () => {}, owner.owns, { capture: owner.capture });
     await bridge.start(); bridge.setToken(key, 'turn'); bridge.setToken(other, 'other-turn');
     onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
-    const cli = fileURLToPath(new URL('../dist/check-command.js', import.meta.url));
     const script = `
       const { spawnSync } = await import('node:child_process');
       const nested = spawnSync(process.execPath, [${JSON.stringify(cli)}, '--', process.execPath, '-e', 'process.stdout.write("nested")'], { env: process.env, encoding: 'utf8' });
@@ -131,7 +162,7 @@ describe('check command bridge', () => {
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
     onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
     const command = 'process.on("SIGTERM",()=>{});process.stdout.write(String(process.pid));setInterval(()=>{},1000)';
-    const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/check-command.js', import.meta.url)), '--', process.execPath, '-e', command], {
+    const child = spawn(process.execPath, [cli, '--', process.execPath, '-e', command], {
       cwd: '/tmp', env: { PATH: process.env.PATH, HH_BRIDGE: bridge.agent(key).hookUrl }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     onTestFinished(() => { child.kill('SIGKILL'); });
@@ -167,7 +198,8 @@ async function guardedCommandFixture() {
     }
     return true;
   });
-  client.online(true); setCheckClient(client); configureCheckCommands(null);
+  client.online(true); setCheckClient(client); configureCheckCommands(user);
+  giveToUser(dir);
   const bridge = new Bridge('http://127.0.0.1:1', () => {});
   await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
   onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
@@ -192,7 +224,7 @@ describe('command policy boundary', () => {
 
   it('denies a whole suite agent payload even while the same agent holds a genuine lease', async () => {
     const c = await guardedCommandFixture();
-    configureCheckCommands(null, createAgentCommandGuard(c.dir));
+    configureCheckCommands(user, createAgentCommandGuard(c.dir));
     const text = await withCheckSlot(() => c.run(currentCheckLease()), { agentId: c.key });
     expect(existsSync(c.sentinel)).toBe(false);
     expect(c.acquired()).toBe(1);
@@ -202,7 +234,7 @@ describe('command policy boundary', () => {
 
   it('turns a throwing policy into a closed refusal before admission', async () => {
     const c = await guardedCommandFixture();
-    configureCheckCommands(null, async () => { throw new Error('private diagnostic'); });
+    configureCheckCommands(user, async () => { throw new Error('private diagnostic'); });
     const text = await c.run();
     expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
     expect(text).toContain('запусти через run_tests');
@@ -214,7 +246,7 @@ describe('command policy boundary', () => {
     const program = join(c.bin, 'vitest');
     writeFileSync(program, '#!/bin/sh\nprintf single-file-output\nexit 7\n'); chmodSync(program, 0o755);
     writeFileSync(join(c.root, 'one.test.ts'), 'export {};');
-    configureCheckCommands(null, createAgentCommandGuard(c.dir));
+    configureCheckCommands(user, createAgentCommandGuard(c.dir));
     const text = await c.run(undefined, ['vitest', 'run', 'one.test.ts']);
     expect(text).toContain(Buffer.from('single-file-output').toString('base64'));
     expect(text).toContain('"type":"exit","code":7');
@@ -227,7 +259,7 @@ describe('command policy boundary', () => {
     const began = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
     const finished = new Promise<void>(resolve => { settled = resolve; });
-    configureCheckCommands(null, async () => { entered(); await gate; settled(); return { allow: true, kind: 'ordinary', coverage: 'opaque' }; });
+    configureCheckCommands(user, async () => { entered(); await gate; settled(); return { allow: true, kind: 'ordinary', coverage: 'opaque' }; });
     const request = c.run();
     await began;
     // Revocation aborts the server-owned signal synchronously, before policy settles.
