@@ -7,7 +7,7 @@ import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import type { CheckerIdentity } from './echelons-policy.js';
 import { loadTask, move, refuse, waitsForPerson, type Moved, type Task, type Wake } from './engine.js';
-import type { ReviewVerdict } from './review-verdict.js';
+import { bindReviewEvidence, type ReviewVerdict } from './review-verdict.js';
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 type Verdict = ReviewVerdict & { comment: string };
@@ -29,8 +29,9 @@ function verdictState(route: Route, verdict: Verdict, agentId: string): Route['s
 }
 
 function verdictData(route: Route, candidate: EchelonCandidate, identity: CheckerIdentity, verdict: Verdict, issues: Awaited<ReturnType<typeof issuesForEchelon>>, state: Route['state']) {
+  const evidence = bindReviewEvidence(verdict.evidence ?? [], candidate.commit);
   return { issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity,
-    ...(verdict.evidence?.length ? { evidence: verdict.evidence } : {}), ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
+    ...(evidence.length ? { evidence } : {}), ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   };
 }
 
