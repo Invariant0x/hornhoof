@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
 import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
@@ -95,15 +95,20 @@ describe('timers', () => {
     const { app, db, ceo, orchestrator } = await company();
     const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
     const role = app.ctx.templates.roles.get('OPS-WATCH')!;
+    /* The clock stands still through the hire, so its moment is this one. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const hiredAt = new Date();
     const hired = await app.inject({
       method: 'POST',
       url: `/api/departments/${ops!.id}/staff`,
       payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: role.skills.filter(s => s.on).map(s => s.id) }] },
       ...as(ceo),
     });
+    vi.useRealTimers();
     const [walt] = await db.select().from(agents).where(eq(agents.id, hired.json().hired[0] as string));
     expect([walt!.timerMinutes, walt!.timerOrder, walt!.timerForWork]).toEqual([10, role.timer!.order, true]);
-    expect(walt!.timerAt!.getTime()).toBeGreaterThan(Date.now() - MIN);
+    expect(walt!.timerAt).toEqual(hiredAt);
   });
 
   it('skips the round of a timer for work while nothing is open or failed since the last one, and counts from the skip', async () => {

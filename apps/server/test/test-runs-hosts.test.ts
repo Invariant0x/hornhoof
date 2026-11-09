@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { asc } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { testParts } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { placesOf, pumpTests } from '../src/modules/testruns/runs.js';
@@ -10,6 +10,8 @@ import { as, connectNode, until, type FakeNode } from './helpers.js';
 import { company, done, gets, GIB, idle, nextOf, reportHost } from './test-runs-company.js';
 
 describe('parts on physical computers', () => {
+  afterEach(() => vi.useRealTimers());
+
   it.each(['run_tests', 'run_work'])('sends %s parts to a free machine while another waits for an update', async tool => {
     const c = await company({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-run-drain-')) });
     const first = await c.machine(c.ann, 'updating');
@@ -47,9 +49,11 @@ describe('parts on physical computers', () => {
     selected.node.send({ type: 'load', ...idle({ ...host, memFree: selectedGb * GIB }) });
     await until(() => c.app.ctx.hub.loadOf(nodeIdentity(selected.id))?.memFree === selectedGb * GIB);
     const selectedAt = c.app.ctx.hub.loadOf(nodeIdentity(selected.id))!.at;
-    await until(() => Date.now() > selectedAt);
+    /* The sibling's report comes a millisecond later on a clock the test moves. */
+    vi.useFakeTimers({ toFake: ['Date'], now: selectedAt + 1 });
     sibling.node.send({ type: 'load', ...idle({ ...host, memFree: siblingGb * GIB }) });
     await until(() => (c.app.ctx.hub.loadOf(nodeIdentity(sibling.id))?.at ?? 0) > selectedAt);
+    vi.useRealTimers();
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status }]);
@@ -144,10 +148,13 @@ describe('parts on physical computers', () => {
     const one = await c.planless(c.ceo, 'stale-container');
     const two = await c.planless(c.ceo, 'current-container');
     const mac = await c.machine(c.ceo, 'macbook', idle({ load: 6 }));
+    /* The second report of the host comes later on a clock the test moves. */
+    vi.useFakeTimers({ toFake: ['Date'] });
     reportHost(c, one.nodeId, 'linux', { hostLoad: 1 });
-    await new Promise(r => setTimeout(r, 5));
+    vi.setSystemTime(Date.now() + 5);
     reportHost(c, two.nodeId, 'linux', { hostLoad: 15 });
     reportHost(c, mac.nodeId, 'mac', { hostLoad: 5 });
+    vi.useRealTimers();
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ machine: 'macbook' }]);

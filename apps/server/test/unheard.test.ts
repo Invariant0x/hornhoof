@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, jobs, people } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
@@ -95,6 +95,9 @@ describe('words the program never took', () => {
     expect(next?.status).toBe('queued');
     expect((await c.events()).some(e => (e.data as { text?: string }).text === LINE)).toBe(true);
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.say')).toBe(false);
+    /* The clock stands still, so the program's short chance to take its words never runs out here: only its word ends it. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: c.job.id, ok: true, sessionId: null, result: '', tail: '', error: null, wordsWaiting: true });
     expect(await c.jobOf(next!.id)).toMatchObject({ status: 'queued' });
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.words_settled', agentKey: c.agent.id, jobId: c.job.id });
