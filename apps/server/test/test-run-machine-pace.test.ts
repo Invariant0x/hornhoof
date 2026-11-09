@@ -2,7 +2,8 @@ import { hashTestEnvironment, type ServerMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { testPartTimings, testParts, testRuns } from '../src/db/schema.js';
-import { newEnvironmentRequest } from '../src/modules/testruns/describe.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
+import { newEnvironmentRequest, testCapabilities } from '../src/modules/testruns/describe.js';
 import { AWAY_MS, checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
 import { until } from './helpers.js';
 import { company, done, idle, nextOf } from './test-runs-company.js';
@@ -80,4 +81,55 @@ it('lays a run out by what each machine took for the same files before, and give
   expect(moved.environment!.selection).toEqual(onSlow.environmentSelection!.selection);
   expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, fastPart.partId)))[0]?.files).toMatchObject([{ package: '.', file: 'test/00.ts', totalMs: 4100 }]);
   await call('stop_tests', { run: run!.number });
+});
+
+/* The whole way, with nothing put in by hand: the parts of each run end with what their runner said each file took, and a later run
+   of the repository is laid out by what they kept, under the keys its plan gives the free computers. The first run cannot tell a
+   slow machine from big files; the second, laid out by those sizes, runs files on the other machine too, and that ties the paces. */
+it('lays a later run out by what the parts of the earlier ones said each file took on their computers', async () => {
+  const c = await company();
+  const fastHost = 'f'.repeat(64), slowHost = '5'.repeat(64);
+  const machines = [{ ...await c.planless(c.ceo, 'fast-pc', idle({ load: 0.1, host: fastHost })), pace: 1 }, { ...await c.planless(c.ceo, 'slow-pc', idle({ load: 0.1, host: slowHost })), pace: 2.5 }];
+  for (const machine of machines) machine.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: RUNTIMES });
+  await until(() => machines.every(machine => testCapabilities(c.app.ctx, nodeIdentity(machine.nodeId)).testEnvironmentVersion === 1));
+  const { call } = await c.turn(c.bruno);
+  const partsOf = (runId: string) => c.db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
+  const filesOf = (part: typeof testParts.$inferSelect) => { const selection = part.environmentSelection!.selection; return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : []; };
+  /* A run of the whole product, each part answered by the machine that got it, at its pace and four files at a time, with a log that
+     says nothing of the files: what each took is only in what its runner reported. */
+  const runOnce = async () => {
+    expect((await call('run_tests', {})).error).toBe(false);
+    const [run] = await c.db.select().from(testRuns).where(eq(testRuns.status, 'running'));
+    const describer = machines.find(machine => machine.nodeId === run!.environmentRequest!.nodeId)!;
+    describer.node.send(await described(await nextOf(describer.node, 'tests.describe')));
+    await until(async () => (await partsOf(run!.id)).length > 0);
+    await pumpTests(c.app.ctx);
+    const laidOut = await partsOf(run!.id);
+    for (const part of laidOut) {
+      const machine = machines.find(machine => machine.nodeId === part.nodeId)!, given = await nextOf(machine.node, 'tests.run'), selection = given.environment!.selection;
+      if (selection.kind !== 'batch') throw new Error('Only batches were laid out.');
+      const commandMs = (filesOf(part).reduce((sum, file) => sum + msOf(file), 0) * machine.pace) / 4;
+      const environmentReceipt = { version: 2, profile: 'fast', selection, commitSha: given.commitSha, manifestHash: given.environment!.snapshot.description.manifestHash, runtimes: RUNTIMES,
+        outcomes: selection.selections.map((_, index) => ({ index, status: 'passed', exitCode: 0 })), dependencies: { key: null, hit: false }, environments: [],
+        phases: { checkoutMs: 1000, dependenciesMs: 1000, environmentMs: 1000, servicesMs: 1000, commandMs, cleanupMs: 1000 } };
+      machine.node.send(done(given, { commit: given.commitSha, environmentReceipt, files: filesOf(part).map(file => ({ suiteId: 'unit', file, status: 'passed', ms: msOf(file) * machine.pace })) }));
+      await nextOf(machine.node, 'tests.ack');
+    }
+    expect((await c.db.select().from(testRuns).where(eq(testRuns.id, run!.id)))[0]!.status).toBe('passed');
+    return partsOf(run!.id);
+  };
+  const first = await runOnce();
+  /* Each part kept what its runner said, under the folder of its suite, and the computer it ran on. */
+  for (const part of first) {
+    const pace = part.nodeId === machines[0]!.nodeId ? 1 : 2.5;
+    expect((await c.db.select().from(testPartTimings).where(eq(testPartTimings.partId, part.id)))[0]!.files).toEqual(filesOf(part).map(file => ({ package: '.', file, totalMs: msOf(file) * pace, setupMs: null, testsMs: null, teardownMs: null, slowest: [] })));
+  }
+  expect(first.map(part => part.computer).sort()).toEqual([`host:${fastHost}`, `host:${slowHost}`].sort());
+  await runOnce();
+  const third = await runOnce();
+  const onFast = third.find(part => part.environmentSelection!.computer === `host:${fastHost}`)!, onSlow = third.find(part => part.environmentSelection!.computer === `host:${slowHost}`)!;
+  expect([onFast.nodeId, onSlow.nodeId]).toEqual([machines[0]!.nodeId, machines[1]!.nodeId]);
+  const work = (part: typeof third[number]) => filesOf(part).reduce((sum, file) => sum + msOf(file), 0);
+  expect(work(onFast)).toBeGreaterThan(2 * work(onSlow));
+  expect(Math.abs(work(onFast) - 2.5 * work(onSlow)) / work(onFast)).toBeLessThan(0.15);
 });
