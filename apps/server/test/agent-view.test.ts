@@ -230,7 +230,7 @@ describe('tasks', () => {
     const c = await aclCompany();
     const { createTask, comment, ask } = await import('../src/modules/tasks/engine.js');
     const parent = await c.work('Hidden parent', c.crew.other);
-    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, reviewerAgentId: c.crew.other.id, parentId: parent.id });
+    const { task } = await createTask(c.app.ctx, { agentId: c.crew.head.id }, { title: 'Shared work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.crew.mine.id, executor: true, resultKind: 'code', reviewerAgentId: c.crew.other.id, parentId: parent.id });
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, 'Otto was here');
     await comment(c.app.ctx, { agentId: c.crew.mine.id }, task.id, 'Mina says hello');
     await comment(c.app.ctx, { personId: c.ids.ann }, task.id, 'Ann says hello');

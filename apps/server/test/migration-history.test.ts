@@ -41,8 +41,10 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   /* Every head and member gets the speed skill its role lists. */
   if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
   if (table !== 'tasks') return rows;
+  /* Migration 0088 removes the gate columns; the required route replaces them. */
+  const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
   return rows.map(({ row }) => ({ row: {
-    ...row, assignment_epoch: 0,
+    ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), assignment_epoch: 0,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

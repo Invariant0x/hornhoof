@@ -473,7 +473,9 @@
         "apps/server/src/auth/password.ts",
         "apps/server/src/modules/outbound/checks.ts",
         "apps/server/src/modules/outbound/delivery.ts",
-        "apps/server/src/modules/outbound/render.ts"
+        "apps/server/src/modules/outbound/render.ts",
+        "apps/server/src/modules/tasks/echelons-policy.ts",
+        "apps/server/src/modules/tasks/review-verdict.ts"
       ],
       "run": {
         "program": "node",

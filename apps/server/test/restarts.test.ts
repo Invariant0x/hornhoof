@@ -6,7 +6,9 @@ import { agentEvents, agents, companies, departments, jobs, nodes, subscriptions
 import { BUILTIN, identityOf } from '../src/modules/nodes/hub.js';
 import { restartCause } from '../src/modules/nodes/restarts.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -45,7 +47,7 @@ async function company() {
   const olga = await hire('Olga', 'head', 'OPS-HEAD', ops.id);
   const rob = await hire('Rob', 'worker', 'OPS-FIX', ops.id);
   const ctx = app.ctx;
-  const task = (await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true })).task;
+  const task = (await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' })).task;
   const turnsOf = (agentId: string) => db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt));
   const jobOf = async (id: string) => (await db.select().from(jobs).where(eq(jobs.id, id)))[0]!;
   const notes = () => db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'interrupted'))).orderBy(asc(taskEvents.id));
@@ -66,19 +68,6 @@ async function company() {
 }
 
 describe('a turn cut off by a node restart', () => {
-  it('retries a legacy completion notice using its requested words, before the queue added its sender', async () => {
-    const c = await company();
-    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
-    await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: c.task.id, why: 'done' }]);
-    const first = await nextRun(c.node());
-    await c.db.update(agentEvents).set({ data: { text: 'A legacy completion notice.' } }).where(and(eq(agentEvents.jobId, first.jobId), eq(agentEvents.kind, 'message')));
-    await c.restart(boot('2026-11-03T00:11:00.000Z'));
-    await until(() => c.ctx.hub.isReady(BUILTIN));
-    expect((await c.turnsOf(c.hana.id)).map(j => j.retryOf)).toEqual([null, first.jobId]);
-    const retry = await nextRun(c.node());
-    expect(await c.jobOf(retry.jobId)).toMatchObject({ agentId: c.hana.id, status: 'running' });
-  });
-
   it.each(['done', 'reported', 'reviewed'] as const)('still delivers a %s notice to the giver and retries it after a restart', async why => {
     const c = await company();
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
@@ -223,6 +212,9 @@ describe('a turn cut off by a node restart', () => {
     const c = await company();
     const first = await c.brunoAtWork();
     const [waiting] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: c.task.id, kind: 'conversation', prompt: 'Hana answered your question.', timeoutMs: 60_000 }).returning();
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+    const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, jobId: waiting!.id, kind: 'message', data: { text: 'Hana answered your question.', taskWake } });
     const node = await c.restart(boot('2026-11-03T00:11:00.000Z'));
     const retry = await nextRun(node);
     expect(retry.jobId).toBe(waiting!.id);

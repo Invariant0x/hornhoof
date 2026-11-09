@@ -47,7 +47,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
     db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo, createdBy }).returning();
   /* The orchestrator's turn is the CEO's, who started it without a message, so every tool works in it. */
   await running(orchestrator!.id, TOKEN, true, owner!.id);
-  const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true })).task;
+  const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' })).task;
   return { app, db, ceo, ceoId: owner!.id, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
 }
 

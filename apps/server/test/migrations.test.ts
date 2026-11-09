@@ -453,7 +453,8 @@ describe('migration 0011', () => {
       (${C}, 3, 'Asking before its gates', 'waiting', 0, ${gates}::jsonb),
       (${C}, 4, 'Being done', 'working', 0, ${gates}::jsonb)`);
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    /* Migration 0088 later removes the panel together with the gates, so check the panel right after 0011. */
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0011_agent_switch') });
 
     const rows = await db.execute<{ number: number; panel: string[] }>(sql`select number, panel from tasks order by number`);
     expect(rows.rows).toEqual([

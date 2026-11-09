@@ -324,15 +324,15 @@ describe('renderInstructions', () => {
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
       const delivered = rendered.skills.map(s => s.body).join('\n\n');
       expect(delivered, roleKey).toContain('first look');
-      expect(delivered, roleKey).toContain('reviewedCommit..fixCommit');
+      expect(delivered, roleKey).toContain('reviewedCommit');
+      expect(delivered, roleKey).toContain('fixCommit');
       expect(delivered, roleKey).not.toContain('at high effort');
-      expect(rendered.whole, roleKey).toContain('reviewedCommit..fixCommit');
+      expect(rendered.whole, roleKey).toContain('fixCommit');
     }
     const revRole = shipped.roles.get('DEV-REV')!;
     const revRendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
     const revFiles = new Map(revRendered.skills.map(s => [s.name, s.body]));
-    expect(revFiles.get('dev-review-verdict')).toContain('task.reviewPlan');
-    expect(revFiles.get('dev-review-verdict')).toContain('task.fixReview');
+    expect(revFiles.get('dev-review-verdict')).toMatch(/After your repair, inspect only the fixes/);
     expect(revFiles.get('dev-review-verdict')).toContain('confirm_finding');
     expect(revFiles.get('dev-review-verdict')).toMatch(/internal role or skill rules[^.!?]*never[^.!?]*(?:main|release) approval/i);
   });
@@ -483,7 +483,7 @@ describe('renderInstructions', () => {
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
   });
 
-  it('delivers the strict mechanical finding category and Wake.mechanical boundary in loaded DEV-REV skill files and whole instructions', () => {
+  it('delivers the strict mechanical finding category and its boundary in loaded DEV-REV skill files and whole instructions', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const revRole = shipped.roles.get('DEV-REV')!;
     const rendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
@@ -494,10 +494,8 @@ describe('renderInstructions', () => {
     const verdict = files.get('dev-review-verdict')!;
     expect(Buffer.byteLength(verdict)).toBeLessThan(22_000);
     expect(verdict).toContain('mechanical');
-    expect(verdict).toContain('Wake.mechanical');
     expect(verdict).toMatch(/provably cannot change[^.!?]*behaviour/i);
     expect(verdict).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
-    expect(rendered.whole).toContain('Wake.mechanical');
     expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
   });
 

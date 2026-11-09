@@ -2,6 +2,7 @@ import { timingLine } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it, TestRunner } from 'vitest';
 import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testPartTimings, testParts, testRuns, turns } from '../src/db/schema.js';
+import { createRoute } from '../src/modules/tasks/echelons-store.js';
 import { pipelineReport } from '../src/modules/tasks/pipeline-report.js';
 import { keepTimings, timingsOfLog } from '../src/modules/testruns/timings.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -74,6 +75,7 @@ async function runOf() {
   const from = new Date('2026-11-04T14:00:00.000Z');
   const [turn] = await db.insert(turns).values({ companyId, number: 7, goal: 'Go', status: 'closed', openedAt: from, closedAt: new Date(from.getTime() + 3_600_000) }).returning();
   const [task] = await db.insert(tasks).values({ companyId, number: 1, turnId: turn!.id, title: 'One', departmentId: dev!.id, executorAgentId: bruno!.id, status: 'done', closedAt: from, updatedAt: from }).returning();
+  await db.transaction(tx => createRoute(tx, task!, {}));
   const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 1000 }).returning();
   const run = async (number: number, kind: 'tests' | 'work', log: string | null, status: 'passed' | 'running' = 'passed') => {
     const [row] = await db.insert(testRuns).values({ companyId, number, taskId: task!.id, agentId: bruno!.id, jobId: job!.id, kind, command: 'npm test', timeoutMs: 1000, status }).returning();

@@ -20,7 +20,7 @@ const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, r
 const MIN = 60_000;
 async function atWork() {
   const c = await failureCompany();
-  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, resultKind: 'code' });
   await wakeAll(c.ctx, [{ agentId: c.agent.id, taskId: task.id, why: 'assigned' }]);
   return { ...c, task, first: (await c.turnsOf())[0]! };
 }

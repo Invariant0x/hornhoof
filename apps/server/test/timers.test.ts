@@ -6,8 +6,15 @@ import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { discardStaleTurn, taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
+
+/* The wake state a real assignment leaves on the turn, so the turn stays current while its task does. */
+async function keepTaskWake(db: FastifyInstance['ctx']['db'], task: typeof tasks.$inferSelect, agentId: string, jobId: string): Promise<void> {
+  const taskWake = taskWakeOf(task, { why: 'go_on' }, routeSnapshot(await routeOf(db, task), task.assigneeAgentId));
+  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'message', data: { text: 'Build POST /checkout.', taskWake } });
+}
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -233,6 +240,7 @@ describe('timers', () => {
       .insert(tasks)
       .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
       .returning();
+    await db.transaction(tx => createRoute(tx, task!, {}));
     const startedAt = new Date();
     const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
     await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));
@@ -251,6 +259,7 @@ describe('timers', () => {
         startedAt,
       })
       .returning();
+    await keepTaskWake(db, task!, bruno!.id, turn!.id);
 
     /* While thinking or running a tool with changing screenAt, even past 30 minutes from since, no alarm fires. */
     await handleNodeMessage(
@@ -342,6 +351,7 @@ describe('timers', () => {
       .insert(tasks)
       .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
       .returning();
+    await db.transaction(tx => createRoute(tx, task!, {}));
     const startedAt = new Date();
     const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
     await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));
@@ -360,6 +370,7 @@ describe('timers', () => {
         startedAt,
       })
       .returning();
+    await keepTaskWake(db, task!, bruno!.id, turn!.id);
 
     await handleNodeMessage(
       app.ctx,

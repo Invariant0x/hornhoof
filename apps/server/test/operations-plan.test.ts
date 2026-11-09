@@ -4,6 +4,7 @@ import type { Db } from '../src/db/client.js';
 import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { ensureOperations, placeOperator } from '../src/modules/operations/ensure.js';
 import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations, ownDatabases } from './helpers.js';
+import { createRoute } from '../src/modules/tasks/echelons-store.js';
 
 ownDatabases();
 
@@ -219,7 +220,8 @@ describe("the program operator's plan", () => {
   it('starts the work that waited for a plan as soon as it has one', async () => {
     const c = await company();
     const me = await operator(c.db);
-    await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, title: 'Look at a screen', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: me.id, status: 'open' });
+    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, title: 'Look at a screen', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: me.id, status: 'open' }).returning();
+    await c.db.transaction(tx => createRoute(tx, task!, {}));
     expect(await c.db.select().from(jobs).where(eq(jobs.agentId, me.id))).toEqual([]);
     const key = await addKey(c);
     const turns = await c.db.select().from(jobs).where(eq(jobs.agentId, me.id));

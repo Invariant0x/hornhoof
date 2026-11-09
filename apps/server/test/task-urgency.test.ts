@@ -59,7 +59,7 @@ async function company() {
   const root = async (more: Partial<NewTask> = {}, actor: Parameters<typeof createTask>[1] = CEO) =>
     (await createTask(app.ctx, actor, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id, ...more })).task;
   const under = async (parentId: string, more: Partial<NewTask> = {}) =>
-    (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, parentId, assigneeAgentId: bruno.id, executor: true, ...more })).task;
+    (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, parentId, assigneeAgentId: bruno.id, executor: true, resultKind: 'code', ...more })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const elsewhere = async () => {
     const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { WHOLE, type Access, type Spot } from '../src/auth/access.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { proposals, requests } from '../src/db/schema.js';
+import { decisionOwner as ownerFromAuth } from '../src/auth/decision-owner.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
 import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
 import { as, listen, openStream, until, ownPlan } from './helpers.js';
@@ -13,6 +14,10 @@ const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ w
 const person = (id: string, access: Access, extra: Partial<Candidate> = {}): Candidate => ({ id, status: 'active', isOwner: false, access, ...extra });
 
 describe('decisionOwner', () => {
+  it('keeps one owner rule, the same from both modules', () => {
+    expect(decisionOwner).toBe(ownerFromAuth);
+  });
+
   const ceo = person('ceo', WHOLE, { isOwner: true });
   const dan = person('dan', listed(['dev']));
   const dev = { departmentId: 'dev', parentId: null };

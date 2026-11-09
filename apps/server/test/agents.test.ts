@@ -465,7 +465,7 @@ describe('the employee card', () => {
     const { app, db, ceo, dev, teamKey, brunoId, snapshot } = await company();
     const [head] = await db.insert(agents).values({ companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey }).returning();
     const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
-    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true });
+    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, resultKind: 'code' });
     const question = await ask(app.ctx, brunoId, task.id, { kind: 'question', text: 'Which checkout version?' });
 
     expect((await patch(app, ceo, brunoId, { team: team!.id })).statusCode).toBe(200);

@@ -71,7 +71,7 @@ describe('/mcp', () => {
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: 'sonnet', subscriptionId: sub!.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'test_harness', 'test_run', 'verdict', 'wait_for', 'work_run']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'report', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'test_harness', 'test_run', 'verdict', 'wait_for', 'work_run']);
   });
 
   it('describes the company with the templates and no email addresses', async () => {

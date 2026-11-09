@@ -4,6 +4,8 @@ import { agents, jobs, tasks, turns } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 
 async function crossingRound(atOpening = false) {
@@ -75,7 +77,10 @@ describe('worker sessions across company rounds', () => {
     const c = await crossingRound();
     const follow = await c.enqueue('An answer for the running job.');
     const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 33, title: 'New round task', status: 'working', assigneeAgentId: c.agent.id }).returning();
-    const next = await c.enqueue('The new round task.', task!.id);
+    await c.db.transaction(tx => createRoute(tx, task!, {}));
+    const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
+    const next = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'The new round task.', createdBy: null, taskId: task!.id,
+      message: { personId: null, text: 'The new round task.', taskWake } });
     await c.done(c.first);
     expect(c.sent(follow)).toMatchObject({ sessionId: 'old-session' });
     await c.done(follow);

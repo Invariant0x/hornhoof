@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { WHOLE, type Access, type Spot } from '../src/auth/access.js';
-import { decisionOwner as ownerFromAuth, decisionPlace } from '../src/auth/decision-owner.js';
+import { decisionPlace, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { actsAsCeo, canDecide, decidedBy, requireDecision, type Decider } from '../src/auth/decisions.js';
 import { ApiError } from '../src/errors.js';
-import { decisionOwner as ownerFromTasks, type DecisionSubject } from '../src/modules/tasks/decisions.js';
 
 const C = 'acme';
 const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds) });
@@ -103,9 +102,5 @@ describe('decidedBy and decisionPlace', () => {
     for (const [, subject, departmental] of rows) if (!departmental) expect(decidedBy(subject)).toEqual({ kind: 'ceo_and_delegate', departmentId: null });
     expect(decisionPlace(request('question', 'task', shop))).toEqual(shop);
     expect(decisionPlace(request('approval', 'task'))).toBeNull();
-  });
-
-  it('keeps one owner rule, the same from both modules', () => {
-    expect(ownerFromTasks).toBe(ownerFromAuth);
   });
 });

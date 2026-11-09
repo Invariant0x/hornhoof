@@ -7,7 +7,7 @@ const command = { program: 'node', args: ['run.js'], cwd: '.' };
 
 function selection() {
   return MutationSelection.parse({ version: 1, status: 'ready', baseCommit: BASE, commit: HEAD, problems: [], excluded: [], selected: [
-    { file: 'src/pure.ts', name: 'price', startLine: 1, endLine: 1, lines: [1], tests: ['test/a.ts'], reason: 'changed_pure_function' },
+    { file: 'src/pure.ts', name: 'price', startLine: 1, endLine: 1, lines: [1], tests: ['spec/a.ts'], reason: 'changed_pure_function' },
   ] });
 }
 
@@ -15,16 +15,16 @@ function snapshot(withMutation = false): EnvironmentSnapshot {
   const manifest = TestEnvironmentV1.parse({ version: 1, defaultProfile: 'fast', runtimes: [],
     profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
     dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-    suites: ['unit', 'other'].map(id => ({ id, root: '.', files: ['test/*.ts', 'src/*.ts'], run: command, split: { kind: 'argv-files' }, profiles: ['fast'] })),
+    suites: ['unit', 'other'].map(id => ({ id, root: '.', files: ['spec/*.ts', 'src/*.ts'], run: command, split: { kind: 'argv-files' }, profiles: ['fast'] })),
     impact: { adapter: 'typescript', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'No migrations.' } },
-    mutation: withMutation ? { status: 'supported', language: 'typescript', tool: 'mutator', command, sourcePaths: ['src/pure.ts'], fastTestPaths: ['test/a.ts'], coverageCommands: [command], coverageFiles: ['coverage/lcov.info'] }
+    mutation: withMutation ? { status: 'supported', language: 'typescript', tool: 'mutator', command, sourcePaths: ['src/pure.ts'], fastTestPaths: ['spec/a.ts'], coverageCommands: [command], coverageFiles: ['coverage/lcov.info'] }
       : { status: 'unsupported', language: 'typescript', reason: 'No mutation applicability in this case.' },
   });
   const inventory = [
-    { suiteId: 'unit', file: 'test/a.ts', selectionUnit: 'test/group.ts' },
-    { suiteId: 'unit', file: 'test/b.ts', selectionUnit: 'test/group.ts' },
+    { suiteId: 'unit', file: 'spec/a.ts', selectionUnit: 'spec/group.ts' },
+    { suiteId: 'unit', file: 'spec/b.ts', selectionUnit: 'spec/group.ts' },
     { suiteId: 'unit', file: 'src/pure.ts', selectionUnit: 'src/pure.ts' },
-    { suiteId: 'other', file: 'test/c.ts', selectionUnit: 'test/c.ts' },
+    { suiteId: 'other', file: 'spec/c.ts', selectionUnit: 'spec/c.ts' },
   ];
   const fingerprints = inventory.map((unit, index) => ({ suiteId: unit.suiteId, file: unit.file, fingerprint: index === 0 || index === 3 ? AFTER : BEFORE }));
   const manifestSource = JSON.stringify(manifest);
@@ -36,7 +36,7 @@ function snapshot(withMutation = false): EnvironmentSnapshot {
 
 describe('candidate applicability at the shared protocol boundary', () => {
   it('keeps a changed indivisible group together and leaves out an ineligible suite', () => {
-    expect(candidateTestUnits(snapshot()).map(unit => unit.file)).toEqual(['test/a.ts', 'test/b.ts']);
+    expect(candidateTestUnits(snapshot()).map(unit => unit.file)).toEqual(['spec/a.ts', 'spec/b.ts']);
   });
 
   it('records no applicable checks when the final influencing fingerprints did not change', () => {
@@ -54,14 +54,14 @@ describe('candidate applicability at the shared protocol boundary', () => {
   it.each(['missing', 'extra'] as const)('refuses %s final canonical inventory', problem => {
     const value = snapshot();
     if (problem === 'missing') value.candidate!.fingerprints.pop();
-    else value.candidate!.fingerprints.push({ suiteId: 'unit', file: 'test/alien.ts', fingerprint: AFTER });
+    else value.candidate!.fingerprints.push({ suiteId: 'unit', file: 'spec/alien.ts', fingerprint: AFTER });
     expect(() => candidateTestUnits(value)).toThrow('canonical');
   });
 
   it('allows the separately named preparation fingerprint without selecting it as a test', () => {
     const value = snapshot();
     value.candidate!.fingerprints.push({ ...PREPARATION_UNIT, fingerprint: AFTER });
-    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['test/a.ts', 'test/b.ts']);
+    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['spec/a.ts', 'spec/b.ts']);
   });
 
   it('refuses a missing candidate or an unknown profile', () => {
@@ -75,9 +75,9 @@ describe('candidate applicability at the shared protocol boundary', () => {
     expect(() => candidateTestUnits(value)).toThrow('mutation applicability');
     value.candidate!.mutation = { delta: { baseCommit: BASE, commit: HEAD, changes: [{ path: 'src/pure.ts', ranges: [[1, 1]] }] }, selection: selection() };
     value.candidate!.fingerprints[2]!.fingerprint = AFTER;
-    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['test/a.ts', 'test/b.ts', 'src/pure.ts']);
+    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['spec/a.ts', 'spec/b.ts', 'src/pure.ts']);
     value.candidate!.mutation.selection.selected = [];
-    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['test/a.ts', 'test/b.ts']);
+    expect(candidateTestUnits(value).map(unit => unit.file)).toEqual(['spec/a.ts', 'spec/b.ts']);
     value.candidate!.mutation.selection.status = 'blocked';
     expect(() => candidateTestUnits(value)).toThrow('mutation applicability');
   });

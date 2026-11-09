@@ -1,7 +1,9 @@
 import type { ServerMessage } from '@hornhoof/protocol';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { departments, jobs, machines, pendingWakes, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agentEvents, departments, jobs, machines, pendingWakes, personAccess, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
@@ -325,7 +327,10 @@ describe('a test run', () => {
     const { job, call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
     const run = await nextOf(ivan.node, 'tests.run');
-    await c.db.insert(jobs).values({ companyId: job.companyId, subscriptionId: job.subscriptionId, agentId: c.bruno.id, taskId: c.task.id, kind: 'conversation', prompt: 'Rita sent it back.', timeoutMs: 900000 });
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+    const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
+    const [waiting] = await c.db.insert(jobs).values({ companyId: job.companyId, subscriptionId: job.subscriptionId, agentId: c.bruno.id, taskId: c.task.id, kind: 'conversation', prompt: 'Rita sent it back.', timeoutMs: 900000 }).returning();
+    await c.db.insert(agentEvents).values({ companyId: job.companyId, agentId: c.bruno.id, jobId: waiting!.id, kind: 'message', data: { text: 'Rita sent it back.', taskWake } });
     ivan.node.send(done(run));
     await nextOf(ivan.node, 'tests.ack');
     await until(async () => /Test run 1 passed/.test((await c.wokeWith(c.bruno.id)) ?? ''));
@@ -341,6 +346,7 @@ describe('a test run', () => {
     expect(await call('run_tests', { command: 'make test' })).toMatchObject({ error: true, text: expect.stringContaining('3') });
     expect((await (await c.turn(c.sam, null)).call('run_tests', { command: 'make test' })).text).toMatch(/task/);
     const [own] = await c.db.insert(tasks).values({ companyId: c.task.companyId, number: 99, title: 'Pitch', brief: '', body: '', departmentId: c.sales.id, assigneeAgentId: c.sam.id, status: 'working' }).returning();
+    await c.db.transaction(tx => createRoute(tx, own!, {}));
     expect((await (await c.turn(c.sam, own!.id)).call('run_tests', { command: 'make test' })).text).toMatch(/repository/);
   });
 });

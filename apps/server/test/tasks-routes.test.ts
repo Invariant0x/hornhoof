@@ -37,7 +37,7 @@ describe('tasks for people', () => {
   it("shows a person only the tasks of agents they see and what waits for them", async () => {
     const { ctx, db, head, bruno, dev, ceo, oleg, maria, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
-    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, resultKind: 'code' });
     await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await get(oleg, '/api/tasks')).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
     expect((await get(maria, '/api/tasks')).json().tasks).toEqual([]);

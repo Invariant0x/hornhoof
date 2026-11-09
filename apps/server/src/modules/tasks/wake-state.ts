@@ -9,7 +9,7 @@ import { routeOf, routeSnapshot } from './echelons-store.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.enum(ECHELON_STAGES).nullable(), candidateId: z.uuid().nullable(), version: z.number().int().nonnegative(), to: z.string().optional() });
+const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.enum(ECHELON_STAGES).nullable(), candidateId: z.uuid().nullable(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
@@ -19,7 +19,7 @@ const GIVER_NEWS = new Set(['blocked', 'switched', 'tests', 'work']);
 const REVIEW = new Set(['review']);
 const RUN_ENDS = new Set(['tests', 'work']);
 
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>, route: Pick<EchelonsSnapshot, 'stage' | 'candidateId'>): TaskWake => ({ why: wake.why, status: task.status, stage: route.stage, candidateId: route.candidateId, version: wake.version ?? task.version });
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>, route: Pick<EchelonsSnapshot, 'stage' | 'candidateId'>): TaskWake => ({ why: wake.why, status: task.status, stage: route.stage, candidateId: route.candidateId, version: wake.version });
 
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);
 
@@ -36,7 +36,8 @@ async function samePhase(db: Store, task: Task, state: TaskWake | null): Promise
 /* Messages follow their recipient through status changes within the same workflow stage. */
 const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.status === task.status;
 
-const sameVersion = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.version === task.version;
+/* Only a wake that names a version expires when the task moves on; other wakes follow their status, stage and candidate. */
+const sameVersion = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.version === undefined || state.version === task.version;
 
 export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId;
 const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && task.assigneeAgentId === agentId;

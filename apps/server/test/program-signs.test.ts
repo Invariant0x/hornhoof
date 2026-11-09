@@ -5,15 +5,24 @@ import { jobs, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
+import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 
 const MIN = 60_000;
+/* A working task with its required route, and a turn that carries the wake state a real assignment leaves. */
+async function taskTurn(c: Awaited<ReturnType<typeof failureCompany>>) {
+  const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
+  await c.db.transaction(tx => createRoute(tx, task!, {}));
+  const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
+  const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null, message: { personId: null, text: 'Work', taskWake } });
+  return { task, id };
+}
 describe('silence measured by signs of life', () => {
   it.each(['done', 'cancelled'] as const)('stops silent work on a %s task before it can call Operations', async status => {
     const c = await failureCompany();
-    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null });
+    const { task, id } = await taskTurn(c);
     const now = Date.now();
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: now - 31 * MIN, screenAt: now, signAt: now - 31 * MIN }, new Date(now));
     await c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task!.id));
@@ -26,8 +35,7 @@ describe('silence measured by signs of life', () => {
 
   it('keeps the last program evidence and redacted 200-line tail when running work becomes stale', async () => {
     const c = await failureCompany();
-    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null });
+    const { task, id } = await taskTurn(c);
     const now = Date.now();
     const signAt = now - 121 * MIN;
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'tool', tool: 'Bash', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
@@ -55,8 +63,7 @@ describe('silence measured by signs of life', () => {
 
   it('says when a running stale turn never reported its program state or a sign of life', async () => {
     const c = await failureCompany();
-    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null });
+    const { task, id } = await taskTurn(c);
     const now = Date.now();
     await c.db.update(jobs).set({ startedAt: new Date(now - 31 * MIN) }).where(eq(jobs.id, id));
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task!.id));
