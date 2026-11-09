@@ -131,13 +131,17 @@ async function answered(response: Response): Promise<Response> {
   throw new Error(`Hornhoof answered ${response.status}${body?.error?.message ? `: ${body.error.message}` : '.'}`);
 }
 
+/* The clock the registry over HTTP waits on: a pause between tries, and a signal that a wait for an answer ran out. */
+export type RemoteClock = { pause(ms: number, signal: AbortSignal): Promise<unknown>; timeout(ms: number): AbortSignal };
+const REAL_CLOCK: RemoteClock = { pause: (ms, signal) => wait(ms, undefined, { signal }), timeout: ms => AbortSignal.timeout(ms) };
+
 /* A link that dropped takes a while to come back, so each new try waits longer. */
-async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise<T>): Promise<T> {
+async function again<T>(signal: AbortSignal, pauseMs: number, run: () => Promise<T>, clock: RemoteClock): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try { return await run(); }
     catch (error) {
       if (signal.aborted || attempt >= TRIES) throw error;
-      await wait(pauseMs * attempt, undefined, { signal });
+      await clock.pause(pauseMs * attempt, signal);
     }
   }
 }
@@ -166,7 +170,7 @@ async function readAll(response: Response, moved: () => void): Promise<Buffer> {
 
 /* The registry over HTTP with the node's key. A bundle goes in parts, each tried again by itself, as a whole one would not
    get through a slow link between a machine and the company's link. */
-export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS, quietMs = QUIET_MS): HarnessRemote {
+export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_MS, releaseMs = RELEASE_MS, quietMs = QUIET_MS, clock = REAL_CLOCK): HarnessRemote {
   const at = (path: string) => `${server}/api/harness${path}`;
   const headers = { authorization: `Bearer ${nodeKey}` };
   const fenced = (lease: HarnessLease) => ({ ...headers, 'x-harness-company': lease.companyId, 'x-harness-attempt': lease.attempt });
@@ -181,7 +185,7 @@ export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_M
         for (let index = 0; index * partBytes < size; index++) {
           const { buffer, bytesRead } = await file.read(Buffer.alloc(partBytes), 0, partBytes, index * partBytes);
           const body = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-          await again(signal, pauseMs, () => quietFor(signal, quietMs * SENDING_QUIETS, async sending => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal: sending }))));
+          await again(signal, pauseMs, () => quietFor(signal, quietMs * SENDING_QUIETS, async sending => answered(await fetch(at(`/${key}/parts/${index}`), { method: 'PUT', headers: { ...fenced(lease), 'content-type': 'application/octet-stream' }, body, signal: sending }))), clock);
         }
       } finally { await file.close(); }
       await quietFor(signal, quietMs, async quiet => answered(await fetch(at(`/${key}/done`), { ...json({ digest, size }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: quiet })));
@@ -191,14 +195,14 @@ export function harnessRemote(server: string, nodeKey: string, pauseMs = PAUSE_M
       try {
         for (let start = 0; start < claim.size; start += claim.partBytes) {
           const range = `bytes=${start}-${Math.min(start + claim.partBytes, claim.size) - 1}`;
-          const part = await again(signal, pauseMs, () => quietFor(signal, quietMs, async (quiet, moved) => readAll(await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal: quiet })), moved)));
+          const part = await again(signal, pauseMs, () => quietFor(signal, quietMs, async (quiet, moved) => readAll(await answered(await fetch(at(`/${key}/bundle`), { headers: { ...fenced(claim), range }, signal: quiet })), moved)), clock);
           await out.writeFile(part);
         }
       } finally { await out.close(); }
       if (await fileDigest(path, { deadline: Number.POSITIVE_INFINITY, signal }) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');
     },
     async failed(key, error, lease) {
-      await answered(await fetch(at(`/${key}/failed`), { ...json({ error }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: AbortSignal.timeout(releaseMs) }));
+      await answered(await fetch(at(`/${key}/failed`), { ...json({ error }), headers: { ...fenced(lease), 'content-type': 'application/json' }, signal: clock.timeout(releaseMs) }));
     },
   };
 }

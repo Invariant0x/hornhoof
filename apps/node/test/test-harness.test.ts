@@ -4,10 +4,12 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { packBundle, unpackBundle } from '../src/test-bundle.js';
 import { prepareCache, restoreCache, STORED_AT, type CacheEntry, type CacheContext } from '../src/test-cache.js';
-import { harnessRemote, harnessShare, type HarnessRemote } from '../src/test-harness.js';
+import { harnessRemote, harnessShare, type HarnessRemote, type RemoteClock } from '../src/test-harness.js';
+import { deferred } from '../../../test-support/deferred.mjs';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 const folders: string[] = [];
@@ -15,10 +17,12 @@ afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, {
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const KEY = 'a'.repeat(64), INPUT = 'd'.repeat(64);
 const LEASE = { companyId: '11111111-1111-4111-8111-111111111111', attempt: '33333333-3333-4333-8333-333333333333' };
+/* A deadline no test reaches: the code waits at most until it, and a timer waits at most 2_147_483_647 ms. */
+const NEVER_MS = 2_147_483_647;
 
 async function machine(): Promise<CacheContext & { dir: string }> {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-harness-')); folders.push(cacheRoot);
-  return { cacheRoot, dir: join(cacheRoot, 'dependencies'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} };
+  return { cacheRoot, dir: join(cacheRoot, 'dependencies'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} };
 }
 async function tree(root: string): Promise<{ root: string; paths: string[] }> {
   await mkdir(join(root, 'node_modules', '.bin'), { recursive: true });
@@ -137,6 +141,14 @@ function registry(answers: Claim[], over: Partial<HarnessRemote> = {}) {
 }
 const UNIT = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: 'e'.repeat(64), unit: 'dependencies', commitSha: 'f'.repeat(40), platform: 'linux-arm64' };
 const failing = (message: string) => async (): Promise<never> => { throw new Error(message); };
+/* Moves the fake clock on a millisecond at a time until the work settles: the code's own pauses and deadlines run out in
+   virtual time, while what it does on disk runs as it does. */
+async function onClock<T>(work: Promise<T>): Promise<T> {
+  let done = false;
+  void work.then(() => { done = true; }, () => { done = true; });
+  while (!done) await vi.advanceTimersByTimeAsync(1);
+  return work;
+}
 
 describe('one build for all the machines', () => {
   it('builds on the machine the registry names, and hands the result over', async () => {
@@ -160,16 +172,20 @@ describe('one build for all the machines', () => {
   it('waits while another machine builds, then takes its result', async () => {
     const elsewhere = await machine(), file = join(elsewhere.cacheRoot, 'bundle'), packed = await packBundle(await built(elsewhere), file, elsewhere);
     const here = await machine(), { remote, asked } = registry([{ state: 'wait', afterMs: 1 }, { state: 'wait', afterMs: 1 }, { state: 'ready', ...LEASE, digest: packed.digest, size: packed.size, partBytes: 1024 }], { download: async (_key, to) => { await writeFile(to, await readFile(file)); } });
-    const entry = await prepareCache(here.dir, KEY, INPUT, here, failing('it must not build'), harnessShare(remote, UNIT));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const entry = await onClock(prepareCache(here.dir, KEY, INPUT, here, failing('it must not build'), harnessShare(remote, UNIT)));
     expect(entry.fetched).toBe(true); expect(asked).toEqual([KEY, KEY, KEY]);
   });
 
   it('builds here when another machine does not finish within the time a part waits for it, and says so', async () => {
-    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [], { remote, uploaded } = registry([{ state: 'wait', afterMs: 5 }]);
-    const started = Date.now();
-    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT, { waitMs: 50 }));
+    const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [], { remote, asked, uploaded } = registry([{ state: 'wait', afterMs: 5 }]);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const entry = await onClock(prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT, { waitMs: 50 })));
     expect(entry).toMatchObject({ fetched: false });
-    expect(Date.now() - started).toBeLessThan(5_000);
+    /* It asked every 5 ms of the 50 it waits, and once more as they ran out. */
+    expect(asked).toHaveLength(11);
     expect(uploaded).toEqual([]);
     expect(said).toEqual([
       `Waiting for the prepared dependencies ${KEY.slice(0, 12)} that another machine builds.`,
@@ -231,8 +247,17 @@ describe('one build for all the machines', () => {
 
   it('keeps its claim while a long build runs', async () => {
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), { remote, asked } = registry([{ state: 'build', ...LEASE, partBytes: 1024 }]);
-    await prepareCache(here.dir, KEY, INPUT, here, async () => { await new Promise(resolve => setTimeout(resolve, 60)); return source; }, harnessShare(remote, UNIT, { renewMs: 10 }));
-    expect(asked.length).toBeGreaterThan(2);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const building = deferred(), finished = deferred();
+    const prepared = prepareCache(here.dir, KEY, INPUT, here, async () => { building.resolve(); await finished.promise; return source; }, harnessShare(remote, UNIT, { renewMs: 10 }));
+    await building.promise;
+    await vi.advanceTimersByTimeAsync(9);
+    expect(asked).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(21);
+    expect(asked).toHaveLength(4);
+    finished.resolve();
+    await prepared;
     await chmod(join(here.dir, KEY), 0o700);
   });
 });
@@ -241,8 +266,26 @@ describe('the registry over HTTP', () => {
   const SIGNAL = new AbortController().signal;
   const unit = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: INPUT, unit: 'dependencies', key: KEY, commitSha: 'e'.repeat(40), platform: 'linux-arm64' };
   type Asked = { method: string; url: string; authorization: string | undefined; range: string | undefined; body: Buffer; company: string | string[] | undefined; attempt: string | string[] | undefined };
+  /* A clock on which a pause ends at once and a wait for an answer never runs out. */
+  const INSTANT: RemoteClock = { pause: async () => {}, timeout: () => new AbortController().signal };
+  /* A clock that moves only as the test says: each pause, and each wait for an answer, lasts until the test ends it. */
+  function heldClock() {
+    const pauses: { ms: number; end: () => void }[] = [], timeouts: { ms: number; end: () => void }[] = [];
+    const clock: RemoteClock = {
+      pause: (ms, signal) => new Promise((resolve, reject) => {
+        pauses.push({ ms, end: () => { resolve(undefined); } });
+        signal.addEventListener('abort', () => { reject(signal.reason as Error); }, { once: true });
+      }),
+      timeout: ms => {
+        const timer = new AbortController();
+        timeouts.push({ ms, end: () => { timer.abort(new DOMException('The wait for an answer ran out.', 'TimeoutError')); } });
+        return timer.signal;
+      },
+    };
+    return { pauses, timeouts, clock };
+  }
   /* A server that answers each request as told, and keeps what it was asked. */
-  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1, releaseMs?: number, requestMs?: number) {
+  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void, pauseMs = 1, releaseMs = 1, clock = INSTANT, quietMs?: number) {
     const heard: Asked[] = [];
     const running = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -255,9 +298,18 @@ describe('the registry over HTTP', () => {
     await listenIn(running);
     onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
     const address = running.address() as { port: number };
-    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs, requestMs) };
+    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs, quietMs, clock) };
   }
   const send = (response: ServerResponse<IncomingMessage>, status: number, body = '') => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body); };
+  /* Once the server has heard a request that it leaves unanswered, its 100 ms of quiet run out on the fake clock, and not
+     a millisecond before. */
+  async function quietUntilHeard(heard: Asked[], count: number, settled = () => false) {
+    await eventually(() => heard.length === count);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(heard).toHaveLength(count);
+    expect(settled()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+  }
   async function file(text: string) {
     const root = await mkdtemp(join(tmpdir(), 'hh-remote-')); folders.push(root);
     await writeFile(join(root, 'bundle'), text);
@@ -279,10 +331,14 @@ describe('the registry over HTTP', () => {
   });
 
   it('lets a unit go within a short time even when the server never answers, as the cache lock waits meanwhile', async () => {
-    const { heard, remote } = await server(() => {}, 1, 200);
-    const started = Date.now();
-    await expect(remote.failed(KEY, null, LEASE)).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(15_000);
+    const held = heldClock(), { heard, remote } = await server(() => {}, 1, 200, held.clock);
+    let settled = false;
+    const failed = remote.failed(KEY, null, LEASE).finally(() => { settled = true; });
+    await eventually(() => heard.length === 1);
+    expect(held.timeouts.map(timeout => timeout.ms)).toEqual([200]);
+    expect(settled).toBe(false);
+    held.timeouts[0]!.end();
+    await expect(failed).rejects.toThrow();
     expect(heard.map(asked => asked.url)).toEqual([`/api/harness/${KEY}/failed`]);
   });
 
@@ -313,17 +369,26 @@ describe('the registry over HTTP', () => {
   });
 
   it('waits longer before each new try, as a link that dropped takes a while to come back', async () => {
-    const at: number[] = [], { remote } = await server((_asked, response) => { at.push(Date.now()); send(response, 503); }, 100);
+    const held = heldClock(), { heard, remote } = await server((_asked, response) => { send(response, 503); }, 100, 1, held.clock);
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL, LEASE)).rejects.toThrow('Hornhoof answered 503');
-    expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(90);
-    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(190);
+    const upload = remote.upload(KEY, path, 'digest', 3, 3, SIGNAL, LEASE);
+    await eventually(() => held.pauses.length === 1);
+    expect(held.pauses[0]!.ms).toBe(100); expect(heard).toHaveLength(1);
+    held.pauses[0]!.end();
+    await eventually(() => held.pauses.length === 2);
+    expect(held.pauses[1]!.ms).toBe(200); expect(heard).toHaveLength(2);
+    held.pauses[1]!.end();
+    await expect(upload).rejects.toThrow('Hornhoof answered 503');
+    expect(heard).toHaveLength(3);
   });
 
   it('stops waiting when it is told to stop', async () => {
-    const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { send(response, 503); setTimeout(() => { stop.abort(); }, 20); }, 60_000);
+    const stop = new AbortController(), held = heldClock(), { heard, remote } = await server((_asked, response) => { send(response, 503); }, 60_000, 1, held.clock);
     const { path } = await file('abc');
-    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal, LEASE)).rejects.toThrow();
+    const upload = remote.upload(KEY, path, 'digest', 3, 3, stop.signal, LEASE);
+    await eventually(() => held.pauses.length === 1);
+    stop.abort();
+    await expect(upload).rejects.toThrow();
     expect(heard).toHaveLength(1);
   });
 
@@ -352,27 +417,45 @@ describe('the registry over HTTP', () => {
   /* A machine that took a part waited for a build another machine made and never got it: the part stood until its whole time
      ran out, and said nothing. Each request has its own time, tried again as a refused one is. */
   it('gives up on a range that never comes after three tries of its own time, and says so', async () => {
-    const { heard, remote } = await server(() => {}, 1, undefined, 100);
+    const { heard, remote } = await server(() => {}, 1, 1, INSTANT, 100);
     const { root } = await file('');
-    const started = Date.now();
-    await expect(remote.download(KEY, join(root, 'came'), { state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL)).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
-    expect(Date.now() - started).toBeLessThan(5_000);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let settled = false;
+    const downloading = remote.download(KEY, join(root, 'came'), { state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 }, SIGNAL).finally(() => { settled = true; });
+    void downloading.catch(() => {});
+    for (let tries = 1; tries <= 3; tries++) await quietUntilHeard(heard, tries, () => settled);
+    await expect(downloading).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
+    expect(settled).toBe(true);
     expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=0-2', 'bytes=0-2']);
   });
 
   it('gives up on a claim that is never answered, so the machine builds it itself', async () => {
-    const { remote } = await server(() => {}, 1, undefined, 100);
-    await expect(remote.claim(unit, SIGNAL)).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
+    const { heard, remote } = await server(() => {}, 1, 1, INSTANT, 100);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let claimed = false;
+    const claiming = remote.claim(unit, SIGNAL).finally(() => { claimed = true; });
+    void claiming.catch(() => {});
+    await quietUntilHeard(heard, 1, () => claimed);
+    await expect(claiming).rejects.toThrow('Hornhoof sent nothing for 0.1 s.');
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
-    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    await quietUntilHeard(heard, 2);
+    const entry = await preparing;
     expect(entry.fetched).toBe(false);
     expect(said.join('\n')).toContain('Hornhoof keeps no prepared dependencies for this machine now: Hornhoof sent nothing for 0.1 s.');
   });
 
   it('builds here when a bundle that is ready never comes, and says which build it waited for and from where', async () => {
-    const { remote } = await server((asked, response) => { if (asked.url === '/api/harness/claim') send(response, 200, JSON.stringify({ state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 })); }, 1, undefined, 100);
+    const { heard, remote } = await server((asked, response) => { if (asked.url === '/api/harness/claim') send(response, 200, JSON.stringify({ state: 'ready', ...LEASE, digest: sha('abc'), size: 3, partBytes: 3 })); }, 1, 1, INSTANT, 100);
     const here = await machine(), source = await tree(join(here.cacheRoot, 'source')), said: string[] = [];
-    const entry = await prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const preparing = prepareCache(here.dir, KEY, INPUT, { ...here, log: line => said.push(line) }, async () => source, harnessShare(remote, UNIT));
+    /* The claim is answered at once; each of the three tries of the range then hears nothing for its 100 ms. */
+    for (let tries = 2; tries <= 4; tries++) await quietUntilHeard(heard, tries);
+    const entry = await preparing;
     expect(entry).toMatchObject({ fetched: false });
     expect(said).toEqual([
       `Taking the prepared dependencies ${KEY.slice(0, 12)} (3 bytes) that another machine built, from Hornhoof.`,

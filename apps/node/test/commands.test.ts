@@ -31,6 +31,8 @@ const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const SERVER = 'https://hornhoof.example.test';
 const KEY = 'node-key-0123456789abcdef';
 const NODE_KEY = 'built-in-node-key-0123456789abcdef0123';
+/* A turn's limit no test reaches: the node gives a turn a tenth more, at most 30 s, on a timer of at most 2_147_483_647 ms. */
+const NO_TURN_LIMIT = 2_147_483_647 - 30_000;
 
 let data: string;
 let bin: string;
@@ -289,7 +291,7 @@ describe('run --builtin', () => {
     expect(server.headers[0]).toBe(`Bearer ${NODE_KEY}`);
     expect(server.received[0]).toMatchObject({ loggedIn: true, running: [] });
 
-    const job = { subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: 10000, prompt: 'say ready', instructions: null, toolToken: null };
+    const job = { subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: NO_TURN_LIMIT, prompt: 'say ready', instructions: null, toolToken: null };
     server.send({ type: 'job.run', jobId: 'j1', provider: 'anthropic_api', secret: 'company-anthropic-key-000000', ...job });
     server.send({ type: 'job.run', jobId: 'j2', provider: 'openai_api', secret: 'company-openai-key-0000000000', ...job, subscriptionId: 'sub-b' });
     await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 2);
@@ -306,7 +308,9 @@ describe('run --builtin', () => {
     ]);
 
     server.send({ type: 'remove' });
-    await new Promise(r => setTimeout(r, 200));
+    /* A node that took the remove runs no turn after it: one that ends proves the remove was handled and left alone. */
+    server.send({ type: 'job.run', jobId: 'j3', provider: 'anthropic_api', secret: 'company-anthropic-key-000000', ...job });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j3'));
     expect(server.received.some(m => m.type === 'removed')).toBe(false);
     expect(existsSync(join(data, 'removed'))).toBe(false);
   });
@@ -346,7 +350,7 @@ describe('run on a machine without a plan', () => {
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.headers[0]).toBe(`Bearer ${KEY}`);
     expect(server.received[0]).toMatchObject({ type: 'hello', loggedIn: true, running: [], terminals: false });
-    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: 10000, prompt: 'hi', instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: NO_TURN_LIMIT, prompt: 'hi', instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'agent_failed', tail: expect.stringContaining('no plan') });
     expect(existsSync(join(data, 'npm.log'))).toBe(false);

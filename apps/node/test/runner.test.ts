@@ -2,14 +2,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ownFs } from '../src/agent-fs.js';
 import { jobDone, runJob, type ProgramWorkspace, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import type { Worktree } from '../src/tests.js';
 import { readSessions, rememberSession } from '../src/state.js';
+import { deferred } from '../../../test-support/deferred.mjs';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 const SECRET = 'oauth-token-0123456789abcdef';
 const me = { uid: process.getuid!(), gid: process.getgid!() };
+/* A job's time that never runs out: the longest a timer waits, less the 30 s at most the runner gives past it. */
+const NEVER_JOB_MS = 2_147_483_647 - 30_000;
+/* A clock that moves only when the test moves it, for the job's timers and the waits that end at a moment, which Node's own
+   AbortSignal.timeout would keep on the real clock. */
+function fakeClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+    const timer = new AbortController();
+    setTimeout(() => { timer.abort(new DOMException('The operation timed out.', 'TimeoutError')); }, ms);
+    return timer.signal;
+  });
+  onTestFinished(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+}
 
 function fakeAdapter(run: (input: RunInput) => Promise<RunResult>): ProviderAdapter & { inputs: RunInput[] } {
   const inputs: RunInput[] = [];
@@ -27,7 +42,7 @@ function fakeAdapter(run: (input: RunInput) => Promise<RunResult>): ProviderAdap
 }
 
 const job = (over: Partial<Extract<ServerMessage, { type: 'job.run' }>> = {}): Extract<ServerMessage, { type: 'job.run' }> => ({
-  type: 'job.run', jobId: 'job-1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null, ...over,
+  type: 'job.run', jobId: 'job-1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NEVER_JOB_MS, secret: null, instructions: null, toolToken: null, ...over,
 });
 
 const ok = (over: Partial<RunResult> = {}): RunResult => ({ ok: true, sessionId: 'sess-1', result: 'ready', output: '', error: null, limits: null, ...over });
@@ -62,22 +77,39 @@ describe('runJob', () => {
   it('gives up with a timeout when the agent does not finish in time', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(() => new Promise(() => {}));
-    const done = await runJob(adapter, job({ timeoutMs: 100 }), dir);
-    expect(done).toMatchObject({ ok: false, error: 'timeout' });
+    fakeClock();
+    let ended = false;
+    const running = runJob(adapter, job({ timeoutMs: 100 }), dir).finally(() => { ended = true; });
+    await eventually(() => adapter.inputs.length === 1);
+    /* Its own 100 ms and a tenth of them for the program to say how it ended. */
+    await vi.advanceTimersByTimeAsync(109);
+    expect(ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await running).toMatchObject({ ok: false, error: 'timeout' });
   });
 
   it('lets a turn in a live program run past its time, until the program ends it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
-    const adapter = fakeAdapter(() => new Promise(done => setTimeout(() => done(ok()), 300)));
-    const done = await runJob(adapter, job({ timeoutMs: 50 }), dir, { untimed: true });
-    expect(done).toMatchObject({ ok: true, result: 'ready' });
+    const ends = deferred(), adapter = fakeAdapter(async () => { await ends.promise; return ok(); });
+    fakeClock();
+    let ended = false;
+    const running = runJob(adapter, job({ timeoutMs: 50 }), dir, { untimed: true }).finally(() => { ended = true; });
+    await eventually(() => adapter.inputs.length === 1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(ended).toBe(false);
+    ends.resolve();
+    expect(await running).toMatchObject({ ok: true, result: 'ready' });
   });
 
   it('keeps the session of a turn that ran out of time as its program ends it, so the next turn goes on in it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     /* The program is stopped at the time and says so a moment later, with its session. */
     const adapter = fakeAdapter(input => new Promise(done => setTimeout(() => done({ ok: false, sessionId: 'sess-1', result: '', output: '', error: 'timeout', limits: null }), input.timeoutMs + 20)));
-    const done = await runJob(adapter, job({ timeoutMs: 1000 }), dir);
+    fakeClock();
+    const running = runJob(adapter, job({ timeoutMs: 1000 }), dir);
+    await eventually(() => adapter.inputs.length === 1);
+    await vi.advanceTimersByTimeAsync(1020);
+    const done = await running;
     expect(done).toMatchObject({ ok: false, error: 'timeout', sessionId: 'sess-1' });
     expect(readSessions(dir)).toEqual({ 'sess-1': join(dir, 'work', 'job-1') });
   });
@@ -206,17 +238,19 @@ describe('runJob', () => {
   it('hides a token the program held only in the middle of the run in its result and output', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     let token = 'old-token-0123456789';
+    /* The event goes out once the runner has read what the program holds then. */
+    const told = deferred();
     const adapter = {
       ...fakeAdapter(async input => {
         token = 'middle-token-0123456789';
         input.onEvent?.({ kind: 'text', text: 'working' });
-        await new Promise(r => setTimeout(r, 10));
+        await told.promise;
         token = 'new-token-0123456789';
         return { ...ok(), result: 'saw middle-token-0123456789', output: 'printed middle-token-0123456789' };
       }),
       secrets: async () => [token],
     };
-    const done = await runJob(adapter, job(), dir, { onEvent: () => {} });
+    const done = await runJob(adapter, job(), dir, { onEvent: () => { told.resolve(); } });
     expect(done.result).toBe('saw [hidden]');
     expect(done.tail).not.toContain('middle-token');
   });
@@ -241,8 +275,10 @@ describe('runJob', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const stop = new AbortController();
     const adapter = fakeAdapter(input => new Promise(done => input.signal?.addEventListener('abort', () => done(ok({ ok: false, error: 'agent_failed', output: 'killed' })))));
-    setTimeout(() => stop.abort(), 50);
-    const done = await runJob(adapter, job(), dir, { signal: stop.signal });
+    const running = runJob(adapter, job(), dir, { signal: stop.signal });
+    await eventually(() => adapter.inputs.length === 1);
+    stop.abort();
+    const done = await running;
     expect(done).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
   });
 
@@ -491,10 +527,17 @@ describe("the dependencies of an agent's worktree", () => {
     const events: AgentEvent[] = [];
     const adapter = owned(dir);
     let told: AbortSignal | undefined;
-    const done = await runJob(adapter, shopJob(), dir, {
+    fakeClock();
+    let ended = false;
+    const running = runJob(adapter, shopJob(), dir, {
       git: headAt(HEAD), prepareRepoBrowser: async () => {}, onEvent: event => events.push(event), dependenciesMs: 50,
       dependencies: (_tree, signal) => { told = signal; return new Promise<null>(() => {}); },
-    });
+    }).finally(() => { ended = true; });
+    await eventually(() => told !== undefined);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(ended).toBe(false); expect(adapter.inputs).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    const done = await running;
     expect(done.ok).toBe(true);
     expect(adapter.inputs).toHaveLength(1);
     expect(events).toEqual([{ kind: 'text', text: expect.stringMatching(/^The program starts without the shared dependencies.*did not come within 1 s\.$/) }]);
@@ -505,9 +548,11 @@ describe("the dependencies of an agent's worktree", () => {
   it('end a turn stopped while something holds them, before its program starts', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const stop = new AbortController();
-    const adapter = owned(dir);
-    setTimeout(() => stop.abort(), 20);
-    const done = await runJob(adapter, shopJob(), dir, { signal: stop.signal, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: () => new Promise<null>(() => {}) });
+    const adapter = owned(dir), asked = deferred();
+    const running = runJob(adapter, shopJob(), dir, { signal: stop.signal, git: headAt(HEAD), prepareRepoBrowser: async () => {}, dependencies: () => { asked.resolve(); return new Promise<null>(() => {}); } });
+    await asked.promise;
+    stop.abort();
+    const done = await running;
     expect(done).toMatchObject({ ok: false, error: 'cancelled' });
     expect(adapter.inputs).toEqual([]);
   });

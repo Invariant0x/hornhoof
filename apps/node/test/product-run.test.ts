@@ -4,7 +4,7 @@ import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 const sharedState = vi.hoisted(() => ({ builderFiles: new Set<string>(), jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000 }));
 import type { TestEnvironmentV1, TestService, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
@@ -45,7 +45,33 @@ vi.mock('../src/isolation.js', async original => {
 });
 import { describeTestEnvironment, readTestEnvironment } from '../src/test-environment.js';
 import { runTests } from '../src/tests.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 const roots: string[] = [];
+/* Times that never run out: the longest a timer waits, and a part's, whose output may still take a minute past it. */
+const NEVER_MS = 2_147_483_647, NEVER_PART_MS = NEVER_MS - 60_000;
+/* A clock that moves only when the test moves it, for the part's timers, its time and the waits that end at a moment, which
+   Node's own AbortSignal.timeout would keep on the real clock. */
+function fakeClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+    const timer = new AbortController();
+    setTimeout(() => { timer.abort(new DOMException('The operation timed out.', 'TimeoutError')); }, ms);
+    return timer.signal;
+  });
+  onTestFinished(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+}
+/* Runs a part into its time limit: the clock moves only once the part's command is up, to just short of the limit and then
+   to it. */
+async function ranOut<T>(run: () => Promise<T>, started: string, limitMs: number): Promise<T> {
+  fakeClock();
+  let ended = false;
+  const running = run().finally(() => { ended = true; });
+  await eventually(async () => await readFile(started).catch(() => null) !== null);
+  await vi.advanceTimersByTimeAsync(limitMs - 1);
+  expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  return running;
+}
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const command = (code: string) => ({ program: 'node', args: ['-e', code], cwd: '.' });
 async function fixture(configure?: (manifest: TestEnvironmentV1) => void, files: Record<string, string> = {}) {
@@ -63,8 +89,8 @@ async function fixture(configure?: (manifest: TestEnvironmentV1) => void, files:
   git('init', '-q'); git('add', '.'); git('commit', '-qm', 'Product fixture');
   const commitSha = git('rev-parse', 'HEAD'), repo = { url: pathToFileURL(source).href, token: '' };
   const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(repo.url).digest('hex') }, dir = join(root, 'node');
-  const description = await readTestEnvironment(repo, repositoryScope, commitSha, { cacheRoot: join(dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
-  const msg: Extract<ServerMessage, { type: 'tests.run' }> = { type: 'tests.run', partId: 'part-one', repo, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 10_000, environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test.js'] } } };
+  const description = await readTestEnvironment(repo, repositoryScope, commitSha, { cacheRoot: join(dir, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
+  const msg: Extract<ServerMessage, { type: 'tests.run' }> = { type: 'tests.run', partId: 'part-one', repo, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: NEVER_PART_MS, environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test.js'] } } };
   return { root, source, dir, msg };
 }
 it('executes cold then warm pinned product commands and returns validated cache/phase evidence', async () => {
@@ -106,9 +132,11 @@ it('integrates the real process service provider with cached stopped state and p
 
 function fixtureService(): TestService { return { id: 'fixture', runtime: 'node', profiles: ['fast'], driver: 'process', options: {
       start: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;if(!f.existsSync(p.join(s,'data/db')))f.writeFileSync(p.join(s,'data/db'),'fresh');f.writeFileSync(p.join(s,'running'),'yes');process.on('SIGINT',()=>{f.rmSync(p.join(s,'running'),{force:true});process.exit(0)});setInterval(()=>{},100)"),
-      readiness: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;let n=0;const t=setInterval(()=>{if(f.existsSync(p.join(s,'running'))){clearInterval(t);process.exit(0)}if(n++>1500)process.exit(1)},10)"),
-      /* Fifteen seconds to start and ten to stop are only room for a slow or loaded machine: a quick service is done at once. */
-      stop: { signal: 'SIGINT', graceMs: 10_000 }, statePaths: ['data'],
+      /* It looks for the running service until it is up, with no limit of its own: the part's time is the limit. */
+      readiness: command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;const t=setInterval(()=>{if(f.existsSync(p.join(s,'running'))){clearInterval(t);process.exit(0)}},10)"),
+      /* The longest stop a manifest may give, longer than the runner gives a whole test, so it never runs out in one: the
+         service stops at once. */
+      stop: { signal: 'SIGINT', graceMs: 30_000 }, statePaths: ['data'],
     } }; }
 
 it('opens a described service with fresh state when no preparation unit declares its template', async () => {
@@ -148,14 +176,14 @@ it('reports a failing literal product command and still removes its attempt', as
 it('retains cleanup through caller cancellation of a running product command', async () => {
   const f = await commandOnlyFixture("require('fs').writeFileSync('started','yes');setInterval(()=>{},100)"), stop = new AbortController();
   const result = runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], signal: stop.signal, prepareRepoBrowser: async () => {} });
-  const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'started'), end = Date.now() + 5000;
-  while (await readFile(started).catch(() => null) === null) { if (Date.now() >= end) throw new Error('The command never started.'); await new Promise(resolve => setTimeout(resolve, 10)); }
+  const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'started');
+  await eventually(async () => await readFile(started).catch(() => null) !== null);
   stop.abort(new Error('Caller cancelled'));
   expect(await result).toMatchObject({ ok: false, error: 'cancelled' }); await expect(readFile(started)).rejects.toThrow();
 });
 it('reports an execution timeout after reaching a product command and finishing cleanup', async () => {
-  const f = await commandOnlyFixture("console.log('command reached');setInterval(()=>{},100)"); f.msg.timeoutMs = 5000;
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
+  const f = await commandOnlyFixture("require('fs').writeFileSync('reached','yes');console.log('command reached');setInterval(()=>{},100)"); f.msg.timeoutMs = 5000;
+  const result = await ranOut(() => runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} }), join(f.dir, 'runs', f.msg.partId, 'repo', 'reached'), 5000);
   expect(result).toMatchObject({ ok: false, error: 'timeout' }); expect(result.log).toContain('command reached');
 });
 
@@ -235,11 +263,11 @@ describe('versioned node execution', () => {
   });
   it.each(['cancelled', 'timeout'])('records the unfinished batch suffix after %s and removes the attempt', async reason => {
     const f = await batchFixture(["require('fs').writeFileSync('batch-started','yes');setInterval(()=>{},100)", "console.log('suffix must not execute')"]), stop = new AbortController();
+    const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'batch-started');
     if (reason === 'timeout') f.msg.timeoutMs = 5000;
-    const running = runTests(f.msg, { ...f.options, signal: stop.signal });
+    const running = reason === 'timeout' ? ranOut(() => runTests(f.msg, { ...f.options, signal: stop.signal }), started, 5000) : runTests(f.msg, { ...f.options, signal: stop.signal });
     if (reason === 'cancelled') {
-      const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'batch-started'), end = Date.now() + 5000;
-      while (await readFile(started).catch(() => null) === null) { if (Date.now() >= end) throw new Error('The first batch command never started.'); await new Promise(resolve => setTimeout(resolve, 10)); }
+      await eventually(async () => await readFile(started).catch(() => null) !== null);
       stop.abort(new Error('Caller cancelled the batch'));
     }
     const result = await running;
@@ -276,7 +304,7 @@ console.log('narrow candidate',base,head);`,
   await writeFile(join(f.source, 'logic.ts'), 'export function total(n: number) { return n + 2; }\n');
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qam', 'Candidate'], { cwd: f.source, stdio: 'pipe' });
   const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.source, encoding: 'utf8' }).trim();
-  const metadata = await describeTestEnvironment(f.msg.repo!, f.msg.repositoryScope!, commitSha, { cacheRoot: join(f.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} }, undefined, baseCommit);
+  const metadata = await describeTestEnvironment(f.msg.repo!, f.msg.repositoryScope!, commitSha, { cacheRoot: join(f.dir, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} }, undefined, baseCommit);
   f.msg.commitSha = commitSha;
   f.msg.environment = { snapshot: { description: metadata.description, profile: 'fast', candidate: { baseCommit, fingerprints: metadata.fingerprints!, baseFingerprints: metadata.baseFingerprints!.fingerprints, mutation: metadata.mutation! } },
     selection: { kind: 'suite', suiteId: 'mutation', files: ['logic.ts'] } };

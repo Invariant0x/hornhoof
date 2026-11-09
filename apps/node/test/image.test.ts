@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -149,7 +150,7 @@ interface SmokeEvent { program: string; args: string[]; uid: number; config?: st
 const fixtures: string[] = [];
 afterEach(() => { for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function smokeFixture(options: { versions?: Record<string, string>; missing?: string; fail?: string; query?: string; rootAccount?: 'postgres' | 'node' | 'root-only' } = {}) {
+async function smokeFixture(options: { versions?: Record<string, string>; missing?: string; fail?: string; query?: string; rootAccount?: 'postgres' | 'node' | 'root-only' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-smoke-fixture-'));
   fixtures.push(dir);
   chmodSync(dir, 0o755);
@@ -207,45 +208,48 @@ syncBuiltinESMExports();
 `);
     args.unshift('--import', preload);
   }
-  const result = spawnSync(process.execPath, args, {
-    encoding: 'utf8', timeout: 15000, env: { ...process.env, PATH: dir, PGHOST: 'outside.invalid', PGPORT: '1' },
-  });
+  /* The smoke runs to its end, however long that takes: the runner's limit for the test is the only limit. */
+  const child = spawn(process.execPath, args, { env: { ...process.env, PATH: dir, PGHOST: 'outside.invalid', PGPORT: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const result = { status: null as number | null, stdout: '', stderr: '' };
+  child.stdout.setEncoding('utf8').on('data', (chunk: string) => { result.stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk: string) => { result.stderr += chunk; });
+  [result.status] = await once(child, 'close') as [number | null];
   const events = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as SmokeEvent);
   return { result, events };
 }
 
 describe('the PostgreSQL runtime smoke', () => {
-  it.each(['postgres', 'node'] as const)('uses the trusted %s account for a root build parent', rootAccount => {
-    const { result, events } = smokeFixture({ rootAccount });
+  it.each(['postgres', 'node'] as const)('uses the trusted %s account for a root build parent', async rootAccount => {
+    const { result, events } = await smokeFixture({ rootAccount });
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(events.every(event => event.uid > 0)).toBe(true);
     expect(events.find(event => event.program === 'initdb' && event.args[0] !== '--version')).toBeDefined();
   });
 
-  it('refuses to initialize as root when no trusted unprivileged account exists', () => {
-    const { result, events } = smokeFixture({ rootAccount: 'root-only' });
+  it('refuses to initialize as root when no trusted unprivileged account exists', async () => {
+    const { result, events } = await smokeFixture({ rootAccount: 'root-only' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('requires a trusted unprivileged');
     expect(events).toEqual([]);
   });
 
-  it.each(['postgres', 'initdb', 'pg_ctl', 'psql'])('rejects %s from another major before initializing a database', program => {
-    const { result, events } = smokeFixture({ versions: { [program]: '18.1' } });
+  it.each(['postgres', 'initdb', 'pg_ctl', 'psql'])('rejects %s from another major before initializing a database', async program => {
+    const { result, events } = await smokeFixture({ versions: { [program]: '18.1' } });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`PostgreSQL 17 required: ${program}`);
     expect(events.every(event => event.args[0] === '--version')).toBe(true);
   });
 
-  it('rejects a missing PostgreSQL executable before initializing a database', () => {
-    const { result, events } = smokeFixture({ missing: 'initdb' });
+  it('rejects a missing PostgreSQL executable before initializing a database', async () => {
+    const { result, events } = await smokeFixture({ missing: 'initdb' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('PostgreSQL 17 required: initdb');
     expect(events.every(event => event.args[0] === '--version')).toBe(true);
   });
 
-  it('initializes as an unprivileged owner, queries its private socket without TCP and removes the stopped cluster', () => {
-    const { result, events } = smokeFixture();
+  it('initializes as an unprivileged owner, queries its private socket without TCP and removes the stopped cluster', async () => {
+    const { result, events } = await smokeFixture();
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('PostgreSQL 17 runtime smoke passed');
@@ -267,8 +271,8 @@ describe('the PostgreSQL runtime smoke', () => {
     expect(existsSync(start.socket!)).toBe(false);
   });
 
-  it.each([{ fail: 'psql' }, { query: '16|2|\n' }, { fail: 'pg_ctl' }])('stops and removes the cluster when startup or the real query fails: %j', options => {
-    const { result, events } = smokeFixture(options);
+  it.each([{ fail: 'psql' }, { query: '16|2|\n' }, { fail: 'pg_ctl' }])('stops and removes the cluster when startup or the real query fails: %j', async options => {
+    const { result, events } = await smokeFixture(options);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/controlled|Unexpected PostgreSQL smoke query/);
     const start = events.find(event => event.program === 'pg_ctl' && event.args.includes('start'))!;

@@ -49,7 +49,7 @@ describe('redaction before the program output line boundary', () => {
     const adapter: ProviderAdapter = { ...base, run: input => base.run({ ...input, env: { ...input.env, FAKE_ERROR_SECRET: secret } }) };
     const msg: Extract<ServerMessage, { type: 'job.run' }> = {
       type: 'job.run', jobId: 'boundary', subscriptionId: 'test', provider, prompt: 'boundary',
-      sessionId: null, model: null, timeoutMs: 10000, secret, instructions: null, toolToken: null,
+      sessionId: null, model: null, timeoutMs: 2_147_483_647 - 30_000, secret, instructions: null, toolToken: null,
     };
     const accepted = parseServerMessage(JSON.stringify(msg));
     expect(accepted?.type === 'job.run' && accepted.secret === secret).toBe(true);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SetupWait } from '../src/setup-wait.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 /* A program that answers whether it waits for its first setup, one answer per question; it fails when asked more. */
 const program = (...answers: Array<boolean | Error>) => ({
@@ -35,14 +36,14 @@ describe('the first setup a plan waits for, as the node tells Hornhoof of it', (
     let signIns = 0;
     const signedIn = async () => (signIns++, true);
     const first = wait.recheck(false, signedIn);
-    await new Promise(r => setTimeout(r, 0));
+    await eventually(() => agy.asked === 1);
     expect(await wait.recheck(false, signedIn)).toEqual({ signedIn: false, changed: false });
     expect([signIns, agy.asked]).toEqual([1, 1]);
     answer(false);
     expect(await first).toEqual({ signedIn: true, changed: true });
     /* Once that look is over, the next tick looks again. */
     const next = wait.recheck(false, signedIn);
-    await new Promise(r => setTimeout(r, 0));
+    await eventually(() => agy.asked === 2);
     answer(false);
     expect(await next).toEqual({ signedIn: true, changed: true });
     expect([signIns, agy.asked]).toEqual([2, 2]);
