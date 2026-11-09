@@ -14,7 +14,7 @@ const KINDS = Object.keys(PROGRAMS) as (keyof typeof PROGRAMS)[];
 type Kind = (typeof KINDS)[number];
 
 async function atWork(kind: Kind) {
-  await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000 });
+  await setUp({ cols: 120, rows: 40, readyMs: 5000, lookMs: 100, toolsMs: 5000, enterWaitMs: 300, typingQuietMs: 50, keptWaitMs: 1000 });
   const key = randomUUID();
   const run = (prompt: string, effort: string, sessionId: string | null = null) => {
     const jobId = randomUUID();

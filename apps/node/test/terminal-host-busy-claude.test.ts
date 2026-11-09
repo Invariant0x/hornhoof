@@ -9,7 +9,7 @@ describe.skipIf(!hasTmux)('live words during a long Claude tool', () => {
 
   it('queues three messages 14 seconds apart through background results and compaction in the same session', async () => {
     const log = vi.fn();
-    await setUp({ log, plugins: [] });
+    await setUp({ log });
     const launch = vi.spyOn(tmux, 'launch');
     const keys = vi.spyOn(tmux, 'keys');
     const run = job('busy-claude', 'LONG_TOOL', { jobId: 'busy-claude-job', timeoutMs: 55_000, env: { FAKE_LONG_TOOL_MS: '40000' } });

@@ -71,7 +71,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
       else if (kind === 'kimi' && mode === 'queued') await hook('queued', { prompt: text });
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [], ...(options.operator ? { operator: options.operator } : {}) });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, ...(options.operator ? { operator: options.operator } : {}) });
   await host.start();
   const results: Promise<unknown>[] = [];
   const run = (prompt = 'HANG', jobId = 'job-receipt') => {

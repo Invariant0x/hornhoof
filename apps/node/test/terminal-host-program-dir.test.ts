@@ -37,7 +37,7 @@ async function turnOf(kind: keyof typeof JOBS, dir: string, key: string, workspa
     secret: null, instructions: 'Be brief.', toolToken: 'known-turn-token-0123456789', workspace: { key, repo: null }, ...(skills ? { skills } : {}),
   };
   const events: AgentEvent[] = [];
-  const done = await runJob(adapter, message, dir, { toolsUrl: 'http://x/mcp', untimed: true, onEvent: event => events.push(event), superpowers: null, ...(workspace ? { workspace } : {}) });
+  const done = await runJob(adapter, message, dir, { toolsUrl: 'http://x/mcp', untimed: true, onEvent: event => events.push(event), ...(workspace ? { workspace } : {}) });
   return { done, events, jobId };
 }
 const nodeDir = () => mkdtempSync(join(tmpdir(), 'hh-node-'));

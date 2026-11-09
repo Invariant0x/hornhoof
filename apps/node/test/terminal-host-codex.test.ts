@@ -43,7 +43,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
   }, 30_000);
 
   it.each([['plainly', false], ['the way the server hands them', true]])('gives Codex the next words only once its log ended the last turn, not at its Stop hook, %s', async (_way, operator) => {
-    await setUp({ readyMs: 3000, enterWaitMs: 500, ...(operator ? { pollMs: 25, plugins: [], operator: { dir: join(home, `operator-${randomUUID()}`), connected: () => true, send: () => true } } : {}) });
+    await setUp({ readyMs: 3000, enterWaitMs: 500, ...(operator ? { pollMs: 25, operator: { dir: join(home, `operator-${randomUUID()}`), connected: () => true, send: () => true } } : {}) });
     const key = randomUUID();
     const turn = (words: string, sessionId: string | null = null) => host.run({
       ...codexJob(key, words, { agentKey: key, jobId: randomUUID(), sessionId, timeoutMs: 8000 }),
