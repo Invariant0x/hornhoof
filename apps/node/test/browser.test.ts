@@ -23,6 +23,9 @@ import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
 
+/* Playwright's browsers stand in for themselves only in the tests of preparing them; elsewhere they are ready at once. */
+const browsersReady = async () => ({ ok: true as const, status: 'not_needed' as const });
+
 const tempDirs: string[] = [];
 const realRunProgram = programs.runProgram;
 
@@ -102,7 +105,7 @@ describe('startup tool readiness', () => {
 
   it('checks the complete runtime tool set with the required version arguments', async () => {
     const bin = startupToolsOnPath();
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, browsersReady)).toBeNull();
     for (const [name, args] of [
       ['unzip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
       ['strings', '--version'], ['patch', '--version'], ['ss', '--version'], ['objdump', '--version'],
@@ -161,7 +164,7 @@ describe('startup tool readiness', () => {
 
   it('continues readiness after unzip -v succeeds', async () => {
     const args = unzipOnPath('echo "UnZip 6.00"\nexit 0');
-    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(await startupBrowserCheck(makeTemp(), null, undefined, browsersReady)).toBeNull();
     expect(existsSync(args)).toBe(true);
     expect(readFileSync(args, 'utf8').trim()).toBe('-v');
   });
@@ -839,14 +842,12 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     writeFileSync(join(badRepo, 'node_modules', 'playwright', 'package.json'), JSON.stringify({ version: '9.9.9' }));
     await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright browsers could not start:');
 
-    if (existsSync(GLOBAL_PLAYWRIGHT_DIR) && existsSync(SEED_BROWSERS_PATH)) {
-      expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null)).toBeNull();
-    }
+    expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null, undefined, browsersReady)).toBeNull();
     const sysDir2 = makeTemp('hh-sysfiles-2-');
     const files2 = { passwd: join(sysDir2, 'passwd'), group: join(sysDir2, 'group') };
-    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2, browsersReady);
     expect(existsSync(files2.passwd)).toBe(false);
-    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2, browsersReady);
     expect(readFileSync(files2.passwd, 'utf8')).toContain(`hh${FIRST_UID}:x:${FIRST_UID}:${FIRST_UID}`);
   });
 });

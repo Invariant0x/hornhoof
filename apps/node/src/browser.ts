@@ -534,20 +534,24 @@ async function startupToolError(bin: string, args: string[], verifyUser: JobUser
   return null;
 }
 
-async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+type PrepareBrowsers = typeof prepareAndVerifyBrowser;
+
+async function startupReadinessError(dir: string, verifyUser: JobUser | null, prepare: PrepareBrowsers): Promise<string | null> {
   for (const { bin, args } of STARTUP_TOOLS) {
     const error = await startupToolError(bin, args, verifyUser);
     if (error) return error;
   }
-  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
+  const res = await prepare({ dir, verifyUser });
   return res.ok ? null : res.error;
 }
 
+/* prepare readies and launches the browsers; a test passes its own, as the browsers are Playwright's, not the node's. */
 export async function startupBrowserCheck(
   dir: string,
   verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
+  prepare: PrepareBrowsers = prepareAndVerifyBrowser,
 ): Promise<string | null> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  return startupReadinessError(dir, verifyUser);
+  return startupReadinessError(dir, verifyUser, prepare);
 }
