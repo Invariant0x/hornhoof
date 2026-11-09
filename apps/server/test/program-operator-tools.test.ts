@@ -144,9 +144,18 @@ it('does not overwrite an uncertain terminal result with a later original comple
     return true;
   });
   const input = { ...c.input, snapshot: c.snapshot, key: 'Enter', reason: 'Continue.', action: randomUUID() };
+  /* The server waits three seconds for the node's answer, on a clock the test moves: the repeat comes while the original
+     waits, the wait runs out, and the original's answer comes only after that. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
   const pending = sendProgramKey(c.ctx, c.caller, input);
   await until(() => answer !== null);
-  const replay = await sendProgramKey(c.ctx, c.caller, input);
+  let replayed = false;
+  const replaying = sendProgramKey(c.ctx, c.caller, input).finally(() => { replayed = true; });
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(replayed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  const replay = await replaying;
   expect(replay.result).toBe('unknown');
   answer!(); await pending;
   expect((await c.db.select().from(programOperatorActions).where(eq(programOperatorActions.id, input.action)))[0]!.result).toBe('unknown');

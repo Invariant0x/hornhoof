@@ -11,6 +11,7 @@ import { dispatchDue, type Senders } from '../../src/modules/outbound/dispatcher
 import { stopByPerson } from '../../src/modules/outbound/policies.js';
 import { aChannelOf, aContactOf, anAccountOf, aPermissionOf, aPolicyOf, documentOf, partsOf, QUIET, type Base } from '../outbound-world.js';
 import { backendPid, privatePostgres, runFixture, type Actor, type PostgresFixture } from './helpers.js';
+import { eventually } from '../../../../test-support/eventually.mjs';
 
 /* Two apps on their own connections to one PostgreSQL, doing what PGlite's one connection cannot show: nothing here is
    mocked but the transport, which no test of this file reaches. Everything is synthetic. */
@@ -100,7 +101,7 @@ async function holding<T>(pg: PostgresFixture, hold: [string, unknown[]], work: 
     const lockerPid = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
     const pending = work();
     void pending.catch(() => {});
-    await expect.poll(async () => (await pg.admin.query<{ waits: boolean }>('SELECT count(*) > 0 AS waits FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [lockerPid])).rows[0]!.waits, { timeout: 5000, interval: 10 }).toBe(true);
+    await eventually(async () => (await pg.admin.query<{ waits: boolean }>('SELECT count(*) > 0 AS waits FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [lockerPid])).rows[0]!.waits);
     if (change) await locker.query(...change);
     await locker.query('COMMIT');
     return await pending;
@@ -255,7 +256,8 @@ it('sends once when two servers run their round at the same moment', { timeout: 
       reconcile: async () => ({ kind: 'pending' }),
     },
     webhook: { send: async () => ({ kind: 'unknown', safeCode: 'timeout' }), reconcile: async () => ({ kind: 'pending' }) },
-    deadlineMs: 5000,
+    /* The send answers at once: its wait never runs out during the test. */
+    deadlineMs: 2_147_483_647,
   };
   await Promise.all([dispatchDue(g.first.ctx, new Date(), senders), dispatchDue(g.second.ctx, new Date(), senders)]);
   expect(sent).toHaveLength(1);

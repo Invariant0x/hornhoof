@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { SealedPayload } from '../src/modules/outbound/delivery.js';
 import { isPublicAddress, webhookAdapter, type WebhookAccount, type WebhookOptions } from '../src/modules/outbound/webhook.js';
+import { until } from './helpers-basic.js';
 import { CERT, closedPort, hookReceiver, silentPort, type HookRequest } from './outbound-receivers.js';
 
 const KEY = 'synthetic-signing-secret-9d21';
 const PAYLOAD: SealedPayload = { recipient: 'buyer@example.test', subject: 'Your order', text: 'Цена 100 ₽ שלום\n<b>inert</b>\n' };
-const LOCAL = { mayReach: (address: string) => address === '127.0.0.1' || address === '::1' };
+/* No wait for a receiver runs out unless a test moves the clock: the longest wait a timer takes. */
+const LOCAL = { mayReach: (address: string) => address === '127.0.0.1' || address === '::1', timeoutMs: 2_147_483_647 };
 
 const closing: (() => Promise<unknown>)[] = [];
 const receiver = async (...args: Parameters<typeof hookReceiver>) => {
@@ -22,11 +24,17 @@ afterEach(async () => {
 const account = (endpoint: string, more: Partial<WebhookAccount> = {}): WebhookAccount => ({ endpoint, signingKey: KEY, ca: CERT, ...more });
 const send = (acc: WebhookAccount, options: Partial<WebhookOptions> = LOCAL, sealedPayload = PAYLOAD, attemptId: string = randomUUID()) => webhookAdapter(options).send({ attemptId, sealedPayload, configuredAccount: acc });
 const takes = (request: HookRequest) => ({ status: 200, body: JSON.stringify({ attemptId: JSON.parse(request.body).attemptId, receipt: 'receipt-41' }) });
+/* The adapter's wait for a receiver goes by a clock the test moves. */
+const stillClock = () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+};
 
 describe('the webhook adapter', () => {
   it('posts the exact words once to its one endpoint, signed, and reports the receipt', async () => {
     const hook = await receiver(takes);
     const attemptId = randomUUID();
+    const before = Math.floor(Date.now() / 1000);
 
     const outcome = await send(account(hook.url), LOCAL, PAYLOAD, attemptId);
 
@@ -38,7 +46,9 @@ describe('the webhook adapter', () => {
     expect(JSON.parse(request!.body)).toEqual({ attemptId, recipient: PAYLOAD.recipient, subject: PAYLOAD.subject, text: PAYLOAD.text });
     expect(request!.headers['idempotency-key']).toBe(attemptId);
     const stamp = request!.headers['x-hornhoof-timestamp'] as string;
-    expect(Math.abs(Date.now() / 1000 - Number(stamp))).toBeLessThan(60);
+    /* Stamped when it was sent: not before the test sent it, and not after the answer came. */
+    expect(Number(stamp)).toBeGreaterThanOrEqual(before);
+    expect(Number(stamp)).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
     expect(request!.headers['x-hornhoof-signature']).toBe(`v1=${createHmac('sha256', KEY).update(`${stamp}.${request!.body}`).digest('hex')}`);
   });
 
@@ -107,7 +117,12 @@ describe('the webhook adapter', () => {
 
     it('says unknown when the receiver stays silent', async () => {
       const hook = await receiver(() => 'silence');
-      expect(await send(account(hook.url), { ...LOCAL, timeoutMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
+      stillClock();
+      const outcome = send(account(hook.url), { ...LOCAL, timeoutMs: 1500 });
+      /* The receiver has the words and says nothing. */
+      await until(() => hook.seen.length === 1);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(await outcome).toEqual({ kind: 'unknown', safeCode: 'timeout' });
       expect(hook.seen).toHaveLength(1);
     });
   });
@@ -120,7 +135,11 @@ describe('the webhook adapter', () => {
     it('when TLS never comes up in time', async () => {
       const silent = await silentPort();
       closing.push(silent.close);
-      expect(await send(account(`https://localhost:${silent.port}/hook`), { ...LOCAL, timeoutMs: 400 })).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_timeout' });
+      stillClock();
+      /* The wait for the receiver begins as the request does; the port never starts TLS, so it is never up in time. */
+      const outcome = send(account(`https://localhost:${silent.port}/hook`), { ...LOCAL, timeoutMs: 400 });
+      await vi.advanceTimersByTimeAsync(400);
+      expect(await outcome).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_timeout' });
     });
 
     it('when its name resolves to nothing', async () => {
@@ -193,7 +212,7 @@ describe('the webhook adapter', () => {
     const asking = async (answer: Parameters<typeof hookReceiver>[0], more: Partial<WebhookAccount> = { readback: true }) => {
       const hook = await receiver(answer);
       const attemptId = randomUUID();
-      const outcome = await webhookAdapter({ ...LOCAL, timeoutMs: 1500 }).reconcile({ attemptId, configuredAccount: account(hook.url, more) });
+      const outcome = await webhookAdapter(LOCAL).reconcile({ attemptId, configuredAccount: account(hook.url, more) });
       return { hook, attemptId, outcome };
     };
 
@@ -213,9 +232,18 @@ describe('the webhook adapter', () => {
       ['the receiver is down', () => ({ status: 503 })],
       ['the answer names another attempt', () => ({ status: 200, body: JSON.stringify({ attemptId: randomUUID(), receipt: 'r' }) })],
       ['the connection dies', () => 'destroy'],
-      ['the receiver stays silent', () => 'silence'],
     ])('keeps waiting when %s', async (_name, answer) => {
       expect((await asking(answer)).outcome).toEqual({ kind: 'pending' });
+    });
+
+    it('keeps waiting when the receiver stays silent', async () => {
+      const hook = await receiver(() => 'silence');
+      stillClock();
+      const outcome = webhookAdapter({ ...LOCAL, timeoutMs: 1500 }).reconcile({ attemptId: randomUUID(), configuredAccount: account(hook.url, { readback: true }) });
+      /* The receiver has the question and says nothing. */
+      await until(() => hook.seen.length === 1);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(await outcome).toEqual({ kind: 'pending' });
     });
 
     it('keeps waiting when its endpoint cannot be used', async () => {

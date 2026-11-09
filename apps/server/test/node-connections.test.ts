@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
@@ -8,11 +9,13 @@ import type { Db } from '../src/db/client.js';
 import { companies, departments, machines, nodeConnections, nodes, people } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { dropOldConnections, nodeConnected, nodeDisconnected } from '../src/modules/nodes/connections.js';
-import { BUILTIN, NodeHub } from '../src/modules/nodes/hub.js';
-import { appOn, as, connectNode, createTestDb, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { BUILTIN, NodeHub, type NodeIdentity } from '../src/modules/nodes/hub.js';
+import { appOn, as, connectNode, createTestDb, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'builtin-node-key-0123456789abcdef';
 const DAY = 24 * 60 * 60 * 1000;
+/* A hub's round of pings that never comes during a test: the longest wait a timer takes. */
+const QUIET = 2_147_483_647;
 
 const SAID = {
   disconnectedAt: '2026-11-04T10:00:00.000Z',
@@ -53,15 +56,25 @@ const endedAre = (db: Db, n: number) => until(async () => (await stored(db)).fil
 
 const history = (app: FastifyInstance, token: string, machineId: string) => app.inject({ url: `/api/machines/${machineId}/connections`, ...as(token) });
 
+/* The node's mark comes back after every message it sent before was handled, one after the other as its socket keeps them. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
+
 describe('the history of a node connection', () => {
   it('writes when a node connects, on its machine, and open while it stays', async () => {
     const { db, url, keys, ids, machineId } = await liveCompany();
     const [acme] = await db.select().from(companies);
+    const before = Date.now();
     await connectNode(url, keys[0]!);
     await storedAre(db, 1);
     const [row] = await stored(db);
     expect(row).toMatchObject({ companyId: acme!.id, machineId, nodeId: ids[0], disconnectedAt: null, cause: null, closeCode: null, closeReason: null, error: null, report: null });
-    expect(Date.now() - row!.connectedAt.getTime()).toBeLessThan(60_000);
+    /* Between asking to connect and finding the row: when the node connected, whatever the time it took. */
+    expect(row!.connectedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(row!.connectedAt.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it('writes a node closing with the code and reason it gave, and how long it was away until it came back', async () => {
@@ -76,14 +89,16 @@ describe('the history of a node connection', () => {
 
     const away = (await history(app, ceo, machineId)).json().events[0];
     expect(away).toMatchObject({ back: null, offlineMs: null, cause: 'node_closed' });
-    await new Promise(r => setTimeout(r, 30));
+    /* The node comes back forty seconds later on the server's clock. */
+    vi.useFakeTimers({ toFake: ['Date'], now: row!.disconnectedAt!.getTime() + 40_000 });
+    onTestFinished(() => { vi.useRealTimers(); });
     await connectNode(url, keys[0]!);
     await storedAre(db, 2);
     const [, next] = await stored(db);
     const back = (await history(app, ceo, machineId)).json().events[0];
     expect(back.back).toBe(next!.connectedAt.toISOString());
     expect(back.offlineMs).toBe(next!.connectedAt.getTime() - row!.disconnectedAt!.getTime());
-    expect(back.offlineMs).toBeGreaterThanOrEqual(20);
+    expect(back.offlineMs).toBe(40_000);
   });
 
   it('writes a socket that was cut without a word as the network', async () => {
@@ -96,8 +111,13 @@ describe('the history of a node connection', () => {
   });
 
   it('writes a node that stopped answering the pings as such', async () => {
+    /* The pings go by a clock the test moves; nothing else of the server runs on intervals this short. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const { db, url, keys } = await liveCompany({ NODE_PING_MS: '20' });
     await connectNode(url, keys[0]!, { autoPong: false });
+    /* Three pings go unanswered, and the round after them drops the node. */
+    await vi.advanceTimersByTimeAsync(4 * 20);
     await endedAre(db, 1);
     expect((await stored(db))[0]).toMatchObject({ cause: 'missed_pongs', closeCode: 1006 });
   });
@@ -206,20 +226,26 @@ describe('the history of a node connection', () => {
     const lines: string[] = [];
     const { app, db, ids } = await liveCompany({}, { level: 'error', stream: { write: (line: string) => void lines.push(line) } });
     await db.delete(nodes).where(eq(nodes.id, ids[0]!));
+    /* The hub hands a close to the app last, after the start and the end of the socket: once the app is done with it, the
+       socket has nothing left to write or to fail on. */
+    const closing = vi.spyOn((app.ctx.hub as unknown as { opts: { onClose(id: NodeIdentity): Promise<void> } }).opts, 'onClose');
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {}, terminate() {} });
     app.ctx.hub.attach({ kind: 'node', nodeId: ids[0]! }, socket as unknown as WebSocket);
     socket.emit('close', 1000, Buffer.from('Done.'));
-    await new Promise(r => setTimeout(r, 30));
+    await until(() => closing.mock.results.length === 1);
+    await closing.mock.results[0]!.value;
     expect(await stored(db)).toEqual([]);
     expect(lines).toEqual([]);
   });
 
   it('keeps no line of a built-in node, which has no machine of its own', async () => {
-    const { db, url } = await liveCompany();
+    const lines: string[] = [];
+    const { db, url } = await liveCompany({}, { level: 'info', stream: { write: (line: string) => void lines.push(line) } });
     const node = await connectNode(url, NODE_KEY);
     node.ws.close(1000);
     await node.closed;
-    await new Promise(r => setTimeout(r, 30));
+    /* The end of a connection goes to the log where a node's would be written: the history has had its chance. */
+    await until(() => lines.some(l => l.includes('A node lost its connection.')));
     expect(await stored(db)).toEqual([]);
   });
 
@@ -239,7 +265,7 @@ describe('the history of a node connection', () => {
   it('cuts a close reason and an error to their limits and keeps control characters out', async () => {
     const { db, ids } = await liveCompany();
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: QUIET,
       onClose: async () => {},
       onMessage: async () => {},
       onDisconnected: (id, end) => nodeDisconnected({ db, log: { info: vi.fn() } } as never, id, end),
@@ -259,7 +285,7 @@ describe('the history of a node connection', () => {
   it('loses a sign-in the limit would cut in two, one with an at sign in it and one with a control character', async () => {
     const { db, ids } = await liveCompany();
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: QUIET,
       onClose: async () => {},
       onMessage: async () => {},
       onDisconnected: (id, end) => nodeDisconnected({ db, log: { info: vi.fn() } } as never, id, end),
@@ -341,7 +367,7 @@ describe('what a node says of a drop when it is back', () => {
     const node = await connectNode(url, NODE_KEY);
     node.send(REPORT);
     node.send({ type: 'hello', version: '0.5.1', loggedIn: true, running: [] });
-    await new Promise(r => setTimeout(r, 30));
+    await marked(node);
     expect(await stored(db)).toEqual([]);
   });
 
@@ -526,7 +552,7 @@ describe('the node hub and the history of connections', () => {
     let release!: () => void;
     const gate = new Promise<void>(done => (release = done));
     const hub = new NodeHub({
-      pingMs: 60_000,
+      pingMs: QUIET,
       onConnected: async () => {
         await gate;
         order.push('connected');
@@ -548,7 +574,7 @@ describe('the node hub and the history of connections', () => {
   it('says a socket that closes after an error ended with the error, and one error is enough', async () => {
     const ends: unknown[] = [];
     const errors: unknown[] = [];
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end), onError: err => errors.push(err) });
+    const hub = new NodeHub({ pingMs: QUIET, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end), onError: err => errors.push(err) });
     onTestFinished(() => hub.stop());
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
     hub.attach(BUILTIN, socket as unknown as WebSocket);
@@ -563,7 +589,7 @@ describe('the node hub and the history of connections', () => {
 
   it('takes a close with no words as cut by the network', async () => {
     const ends: unknown[] = [];
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
+    const hub = new NodeHub({ pingMs: QUIET, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
     onTestFinished(() => hub.stop());
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
     hub.attach(BUILTIN, socket as unknown as WebSocket);
@@ -574,7 +600,7 @@ describe('the node hub and the history of connections', () => {
 
   it('says every socket ends with the server once the server is stopping, whatever closes it first', async () => {
     const ends: unknown[] = [];
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
+    const hub = new NodeHub({ pingMs: QUIET, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
     onTestFinished(() => hub.stop());
     const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
     hub.attach(BUILTIN, socket as unknown as WebSocket);
@@ -586,7 +612,8 @@ describe('the node hub and the history of connections', () => {
 
   it('ends a replaced socket only once, though it closes later', async () => {
     const ends: { link: string; cause: string }[] = [];
-    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
+    let handled = 0;
+    const hub = new NodeHub({ pingMs: QUIET, onClose: async () => void handled++, onMessage: async () => {}, onDisconnected: async (_id, end) => void ends.push(end) });
     onTestFinished(() => hub.stop());
     const closes: unknown[][] = [];
     const old = Object.assign(new EventEmitter(), { readyState: 1, close: (...args: unknown[]) => void closes.push(args), ping() {} });
@@ -595,7 +622,8 @@ describe('the node hub and the history of connections', () => {
     await until(() => ends.length === 1);
     expect(closes).toEqual([[4000, 'Replaced by a newer connection.']]);
     old.emit('close', 1006, Buffer.alloc(0));
-    await new Promise(r => setTimeout(r, 20));
+    /* The close is handed on last, after any end it would write. */
+    await until(() => handled === 1);
     expect(ends.map(e => e.cause)).toEqual(['replaced']);
   });
 });

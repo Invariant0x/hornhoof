@@ -1,13 +1,13 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { outboundAccounts, outboundAttempts, outboundChannels, outboundDailyUsage } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { reserveDispatch } from '../src/modules/outbound/core.js';
 import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
-import { as } from './helpers.js';
-import { EVENT_KEY, FROM, SIGNING_KEY, closeKept, frozenOf, hookWay, keep, liveSenders, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
+import { as, until } from './helpers.js';
+import { EVENT_KEY, FROM, NEVER, SIGNING_KEY, closeKept, frozenOf, hookWay, keep, liveSenders, liveWebhook, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
 import { closedPort, hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
 import { QUIET, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 
@@ -18,6 +18,11 @@ const attemptsOf = (w: World, messageId: string) => w.c.db.select().from(outboun
 const round = (w: World, senders = liveSenders()) => outboundRound(w.ctx, new Date(), senders);
 const LATER = () => new Date(Date.now() + 6 * 60_000);
 const takes = (request: HookRequest) => ({ status: 200, body: JSON.stringify({ attemptId: JSON.parse(request.body).attemptId, receipt: 'receipt-41' }) });
+/* The senders' waits go by a clock the test moves. */
+const stillClock = () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+};
 
 describe('a message over real authenticated SMTP', () => {
   it('leaves by the server\'s own minute, once, in exactly the words frozen when it was admitted', async () => {
@@ -67,7 +72,13 @@ describe('a message over real authenticated SMTP', () => {
     const quiet = keep(await scriptedSmtp('silent_after_message'));
     const { input } = await smtpWay(w, quiet.port);
     const { messageId } = await submitByTool(w, input());
-    await round(w, liveSenders({ smtp: smtpAdapter({ socketMs: 200, totalMs: 500 }) }));
+    stillClock();
+    const sending = round(w, liveSenders({ smtp: smtpAdapter({ connectMs: NEVER, greetingMs: NEVER, socketMs: NEVER, totalMs: 500 }) }));
+    /* The server has the whole message and answers nothing. */
+    await until(() => quiet.seen.messages === 1);
+    await vi.advanceTimersByTimeAsync(500);
+    await sending;
+    vi.useRealTimers();
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'unknown' }]);
 
     const other = await world();
@@ -227,7 +238,14 @@ describe('a message over the signed HTTPS channel', () => {
     const silent = keep(await silentPort());
     const { input: toSilence } = await hookWay(other, `https://localhost:${silent.port}/hook`);
     const lost = await submitByTool(other, toSilence());
-    await round(other);
+    stillClock();
+    let asked = false;
+    const webhook = liveWebhook(2000);
+    const sending = round(other, liveSenders({ webhook: { ...webhook, send: attempt => { asked = true; return webhook.send(attempt); } } }));
+    /* The wait for the endpoint begins as its request does; the port never starts TLS, so it is never up in time. */
+    await until(() => asked);
+    await vi.advanceTimersByTimeAsync(2000);
+    await sending;
     expect(await attemptsOf(other, lost.messageId)).toMatchObject([{ status: 'definitely_not_accepted', safeCode: 'connect_timeout' }]);
   });
 });

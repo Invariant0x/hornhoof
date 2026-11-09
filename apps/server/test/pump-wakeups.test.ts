@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, jobs, subscriptions } from '../src/db/schema.js';
 import { agentState, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
@@ -11,13 +11,16 @@ import { statements } from './helpers.js';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const LIMIT_GRACE_MS = 5_000;
-/* Long enough for a line that spins to run its queries many times over. */
+/* Long enough on the test's clock for a line that spins to run its queries many times over. */
 const SETTLE_MS = 150;
-const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+const settle = () => vi.advanceTimersByTimeAsync(SETTLE_MS);
 
 /* Bruno's plan, at its limit or past the share set for tasks until in an hour, and a turn waiting for him. */
 async function line(plan: 'limit' | 'spent' | 'free' = 'limit') {
   const c = await failureCompany();
+  /* The clock and the pump's timers go only as far as a test moves them. */
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
   const resetsAt = new Date(Date.now() + HOUR).toISOString();
   if (plan === 'limit') await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
   if (plan === 'spent') await c.db.update(subscriptions).set({ budget: 50, limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.8, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));

@@ -28,7 +28,10 @@ export const FROM = 'sender@acme.test';
 
 /* The receivers listen on this machine, which a real sender may not reach: only the test lets it. */
 const onThisMachine = (address: string) => address === '127.0.0.1' || address === '::1';
-export const liveSenders = (given: Partial<Senders> = {}): Senders => ({ smtp: smtpAdapter(), webhook: webhookAdapter({ mayReach: onThisMachine, timeoutMs: 2000 }), deadlineMs: 10_000, ...given });
+/* No wait for a receiver runs out unless a test moves the clock: the longest wait a timer takes. */
+export const NEVER = 2_147_483_647;
+export const liveWebhook = (timeoutMs = NEVER) => webhookAdapter({ mayReach: onThisMachine, timeoutMs });
+export const liveSenders = (given: Partial<Senders> = {}): Senders => ({ smtp: smtpAdapter({ connectMs: NEVER, greetingMs: NEVER, socketMs: NEVER, totalMs: NEVER }), webhook: liveWebhook(), deadlineMs: NEVER, ...given });
 
 export const smtpSettings = (port: number, more: object = {}) => ({ host: 'localhost', port, security: 'tls', username: USERNAME, password: PASSWORD, from: FROM, eventKey: EVENT_KEY, ca: CERT, ...more });
 export const hookSettings = (endpoint: string, more: object = {}) => ({ endpoint, signingKey: SIGNING_KEY, ca: CERT, ...more });
