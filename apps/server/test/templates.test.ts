@@ -167,7 +167,8 @@ describe('templates', () => {
 
   it('sets a time budget for tests and puts an over-budget file in the scope of whoever touches it', () => {
     const rule = (n: number) => body('dev-testing-policy').split('\n').find(line => line.startsWith(`- **T${n}:`))!;
-    expect(rule(5)).toMatch(/one test takes under 1 s, one test file under 30 s, and a whole run of the fast profile under 5 minutes of wall time/);
+    expect(rule(5)).toMatch(/a test that needs no browser takes under 1 s and its file under 30 s, and a whole run of the fast profile takes under 5 minutes of wall time/);
+    expect(rule(5)).toMatch(/browser tests keep the budget their project sets/);
     expect(rule(5)).toMatch(/file over budget is a defect like a failing test/);
     expect(rule(5)).toMatch(/in scope for whoever touches it or is assigned it/);
     expect(rule(5)).toMatch(/never checked inside a test/);
