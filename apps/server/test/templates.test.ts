@@ -247,6 +247,8 @@ describe('templates', () => {
   it('releases only an exact authorized candidate with real evidence and a tested rollback', () => {
     const release = body('dev-ci-release');
     for (const rule of [/0\.x\.y/, /exact 40-character commit/, /explicit yes for that exact candidate/, /Merge only the approved commit into main/, /Prove rollback first/, /never publish an unapproved task branch/i, /never skip, mute or retry a (?:failed )?check (?:merely )?to get green/i]) expect(release, String(rule)).toMatch(rule);
+    expect(release).toMatch(/profile[^.]*full run[^.]*every suite and every test file anew[^.]*no earlier result/i);
+    expect(release).toMatch(/narrower profile, one suite or results kept from earlier runs is no release check/i);
     expect(release).not.toMatch(/live (?:node |program )?checks?|one idle node at a time|actual program's request receipt/i);
     expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).not.toMatch(/dryer and live checks/);
     expect(body('dev-worktrees')).toMatch(/Never force-push a shared branch/);

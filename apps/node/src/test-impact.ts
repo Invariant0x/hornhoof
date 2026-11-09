@@ -100,7 +100,7 @@ export function matchesPattern(path: string, pattern: string): boolean {
 }
 const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 /* A scenario of a screen is named after it: one of the two names starts the other, word by word. It imports no screen, so this is all
-   that ties them, for what a release runs again as for what an author is told to look at. */
+   that ties them, for what an author is told to look at first. A release runs every scenario again when any screen changed. */
 export function namedAfter(scenario: string, screen: string): boolean {
   const own = `${posix.basename(scenario).replace(/\.[^.]+\.[^.]+$/, '')}-`, other = `${kebab(posix.basename(screen).replace(/\.[^.]+$/, ''))}-`;
   return own.startsWith(other) || other.startsWith(own);

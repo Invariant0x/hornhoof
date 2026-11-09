@@ -49,7 +49,6 @@ for (const [group, path, expected] of [
   ['the image of the app', 'Dockerfile', ['release-scripts', 'server']],
   ['the compose file', 'compose.yaml', ['release-scripts', 'server']],
   ['a browser scenario', 'apps/web/e2e/about.spec.ts', []],
-  ['a document', 'README.md', []],
 ]) {
   test(`a change of ${group} runs ${expected.join(', ') || 'no suite'}`, { timeout: 60_000 }, async () => {
     const selection = await runs(path);
@@ -76,6 +75,21 @@ test('a change of the templates or the skills runs every test that reads them an
     assert.deepEqual(chosen(selection), [['node', 'related'], ['server', 'related']], path);
     assert.deepEqual(filesOf(selection), readers, path);
   }
+});
+
+/* Built here, so that this test does not name it and read it itself. */
+const UNREAD = ['docs', 'nobody-reads.md'].join('/');
+
+test('a document runs the tests that read it by its path, and one no test names runs none', { timeout: 60_000 }, async () => {
+  for (const [path, reader] of [['docs/style-book.md', 'apps/server/test/templates.test.ts'], ['README.md', 'apps/server/test/test-environment-templates.test.ts']]) {
+    const selection = await runs(path);
+    assert.equal(selection.unavailable, undefined, path);
+    assert.ok(filesOf(selection).includes(reader), `${path}: ${filesOf(selection).join(', ')}`);
+    assert.ok(!selection.notes.includes(`document without tests: ${path}`), selection.notes.join('\n'));
+  }
+  const unread = await select([{ path: UNREAD, kind: 'added' }], [{ path: UNREAD, mode: '100644', oid: 'a'.repeat(40) }]);
+  assert.deepEqual(suites(unread), []);
+  assert.deepEqual(unread.notes, [`document without tests: ${UNREAD}`]);
 });
 
 test('a change of the templates beside a test runs that test and the readers of the templates, not the whole suite', { timeout: 60_000 }, async () => {

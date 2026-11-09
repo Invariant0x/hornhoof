@@ -18,13 +18,19 @@ test('a change stays in its group: the frontend, the backend and the node leave 
   assert.ok(unitsOf('node').filter(unit => node.has(unit)).length <= unitsOf('node').length / 2, 'one file of the node should not rerun most of its tests');
 });
 
-test('a scenario follows the screen named like it, and a shared look takes every scenario but no other test', async () => {
-  const changed = await changedBy('apps/web/src/screens/About.tsx');
-  assert.ok(changed.has('browser:apps/web/e2e/about.spec.ts') && changed.has('browser-matrix:apps/web/e2e/about.spec.ts'));
-  assert.ok(!changed.has('browser:apps/web/e2e/agent-state.spec.ts'));
-  const shared = await changedBy('apps/web/src/theme.css');
-  assert.deepEqual(unitsOf('browser', 'browser-matrix').filter(unit => !shared.has(unit)), []);
-  strays(shared, 'server', 'node', 'protocol');
+/* A scenario opens the app and drives it, so whatever screen the app may show on the way can break it: the department screen
+   once read a route the scenarios' mock did not answer, and six scenarios of other names failed. */
+test('a scenario follows every screen of the app, and a screen takes every scenario but no test of another group', async () => {
+  for (const path of ['apps/web/src/ui/Briefing.tsx', 'apps/web/src/screens/About.tsx', 'apps/web/src/theme.css']) {
+    const changed = await changedBy(path);
+    assert.deepEqual(unitsOf('browser', 'browser-matrix').filter(unit => !changed.has(unit)), [], path);
+    strays(changed, 'server', 'node', 'protocol');
+  }
+});
+
+/* A spec of the database imports the server code it drives, as a test of the server does. */
+test('a spec of the database follows the server source it imports', async () => {
+  assert.ok((await changedBy('apps/server/src/modules/tasks/wait-escalation.ts')).has('server-postgres:apps/server/test/postgres/wait-escalation.pg.spec.ts'));
 });
 
 test('mutation of a file follows that file and the fast tests that judge it', async () => {
