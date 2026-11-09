@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { Branch } from '@hornhoof/protocol';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, subscriptions, taskEvents, testParts, testRuns } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import type { CompareResult } from '../testruns/compare.js';
-import type { RepoAddress } from '../testruns/refs.js';
-import type { Task, Tx } from './engine.js';
+import type { CommitWanted, RepoAddress } from '../testruns/refs.js';
+import { refuse, type Task, type Tx } from './engine.js';
 import { authorQuality, CheckReceiptPart, checkReceiptPart, QualityEvidence, unavailableQuality } from './review-quality.js';
 import { verifiedReuse } from './review-reuse.js';
 import { ReviewSha } from './review-schema.js';
@@ -16,7 +17,8 @@ const VENDORS: Partial<Record<string, string>> = { anthropic_api: 'claude', open
 export const reviewVendor = (provider: string): string => VENDORS[provider] ?? provider;
 const Counts = z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), other: z.number().int().nonnegative() });
 const Run = z.object({ id: z.string().uuid(), number: z.number().int(), authorId: z.string().uuid(), commit: z.string().nullable(), command: z.string(), status: z.string(), parts: Counts, receipts: z.array(CheckReceiptPart).default([]), verified: z.boolean() });
-export const ReviewSubmission = z.object({ baseCommit: ReviewSha }).strict();
+/* branch names where the work is when it is not on the task's own branch; commit, when given, must be its head. */
+export const ReviewSubmission = z.object({ baseCommit: ReviewSha, branch: Branch.optional(), commit: ReviewSha.optional() }).strict();
 const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative() });
 export const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
@@ -30,10 +32,9 @@ export const ReviewRecord = z.object({
 export type Review = z.infer<typeof ReviewRecord>;
 type Reader = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config' | 'readCommit' | 'readCompare'>>;
 type Store = Ctx['db'] | Tx;
-type Pin = Pick<Review, 'commit' | 'branch' | 'status' | 'reason'>;
+type Pin = Pick<Review, 'commit' | 'branch' | 'status' | 'reason'> & { commit: string; branch: string };
 type TestRun = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
-const UNAVAILABLE: Pin = { commit: null, branch: null, status: 'degraded', reason: 'commit-unavailable' };
 
 /* CompareResult carries validated hunk patches, whose increment/decrement lines count too. */
 export const changedLines = (diff: string): number => diff.split('\n').filter(line => /^[+-]/.test(line)).length;
@@ -64,21 +65,24 @@ async function authorRuns(db: Store, task: Task, commit: string | null, branch?:
   return Promise.all(runs.map(run => runRecord(run, parts, commit)));
 }
 
-async function readPin(read: Ctx['readCommit'], repo: RepoAddress, task: number): Promise<Pin> {
-  try {
-    const at = await read(repo, { task }, 5_000);
-    if ('commitSha' in at && ReviewSha.safeParse(at.commitSha).success) return { commit: at.commitSha, branch: at.branch, status: 'pinned', reason: null };
-  } catch { /* Remote text never becomes an audit record. */ }
-  return UNAVAILABLE;
+/* No stage passes without a commit: a branch that cannot be read refuses the submission with git's reason. */
+async function readPin(read: Ctx['readCommit'], repo: RepoAddress, want: CommitWanted, named?: string): Promise<Pin> {
+  let at: Awaited<ReturnType<Ctx['readCommit']>>;
+  try { at = await read(repo, want, 5_000); }
+  catch { throw refuse(409, 'repo_invalid', 'The repository could not be read, so the submission has no commit. Try again.'); }
+  if ('problem' in at) throw refuse(409, 'repo_invalid', at.problem);
+  if (!ReviewSha.safeParse(at.commitSha).success) throw refuse(409, 'repo_invalid', `The branch ${at.branch} has no full commit name.`);
+  if (named && named !== at.commitSha) throw refuse(409, 'task_changed', `The branch ${at.branch} is at ${at.commitSha}, not at the named commit ${named}. Push it or name the head.`);
+  return { commit: at.commitSha, branch: at.branch, status: 'pinned', reason: null };
 }
 
-async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string | null, input?: z.infer<typeof ReviewSubmission>): Promise<Review['source']> {
-  if (!commit || !input || !ctx.readCompare) return null;
-  try {
-    const compared = await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000);
-    if (exactComparison(compared, input.baseCommit, commit)) return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: changedLines(compared.diff) };
-  } catch { /* An incomplete source is degraded, never an invented inventory. */ }
-  return null;
+async function sourceAt(ctx: Reader, repo: RepoAddress, commit: string, input?: z.infer<typeof ReviewSubmission>): Promise<NonNullable<Review['source']>> {
+  if (!input) throw refuse(400, 'task_invalid', 'Name review.baseCommit, the commit the change starts from.');
+  let compared: Awaited<ReturnType<NonNullable<Ctx['readCompare']>>> | null = null;
+  try { compared = ctx.readCompare ? await ctx.readCompare(repo, { base: input.baseCommit, head: commit }, 10_000) : null; }
+  catch { /* An incomplete source is refused below, never an invented inventory. */ }
+  if (!compared || !exactComparison(compared, input.baseCommit, commit)) throw refuse(409, 'repo_invalid', `The change from ${input.baseCommit} to ${commit} could not be compared. Check that the base is in the branch's history.`);
+  return { baseCommit: input.baseCommit, commit, paths: [...new Set(compared.paths)], changedLines: changedLines(compared.diff) };
 }
 
 async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts']> {
@@ -86,12 +90,14 @@ async function gateCounts(db: Store, taskId: string): Promise<Review['gateCounts
   return { source: 'review-lifecycle', passed: verdicts.filter(v => v.data.pass === true).length, returned: verdicts.filter(v => v.data.pass === false).length };
 }
 
-/* Resolve the repository before a task transaction; an outage cannot roll back a submission. */
-export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typeof ReviewSubmission>): Promise<Review | null> {
-  if (!ctx.config || !ctx.readCommit || !task.executorAgentId) return null;
+/* Resolve the repository before a task transaction; an outage refuses the submission rather than record it without a
+   commit. A repair keeps the branch of the candidate it repairs unless another is named. */
+export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typeof ReviewSubmission>, branch?: string): Promise<Review> {
+  if (!ctx.config || !ctx.readCommit || !task.executorAgentId) throw refuse(409, 'repo_invalid', 'The repository cannot be read here, so the submission has no commit.');
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
-  if (!found) return null;
-  const pin = await readPin(ctx.readCommit, found.repo, task.number);
+  if (!found) throw refuse(409, 'repo_invalid', 'This task has no repository, so it has no code candidate. Report its result instead.');
+  const named = input?.branch ?? branch;
+  const pin = await readPin(ctx.readCommit, found.repo, named ? { branch: named } : { task: task.number }, input?.commit);
   return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit, task.executorAgentId), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
 }
 

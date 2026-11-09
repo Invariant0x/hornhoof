@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { taskEvents } from '../../db/schema.js';
 import { refuse, type Moved, type Task } from './engine.js';
 
-export type Submission = { summary: string; evidence: string; review?: { baseCommit: string }; operationId?: string };
+export type Submission = { summary: string; evidence: string; review?: { baseCommit: string; branch?: string; commit?: string }; operationId?: string };
 
 export function submissionOperation(input: Submission): { id: string; digest: string } | null {
   if (!input.operationId) return null;

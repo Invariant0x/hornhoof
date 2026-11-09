@@ -605,10 +605,10 @@ async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Su
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
-  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review);
+  const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, inputCandidate?.branch);
   const producer = await agentIdentity(ctx.db, task.companyId, agentId);
   if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.');
-  const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
   if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);
   const candidate = producedCandidate(route, producer, review);
   if (inputCandidate) await requireRepairHistory(ctx, task, inputCandidate, candidate);
