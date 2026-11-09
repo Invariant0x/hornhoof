@@ -31,6 +31,8 @@ export class Bridge {
   private readonly listing = new Map<string, Set<(asked: number) => void>>();
   /* When each agent's program last asked for the list of its tools that the bridge then handed it. */
   private readonly listedAt = new Map<string, number>();
+  /* When each agent's program last connected to its tools and was turned away, as no turn ran: it does not try again. */
+  private readonly refusedAt = new Map<string, number>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
@@ -117,6 +119,12 @@ export class Bridge {
   /* Whether the agent's program has listed its tools through the bridge, asking for them since then. */
   listedSince(key: string, since: number): boolean {
     return (this.listedAt.get(key) ?? -Infinity) >= since;
+  }
+
+  /* Whether the agent's program was turned away as it connected to its tools since then, and has not listed them since. */
+  toolsRefusedSince(key: string, since: number): boolean {
+    const refused = this.refusedAt.get(key) ?? -Infinity;
+    return refused >= since && !this.listedSince(key, refused);
   }
 
   /* Resolves true once the agent's program has listed its tools through the bridge, asking for them since the time given
@@ -206,6 +214,7 @@ export class Bridge {
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
+    if (!token && kind === 'mcp' && asks(body, 'initialize')) this.refusedAt.set(key, asked);
     if (!token) return kind === 'mcp' ? noTurn(res, body) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {

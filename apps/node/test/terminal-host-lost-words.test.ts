@@ -68,7 +68,7 @@ async function started(program: Program, { plain = false, remember, readyMs }: {
   stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
   const enters = () => keys.mock.calls.filter(([, key]) => key === 'Enter').length;
   /* The next turn of the same program, in the same session. */
-  const next = (prompt: string) => host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: randomUUID(), ordinal: 2 }, input: { agentKey, jobId: randomUUID(), prompt, sessionId, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {} } } as never);
+  const next = (prompt: string, more: object = {}) => host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: randomUUID(), ordinal: 2 }, input: { agentKey, jobId: randomUUID(), prompt, sessionId, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {}, ...more } } as never);
   return { host, running, next, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir, tmux };
 }
 
@@ -164,6 +164,27 @@ it('erases a copy of its words it typed again while the program was on its way t
   c.finish('Look at the release.', 'next');
   expect(await next).toMatchObject({ ok: true });
   expect(c.reports.filter(frame => frame.type === 'agent.input_left')).toEqual([]);
+});
+
+/* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
+   for them then, and goes without them for the rest of its session. */
+it('ends a turn of a program whose tools were turned away as it connected, and starts it anew for the next', async () => {
+  let turn = 0;
+  const program = empty();
+  const c = await started({ ...program, get input() { return program.input; }, onPaste: text => { program.input = text; }, onEnter: () => {
+    const words = program.input;
+    program.input = '';
+    if (words) c.finish(words, `turn-${++turn}`);
+  } });
+  expect(await c.running).toMatchObject({ ok: true });
+  await c.host.start();
+  const connect = await fetch(c.host['bridge'].agent(c.agentKey).mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} }) });
+  expect((await connect.json()).error).toMatchObject({ code: -32001 });
+  const tools = { url: 'http://127.0.0.1:9/mcp', token: 'tok-turn' };
+  expect(await c.next('Look at the release.', { tools })).toMatchObject({ ok: false, failure: { kind: 'tools' } });
+  expect(c.tmux.launch).toHaveBeenCalledTimes(1);
+  expect(await c.next('Look at the checkout.', { tools })).toMatchObject({ ok: true });
+  expect(c.tmux.launch).toHaveBeenCalledTimes(2);
 });
 
 it('stops typing them after a few tries and leaves it to the operator case', async () => {

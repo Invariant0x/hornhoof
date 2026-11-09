@@ -1372,9 +1372,19 @@ export class TerminalHost {
     }
     await this.settle(a, message);
     await this.planLimits(a);
+    if (job.input.tools && this.bridge.toolsRefusedSince(a.key, a.startedAt)) return await this.withoutTools(a, job);
     /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
     const output = message.trim() ? '' : await this.screen(job.key);
     return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
+  }
+
+  /* A program that connects to its tools only after the short turn that started it ended is turned away, as no turn answers
+     for them then, and goes without them for the rest of its session. Its turns end saying so, not as turns that left
+     their task where it was, and the next one starts it anew, to connect while that turn runs. */
+  private withoutTools(a: Agent, job: TermJob): Promise<RunResult> {
+    a.hash = null;
+    a.failure = failure('tools', "The program has no Hornhoof tools in this session: it connected to them between turns, when no turn could answer for them. The next turn starts it anew.");
+    return this.failedTurn(a, job, 'agent_failed');
   }
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
