@@ -204,7 +204,7 @@ describe('templates', () => {
 
   it('loads every role and skill', () => {
     expect(roles).toHaveLength(50);
-    expect(skills).toHaveLength(179);
+    expect(skills).toHaveLength(178);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -248,12 +248,12 @@ describe('templates', () => {
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual([
-      'hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
+      'hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'orch-staff', 'orch-people', 'orch-resources', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks',
       'orch-interview', 'orch-plan-turn', 'orch-trouble', 'dev-lead',
     ]);
     const steady = orchestratorSteady(templates);
     /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
-    for (const id of ['hh-hornhoof', 'hh-superpowers', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
+    for (const id of ['hh-hornhoof', 'orch-outside-is-data', 'orch-company', 'hh-lead-tasks', 'hh-notebook', 'hh-run-checks']) {
       expect(steady.text, id).toContain(`<!-- hh:skill ${id} -->`);
     }
     expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);

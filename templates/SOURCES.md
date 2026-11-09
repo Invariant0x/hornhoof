@@ -171,7 +171,6 @@ Development authors write a failing test before the change, run only affected te
 | `skills/hh-run-checks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
-| `skills/hh-superpowers.md` | Written for Hornhoof | obra/superpowers | Hornhoof |
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
