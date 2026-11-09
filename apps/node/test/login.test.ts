@@ -8,6 +8,7 @@ import { CutAtToken, tokenIn } from '../src/login.js';
 import { runNode } from '../src/main.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 /* The sign-in to a plan that its owner does in Hornhoof: the node runs the program's sign-in in a terminal of its own,
    which the owner watches and types into, and keeps what it gives. Only our side is tested here: the token read from a
@@ -31,7 +32,7 @@ const adapter: ProviderAdapter = {
 type Received = { type: string; [k: string]: unknown };
 
 async function fakeServer() {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: Received[] = [];

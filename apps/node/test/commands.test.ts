@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
 import { markRemoved, readState } from '../src/state.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:child_process', async importOriginal => {
   const original = await importOriginal<typeof import('node:child_process')>();
@@ -91,7 +92,7 @@ const logged = () => readFileSync(logFile, 'utf8').trim().split('\n').map(l => J
 
 /* A Hornhoof that records what a node says and sends it what the test gives. */
 async function fakeServer() {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];

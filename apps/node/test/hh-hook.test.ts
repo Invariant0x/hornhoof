@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
 const run = promisify(execFile);
@@ -22,7 +23,7 @@ describe('hh-hook', () => {
   /* The program adds what its prompt hook prints to the prompt; a status line shows what its command prints. */
   it("prints the bridge's answer to a prompt, and only to a prompt", async () => {
     const bridge = createServer((req, res) => req.resume().on('end', () => res.end(`said to ${req.url}`)));
-    await new Promise<void>(r => bridge.listen(0, '127.0.0.1', r));
+    await listenIn(bridge);
     const env = { PATH: process.env.PATH, HH_BRIDGE: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}` };
     try {
       expect((await run('node', [HOOK, 'prompt', '{"prompt":"hi"}'], { env })).stdout).toBe('said to /prompt\n');

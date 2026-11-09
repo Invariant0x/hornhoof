@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { hookClock } from './hook-test-clock.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
 const CLOCK = fileURLToPath(new URL('./fakes/hook-clock.cjs', import.meta.url));
@@ -25,7 +26,7 @@ export async function client(answer: (call: number) => 'ok' | 'disconnect' | 'ti
       res.writeHead(how === 'forbidden' ? 403 : 200).end('');
     });
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenIn(server);
   cleanups.push(() => { server.closeAllConnections(); server.close(); });
   const dir = mkdtempSync(join(tmpdir(), 'hh-client-'));
   const args = [HOOK, 'stop', '{"last_assistant_message":"Done."}'];

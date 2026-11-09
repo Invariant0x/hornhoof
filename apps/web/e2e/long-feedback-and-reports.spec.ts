@@ -59,6 +59,7 @@ import { applyMissingMigrations, MIGRATIONS } from './src/db/client.js';
 import * as schema from './src/db/schema.js';
 import { setupCode } from './src/modules/setup/code.js';
 import { ask, createTask, submit, verdict } from './src/modules/tasks/engine.js';
+import { testPort } from '../../test-support/ports.mjs';
 
 const secret = Buffer.alloc(32, 9).toString('base64');
 const base = 'a'.repeat(40);
@@ -260,7 +261,7 @@ const reviewer = await hire('Rita', 'worker', 'DEV-REV');
 const designer = await hire('Interface Designer', 'worker', 'DEV-FE');
 fx = { acme, ceo, dev, head, worker, reviewer, designer };
 
-const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
 process.stdout.write(JSON.stringify({
   origin,
   ceoSession,

@@ -20,6 +20,7 @@ import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 import type { runTests } from '../src/tests.js';
+import { testPort } from '../../../test-support/ports.mjs';
 
 vi.mock('node:os', async importOriginal => {
   const os = await importOriginal<typeof import('node:os')>();
@@ -39,7 +40,7 @@ function grantCheck(socket: WebSocket, frame: { type: string; id?: string }, all
 }
 
 async function fakeServer(grantChecks = true) {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];

@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 type Seen = { method: string; url: string; auth: string; body: string };
 
@@ -16,7 +17,7 @@ async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }
       res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }));
     });
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await listenIn(server);
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen, server };
 }
 
@@ -85,7 +86,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
     const slow = createServer((req, res) => {
       req.resume().on('end', () => void answered.then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}')));
     });
-    await new Promise<void>(r => slow.listen(0, '127.0.0.1', r));
+    await listenIn(slow);
     const bridge = new Bridge(`http://127.0.0.1:${(slow.address() as AddressInfo).port}`, () => {});
     await bridge.start();
     closers.push(() => bridge.stop(), () => slow.close());
@@ -109,7 +110,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
       const first = calls++ === 0;
       req.resume().on('end', () => void (first ? answered : Promise.resolve()).then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}')));
     });
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    await listenIn(server);
     const bridge = new Bridge(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, () => {});
     await bridge.start();
     closers.push(() => bridge.stop(), () => server.close());

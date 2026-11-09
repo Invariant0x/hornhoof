@@ -791,6 +791,7 @@ import { applyMissingMigrations, MIGRATIONS } from './src/db/client.js';
 import * as schema from './src/db/schema.js';
 import { setupCode } from './src/modules/setup/code.js';
 import { ask, createTask } from './src/modules/tasks/engine.js';
+import { testPort } from '../../test-support/ports.mjs';
 
 const secret = Buffer.alloc(32, 7).toString('base64');
 const commit = 'a'.repeat(40);
@@ -897,7 +898,7 @@ ids = {
   designerId: designer.id,
 };
 
-const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+const origin = await app.listen({ host: '127.0.0.1', port: await testPort() });
 process.stdout.write(JSON.stringify({
   origin,
   session,

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { packBundle, unpackBundle } from '../src/test-bundle.js';
 import { prepareCache, restoreCache, STORED_AT, type CacheEntry, type CacheContext } from '../src/test-cache.js';
 import { harnessRemote, harnessShare, type HarnessRemote } from '../src/test-harness.js';
+import { listenIn } from '../../../test-support/ports.mjs';
 
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -238,7 +239,7 @@ describe('the registry over HTTP', () => {
         heard.push(asked); answer(asked, response);
       });
     });
-    await new Promise<void>(resolve => { running.listen(0, '127.0.0.1', resolve); });
+    await listenIn(running);
     onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
     const address = running.address() as { port: number };
     return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key', pauseMs, releaseMs) };

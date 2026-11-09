@@ -13,9 +13,10 @@ import {
   jitteredDelay,
   networkSnapshot,
 } from '../src/connection.js';
+import { listenIn, testPort } from '../../../test-support/ports.mjs';
 
 async function listenWs(opts: { autoPong?: boolean } = {}) {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1', ...opts });
+  const server = new WebSocketServer({ port: await testPort(), host: '127.0.0.1', ...opts });
   onTestFinished(() => server.close());
   await new Promise<void>(r => server.once('listening', () => r()));
   const port = (server.address() as AddressInfo).port;
@@ -185,7 +186,7 @@ describe('connect', () => {
       for (const s of sockets) s.destroy();
       blackhole.close();
     });
-    await new Promise<void>(r => blackhole.listen(0, '127.0.0.1', () => r()));
+    await listenIn(blackhole);
     const port = (blackhole.address() as AddressInfo).port;
 
     /* Step clock: handshakeTimeoutMs is 5_000 so only checkHealth at clockMs === 6_000 can abort within 300 ms. */
@@ -229,7 +230,7 @@ describe('connect', () => {
     onTestFinished(() => {
       blackhole2.close();
     });
-    await new Promise<void>(r => blackhole2.listen(0, '127.0.0.1', () => r()));
+    await listenIn(blackhole2);
     const port2 = (blackhole2.address() as AddressInfo).port;
     const beforeCount = sockets.length;
     let lateRetry: (() => void) | null = null;
@@ -256,7 +257,7 @@ describe('connect', () => {
 
   it('survives a 10-minute server outage with jittered pauses between 1 s and 30 s and recovers automatically', async () => {
     const probe = createTcpServer();
-    await new Promise<void>(r => probe.listen(0, '127.0.0.1', () => r()));
+    await listenIn(probe);
     const port = (probe.address() as AddressInfo).port;
     await new Promise<void>(r => probe.close(() => r()));
 
@@ -388,7 +389,7 @@ describe('connect', () => {
 
   it('wakes a long retry backoff immediately when the clock jumps forward after sleep', async () => {
     const probe = createTcpServer();
-    await new Promise<void>(r => probe.listen(0, '127.0.0.1', () => r()));
+    await listenIn(probe);
     const port = (probe.address() as AddressInfo).port;
     await new Promise<void>(r => probe.close(() => r()));
 
@@ -440,7 +441,7 @@ describe('connect', () => {
       }
       wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
     });
-    await new Promise<void>(r => httpServer.listen(0, '127.0.0.1', () => r()));
+    await listenIn(httpServer);
     const port = (httpServer.address() as AddressInfo).port;
 
     /* Also verify 401 without optional log/onRefused handlers works cleanly. */
@@ -525,7 +526,7 @@ describe('connect', () => {
       for (const s of sockets) s.destroy();
       blackhole.close();
     });
-    await new Promise<void>(r => blackhole.listen(0, '127.0.0.1', () => r()));
+    await listenIn(blackhole);
     const blackholePort = (blackhole.address() as AddressInfo).port;
 
     let attempts = 0;
