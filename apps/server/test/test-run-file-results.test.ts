@@ -135,6 +135,21 @@ describe('reusing green test results', () => {
     expect(await f.told()).toContain('3 test files kept their fingerprint and a green result, so nothing had to run.');
   });
 
+  /* The author check runs only the tests near a change and leaves the rest of the import graph to the full run. A file left so
+     has a new fingerprint once what it imports changed: the full run runs it, and its green result at the old one stands for
+     nothing, so a failure there fails the run and the file runs again after. */
+  it('runs a file the author check left to the full run once its fingerprint changed, and its old green result cannot stand for it', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({ profile: 'final' }));
+    const changed = fingerprints({ 'test/b.test.ts': print('e') });
+    const full = await f.start({ profile: 'final' }, changed);
+    expect(await f.ranFiles(full)).toEqual(['test/b.test.ts']);
+    await f.finish(full, { ok: false, files: [{ suiteId: 'unit', file: 'test/b.test.ts', status: 'failed' }] });
+    expect(await f.runOf(full)).toMatchObject({ status: 'failed' });
+    expect((await f.greenRows()).filter(row => row.file === 'test/b.test.ts').map(row => row.fingerprint)).toEqual([print('b')]);
+    expect(await f.ranFiles(await f.start({ profile: 'final' }, changed))).toEqual(['test/b.test.ts']);
+  });
+
   it('runs only the file whose dependency changed', async () => {
     const f = await fixture();
     const first = await f.start({});

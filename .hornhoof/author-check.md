@@ -14,8 +14,8 @@ It runs where it is called: in the workspace of whoever builds or reviews the ch
 | --- | --- | --- |
 | `format` | `npm run -s format:check` | `repo_has_no_formatter`: this repository has no formatter today |
 | `lint` | `eslint` on the changed files | `nothing_to_lint` |
-| `types` | `finalChecks` of the touched suites, and `typecheck:tests` when TypeScript changed | `nothing_to_typecheck` |
-| `tests` | the selection of `apps/node/src/test-impact.ts`, once per suite, with coverage of the changed sources in that same run | `nothing_selected`, `selection_is_whole_suite`, a problem of the selection |
+| `types` | `finalChecks` of the touched suites, and the steps of `typecheck:tests` for the projects TypeScript changed in and those that use them, after its builds; all of it for a typed file outside every project | `nothing_to_typecheck` |
+| `tests` | the near tests of the selection of `apps/node/src/test-impact.ts`, once per suite, with coverage of the changed sources in that same run | `nothing_selected`, `selection_is_whole_suite`, a problem of the selection |
 | `crapper` | `crapper --use-existing-coverage` on the changed sources, so tests never run twice | `no_source_changed`, `no_coverage_adapter`, `no_coverage_measured`, `crapper_missing`, `crapper_failed` |
 | `dryer` | `dryer` on the changed code | `no_source_changed`, `dryer_missing`, `dryer_failed` |
 
@@ -25,7 +25,7 @@ A change the selector answers with the whole fast suite does not run it: `tests`
 
 ## What a change runs
 
-The selection goes by the paths a change touches, and within a package by the import graph. A test that imports a file of another group runs when that file changes, and nothing else crosses a group. A commit that mixes code with a file of a rule that takes packages whole takes the packages of that code whole too; a rule that names its tests adds only them. A Vitest suite gets its files as on a node, through `HH_TEST_FILES` and `--shard=1/1`, because its config asks for both.
+The selection goes by the paths a change touches, and within a package by the import graph. The author's check runs, with coverage, the tests that import a changed file directly, are named after a changed source, or changed in the commit. The rest of the tests the import graph reaches are listed by file in its record as left to the full run, which runs again every file whose fingerprint changed and never takes an old green result for it. A package none of whose tests reaches the change directly runs all the graph reaches there. The list is `scope.leftToFullRun` of the record and `leftToFullRun` of `TEST_SELECTION`, so a reviewer sees what the author did not run. A test that imports a file of another group runs when that file changes, and nothing else crosses a group. A commit that mixes code with a file of a rule that takes packages whole takes the packages of that code whole too; a rule that names its tests adds only them. A Vitest suite gets its files as on a node, through `HH_TEST_FILES` and `--shard=1/1`, because its config asks for both.
 
 | Group | Paths | Runs |
 | --- | --- | --- |

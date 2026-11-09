@@ -86,7 +86,8 @@ export async function selectionPorts(root) {
   const { collectVitestImpact } = await import('../../apps/node/dist/test-impact-adapters.js');
   const { listTestUnits } = await import('../../apps/node/dist/test-environment.js');
   const collect = async changed => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', PROBE, JSON.stringify(changed)], { cwd: root, encoding: 'utf8', timeout: COLLECT_MS, maxBuffer: COLLECT_BYTES, stdio: ['ignore', 'pipe', 'inherit'] }));
-  return { namedAfter, selectAffectedTests, collectVitestImpact, listTestUnits, collect };
+  const read = path => { try { return readFileSync(join(root, path), 'utf8'); } catch { return null; } };
+  return { namedAfter, selectAffectedTests, collectVitestImpact, listTestUnits, collect, read };
 }
 
 async function selection(args, plan, manifest, ports, root) {

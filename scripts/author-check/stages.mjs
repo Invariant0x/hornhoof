@@ -37,11 +37,47 @@ async function lintStage(context) {
   return fromCodes('lint', await runAll(context, [{ program: 'npx', args: ['--no-install', 'eslint', ...files], cwd: '.' }]));
 }
 
+const TSC = /^tsc -p (\S+)((?: \S+)*)$/;
+const BUILD = /^npm run (?:-s )?build -w \S+$/;
+const words = text => text.split(' ').filter(Boolean);
+
+function workspaceOf(context, root) {
+  try {
+    const manifest = JSON.parse(context.ports.read(`${root}/package.json`));
+    return { name: manifest.name, uses: Object.keys({ ...manifest.dependencies, ...manifest.devDependencies, ...manifest.peerDependencies }) };
+  } catch { return { name: null, uses: [] }; }
+}
+
+/* The projects the test types reach: those holding a changed file, and those that use one of them, at any remove. */
+function reachedProjects(context, projects, typed) {
+  const known = projects.map(project => ({ ...project, ...workspaceOf(context, project.root) }));
+  const reached = new Set(known.filter(project => typed.some(path => path.startsWith(`${project.root}/`))));
+  for (let grew = true; grew;) {
+    const names = new Set([...reached].map(project => project.name).filter(Boolean));
+    const more = known.filter(project => !reached.has(project) && project.uses.some(name => names.has(name)));
+    for (const project of more) reached.add(project);
+    grew = more.length > 0;
+  }
+  return known.filter(project => reached.has(project));
+}
+
+/* The repository's test types, step by step, of only the projects a change reaches. Its builds come first, as the script has
+   them. A typed file outside every project reaches them all, and so does a script this cannot read step by step. */
+function testTypeChecks(context) {
+  const script = context.scripts['typecheck:tests'], typed = context.paths.filter(path => TYPED.test(path));
+  if (!script || !typed.length) return [];
+  const steps = script.split('&&').map(step => step.trim());
+  const projects = steps.flatMap(step => { const found = TSC.exec(step); return found ? [{ config: found[1], root: posix.dirname(found[1]), rest: words(found[2]) }] : []; });
+  if (!projects.length || steps.some(step => !TSC.test(step) && !BUILD.test(step))) return [TEST_TYPES];
+  if (typed.some(path => !projects.some(project => path.startsWith(`${project.root}/`)))) return [TEST_TYPES];
+  const builds = steps.filter(step => BUILD.test(step)).map(step => ({ program: 'npm', args: words(step).slice(1), cwd: '.' }));
+  return [...builds, ...reachedProjects(context, projects, typed).map(project => ({ program: 'npx', args: ['--no-install', 'tsc', '-p', project.config, ...project.rest], cwd: '.' }))];
+}
+
 function typeChecks(context) {
   const selected = context.selection.packages ?? [];
   const touched = suite => selected.some(item => item.packageId === suite.id) || context.paths.some(path => ownerOf(context.suites, path) === suite);
-  const checks = context.suites.filter(touched).flatMap(suite => suite.finalChecks);
-  if (context.scripts['typecheck:tests'] && context.paths.some(path => TYPED.test(path))) checks.push(TEST_TYPES);
+  const checks = [...context.suites.filter(touched).flatMap(suite => suite.finalChecks), ...testTypeChecks(context)];
   return [...new Map(checks.map(check => [JSON.stringify(check), check])).values()];
 }
 
@@ -201,7 +237,8 @@ const STEPS = [formatStage, lintStage, typesStage, testsStage, crapperStage, dry
 export async function runStages(input, ports) {
   const paths = input.plan.changes.filter(change => change.kind !== 'deleted').map(change => change.path);
   const context = { ...input, ports, paths, numbers: { tests: null, changedLines: null, worstCrap: null, dryerFlags: null } };
-  ports.log(`TEST_SELECTION ${JSON.stringify({ version: 1, commit: input.sha, baseCommit: input.plan.base, status: input.selection.unavailable ? 'NOT_RUN' : 'selected', sourcePaths: input.plan.changes.map(change => change.path), packages: input.selection.packages ?? [], reason: input.selection.unavailable ?? null, fullSuiteComparator: 'unavailable' })}`);
+  const leftToFullRun = input.selection.leftToFullRun ?? [];
+  ports.log(`TEST_SELECTION ${JSON.stringify({ version: 1, commit: input.sha, baseCommit: input.plan.base, status: input.selection.unavailable ? 'NOT_RUN' : 'selected', sourcePaths: input.plan.changes.map(change => change.path), packages: input.selection.packages ?? [], leftToFullRun, reason: input.selection.unavailable ?? null, fullSuiteComparator: 'unavailable' })}`);
   for (const note of input.selection.notes) ports.log(`NOTE ${note}`);
   const stages = [];
   for (const step of STEPS) {
@@ -212,5 +249,5 @@ export async function runStages(input, ports) {
   }
   context.numbers.changedLines = changedLineNumbers(context);
   const whole = (input.selection.packages ?? []).some(item => item.mode === 'whole-package');
-  return finished(input.sha, { kind: whole ? 'package' : 'changed', paths: input.plan.changes.map(change => change.path) }, stages, context.numbers);
+  return finished(input.sha, { kind: whole ? 'package' : 'changed', paths: input.plan.changes.map(change => change.path), leftToFullRun }, stages, context.numbers);
 }

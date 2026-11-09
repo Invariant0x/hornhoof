@@ -1,4 +1,5 @@
-import { isDocument, isLintable, ownerOf } from './plan.mjs';
+import { posix } from 'node:path';
+import { isDocument, isLintable, isSource, ownerOf } from './plan.mjs';
 
 /* The projects of the root vitest.config.mjs and the suites of .hornhoof/test-environment.json they run. */
 const PROJECT_SUITES = {
@@ -44,7 +45,8 @@ async function adapterSelection(environment, changes, suites, ports) {
   const requiredSuiteIds = known.filter(suite => adapterOf(suite.run) === 'vitest').map(suite => suite.id);
   const graph = await ports.collectVitestImpact({ inventory, projectSuites: PROJECT_SUITES, changed, requiredSuiteIds }, collection);
   const packages = environment.packages.filter(item => known.some(suite => suite.id === item.id));
-  return ports.selectAffectedTests({ environment: { ...environment, packages, inventory }, changes, graphs: [graph] });
+  const selection = await ports.selectAffectedTests({ environment: { ...environment, packages, inventory }, changes, graphs: [graph] });
+  return { ...selection, reached: graph.status === 'ready' ? graph.units : [] };
 }
 
 const opaqueOwner = (suites, path) => {
@@ -112,6 +114,36 @@ function laterTests(environment, units, mutation) {
 /* A file moved here from where the fast suites run still counts for where it was. */
 const outsideFast = (change, later) => [change.path, change.previousPath ?? change.path].every(path => path.startsWith(E2E) || later.has(path));
 
+const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bvi\.mock\(\s*)['"]([^'"]+)['"]/g;
+/* The files a test names by a relative path, each under the names it may have: as written, its source for a built name, an index. */
+export function directImports(file, text) {
+  const named = [...text.matchAll(SPECIFIER)].map(match => match[1]).filter(specifier => specifier.startsWith('.'));
+  return named.flatMap(specifier => {
+    const path = posix.join(posix.dirname(file), specifier), bare = path.replace(/\.[cm]?jsx?$/, '');
+    return [path, ...['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '/index.ts', '/index.tsx'].map(end => `${bare}${end}`)];
+  });
+}
+
+/* The tests an author runs of what the import graph reaches: those that import a changed file themselves, are named after a
+   changed source, or changed. The rest is left to the full run, which runs again every file whose fingerprint changed. A test
+   a rule names is no test of the graph and always runs. A package none of whose tests reaches the change directly runs all
+   the graph reaches there. */
+function nearTests(packages, changes, reached, ports) {
+  const keyOf = unit => `${unit.suiteId}\0${unit.file}`, graph = new Set(reached.map(keyOf));
+  const changed = new Set(changes.filter(change => change.kind !== 'deleted').map(change => change.path));
+  const sources = [...changed].filter(isSource);
+  const imports = file => { const text = ports.read(file); return text === null ? [] : directImports(file, text); };
+  const near = unit => changed.has(unit.file) || sources.some(source => ports.namedAfter(unit.file, source)) || imports(unit.file).some(path => changed.has(path));
+  const left = new Set();
+  const kept = packages.map(item => {
+    const far = item.mode === 'related' ? item.units.filter(unit => graph.has(keyOf(unit)) && !near(unit)) : [];
+    if (!far.length || !item.units.some(unit => graph.has(keyOf(unit)) && near(unit))) return item;
+    for (const unit of far) left.add(unit.file);
+    return { ...item, units: item.units.filter(unit => !far.includes(unit)) };
+  });
+  return { packages: kept, leftToFullRun: [...left].sort() };
+}
+
 export async function selectTests({ changes, manifest, tracked, allowWhole }, ports) {
   const suites = fastSuites(manifest);
   const units = ports.listTestUnits(manifest, tracked);
@@ -126,7 +158,9 @@ export async function selectTests({ changes, manifest, tracked, allowWhole }, po
   const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked, ports.namedAfter), ...changes.filter(change => later.has(change.path) && !change.path.startsWith(E2E)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
-  const packages = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
-  if (isWholeSuite(packages, suites) && !allowWhole && !reachesEveryone(packages)) return { unavailable: 'selection_is_whole_suite', notes };
-  return { packages, notes };
+  const reached = mergePackages([...selection.packages, ...wholeOf(environment, suites, opaque)]);
+  if (isWholeSuite(reached, suites) && !allowWhole && !reachesEveryone(reached)) return { unavailable: 'selection_is_whole_suite', notes };
+  const { packages, leftToFullRun } = nearTests(reached, changes, selection.reached ?? [], ports);
+  if (leftToFullRun.length) notes.push(`left to the full run: ${leftToFullRun.length} test files the import graph reaches, listed in the record`);
+  return { packages, notes, leftToFullRun };
 }

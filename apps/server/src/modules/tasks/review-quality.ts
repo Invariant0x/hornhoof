@@ -16,7 +16,8 @@ const Tests = z.object({ passed: Count, failed: Count, skipped: Count, total: Co
 const Lines = z.object({ covered: Count, total: Count }).strict().refine(v => v.covered <= v.total);
 export const AuthorCheckInput = z.object({
   version: z.literal(1), runId: z.string().uuid(), submissionCommit: ReviewSha, checkCommit: ReviewSha,
-  scope: z.object({ kind: z.enum(['changed', 'package']), paths: z.array(RepoPath) }).strict(),
+  /* leftToFullRun: the test files the import graph reaches that the author did not run, which the full run takes. */
+  scope: z.object({ kind: z.enum(['changed', 'package']), paths: z.array(RepoPath), leftToFullRun: z.array(RepoPath).max(20_000).optional() }).strict(),
   stages: z.array(Stage).max(STAGES.length).refine(stages => new Set(stages.map(stage => stage.name)).size === stages.length),
   numbers: z.object({ tests: Tests.nullable(), changedLines: Lines.nullable(), worstCrap: z.number().nonnegative().nullable(), dryerFlags: Count.nullable() }).strict(),
 }).strict();

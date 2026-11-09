@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { URL } from 'node:url';
 import { changedLines, countDuplicates, exitCodeOf, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from '../author-check/judge.mjs';
 import { buildPlan, grownFunctions, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus } from '../author-check/plan.mjs';
-import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
+import { adapterOf, directImports, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
 import { complexityAt, prepare, sourceDigest } from '../author-check/wired.mjs';
@@ -29,7 +29,7 @@ const FILES = {
 const grownIn = (cwd, name, cc, base = null) => ({ [cwd]: [{ namespace: 'a', name, cc, base }] });
 function given({ changes = CHANGES, suites = [vitestSuite], selection, hunks = { 'apps/node/src/a.ts': [[1, 3]] }, grown = {}, scripts = {} } = {}) {
   return { sha: SHA, tmp: '/tmp/check', scripts, suites, plan: { sha: SHA, base: BASE, changes, hunks, grown },
-    selection: selection ?? { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }], notes: [] } };
+    selection: selection ?? { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }], notes: [], leftToFullRun: ['apps/node/test/far.test.ts'] } };
 }
 function fake(answer = () => undefined, files = FILES) {
   const calls = [], lines = [], values = { ...files };
@@ -123,7 +123,7 @@ test('a language without an adapter runs its whole package by one command, with 
   const result = await runStages(given({ changes, suites: [opaqueSuite], selection, hunks: { 'lib/a.py': [[1, 1]] } }), ports);
   assert.deepEqual(named(ports, 'sh'), [{ program: 'sh', args: ['lib/run.sh'], cwd: '.' }]);
   assert.equal(stage(result, 'tests').status, 'passed');
-  assert.deepEqual(result.record.scope, { kind: 'package', paths: ['lib/a.py'] });
+  assert.deepEqual(result.record.scope, { kind: 'package', paths: ['lib/a.py'], leftToFullRun: [] });
   assert.deepEqual([result.numbers.tests, result.numbers.changedLines, result.numbers.worstCrap], [null, null, null]);
   assert.equal(named(ports, 'crapper')[0].args[0], '--no-coverage');
   assert.equal(stage(result, 'crapper').status, 'unavailable');
@@ -288,6 +288,28 @@ test('the test types of the repository run when TypeScript changed, whatever sui
   const quiet = fake();
   await runStages(given({ scripts: { 'typecheck:tests': 'x' }, changes: [{ path: 'apps/node/src/a.mjs', kind: 'modified' }] }), quiet);
   assert.equal(named(quiet, 'npm').length, 0);
+});
+
+/* The test types of each project a change reaches: its own folder, or a workspace package it depends on. A typed file
+   outside every project reaches them all. */
+test('the test types check only the projects a change reaches', async () => {
+  const script = 'npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit';
+  const manifests = {
+    'apps/server/package.json': JSON.stringify({ name: '@hornhoof/server', dependencies: { '@hornhoof/protocol': '*' } }),
+    'apps/node/package.json': JSON.stringify({ name: '@hornhoof/node', dependencies: { '@hornhoof/protocol': '*', zod: '*' } }),
+    'apps/web/package.json': JSON.stringify({ name: '@hornhoof/web', devDependencies: { '@hornhoof/protocol': '*' } }),
+    'packages/protocol/package.json': JSON.stringify({ name: '@hornhoof/protocol' }),
+  };
+  const checked = async path => {
+    const ports = fake(undefined, { ...FILES, ...manifests });
+    await runStages(given({ scripts: { 'typecheck:tests': script }, changes: [{ path, kind: 'modified' }], suites: [], selection: { packages: [], notes: [] } }), ports);
+    return ports.calls.filter(call => call.args.includes('tsc') || call.args.includes('build') || call.args.includes('typecheck:tests')).map(call => [call.program, ...call.args].join(' '));
+  };
+  const build = 'npm run build -w @hornhoof/protocol', tsc = config => `npx --no-install tsc -p ${config} --noEmit`;
+  assert.deepEqual(await checked('apps/server/src/a.ts'), [build, tsc('apps/server/tsconfig.eslint.json')]);
+  assert.deepEqual(await checked('apps/web/test/A.test.tsx'), [build, tsc('apps/web/tsconfig.json')]);
+  assert.deepEqual(await checked('packages/protocol/src/a.ts'), [build, ...['apps/server/tsconfig.eslint.json', 'apps/node/tsconfig.eslint.json', 'packages/protocol/tsconfig.eslint.json', 'apps/web/tsconfig.json'].map(tsc)]);
+  assert.deepEqual(await checked('test-support/eventually.d.mts'), ['npm run typecheck:tests']);
 });
 
 test('a check that cannot even start is unavailable, not failed', async () => {
@@ -479,11 +501,57 @@ const MANIFEST = {
 const UNITS = [unit('apps/node/test/a.test.ts'), { suiteId: 'scripts', file: 'scripts/test/a.test.mjs', selectionUnit: 'scripts/test/a.test.mjs' }, { suiteId: 'ruby', file: 'lib/a_test.rb', selectionUnit: 'lib' }, { suiteId: 'pg', file: 'apps/node/test/a.pg.ts', selectionUnit: 'apps/node/test/a.pg.ts' }];
 function selector(answer = {}) {
   const seen = { collected: [], select: [], collectCalls: 0 };
-  return { seen, listTestUnits: () => UNITS,
+  return { seen, listTestUnits: () => UNITS, read: () => null, namedAfter: () => false,
     collectVitestImpact: async (input, collect) => { seen.vitest = input; if (input.changed.length) await collect(input.changed[0]); return { adapter: 'vitest-related', status: 'ready', units: [] }; },
     collect: async changed => { seen.collectCalls += 1; seen.collected = changed; return { projects: [], all: [], selected: [] }; },
     selectAffectedTests: input => { seen.select.push(input); return { status: 'ready', problems: [], packages: input.changes.length ? [{ packageId: 'node', mode: 'related', units: [UNITS[0]], reasons: [] }] : [], ...answer }; } };
 }
+
+/* The import graph of a central file reaches nearly every test of its package: the author runs those that import a changed file
+   themselves, are named after it or changed, and the record lists the rest, which the full run takes. */
+const near = unit('apps/node/test/near.test.ts'), namedTest = unit('apps/node/test/a.test.ts'), far = unit('apps/node/test/far.test.ts'), changedTest = unit('apps/node/test/other.test.ts');
+function graphReaching(units, texts, named = []) {
+  return { ...selector({ packages: [{ packageId: 'node', mode: 'related', units: [...units, ...named], reasons: [] }] }),
+    collectVitestImpact: async () => ({ adapter: 'vitest-related', status: 'ready', units }),
+    namedAfter: (test, source) => test.endsWith('/a.test.ts') && source.endsWith('/a.ts'), read: path => texts[path] ?? null };
+}
+
+test('the author runs the tests that import a changed file, are named after it or changed, and leaves the rest of the graph to the full run', async () => {
+  const ports = graphReaching([near, namedTest, far, changedTest], {
+    [near.file]: "import { a } from '../src/a.js';\nimport { helper } from './helper.js';",
+    [far.file]: "import { helper } from './helper.js';",
+    [changedTest.file]: "import { b } from '../src/b.js';",
+  });
+  const changes = [{ path: 'apps/node/src/a.ts', kind: 'modified' }, { path: changedTest.file, kind: 'modified' }];
+  const result = await selectTests({ changes, manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages.map(item => [item.packageId, item.units.map(each => each.file)]), [['node', [near.file, namedTest.file, changedTest.file]]]);
+  assert.deepEqual(result.leftToFullRun, [far.file]);
+});
+
+test('a test a rule names for a change runs, however far it is from the change', async () => {
+  const ruled = unit('apps/node/test/reads-templates.test.ts');
+  const ports = graphReaching([near, far], { [near.file]: "import '../src/a.js';" }, [ruled]);
+  const result = await selectTests({ changes: [{ path: 'apps/node/src/a.ts', kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages[0].units.map(each => each.file), [near.file, ruled.file]);
+  assert.deepEqual(result.leftToFullRun, [far.file]);
+});
+
+test('a package none of whose tests reaches the change directly runs all the graph reaches there', async () => {
+  const ports = graphReaching([near, far], { [near.file]: "import './helper.js';", [far.file]: "import './helper.js';" });
+  const result = await selectTests({ changes: [{ path: 'apps/node/src/helper-of-helper.ts', kind: 'modified' }], manifest: MANIFEST, tracked: [], allowWhole: false }, ports);
+  assert.deepEqual(result.packages[0].units.map(each => each.file), [near.file, far.file]);
+  assert.deepEqual(result.leftToFullRun, []);
+});
+
+test('a test imports what it names by a relative path, as source or as its built name, and by a mock', () => {
+  const text = [
+    "import { a } from '../src/modules/a.js';", "import type { B } from \"../src/b\";", "export { c } from './c.mjs';",
+    "const d = await import('../src/d.js');", "vi.mock('../src/e.js', () => ({}));", "import 'side-effect';", "import { z } from 'zod';",
+  ].join('\n');
+  const found = directImports('apps/server/test/x.test.ts', text);
+  for (const path of ['apps/server/src/modules/a.ts', 'apps/server/src/b.ts', 'apps/server/test/c.mts', 'apps/server/src/d.ts', 'apps/server/src/e.ts', 'apps/server/src/b/index.ts']) assert.ok(found.includes(path), path);
+  assert.ok(!found.some(path => path.includes('zod') || path.includes('side-effect')));
+});
 
 test('the fast profile decides the suites and their kinds', () => {
   const environment = impactEnvironment(MANIFEST, UNITS);
