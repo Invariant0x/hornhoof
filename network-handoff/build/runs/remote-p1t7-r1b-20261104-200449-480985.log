@@ -1,0 +1,38 @@
+== files: relay/relay.py relay/test/harness.py
+== coverage run (whole relay suite)
+........private-words: none here, skipped
+...............................................................
+======================================================================
+FAIL: test_r6_1_change_key (test_keys.KeyTests.test_r6_1_change_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 79, in test_r6_1_change_key
+    self.assertEqual(self.route(new), original)
+AssertionError: {'sta[103 chars]823684, 'evictionBound': 30, 'sync': {'state':[58 chars]one}} != {'sta[103 chars]823683, 'evictionBound': 30, 'sync': {'state':[58 chars]one}}
+  {'client': 'acme-aaaaaaaa-link',
+   'evictionBound': 30,
+   'generation': 1,
+-  'relayStarted': 1793823684,
+?                           ^
+
++  'relayStarted': 1793823683,
+?                           ^
+
+   'since': 1793823683,
+   'state': 'held',
+   'sync': {'at': None,
+            'copy': None,
+            'epoch': 0,
+            'generation': 0,
+            'state': 'off'}}
+
+----------------------------------------------------------------------
+Ran 169 tests in 533.942s
+
+FAILED (failures=1)
+== TESTS FAILED
+gates exit=1
+== suite on 3.14
+Ran 169 tests in 493.793s
+OK
+suite314 exit=0

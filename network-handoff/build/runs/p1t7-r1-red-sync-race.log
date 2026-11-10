@@ -1,0 +1,14 @@
+F
+======================================================================
+FAIL: test_r2_4_a_sync_post_authorized_before_a_release_cannot_reach_the_next_owner (relay.test.test_keys.KeyAuthorizationTests.test_r2_4_a_sync_post_authorized_before_a_release_cannot_reach_the_next_owner)
+The post passes its checks for the old owner, then the name changes hands before its write.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 490, in test_r2_4_a_sync_post_authorized_before_a_release_cannot_reach_the_next_owner
+    self.assertEqual(status, 409, 'a post authorized for the old owner must not be stored')
+AssertionError: 200 != 409 : a post authorized for the old owner must not be stored
+
+----------------------------------------------------------------------
+Ran 1 test in 0.510s
+
+FAILED (failures=1)

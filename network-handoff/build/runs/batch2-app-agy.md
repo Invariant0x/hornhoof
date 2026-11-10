@@ -1,0 +1,22 @@
+I will start by reading `../brief.md` in full, followed by the skills in `../skills/` and the diff under review.
+I have read the brief, the skills, `dev-engineering-rules.md`, and most of `package.diff`. Next I will read the end of `package.diff` along with `../ledger.md` and `../spec.md` so I have the full specification and prior build rulings before inspecting the repository files in detail.
+### Findings
+
+#### Critical
+- None found.
+
+#### Important
+- None found.
+
+#### Minor
+- Minor: [`apps/server/src/db/client.ts:23`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/server/src/db/client.ts#L23-L27): `pg` merges query parameters parsed from `connectionString` over explicit `Pool` options, so a custom `DATABASE_URL` with `?application_name=...` or `?statement_timeout=...` would make a person's migration miss `hornhoof-migrate` or time out; stripping those query parameters from `url` before `new pg.Pool` would keep `name` and `opts` authoritative.
+- Minor: [`apps/web/src/updates.ts:73`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/web/src/updates.ts#L73): `busy` does not include `outage === 'maintenance'` and [`UpdateBanner.tsx:51`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/web/src/ui/UpdateBanner.tsx#L51) / [`Versions.tsx:75`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/web/src/screens/Versions.tsx#L75) require `starting || status?.state === 'running'`, so a person in a second open tab whose 5-minute poll hits `maintenance` before seeing `running` gets no maintenance bar and waits up to 5 minutes to reload; showing progress on `updates.maintenance` and polling at `BUSY_POLL_MS` would keep passive tabs current.
+- Minor: [`apps/web/src/updates.ts:96`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/web/src/updates.ts#L96): `check()` calls `take(...)` without `setOutage('none')`, so a person clicking "Check now" right after maintenance ends keeps seeing the maintenance text until the next poll; clearing `outage` after `api.post('/api/updates/check')` succeeds would clear it at once.
+
+### Verification and Rules Checked
+- Skills and rules read: [`brief.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/brief.md), [`test-driven-development.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/skills/test-driven-development.md), [`systematic-debugging.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/skills/systematic-debugging.md), [`verification-before-completion.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/skills/verification-before-completion.md), [`AGENTS.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/AGENTS.md), [`dev-engineering-rules.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/templates/skills/dev-engineering-rules.md), [`dev-review-diff.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/templates/skills/dev-review-diff.md), [`spec.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/spec.md), and [`ledger.md`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/ledger.md).
+- Gates and checks run (read-only, workspace verified untouched):
+  - Task 2 tests (`db-pool.test.ts`, `migrate.test.ts`, `migrate-masking.test.ts`, `cli.test.ts`): 4 files, 11 passed.
+  - Task 10 tests (`Updates.test.tsx`, `i18n.test.tsx`): 2 files, 30 passed.
+  - Typechecks (`tsc -p apps/server/tsconfig.json --noEmit`, `tsc -p apps/server/tsconfig.eslint.json --noEmit`, `tsc -p apps/web/tsconfig.json --noEmit`) and `eslint` on all 15 changed TypeScript files: clean (exit 0).
+  - Uncle Bob gates and text rules: all new and changed functions stay under CRAP 10 (max new cyclomatic complexity is 5 in [`reasonOf`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/server/src/migrate.ts#L8-L15) and [`stepLabel`](file:///tmp/claude-1000/-home-altera-hornhoof-network/agy-work/batch2-app/repo/apps/web/src/ui/UpdateProgress.tsx#L18-L22), both covered), no duplicate pair at or above 0.8, no em dashes, no Russian dotted `е` or forbidden words, and no unmasked credentials.

@@ -1,0 +1,1332 @@
+# Review package: batch 7, slice relay
+
+## 8c2090d Refuse new connections to a blocked or freed name at once, without a restart
+
+frps now asks relay.py about every new connection to an https or stcp proxy (R7.4). A name that is blocked or freed is
+refused at once, with one read of bindings by its primary key: no write, no dashboard read, no lock. The owner's key is
+not looked at, so a tunnel keeps taking connections after a key change (R6.1). The edge passes on its token alone. The
+visitor's address is neither logged nor kept. `admin ban <name> [reason] --cut` ends with `restart frps`, which
+hornhoof-relay acts on, after Caddy's list.
+
+Review Focus 5 turned up two waits that no trace line can show, since a line's ms starts once the request is read and
+ends before its answer goes out. On a kept connection each answer took about 44 ms, Nagle's rule holding its body for the
+delayed ACK of its headers; it is 0.35 ms now. A crowd at once overflowed the relay's queue of 5 connections
+(ListenOverflows +161 to +220 per 200 at once, 0 now), which cost its visitors the kernel's retry. Both have clock-free
+tests.
+
+test_the_droplet_logs_no_visitor_address now looks for both forms of the visitor's port. At the droplet's log levels it
+finds neither, on all four hosts, in frps, the edge, Caddy or relay.py, and no leak beyond what the README says. A new test
+pins that Caddy's 502 line does carry the form these checks look for. A refused visitor leaves no address either.
+
+Proven by: 28 tests of test_block_by_name, and each wrong version tried (a write, a lock, a dashboard read, a table scan,
+a sleep, the address in the trace, the owner's key, the edge by the link rule) turned its test red. The two crowd tests
+passed 6 of 6 runs under coverage on one core shared with three spinners.
+
+Ruling: test_new_user_conn_burst allows 10 of 200 trace lines over 50 ms, not none - why: a wall clock on a loaded machine; one preemption gave 29.5 ms on a shared core, a stall lands only on the calls in flight, and what relay.py itself could make wait is pinned without a clock in NoWaitTests and WaitsNoTraceLineShowsTests - cost if wrong: a slow path that hits under 5% of calls and is none of a write, lock, dashboard read or scan goes unseen by this test.
+Ruling: Handler sets TCP_NODELAY and RelayServer's queue is 1024, neither in the plan - why: Review Focus 5's own promise, measured above; the plan's trace cannot see either - cost if wrong: none found; loopback only, and the kernel caps the queue at somaxconn.
+Ruling: test_a_crowd_at_once_is_refused_nowhere added, and the fake company's queue is 512 - why: the plan paces 200 over 2 s but Review Focus 5 says at once; 9 of 200 failed on the fake's queue of 5, not on the relay - cost if wrong: none. At once, no timing is asserted: fresh threads each open SQLite, p95 about 5 ms, worst 46 to 64 ms seen.
+Ruling: a proxy named edge without the token is refused outright, never by the link rule - why: fail closed; edge is reserved, so no company can hold it - cost if wrong: none.
+Ruling: a service's link is CLIENT applied to <name without its service>-peer - why: CLIENT needs a kind, so the plan's wording cannot match as written - cost if wrong: none; its table test pins hyphens and a link named data-app.
+Ruling: the trace line keeps run_id and client beside the plan's op, proxy_name, ms and reject - why: one shape for every op, and neither names a visitor - cost if wrong: none.
+Ruling: admin() split into small functions, behaviour unchanged - why: its CRAP was over 10 and the ban changes it - cost if wrong: none; the old tests of its commands pass.
+Ruling: Stack.start_relay wraps _start_relay - why: an old test calls the private name, and old tests are not rewritten - cost if wrong: none.
+
+---
+ README.md                        |   2 +
+ relay/frps.toml                  |   6 +-
+ relay/hornhoof-relay             |  16 +-
+ relay/relay.py                   | 169 ++++++++++++----
+ relay/test/harness.py            |  10 +-
+ relay/test/test_block_by_name.py | 423 +++++++++++++++++++++++++++++++++++++++
+ relay/test/test_sni.py           |  19 +-
+ 7 files changed, 591 insertions(+), 54 deletions(-)
+
+diff --git a/README.md b/README.md
+index ce8500b..99d1419 100644
+--- a/README.md
++++ b/README.md
+@@ -42,16 +42,18 @@ For each link, the relay keeps:
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+ - the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat. Nothing but a heartbeat can use them;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
++frps asks the relay about every new connection to a company's https proxy or stcp service, with the visitor's address among what it sends. The relay reads only the name, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
++
+ The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
+ 
+ ## Run the tests
+ 
+ You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
+ 
+ From this folder:
+ 
+diff --git a/relay/frps.toml b/relay/frps.toml
+index 0961bb9..1da398c 100644
+--- a/relay/frps.toml
++++ b/relay/frps.toml
+@@ -1,15 +1,17 @@
+ # frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's live https
+ # proxy gets the encrypted stream as it came, and everything else goes through the droplet's own frpc (client edge) to
+ # Caddy on loopback. That includes a name in https mode while its tunnel is down: Caddy reads that request to answer it
+ # with a 404 or 410, and keeps nothing of it. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and
+ # the traffic of companies in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because
+ # proxyBindAddr opens 443; both firewalls keep it closed.
+-# Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600); if it does not answer, frps refuses.
++# Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600), and so is every new connection to an
++# https or stcp proxy, the edge's too; if it does not answer, frps refuses. While relay.py restarts nothing new comes in
++# on 443, and connections already open stay.
+ bindAddr = "127.0.0.1"
+ bindPort = 7000
+ proxyBindAddr = "0.0.0.0"
+ vhostHTTPPort = 8080
+ vhostHTTPSPort = 443
+ vhostHTTPTimeout = 60
+ subDomainHost = "hornhoof.org"
+ custom404Page = "/etc/frp/404.html"
+@@ -35,9 +37,9 @@ webServer.addr = "127.0.0.1"
+ webServer.port = 7500
+ webServer.user = "admin"
+ webServer.password = "@WEB_PASSWORD@"
+ 
+ [[httpPlugins]]
+ name = "hornhoof-relay"
+ addr = "127.0.0.1:7600"
+ path = "/frp/handler"
+-ops = ["Login", "NewProxy", "Ping"]
++ops = ["Login", "NewProxy", "Ping", "NewUserConn"]
+diff --git a/relay/hornhoof-relay b/relay/hornhoof-relay
+index b77cf34..72cb1c7 100755
+--- a/relay/hornhoof-relay
++++ b/relay/hornhoof-relay
+@@ -1,18 +1,24 @@
+ #!/bin/sh
+ # Operator commands for the Hornhoof relay. Run as root on the droplet.
+-#   hornhoof-relay list                 every binding, when it was made and last seen
+-#   hornhoof-relay add <name>           a binding made by us (no rate limit); prints {name, key} once, keep it secret
+-#   hornhoof-relay ban <name> [reason]  answer 410 at once; its tunnel can never log in or register again
++#   hornhoof-relay list                       every binding, when it was made and last seen
++#   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret
++#   hornhoof-relay ban <name> [reason] [--cut]  answer 410 at once; a ban refuses new connections at once, and its tunnel can
++#                                             never log in or register again. Connections already open stay;
++#                                             --cut also drops open ones, with every link, by restarting frps
+ #   hornhoof-relay unban <name>
+-#   hornhoof-relay release <name>       free a name once its old tunnel is gone
++#   hornhoof-relay release <name>             free a name once its old tunnel is gone
+ set -eu
+ relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+-relay "$@"
++said=$(relay "$@")
++printf '%s\n' "$said"
+ case "${1:-}" in
+   ban | unban)
+     relay banned-caddy > /etc/caddy/blocked.caddy.new
+     mv /etc/caddy/blocked.caddy.new /etc/caddy/blocked.caddy
+     chmod 644 /etc/caddy/blocked.caddy
+     systemctl reload caddy
+     ;;
+ esac
++if [ "${1:-}" = ban ] && [ "$(printf '%s\n' "$said" | tail -n 1)" = 'restart frps' ]; then
++  systemctl restart frps
++fi
+diff --git a/relay/relay.py b/relay/relay.py
+index 4dae3ee..dea750c 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -5,17 +5,17 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}, 503 if unknown
+   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}, 409 taken, 503 if unknown
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
+   POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
+   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
+-frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
++frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
+ Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
+ 
+ Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
+ """
+ import base64
+ import collections
+ import contextlib
+ import hashlib
+@@ -1384,44 +1384,90 @@ def edge_reason(op: str, content: dict, metas: dict) -> str | None:
+     """R7.5: a session that names itself the edge passes on its token alone, never on a binding's checks."""
+     if not edge_token_matches(metas['edge']):
+         return EDGE_REFUSED
+     if op == 'Login' and content.get('client_id') != EDGE_CLIENT:
+         return EDGE_REFUSED
+     return edge_proxy_reason(content) if op == 'NewProxy' else None
+ 
+ 
++def peer_service_link(proxy_name: str) -> str | None:
++    """The link of a peer's service <link>-<m8>-<service>, by CLIENT's rule for the machine that offers it."""
++    machine, _, service = proxy_name.rpartition('-')
++    match = CLIENT.fullmatch(f'{machine}-peer') if service in PEER_SERVICES else None
++    return match.group('link') if match else None
++
++
++def connection_link(proxy_name: object, proxy_type: object) -> str | None:
++    """The link a new connection is for; None for anything that is neither a company's https proxy nor a service."""
++    if not isinstance(proxy_name, str):
++        return None
++    if proxy_type == 'https':
++        return proxy_name
++    return peer_service_link(proxy_name) if proxy_type == 'stcp' else None
++
++
++def link_refusal(link: str) -> str | None:
++    """R7.4: why this link takes no new connection. frps holds each new connection on this answer, so that a crowd can
++    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write."""
++    row = db().execute('SELECT banned_at FROM bindings WHERE name = ?', (link,)).fetchone()
++    if row is None:
++        return 'freed'
++    return 'blocked' if row[0] else None
++
++
++def new_user_conn_reason(content: dict, metas: dict) -> str | None:
++    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound and not blocked. The name
++    decides and the owner's key does not, since a live tunnel keeps logging its old key after a key change (R6.1)."""
++    proxy_name = content.get('proxy_name')
++    if proxy_name == EDGE_CLIENT:
++        return None if edge_token_matches(metas.get('edge')) else EDGE_REFUSED
++    link = connection_link(proxy_name, content.get('proxy_type'))
++    return 'not a link' if link is None else link_refusal(link)
++
++
+ def plugin_answer(reason: str | None) -> dict:
+     return {'reject': False, 'unchange': True} if reason is None else {'reject': True, 'reject_reason': reason}
+ 
+ 
+ def plugin_decide(op: str, content: dict) -> dict:
+     """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes and is marked seen.
+ 
+     A NewProxy is marked seen before its rule, so that its registration is the call's last write: a later one could
+     still refuse a registration already on disk.
+     """
+     metas = call_metas(op, content)
++    if op == 'NewUserConn':
++        return plugin_answer(new_user_conn_reason(content, metas))
+     if 'edge' in metas:
+         return plugin_answer(edge_reason(op, content, metas))
+     name, kind, reason = authenticate_call(op, metas)
+     if reason is None and op == 'Login':
+         reason = login_reason(name, kind, content, metas)
+     elif reason is None and op == 'NewProxy':
+         touch(name)
+         reason = offer_reason(name, kind, content, metas)
+     if reason is None and op != 'NewProxy':
+         touch(name)
+     return plugin_answer(reason)
+ 
+ 
++class RelayServer(ThreadingHTTPServer):
++    # frps keeps two connections to the relay and opens one more for each plugin call beyond those, so that a crowd of
++    # visitors is as many new connections at once. Past this queue the kernel drops one, and the visitor waits for its retry.
++    request_queue_size = 1024
++
++
+ class Handler(BaseHTTPRequestHandler):
+     server_version = 'hornhoof-relay'
+     sys_version = ''
+     protocol_version = 'HTTP/1.1'
++    # An answer is two writes, its headers and its body. Under Nagle's rule the body would wait for the ACK of the headers,
++    # which the receiver delays by 40 ms, and frps holds a visitor's new connection on this answer.
++    disable_nagle_algorithm = True
+ 
+     def log_message(self, fmt, *args):
+         pass
+ 
+     def handle_one_request(self):
+         """A busy store answers 503 instead of dropping the connection mid-request."""
+         self.body_read = False
+         try:
+@@ -1692,62 +1738,97 @@ class Handler(BaseHTTPRequestHandler):
+         if row[1]:
+             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
+         if not release_binding(name, row[0]):
+             return self.error(404, 'not_found', f'There is no binding {name}.')
+         log_line(f'released {name} for {self.client_ip()}')
+         self.send_json(204)
+ 
+ 
++# What a ban prints last when frps must restart, which hornhoof-relay acts on. frp 0.71.1 has no call that closes one
++# proxy's open connections, so cutting one name's means every link's.
++RESTART_FRPS = 'restart frps'
++CUT = '--cut'
++
++
++def admin_list() -> int:
++    for r in db().execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
++                          'ORDER BY created_at'):
++        seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
++        ban = f'  BLOCKED: {r[5]}' if r[4] else ''
++        print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
++    return 0
++
++
++def admin_banned_caddy() -> int:
++    hosts = [f'{r[0]}.{DOMAIN}' for r in db().execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
++    print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
++    if hosts:
++        print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
++              f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
++    return 0
++
++
++def admin_add(name: str) -> int:
++    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret."""
++    reason = check_name(name)
++    if reason:
++        print(f'{name}: {reason}', file=sys.stderr)
++        return 1
++    key = secrets.token_urlsafe(32)
++    write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
++          (name, key_hash(key), now(), 'operator'))
++    print(json.dumps({'name': name, 'key': key}))
++    return 0
++
++
++def store_ban(name: str, reason: str) -> None:
++    if db().execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
++        write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
++    else:  # block a name nobody holds, so nobody can take it
++        write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
++              'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
++
++
++def admin_ban(name: str, words: list[str]) -> int:
++    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart."""
++    reason = [word for word in words if word != CUT]
++    store_ban(name, ' '.join(reason) or 'blocked by the relay operator')
++    print(f'ban {name}: done')
++    if len(reason) != len(words):
++        print(RESTART_FRPS)
++    return 0
++
++
++def admin_unban(name: str, _words: list[str]) -> int:
++    unban_binding(name)
++    print(f'unban {name}: done')
++    return 0
++
++
++def admin_release(name: str, _words: list[str]) -> int:
++    release_binding(name)
++    print(f'release {name}: done')
++    return 0
++
++
++ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
++ADMIN_CHANGES = {'ban': admin_ban, 'unban': admin_unban, 'release': admin_release}
++
++
+ def admin(args) -> int:
+     init_db()
+-    conn = db()
+     cmd = args[0] if args else 'list'
+-    if cmd == 'list':
+-        for r in conn.execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
+-                              'ORDER BY created_at'):
+-            seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
+-            ban = f'  BLOCKED: {r[5]}' if r[4] else ''
+-            print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
+-        return 0
+-    if cmd == 'banned-caddy':
+-        hosts = [f'{r[0]}.{DOMAIN}' for r in conn.execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
+-        print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
+-        if hosts:
+-            print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
+-                  f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
+-        return 0
++    if cmd in ADMIN_REPORTS:
++        return ADMIN_REPORTS[cmd]()
+     if cmd == 'add' and len(args) == 2:
+-        # Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret.
+-        name = args[1].lower()
+-        reason = check_name(name)
+-        if reason:
+-            print(f'{name}: {reason}', file=sys.stderr)
+-            return 1
+-        key = secrets.token_urlsafe(32)
+-        write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+-              (name, key_hash(key), now(), 'operator'))
+-        print(json.dumps({'name': name, 'key': key}))
+-        return 0
+-    if cmd in ('ban', 'unban', 'release') and len(args) >= 2:
+-        name = args[1].lower()
+-        if cmd == 'ban':
+-            reason = ' '.join(args[2:]) or 'blocked by the relay operator'
+-            if conn.execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
+-                write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+-            else:  # block a name nobody holds, so nobody can take it
+-                write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+-                      'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+-        elif cmd == 'unban':
+-            unban_binding(name)
+-        else:
+-            release_binding(name)
+-        print(f'{cmd} {name}: done')
+-        return 0
+-    print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',
++        return admin_add(args[1].lower())
++    if cmd in ADMIN_CHANGES and len(args) >= 2:
++        return ADMIN_CHANGES[cmd](args[1].lower(), args[2:])
++    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
+           file=sys.stderr)
+     return 2
+ 
+ 
+ def run_admin(args) -> int:
+     """`relay.py admin`: a store busy past a write's budget is one plain line and a failure, which stops hornhoof-relay
+     before its next step."""
+     try:
+@@ -1758,17 +1839,17 @@ def run_admin(args) -> int:
+ 
+ 
+ def main() -> int:
+     if sys.argv[1:2] == ['admin']:
+         return run_admin(sys.argv[2:])
+     init_db()
+     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
+     threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
+-    server = ThreadingHTTPServer(LISTEN, Handler)
++    server = RelayServer(LISTEN, Handler)
+     server.daemon_threads = True
+     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+     server.serve_forever()
+     return 0
+ 
+ 
+ if __name__ == '__main__':
+     sys.exit(main())
+diff --git a/relay/test/harness.py b/relay/test/harness.py
+index be9cc80..fc1897b 100644
+--- a/relay/test/harness.py
++++ b/relay/test/harness.py
+@@ -262,16 +262,18 @@ def read_proxy_v2(sock: socket.socket) -> tuple[str, int] | None:
+     sock.recv(whole)
+     return socket.inet_ntoa(header[16:20]), int.from_bytes(header[24:26], 'big')
+ 
+ 
+ class _PassthroughEcho(ThreadingHTTPServer):
+     """A company's machine in https mode: its own TLS, behind a PROXY v2 header from its frpc."""
+ 
+     daemon_threads = True
++    # A crowd comes at once. Python's default queue of 5 would cost it the kernel's retries, on this fake and not the relay.
++    request_queue_size = 512
+ 
+     def __init__(self, port: int, cert: Path, key: Path):
+         super().__init__(('127.0.0.1', port), _PassthroughEchoRequest)
+         self.tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+         self.tls.load_cert_chain(cert, key)
+         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+ 
+     def finish_request(self, request: socket.socket, client_address: tuple) -> None:
+@@ -494,20 +496,26 @@ class Stack:
+     def _start_relay(self):
+         self.relay = _Process(
+             [sys.executable, '-u', str(ROOT / 'relay/relay.py')], self.tmp / 'relay.log',
+             env=self.env, private=self.private,
+         )
+         # Readiness must work before frps starts, including when health later returns 503.
+         self._ready(self.relay, self.relay_port, '/api/v1/names/www')
+ 
+-    def restart_relay(self):
++    def stop_relay(self) -> None:
+         self.relay.stop()
++
++    def start_relay(self) -> None:
+         self._start_relay()
+ 
++    def restart_relay(self):
++        self.stop_relay()
++        self.start_relay()
++
+     def start_frps(self):
+         if self.frps is not None and self.frps.process.poll() is None:
+             return
+         replacements = {
+             'bindPort': str(self.bind_port),
+             'vhostHTTPPort': str(self.vhost_port),
+             'vhostHTTPSPort': str(self.https_port),
+             'proxyBindAddr': '"127.0.0.1"',
+diff --git a/relay/test/test_block_by_name.py b/relay/test/test_block_by_name.py
+new file mode 100644
+index 0000000..d57455f
+--- /dev/null
++++ b/relay/test/test_block_by_name.py
+@@ -0,0 +1,423 @@
++"""Blocking by name, per connection (R7.4): frps asks the plugin about every new connection to an https or stcp proxy."""
++
++import http.client
++import os
++from pathlib import Path
++import secrets
++import socket
++import sqlite3
++import ssl
++import statistics
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import unittest
++from unittest.mock import patch
++
++if __package__:
++    from . import test_peers
++    from .harness import ROOT, Answer, Stack, _wait, load_relay_module, render_caddyfile
++    from .test_sni import PASSED, PassthroughCase
++else:
++    import test_peers
++    from harness import ROOT, Answer, Stack, _wait, load_relay_module, render_caddyfile
++    from test_sni import PASSED, PassthroughCase
++
++
++M8 = test_peers.M8
++TOKEN = 'the edge token of this test'
++BLOCKED = {'reject': True, 'reject_reason': 'blocked'}
++FREED = {'reject': True, 'reject_reason': 'freed'}
++CROWD = 200
++CROWD_SECONDS = 2
++# Review Focus 5. What keeps a connection waiting is pinned without a clock in NoWaitTests.
++WAIT_LIMIT_MS = 50
++STALLED_CALLS_ALLOWED = CROWD // 20
++
++
++def peer_helpers() -> type[unittest.TestCase]:
++    """Task 6's helpers, which ask nothing of self but a TestCase's own. A name for the class at the top of this module
++    would make unittest run all of its tests here too."""
++    return test_peers.PeerTests
++
++
++def new_user_conn(proxy_name: object, proxy_type: object, metas: object = None) -> dict:
++    """A NewUserConn's content as frps sends it: user is the proxy owner's, remote_addr the visitor's."""
++    return {'user': {'user': '', 'metas': {} if metas is None else metas, 'run_id': 'a run'},
++            'proxy_name': proxy_name, 'proxy_type': proxy_type, 'remote_addr': '203.0.113.9:40000'}
++
++
++class BlockByNameTests(PassthroughCase):
++    def assert_refused_at_once(self, host: str) -> None:
++        started = time.monotonic()
++        refused = self.stack.https(host)
++        elapsed = time.monotonic() - started
++        self.assertIsNone(refused.status, refused)
++        self.assertLess(elapsed, 1, refused.error)
++
++    def peer_with_a_visitor(self, name: str) -> int:
++        """Task 6's setup: a -peer machine offers its app service, and a visitor machine opens it on the port returned."""
++        key = self.stack.bind(name)['key']
++        status, body = self.stack.api('POST', f'/api/v1/links/{name}/visitor-key', key=key)
++        self.assertEqual(status, 200, 'issuing a visitor key must answer 200')
++        service, secret, port = f'{name}-{M8}-app', secrets.token_hex(20), self.stack._free_port()
++        peer = self.stack.client(name, key, settings='network', client=f'{name}-{M8}-peer',
++                                 proxies=peer_helpers().stcp_proxies(self, (service, secret, self.stack.echo_port)))
++        self.assertTrue(peer.started(service), peer.log())
++        visitor = self.stack.client(name, None, settings='network', client=f'{name}-77aa0011-visit',
++                                    visitor_key=body['visitorKey'],
++                                    proxies=peer_helpers().visitor_proxy(self, service, secret, port))
++        self.assertTrue(_wait(lambda: 'start visitor success' in visitor.log(), 15), visitor.log())
++        return port
++
++    def test_r7_4_blocked_https_name(self) -> None:
++        self.holder('acme')
++        answer, kept = self.stack.https('acme.hornhoof.org', keep=True)
++        self.assertEqual(answer.status, 200, answer.error)
++        frps_started = Path(self.stack.env['RELAY_FRPS_STARTED']).read_text()
++        self.stack.admin('ban', 'acme')
++        self.assert_refused_at_once('acme.hornhoof.org')
++        again = kept.again('/y')
++        self.assertEqual(again.status, 200, again.error)
++        self.assertEqual(Path(self.stack.env['RELAY_FRPS_STARTED']).read_text(), frps_started)
++
++    def test_r7_4_freed_https_name(self) -> None:
++        _, key = self.holder('acme')
++        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
++        status, _ = self.stack.api('DELETE', '/api/v1/bindings/acme', key=key)
++        self.assertEqual(status, 204)
++        self.assert_refused_at_once('acme.hornhoof.org')
++
++    def test_r7_4_blocked_peers(self) -> None:
++        acme, globex = self.peer_with_a_visitor('acme'), self.peer_with_a_visitor('globex')
++        for port in (acme, globex):
++            peer_helpers().echo(self, port)
++        self.stack.admin('ban', 'acme')
++        peer_helpers().echo_closes_silent(self, acme)
++        peer_helpers().echo(self, globex)
++
++    def test_edge_never_refused(self) -> None:
++        self.holder('acme')
++        self.stack.admin('ban', 'acme')
++        self.assertEqual(self.stack.https('hornhoof.org').status, 200)
++        self.assertEqual(self.stack.https('nobody.hornhoof.org').status, 404)
++
++    def test_r6_1_a_key_change_leaves_new_connections_open(self) -> None:
++        # frps sends the metas of the tunnel's login, with the key it logged in with, for as long as that tunnel lives.
++        _, key = self.holder('acme')
++        status, _ = self.stack.api('POST', '/api/v1/links/acme/key', key=key)
++        self.assertEqual(status, 200, 'changing the key must answer 200')
++        answer = self.stack.https('acme.hornhoof.org')
++        self.assertEqual(answer.status, 200, answer.error)
++
++    def crowd(self, host: str, seconds: float) -> list[Answer]:
++        """CROWD connections, one request each, spread evenly over these seconds."""
++        answers: list[Answer | None] = [None] * CROWD
++
++        def visit(index: int) -> None:
++            answers[index] = self.stack.https(host)
++
++        visitors = [threading.Thread(target=visit, args=(index,), daemon=True) for index in range(CROWD)]
++        started = time.monotonic()
++        for index, visitor in enumerate(visitors):
++            time.sleep(max(0.0, started + index * seconds / CROWD - time.monotonic()))
++            visitor.start()
++        for visitor in visitors:
++            visitor.join(60)
++        return answers
++
++    def assert_crowd_let_through(self, answers: list[Answer | None]) -> list[dict]:
++        """Every visitor answered and none refused; the crowd's NewUserConn calls."""
++        self.assertEqual([answer for answer in answers if answer is None or answer.status != 200], [])
++        calls = [call for call in self.stack.plugin_calls()
++                 if call['op'] == 'NewUserConn' and call['proxy_name'] == 'acme']
++        self.assertEqual(len(calls), CROWD)
++        self.assertEqual([call for call in calls if call['reject']], [])
++        return calls
++
++    def test_new_user_conn_burst(self) -> None:
++        self.holder('acme')
++        calls = self.assert_crowd_let_through(self.crowd('acme.hornhoof.org', CROWD_SECONDS))
++        waits = sorted(call['ms'] for call in calls)
++        print(f'\nNewUserConn in a crowd of {CROWD}: median {statistics.median(waits)} ms, worst {waits[-1]} ms')
++        # A machine's stall lands on the few calls in flight at that moment, and calls this far apart rarely overlap. It says
++        # nothing of relay.py, whose own causes of a wait NoWaitTests and WaitsNoTraceLineShowsTests pin. A slow path in
++        # relay.py shows in every call or in many.
++        self.assertLessEqual(len([wait for wait in waits if wait >= WAIT_LIMIT_MS]), STALLED_CALLS_ALLOWED, waits[-20:])
++        traces = [line for line in self.stack.relay.log().splitlines() if line.startswith('TRACE ')]
++        self.assertGreaterEqual(len(traces), CROWD)
++        self.assertEqual([line for line in traces if 'remote_addr' in line or '127.0.0.1' in line], [])
++
++    def test_a_crowd_at_once_is_refused_nowhere(self) -> None:
++        self.holder('acme')
++        self.assert_crowd_let_through(self.crowd('acme.hornhoof.org', 0))
++
++    def test_new_user_conn_relay_down(self) -> None:
++        self.holder('acme')
++        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
++        self.stack.stop_relay()
++        down = self.stack.https('acme.hornhoof.org')
++        self.assertIsNone(down.status, down)
++        self.stack.start_relay()
++        self.assertTrue(_wait(lambda: self.stack.https('acme.hornhoof.org').status == 200, 3))
++
++
++class RelayRuleCase(unittest.TestCase):
++    def setUp(self) -> None:
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-block-'))
++        self.relay = load_relay_module()
++        self.relay.DB_PATH = str(Path(tmp) / 'relay.db')
++        self.relay.EDGE_TOKEN = TOKEN
++        self.relay.init_db()
++        self.addCleanup(self.relay.db().close)
++        self.bind('acme')
++        self.bind('my-co')
++        self.bind('data-app')
++        self.bind('globex', banned_at=1)
++
++    def bind(self, name: str, banned_at: int | None = None) -> None:
++        self.relay.write('INSERT INTO bindings (name, key_hash, created_at, banned_at) VALUES (?, ?, 0, ?)',
++                         (name, self.relay.key_hash('k'), banned_at))
++
++    def decide(self, content: dict) -> dict:
++        return self.relay.plugin('NewUserConn', content)
++
++
++class ConnectionRuleTests(RelayRuleCase):
++    """R7.4's rule on relay.py itself, for what a real frps would never send."""
++
++    def test_an_https_name_needs_a_binding_with_no_ban(self) -> None:
++        self.assertEqual(self.decide(new_user_conn('acme', 'https')), PASSED)
++        self.assertEqual(self.decide(new_user_conn('globex', 'https')), BLOCKED)
++        self.assertEqual(self.decide(new_user_conn('nobody', 'https')), FREED)
++
++    def test_a_service_belongs_to_the_link_before_its_machine(self) -> None:
++        for service, answer in (('acme-3f2a9c1b-app', PASSED), ('acme-3f2a9c1b-data', PASSED),
++                                ('my-co-3f2a9c1b-app', PASSED), ('data-app-3f2a9c1b-data', PASSED),
++                                ('globex-3f2a9c1b-app', BLOCKED), ('nobody-3f2a9c1b-data', FREED)):
++            with self.subTest(service):
++                self.assertEqual(self.decide(new_user_conn(service, 'stcp')), answer)
++
++    def test_anything_else_is_refused(self) -> None:
++        for proxy_name, proxy_type in (('acme', 'http'), ('acme', 'tcp'), ('acme', None), ('acme', 'HTTPS'),
++                                       ('acme', 'stcp'), ('acme-data', 'stcp'), ('acme-3f2a9c1b', 'stcp'),
++                                       ('acme-3f2a9c1b-other', 'stcp'), ('acme-3F2A9C1B-app', 'stcp'),
++                                       ('acme-3f2a9c1b-peer', 'stcp'), ('acme-3f2a9c1b-app', 'https'),
++                                       (None, 'https'), (7, 'https'), (['acme'], 'https'), ('', 'https')):
++            with self.subTest(proxy_name=proxy_name, proxy_type=proxy_type):
++                self.assertIs(self.decide(new_user_conn(proxy_name, proxy_type))['reject'], True)
++        self.assertIs(self.decide({})['reject'], True)
++
++    def test_the_edge_passes_on_its_token_alone(self) -> None:
++        self.assertEqual(self.decide(new_user_conn('edge', 'https', {'edge': TOKEN})), PASSED)
++        for metas in ({'edge': 'wrong'}, {'edge': ''}, {'edge': 7}, {}, 'not an object'):
++            with self.subTest(metas_are_a=type(metas).__name__):
++                self.assertIs(self.decide(new_user_conn('edge', 'https', metas))['reject'], True)
++
++    def test_a_binding_named_edge_opens_nothing_without_the_token(self) -> None:
++        self.bind('edge')
++        self.assertIs(self.decide(new_user_conn('edge', 'https'))['reject'], True)
++
++    def test_no_token_set_refuses_the_edge(self) -> None:
++        self.relay.EDGE_TOKEN = ''
++        for token in ('', TOKEN):
++            with self.subTest(token_is_empty=not token):
++                self.assertIs(self.decide(new_user_conn('edge', 'https', {'edge': token}))['reject'], True)
++
++    def test_the_edge_token_opens_only_the_edge(self) -> None:
++        self.assertEqual(self.decide(new_user_conn('globex', 'https', {'edge': TOKEN})), BLOCKED)
++
++    def test_a_key_in_the_metas_changes_nothing(self) -> None:
++        # The tunnel of a changed key still sends its old key, and a live tunnel stays (R6.1).
++        metas = {'name': 'acme', 'key': 'an old key'}
++        self.assertEqual(self.decide(new_user_conn('acme', 'https', metas)), PASSED)
++
++
++class NoWaitTests(RelayRuleCase):
++    """Review Focus 5 without a clock: every thing that could make a crowd wait on relay.py, shown not to."""
++
++    def test_an_answer_is_one_select_by_the_binding_name(self) -> None:
++        statements: list[str] = []
++        connection = self.relay.db()
++        connection.set_trace_callback(statements.append)
++        self.addCleanup(connection.set_trace_callback, None)
++        self.assertEqual(self.decide(new_user_conn('acme', 'https')), PASSED)
++        connection.set_trace_callback(None)
++        self.assertEqual(len(statements), 1, statements)
++        self.assertTrue(statements[0].startswith('SELECT'), statements)
++        steps = connection.execute(f'EXPLAIN QUERY PLAN {statements[0]}').fetchall()
++        self.assertEqual(len(steps), 1, steps)
++        self.assertIn('SEARCH bindings USING', steps[0][3])
++
++    def test_an_answer_never_reads_the_dashboard(self) -> None:
++        with patch.object(self.relay, '_dash_get', side_effect=AssertionError('a dashboard read')):
++            self.assertEqual(self.decide(new_user_conn('acme', 'https')), PASSED)
++            self.assertEqual(self.decide(new_user_conn('acme-3f2a9c1b-app', 'stcp')), PASSED)
++
++    def test_a_stalled_commit_and_a_held_route_keep_no_connection_waiting(self) -> None:
++        # A write would be refused past its budget here, and a route's lock would never come.
++        stalled = sqlite3.connect(self.relay.DB_PATH, isolation_level=None)
++        self.addCleanup(stalled.close)
++        stalled.execute('BEGIN IMMEDIATE')
++        self.addCleanup(stalled.execute, 'ROLLBACK')
++        answers = []
++
++        def answer_on_a_new_connection() -> None:
++            # A new thread opens its own SQLite connection, as for each new connection from frps to the relay.
++            answers.append(self.decide(new_user_conn('acme', 'https')))
++            self.relay.db().close()
++
++        with self.relay.writer.changed:
++            self.relay.writer.taken = True
++        with self.relay.route_lock('acme'):
++            thread = threading.Thread(target=answer_on_a_new_connection, daemon=True)
++            thread.start()
++            thread.join(5)
++        self.assertFalse(thread.is_alive(), 'the connection waited')
++        self.assertEqual(answers, [PASSED])
++
++
++class WaitsNoTraceLineShowsTests(RelayRuleCase):
++    """A trace line's ms starts once the request is read and ends before its answer goes out. frps waits for the rest too,
++    and neither wait is a matter of how loaded the machine is, so these tests hold no clock."""
++
++    def test_an_answer_leaves_at_once_on_a_kept_connection(self) -> None:
++        # An answer is two writes, its headers and its body. Under Nagle's rule the body waits for the ACK of the headers,
++        # which the receiver delays by 40 ms: measured 44 ms per answer, on the connections frps keeps.
++        no_delay = []
++
++        class Watched(self.relay.Handler):
++            def do_GET(self) -> None:
++                no_delay.append(self.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
++                super().do_GET()
++
++        with self.relay.RelayServer(('127.0.0.1', 0), Watched) as server:
++            threading.Thread(target=server.handle_request, daemon=True).start()
++            client = http.client.HTTPConnection(*server.server_address, timeout=10)
++            self.addCleanup(client.close)
++            client.request('GET', '/nowhere')
++            self.assertEqual(client.getresponse().status, 404)
++        self.assertEqual(len(no_delay), 1)
++        self.assertTrue(no_delay[0], 'the body of an answer waits for the ACK of its headers')
++
++    def test_a_crowd_of_new_connections_fits_the_queue(self) -> None:
++        # frps keeps two connections to the relay and opens one more for each call beyond those, so a crowd is that many at
++        # once. Past the queue the kernel drops one, and its retry comes 200 ms to 1 s later. Nothing accepts here, so
++        # all of them must fit.
++        with self.relay.RelayServer(('127.0.0.1', 0), self.relay.Handler) as server:
++            connections = [socket.create_connection(server.server_address, timeout=5) for _ in range(CROWD)]
++            for connection in connections:
++                connection.close()
++
++
++class AdminCase(unittest.TestCase):
++    def setUp(self) -> None:
++        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-ban-')))
++        self.env = dict(os.environ, RELAY_DB=str(self.tmp / 'relay.db'), RELAY_CADDYFILE=str(self.tmp / 'Caddyfile'))
++        (self.tmp / 'Caddyfile').write_text('')
++
++
++class BanCommandTests(AdminCase):
++    def admin(self, *args: str) -> list[str]:
++        finished = subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args], env=self.env,
++                                  check=True, capture_output=True, text=True, timeout=30)
++        return finished.stdout.splitlines()
++
++    def ban_reason(self, name: str) -> str:
++        with sqlite3.connect(self.env['RELAY_DB']) as connection:
++            return connection.execute('SELECT ban_reason FROM bindings WHERE name = ?', (name,)).fetchone()[0]
++
++    def test_ban_cut_prints_restart(self) -> None:
++        self.assertEqual(self.admin('ban', 'acme', '--cut')[-1], 'restart frps')
++        self.assertNotIn('restart frps', self.admin('ban', 'globex'))
++
++    def test_cut_is_no_part_of_the_reason(self) -> None:
++        self.admin('ban', 'acme', 'stolen', 'machine', '--cut')
++        self.assertEqual(self.ban_reason('acme'), 'stolen machine')
++        self.admin('ban', 'globex', '--cut')
++        self.assertEqual(self.ban_reason('globex'), 'blocked by the relay operator')
++
++
++class OperatorCommandTests(AdminCase):
++    """hornhoof-relay itself, its own text, with stand-ins for what only the droplet has."""
++
++    def setUp(self) -> None:
++        super().setUp()
++        self.calls = self.tmp / 'systemctl-calls'
++        stand_ins = self.tmp / 'bin'
++        stand_ins.mkdir()
++        (self.tmp / 'caddy').mkdir()
++        (stand_ins / 'runuser').write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
++        (stand_ins / 'systemctl').write_text(f'#!/bin/sh\necho "$@" >> {self.calls}\n')
++        for stand_in in stand_ins.iterdir():
++            stand_in.chmod(0o755)
++        self.env['PATH'] = f'{stand_ins}:{self.env["PATH"]}'
++        self.script = self.tmp / 'hornhoof-relay'
++        self.script.write_text(render_caddyfile((ROOT / 'relay/hornhoof-relay').read_text(), [
++            ('/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py', f'{sys.executable} {ROOT}/relay/relay.py'),
++            ('/etc/caddy', str(self.tmp / 'caddy')),
++        ], file='relay/hornhoof-relay'))
++
++    def operator(self, *args: str) -> subprocess.CompletedProcess:
++        return subprocess.run(['sh', str(self.script), *args], env=self.env, capture_output=True, text=True,
++                              timeout=30)
++
++    def systemctl_calls(self) -> list[str]:
++        return self.calls.read_text().splitlines() if self.calls.exists() else []
++
++    def test_a_ban_with_cut_restarts_frps_after_caddys_list(self) -> None:
++        done = self.operator('ban', 'acme', '--cut')
++        self.assertEqual(done.returncode, 0, done.stderr)
++        self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
++        self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
++
++    def test_a_ban_without_cut_restarts_nothing(self) -> None:
++        done = self.operator('ban', 'acme', 'restart', 'frps')
++        self.assertEqual(done.returncode, 0, done.stderr)
++        self.assertEqual(self.systemctl_calls(), ['reload caddy'])
++
++    def test_the_operator_still_reads_what_the_relay_says(self) -> None:
++        self.assertIn('ban acme: done', self.operator('ban', 'acme').stdout)
++        self.assertIn('acme  created', self.operator('list').stdout)
++
++    def test_a_ban_the_store_refused_restarts_nothing(self) -> None:
++        self.env['RELAY_DB'] = str(self.tmp / 'no-such-folder' / 'relay.db')
++        done = self.operator('ban', 'acme', '--cut')
++        self.assertNotEqual(done.returncode, 0)
++        self.assertEqual(self.systemctl_calls(), [])
++
++
++class RefusedVisitorAddressTests(unittest.TestCase):
++    def refused_connection(self, stack: Stack, host: str) -> int:
++        """The local port of a connection frps closes during its handshake, which an Answer cannot carry."""
++        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
++        context.check_hostname = False
++        context.verify_mode = ssl.CERT_NONE
++        plain = socket.create_connection(('127.0.0.1', stack.https_port), timeout=10)
++        self.addCleanup(plain.close)
++        port = plain.getsockname()[1]
++        with self.assertRaises(OSError):
++            context.wrap_socket(plain, server_hostname=host, do_handshake_on_connect=True)
++        return port
++
++    def test_a_refused_visitor_leaves_no_address_on_the_droplet(self) -> None:
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-block-logs-'))
++        stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
++        company = stack.client('acme', stack.bind('acme')['key'], settings='network', client='acme-aaaaaaaa-link',
++                               proxy_type='https')
++        self.assertTrue(company.started('acme'), company.log())
++        stack.admin('ban', 'acme')
++        visitor_port = self.refused_connection(stack, 'acme.hornhoof.org')
++        refusals = [call for call in stack.plugin_calls() if call['op'] == 'NewUserConn' and call['reject']]
++        self.assertEqual([call['proxy_name'] for call in refusals], ['acme'])
++        for name, process in (('frps', stack.frps), ('edge', stack.edge), ('caddy', stack.caddy),
++                              ('relay', stack.relay)):
++            with self.subTest(process=name):
++                self.assertNotIn(f'127.0.0.1:{visitor_port}', process.log())
++                self.assertNotIn(f'"remote_port":"{visitor_port}"', process.log())
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/relay/test/test_sni.py b/relay/test/test_sni.py
+index 73ee523..ffb2d87 100644
+--- a/relay/test/test_sni.py
++++ b/relay/test/test_sni.py
+@@ -357,21 +357,36 @@ class VisitorAddressTests(unittest.TestCase):
+         company = stack.client('acme', stack.bind('acme')['key'], settings='network', client='acme-aaaaaaaa-link',
+                                proxy_type='https')
+         self.assertTrue(company.started('acme'), company.log())
+         http_mode = stack.client('initech', stack.bind('initech')['key'], via='caddy')
+         self.assertTrue(http_mode.started('initech'), http_mode.log())
+         for host in ('acme.hornhoof.org', 'initech.hornhoof.org', 'hornhoof.org', 'nobody.hornhoof.org'):
+             answer = stack.https(host)
+             self.assertIsNotNone(answer.status, answer.error)
+-            visitor = f'127.0.0.1:{answer.local_port}'
++            # Caddy's JSON names the address and the port apart.
+             for name, process in (('frps', stack.frps), ('edge', stack.edge), ('caddy', stack.caddy),
+                                   ('relay', stack.relay)):
+                 with self.subTest(host=host, process=name):
+-                    self.assertNotIn(visitor, process.log())
++                    self.assertNotIn(f'127.0.0.1:{answer.local_port}', process.log())
++                    self.assertNotIn(f'"remote_port":"{answer.local_port}"', process.log())
++
++    def test_caddy_names_a_visitor_in_the_form_those_checks_look_for(self) -> None:
++        # As the README says, a request that fails on its way to the relay is the one that leaves an address in Caddy's log.
++        # With relay.py down nothing comes through frps, so this one goes to Caddy itself. If Caddy changes its form, the
++        # checks above go on passing and see nothing, so this one fails first.
++        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-502-'))
++        stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
++        stack.stop_relay()
++        sock = _tls_socket(stack.caddy_https_port, 'hornhoof.org')
++        direct = KeptConnection(sock, 'hornhoof.org', [])
++        self.addCleanup(direct.close)
++        answer = direct.ask('/api/v1/health')
++        self.assertEqual(answer.status, 502, answer.error)
++        self.assertTrue(_wait(lambda: f'"remote_port":"{answer.local_port}"' in stack.caddy.log(), 5), stack.caddy.log())
+ 
+ 
+ class CaddyBehindFrpsTests(PassthroughCase):
+     @unittest.skipUnless(sys.platform == 'linux', 'the kernel lists its sockets this way on Linux only')
+     def test_caddy_https_on_loopback_only(self) -> None:
+         self.assertEqual(listeners_on(self.stack.caddy_https_port), ['127.0.0.1'])
+ 
+     def droplet_servers(self) -> list[dict]:
+
+
+
+# Whole file on the Hornhoof side for Part 2: apps/server/src/modules/link/relay.ts
+
+import { isLinkName } from '@hornhoof/protocol/link';
+import { z } from 'zod';
+import { ApiError } from '../../errors.js';
+
+/* How long one call to the relay may take before Hornhoof says it does not answer. */
+const WAIT_MS = 10_000;
+
+export type NameCheck = { name: string; free: boolean; reason?: 'taken' | 'reserved' | 'invalid' };
+
+const Check = z.object({ name: z.string(), free: z.boolean(), reason: z.enum(['taken', 'reserved', 'invalid']).optional() });
+
+/* What the relay gives for a new link: its name and an https address that starts with it, the key that removes it,
+   and what the tunnel needs. */
+const Bound = z
+  .object({
+    name: z.string().refine(isLinkName),
+    url: z.url({ protocol: /^https$/ }).transform(url => url.replace(/\/+$/, '')),
+    key: z.string().min(16).max(1000),
+    tunnel: z.record(z.string(), z.unknown()),
+  })
+  .refine(b => new URL(b.url).hostname.startsWith(`${b.name}.`) && new URL(b.url).pathname === '/');
+export type Bound = z.infer<typeof Bound>;
+
+const Count = z.number().int().nonnegative();
+const SyncRecord = z.object({ state: z.enum(['on', 'off']), copy: z.string().nullable(), epoch: Count, generation: Count, at: Count.nullable() });
+export type SyncRecord = z.infer<typeof SyncRecord>;
+
+/* The route answer may grow fields (R2), so extra ones are let through; every field read here must be right. */
+const RouteBody = z.object({
+  state: z.enum(['held', 'empty']),
+  client: z.string().nullable(),
+  since: Count,
+  generation: Count,
+  relayStarted: Count,
+  evictionBound: Count,
+  sync: SyncRecord,
+});
+export type Route = ({ known: true } & z.infer<typeof RouteBody>) | { known: false; why: 'unreachable' | 'slow' | 'refused' | 'malformed' };
+
+export type SyncPost = { client: string; generation: number; state: 'on' | 'off'; copy: string | null; epoch: number };
+export type SyncResult = { stored: true; sync: SyncRecord } | { stored: false; why: 'not_holder' | 'stale_epoch' | 'unknown' };
+
+/* A relay from before passthrough has no such field, and that reads as not passing through. */
+const Health = z.object({ ok: z.literal(true), frps: z.literal(true), relayStarted: Count, passthrough: z.boolean().default(false) });
+export type Health = { up: boolean; relayStarted: number | null; passthrough: boolean };
+const DOWN: Health = { up: false, relayStarted: null, passthrough: false };
+
+const KeyAnswer = z.object({ key: z.string().min(16).max(1000) });
+const VisitorKeyAnswer = z.object({ visitorKey: z.string().min(16).max(1000) });
+
+/* How long a read of the relay's route or sync answer waits when the caller does not say. */
+const READ_MS = 2000;
+
+type Reply = { res: Response } | { failed: 'slow' | 'unreachable' };
+
+const unreachable = () => new ApiError(503, 'unavailable', 'hornhoof.org does not answer now. Try again in a few minutes.', 'relay_unreachable');
+const invalid = () => new ApiError(400, 'validation', 'A link name takes 1 to 63 lowercase Latin letters, digits and hyphens, with no hyphen at either end.', 'link_invalid');
+const busy = () => new ApiError(429, 'too_many', 'hornhoof.org got too many requests from here. Wait a little and try again.');
+
+/* The relay's word on a name it refused, as it gives it. */
+async function reasonOf(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: unknown; reason?: unknown } | null;
+  const said = body?.reason ?? body?.error;
+  return typeof said === 'string' ? said : typeof (said as { reason?: unknown })?.reason === 'string' ? (said as { reason: string }).reason : '';
+}
+
+/* The relay's 409 on a sync post names why; any other word reads as unknown. */
+async function conflictOf(res: Response): Promise<'not_holder' | 'stale_epoch' | 'unknown'> {
+  const said = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error;
+  return said === 'not_holder' || said === 'stale_epoch' ? said : 'unknown';
+}
+
+/* The stored record carries the post's own fields and nothing else changed them. */
+const echoes = (stored: SyncRecord, post: SyncPost): boolean =>
+  stored.state === post.state && stored.copy === post.copy && stored.epoch === post.epoch && stored.generation === post.generation;
+
+/* The relay hands out public links like acme.hornhoof.org and carries their traffic to this server through the
+   tunnel. Only the server talks to it: the browser asks Hornhoof, never the relay. */
+export class Relay {
+  constructor(private readonly base: string) {}
+
+  /* Never throws: a call that got no answer says whether it was too slow or could not connect. */
+  private async attempt(method: string, path: string, opts: { body?: object; key?: string }, timeoutMs: number): Promise<Reply> {
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (opts.body) headers['content-type'] = 'application/json';
+    if (opts.key) headers.authorization = `Bearer ${opts.key}`;
+    try {
+      const res = await fetch(`${this.base}/api/v1${path}`, { method, headers, body: opts.body && JSON.stringify(opts.body), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+      /* The body is read here, on a clone, so a stall in it counts as slow and a cut as unreachable. */
+      await res.clone().text();
+      return { res };
+    } catch (error) {
+      return { failed: (error as Error).name === 'TimeoutError' ? 'slow' : 'unreachable' };
+    }
+  }
+
+  private async call(method: string, path: string, opts: { body?: object; key?: string } = {}): Promise<Response> {
+    const reply = await this.attempt(method, path, opts, WAIT_MS);
+    if ('failed' in reply) throw unreachable();
+    return reply.res;
+  }
+
+  /* Who holds the link's route. Anything but a clean answer reads as unknown, never as empty (R2). */
+  async route(name: string, key: string, timeoutMs = READ_MS): Promise<Route> {
+    const reply = await this.attempt('GET', `/links/${encodeURIComponent(name)}/route`, { key }, timeoutMs);
+    if ('failed' in reply) return { known: false, why: reply.failed };
+    if (reply.res.status !== 200) return { known: false, why: 'refused' };
+    const body = RouteBody.safeParse(await reply.res.json().catch(() => null));
+    return body.success ? { known: true, ...body.data } : { known: false, why: 'malformed' };
+  }
+
+  /* Posts the sync record. It counts as stored only when the relay answers with exactly what was posted. */
+  async setSync(name: string, key: string, post: SyncPost, timeoutMs = READ_MS): Promise<SyncResult> {
+    const reply = await this.attempt('POST', `/links/${encodeURIComponent(name)}/sync`, { key, body: post }, timeoutMs);
+    if ('failed' in reply) return { stored: false, why: 'unknown' };
+    if (reply.res.status === 409) return { stored: false, why: await conflictOf(reply.res) };
+    if (reply.res.status !== 200) return { stored: false, why: 'unknown' };
+    const answer = z.object({ sync: SyncRecord }).safeParse(await reply.res.json().catch(() => null));
+    return answer.success && echoes(answer.data.sync, post) ? { stored: true, sync: answer.data.sync } : { stored: false, why: 'unknown' };
+  }
+
+  /* Whether frps takes logins, since when the relay runs, and whether it routes by TLS server name. */
+  async health(timeoutMs = READ_MS): Promise<Health> {
+    const reply = await this.attempt('GET', '/health', {}, timeoutMs);
+    if ('failed' in reply || reply.res.status !== 200) return DOWN;
+    const body = Health.safeParse(await reply.res.json().catch(() => null));
+    return body.success ? { up: true, relayStarted: body.data.relayStarted, passthrough: body.data.passthrough } : DOWN;
+  }
+
+  /* A new link key; the old one stops working at once. */
+  async changeKey(name: string, key: string): Promise<string> {
+    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/key`, key, KeyAnswer)).key;
+  }
+
+  /* A new visitor key for the link, replacing the one before. */
+  async visitorKey(name: string, key: string): Promise<string> {
+    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/visitor-key`, key, VisitorKeyAnswer)).visitorKey;
+  }
+
+  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>): Promise<T> {
+    const res = await this.call('POST', path, { key });
+    if (res.status === 429) throw busy();
+    const parsed = res.ok ? answer.safeParse(await res.json().catch(() => null)) : null;
+    if (!parsed?.success) throw unreachable();
+    return parsed.data;
+  }
+
+  /* A name no link can have is answered here, without asking. */
+  async check(name: string): Promise<NameCheck> {
+    if (!isLinkName(name)) return { name, free: false, reason: 'invalid' };
+    const res = await this.call('GET', `/names/${name}`);
+    if (res.status === 429) throw busy();
+    const checked = res.ok ? Check.safeParse(await res.json().catch(() => null)) : null;
+    if (!checked?.success) throw unreachable();
+    return checked.data;
+  }
+
+  /* A new link with this name, or with a long random one when none is given. */
+  async bind(name?: string): Promise<Bound> {
+    if (name !== undefined && !isLinkName(name)) throw invalid();
+    const res = await this.call('POST', '/bindings', { body: name === undefined ? {} : { name } });
+    if (res.status === 409 || res.status === 400) {
+      if ((await reasonOf(res)) === 'reserved') throw new ApiError(400, 'validation', 'This name is kept for hornhoof.org itself. Pick another one.', 'link_reserved');
+      if (res.status === 409) throw new ApiError(409, 'conflict', 'This link is taken already. Pick another name.', 'link_taken');
+      throw invalid();
+    }
+    if (res.status === 429) throw busy();
+    const bound = res.status === 201 ? Bound.safeParse(await res.json().catch(() => null)) : null;
+    if (!bound?.success) throw unreachable();
+    return bound.data;
+  }
+
+  /* Takes the link away. One the relay no longer knows, or no longer takes this key for, is gone already. */
+  async unbind(name: string, key: string): Promise<void> {
+    const res = await this.call('DELETE', `/bindings/${encodeURIComponent(name)}`, { key });
+    if (res.ok || [401, 403, 404].includes(res.status)) return;
+    if (res.status === 429) throw busy();
+    throw unreachable();
+  }
+}
+
+
+# Whole file on the Hornhoof side for Part 2: apps/server/test/fake-relay.ts
+
+import type { AddressInfo } from 'node:net';
+import { randomBytes } from 'node:crypto';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { onTestFinished } from 'vitest';
+import { z } from 'zod';
+
+/* Who holds a name's route, and since when. Unix seconds. The generation counts the registrations let through. */
+export type FakeRoute = { state: 'held' | 'empty'; client: string | null; since: number; generation: number };
+export type FakeSync = { state: 'on' | 'off'; copy: string | null; epoch: number; generation: number; at: number | null };
+type Registered = { ok: true; generation: number } | { ok: false; reason: 'router config conflict' | 'already online' };
+
+export type FakeRelay = {
+  /* The address to give Hornhoof as RELAY_URL. */
+  url: string;
+  /* The links it handed out, by name, with the key that removes each. */
+  bindings: Map<string, { key: string }>;
+  reserved: Set<string>;
+  /* Every request it got, as "METHOD /path". */
+  calls: string[];
+  /* While set, it answers 502 to everything, as its proxy does when the service is down. */
+  down: boolean;
+  /* The address it gives a new link. */
+  urlFor: (name: string) => string;
+  routes: Map<string, FakeRoute>;
+  syncs: Map<string, FakeSync>;
+  visitorKeys: Map<string, string>;
+  /* While set, route, sync and health answer 503, and so do the check and the binding of a requested name. */
+  frpsDown: boolean;
+  relayStarted: number;
+  /* True: health says the relay routes by TLS server name (R4.1). */
+  passthrough: boolean;
+  evictionBound: number;
+  /* How the route answer is spoiled: not JSON, one extra field, the state "gone", no answer at all. */
+  routeAnswer: 'contract' | 'garbage' | 'extra' | 'badstate' | 'hang';
+  /* A registration of a name by a client, as the plugin lets it through or refuses it. */
+  register: (name: string, client: string) => Registered;
+  /* The holder of a name was evicted or stopped. */
+  drop: (name: string) => void;
+  /* Every route empty, generations and syncs kept, relayStarted now. */
+  restartFrps: () => void;
+};
+
+const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const newKey = () => randomBytes(24).toString('base64url');
+const NO_SYNC: FakeSync = { state: 'off', copy: null, epoch: 0, generation: 0, at: null };
+const UNKNOWN = { error: 'unknown', message: 'The relay cannot tell whether the route is live.' };
+
+/* The sync record R2.4 takes: exactly these fields, a copy only when the sync is on. */
+const text = z.string().min(1).max(100);
+const SyncRecord = z
+  .strictObject({ client: text, generation: z.int().min(1), state: z.enum(['on', 'off']), copy: text.nullable(), epoch: z.int().min(1) })
+  .refine(record => record.copy !== null || record.state === 'off');
+type SyncRecord = z.infer<typeof SyncRecord>;
+
+const holds = (routes: Map<string, FakeRoute>, name: string) => routes.get(name)?.state === 'held';
+
+function register(routes: Map<string, FakeRoute>, name: string, client: string): Registered {
+  /* frps meets a live client id at Login, before any registration of a name meets a held route. */
+  if ([...routes.values()].some(route => route.state === 'held' && route.client === client)) return { ok: false, reason: 'already online' };
+  if (holds(routes, name)) return { ok: false, reason: 'router config conflict' };
+  const generation = (routes.get(name)?.generation ?? 0) + 1;
+  routes.set(name, { state: 'held', client, since: nowSeconds(), generation });
+  return { ok: true, generation };
+}
+
+function drop(routes: Map<string, FakeRoute>, name: string): void {
+  const route = routes.get(name);
+  if (route && holds(routes, name)) routes.set(name, { ...route, state: 'empty', client: null, since: nowSeconds() });
+}
+
+/* The record the holder's post sets, or why the relay refuses it. */
+function acceptSync(relay: FakeRelay, name: string, record: SyncRecord): FakeSync | 'not_holder' | 'stale_epoch' {
+  const route = relay.routes.get(name);
+  if (route?.state !== 'held' || route.client !== record.client || route.generation !== record.generation) return 'not_holder';
+  if (record.epoch <= (relay.syncs.get(name) ?? NO_SYNC).epoch) return 'stale_epoch';
+  const stored: FakeSync = { state: record.state, copy: record.copy, epoch: record.epoch, generation: route.generation, at: nowSeconds() };
+  relay.syncs.set(name, stored);
+  return stored;
+}
+
+/* A binding nobody registered has no route yet. The relay dates it from the binding, which a binding set by a test
+   does not record, so its since is 0. */
+const NO_ROUTE = { state: 'empty', client: null, since: 0, generation: 0 } as const;
+
+const routeBody = (relay: FakeRelay, name: string) => ({
+  ...(relay.routes.get(name) ?? NO_ROUTE),
+  relayStarted: relay.relayStarted,
+  evictionBound: relay.evictionBound,
+  sync: relay.syncs.get(name) ?? NO_SYNC,
+});
+
+const spoiled = (mode: FakeRelay['routeAnswer'], body: object): unknown =>
+  mode === 'garbage' ? '{not json' : mode === 'extra' ? { ...body, surprise: true } : mode === 'badstate' ? { ...body, state: 'gone' } : body;
+
+/* What the relay gives the tunnel client, as relay.py builds it: the frpc image and config, and its parts. */
+const tunnelFor = (name: string, key: string) => ({
+  image: 'fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e',
+  configPath: '/etc/frp/frpc.toml',
+  args: ['-c', '/etc/frp/frpc.toml'],
+  config: `serverAddr = "hornhoof.test"\nmetadatas.name = "${name}"\nmetadatas.key = "${key}"\n`,
+  serverAddr: 'hornhoof.test',
+  serverPort: 443,
+  protocol: 'wss',
+  proxyName: name,
+  subdomain: name,
+  target: 'app:8080',
+});
+
+function newRelay(): FakeRelay {
+  const relay: FakeRelay = {
+    url: '',
+    bindings: new Map(),
+    reserved: new Set(['www', 'api']),
+    calls: [],
+    down: false,
+    urlFor: name => `https://${name}.hornhoof.test`,
+    routes: new Map(),
+    syncs: new Map(),
+    visitorKeys: new Map(),
+    frpsDown: false,
+    relayStarted: nowSeconds(),
+    passthrough: true,
+    evictionBound: 30,
+    routeAnswer: 'contract',
+    register: (name, client) => register(relay.routes, name, client),
+    drop: name => drop(relay.routes, name),
+    restartFrps: () => {
+      [...relay.routes.keys()].forEach(name => drop(relay.routes, name));
+      relay.relayStarted = nowSeconds();
+    },
+  };
+  return relay;
+}
+
+/* What the relay says about a name. */
+function nameRules(relay: FakeRelay) {
+  /* A reason the relay knows without asking frps. */
+  const knownReason = (name: string) =>
+    !NAME.test(name) || name.slice(2, 4) === '--' ? 'invalid' : relay.reserved.has(name) ? 'reserved' : relay.bindings.has(name) ? 'taken' : undefined;
+  return {
+    /* A name with no binding is free only when frps shows no route for it (R1.5). */
+    check: (name: string) => {
+      const reason = knownReason(name) ?? (holds(relay.routes, name) ? 'taken' : undefined);
+      return reason ? { name, free: false, reason } : { name, free: true };
+    },
+    cannotTell: (name: string) => relay.frpsDown && !knownReason(name),
+  };
+}
+
+/* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
+export async function fakeRelay(): Promise<FakeRelay> {
+  const app = Fastify({ forceCloseConnections: true });
+  const relay = newRelay();
+  const { check, cannotTell } = nameRules(relay);
+  /* A link call needs its binding and its key: 404 for an unknown name, 401 for a wrong key. */
+  const authorize = async (req: FastifyRequest<{ Params: { name: string } }>, reply: FastifyReply) => {
+    const binding = relay.bindings.get(req.params.name);
+    if (!binding) return reply.code(404).send({ error: 'not_found', message: `There is no binding ${req.params.name}.` });
+    if (req.headers.authorization !== `Bearer ${binding.key}`) return reply.code(401).send({ error: 'unauthorized', message: 'Send the binding key as Authorization: Bearer <key>.' });
+  };
+
+  app.addHook('onRequest', async (req, reply) => {
+    relay.calls.push(`${req.method} ${req.url}`);
+    if (relay.down) return reply.code(502).send('Bad Gateway');
+  });
+  app.get<{ Params: { name: string } }>('/api/v1/names/:name', async (req, reply) => (cannotTell(req.params.name) ? reply.code(503).send(UNKNOWN) : check(req.params.name)));
+  app.post<{ Body: { name?: string } | undefined }>('/api/v1/bindings', async (req, reply) => {
+    if (req.body?.name !== undefined && cannotTell(req.body.name)) return reply.code(503).send(UNKNOWN);
+    const name = req.body?.name ?? randomBytes(12).toString('hex');
+    const found = check(name);
+    if (!found.free) return reply.code(found.reason === 'invalid' ? 400 : 409).send({ error: found.reason, message: `${name} is ${found.reason}.` });
+    const key = newKey();
+    relay.bindings.set(name, { key });
+    if (!relay.routes.has(name)) relay.routes.set(name, { state: 'empty', client: null, since: nowSeconds(), generation: 0 });
+    return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: tunnelFor(name, key) });
+  });
+  app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', { preHandler: authorize }, async (req, reply) => {
+    relay.bindings.delete(req.params.name);
+    relay.visitorKeys.delete(req.params.name);
+    return reply.code(204).send();
+  });
+  app.get<{ Params: { name: string } }>('/api/v1/links/:name/route', { preHandler: authorize }, async (req, reply) => {
+    if (relay.frpsDown) return reply.code(503).send(UNKNOWN);
+    if (relay.routeAnswer === 'hang') return reply.hijack();
+    return reply.type('application/json').send(spoiled(relay.routeAnswer, routeBody(relay, req.params.name)));
+  });
+  app.post<{ Params: { name: string }; Body: unknown }>('/api/v1/links/:name/sync', { preHandler: authorize }, async (req, reply) => {
+    const record = SyncRecord.safeParse(req.body);
+    if (!record.success) return reply.code(400).send({ error: 'invalid' });
+    if (relay.frpsDown) return reply.code(503).send(UNKNOWN);
+    const stored = acceptSync(relay, req.params.name, record.data);
+    return typeof stored === 'string' ? reply.code(409).send({ error: stored }) : { sync: stored };
+  });
+  app.post<{ Params: { name: string } }>('/api/v1/links/:name/key', { preHandler: authorize }, async req => {
+    const key = newKey();
+    relay.bindings.set(req.params.name, { key });
+    return { key };
+  });
+  app.post<{ Params: { name: string } }>('/api/v1/links/:name/visitor-key', { preHandler: authorize }, async req => {
+    const visitorKey = newKey();
+    relay.visitorKeys.set(req.params.name, visitorKey);
+    return { visitorKey };
+  });
+  app.get('/api/v1/health', async (_req, reply) =>
+    relay.frpsDown ? reply.code(503).send({ ok: false, frps: false }) : { ok: true, frps: true, relayStarted: relay.relayStarted, passthrough: relay.passthrough },
+  );
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  relay.url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  onTestFinished(() => app.close());
+  return relay;
+}

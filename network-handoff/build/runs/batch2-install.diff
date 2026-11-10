@@ -1,0 +1,3133 @@
+# Review package: batch 2, slice install
+
+## fa5e1090 Stop the app before the database copy, remove the services a build does not name, and take over an update an old updater began
+
+An old updater can hand an update to the new build's own. A restart in the middle goes on from where it stood, the time limit ends the installer's whole process group, and a failed update rolls back.
+
+Ruling: a restart at step backup starts the stopped app first; a restart during the second copy stays on the hand-over path; the time limit kills the installer's whole group; 'This build's updater goes on with the update.' goes to status.json before applied - why: each is needed for the update's promise, tested, and judged sound by review - cost if wrong: one more dump or a slower restart.
+
+---
+ apps/server/test/updater-rev1.sh      | 602 ++++++++++++++++++++++++++++++++++
+ apps/server/test/updater-stubs/docker |  95 +++++-
+ apps/server/test/updater.test.ts      | 401 +++++++++++++++++++++-
+ apps/updater/updater.sh               | 228 +++++++++++--
+ 4 files changed, 1276 insertions(+), 50 deletions(-)
+
+diff --git a/apps/server/test/updater-rev1.sh b/apps/server/test/updater-rev1.sh
+new file mode 100755
+index 00000000..7283cba0
+--- /dev/null
++++ b/apps/server/test/updater-rev1.sh
+@@ -0,0 +1,602 @@
++#!/usr/bin/env bash
++# The updater from before revision 2, kept so the tests run a move-in under it.
++# Hornhoof updater: swaps this server's images when someone updates from the web app.
++#
++#   updater.sh          watch the control folder for update requests
++#   updater.sh --once   handle the waiting request, if any, then exit
++#
++# The app writes request.json {id, version, tag, digest, nodeDigest, updaterDigest} into the control folder; this
++# writes status.json {id, version, state, step, log, at} and touches alive. An update downloads the build by the
++# digest the app read for it, and every image that build's compose file names, the node and updater images by their
++# digests too, while the old server keeps working. Only then it saves the database, runs that build's own installer,
++# which starts exactly these images, and waits for the new server to answer with the build's commit. If it does not,
++# the images that ran before go back, and the database goes back to the saved copy first when the new build added
++# migrations to it, since the old build does not know them, with the public link's settings kept next to the copy.
++# After each install, containers of services the build's compose file does not name go. An updater stopped during an
++# update goes on with it when it starts again. The updater holds the Docker socket, so it takes nothing from the
++# request but the tag, which must be a plain image tag, and the digests, and only runs images of HORNHOOF_IMAGE and of
++# its -node and -updater repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's
++# in its image.
++#
++# It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
++# the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
++# computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
++set -euo pipefail
++
++CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
++SERVER_DIR="${HORNHOOF_SERVER_DIR:-}"
++IMAGE="${HORNHOOF_IMAGE:-ghcr.io/invariant0x/hornhoof}"
++NODE_IMAGE="${IMAGE}-node"
++UPDATER_IMAGE="${IMAGE}-updater"
++HEALTH_URL="${HORNHOOF_HEALTH_URL:-http://app:8080/api/health}"
++HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
++KEEP_BACKUPS=3
++# The image commands on the computer run in: the updater's own, which compose names.
++COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
++# The longest a command on the computer runs, in seconds, and how many characters of its output go back.
++COMPUTER_MAX=1800
++COMPUTER_OUTPUT=30000
++
++ID=''
++VERSION=''
++STATE=''
++STEP=''
++LOG=''
++WORK=''
++# The update being run: its tag, the digests of its app, node and updater images, empty for one it takes by the tag,
++# the build to go back to and the images it ran, the commit the new server answers with, how many migrations the
++# database had before, and the copy of it.
++TAG=''
++DIGEST=''
++NODE_DIGEST=''
++UPDATER_DIGEST=''
++PREVIOUS=''
++BACK_APP=''
++BACK_NODE=''
++BACK_UPDATER=''
++TARGET=''
++BEFORE=''
++BACKUP=''
++
++say() {
++  printf '%s\n' "$*"
++  LOG="$LOG$*
++"
++}
++
++# Written whole and then moved, so the app never reads half a file.
++write_status() {
++  STATE=$1
++  STEP=$2
++  jq -n --arg id "$ID" --arg version "$VERSION" --arg state "$STATE" --arg step "$STEP" \
++    --arg log "$(printf '%s' "$LOG" | tail -n 40)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
++    '{id: $id, version: $version, state: $state, step: $step, log: $log, at: $at}' > "$CONTROL/status.json.new"
++  mv "$CONTROL/status.json.new" "$CONTROL/status.json"
++}
++
++step() {
++  say "$2"
++  write_status running "$1"
++}
++
++# The update ends, and the note about it goes.
++stop_with() {
++  say "$2"
++  write_status "$1" "${3:-$STEP}"
++  forget
++}
++
++compose() { (cd "$SERVER_DIR" && docker compose "$@"); }
++
++env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
++
++plain_tag() {
++  case "$1" in '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) return 1 ;; esac
++  [ "${#1}" -le 128 ]
++}
++
++# sha256: and 64 hex digits, the way a registry names one exact build.
++plain_digest() {
++  case "$1" in sha256:*) ;; *) return 1 ;; esac
++  case "${1#sha256:}" in *[!0-9a-f]*) return 1 ;; esac
++  [ "${#1}" -eq 71 ]
++}
++
++digest_or_none() { [ -z "$1" ] || plain_digest "$1"; }
++
++# own <repository> <image>: the image is one of that repository's, by a plain tag or by a digest.
++own() {
++  case "$2" in
++    "$1"@*) plain_digest "${2#"$1"@}" ;;
++    "$1":*) plain_tag "${2#"$1":}" ;;
++    *) return 1 ;;
++  esac
++}
++
++# pinned <repository> <digest>: an image of the update by its digest, by the update's tag when it has none.
++pinned() { if [ -n "$2" ]; then printf '%s@%s' "$1" "$2"; else printf '%s:%s' "$1" "$TAG"; fi; }
++
++# The updater's own note of the update it runs, so an updater that was stopped can go on with it. It lies next to
++# the backups, where the app cannot write.
++note() {
++  mkdir -p "$SERVER_DIR/backups"
++  (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg node "$NODE_DIGEST" \
++    --arg updater "$UPDATER_DIGEST" --arg previous "$PREVIOUS" --arg back_app "$BACK_APP" --arg back_node "$BACK_NODE" \
++    --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" \
++    '{id: $id, version: $version, tag: $tag, digest: $digest, node: $node, updater: $updater, previous: $previous,
++      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup}' \
++    > "$SERVER_DIR/backups/update.json.new")
++  mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
++}
++
++# Reads the note of the update with this ID; fails when there is none.
++recall() {
++  local file="$SERVER_DIR/backups/update.json"
++  [ -n "$SERVER_DIR" ] && [ -f "$file" ] && [ "$(jq -r '.id // empty' "$file" 2> /dev/null || true)" = "$ID" ] || return 1
++  VERSION=$(jq -r '.version' "$file")
++  TAG=$(jq -r '.tag' "$file")
++  DIGEST=$(jq -r '.digest' "$file")
++  NODE_DIGEST=$(jq -r '.node' "$file")
++  UPDATER_DIGEST=$(jq -r '.updater' "$file")
++  PREVIOUS=$(jq -r '.previous' "$file")
++  BACK_APP=$(jq -r '.back.app' "$file")
++  BACK_NODE=$(jq -r '.back.node' "$file")
++  BACK_UPDATER=$(jq -r '.back.updater' "$file")
++  TARGET=$(jq -r '.target' "$file")
++  BEFORE=$(jq -r '.before' "$file")
++  BACKUP=$(jq -r '.backup' "$file")
++  plain_tag "$TAG" && plain_digest "$DIGEST" && digest_or_none "$NODE_DIGEST" && digest_or_none "$UPDATER_DIGEST" && plain_tag "$PREVIOUS" || return 1
++  own "$IMAGE" "$BACK_APP" && own "$NODE_IMAGE" "$BACK_NODE" && own "$UPDATER_IMAGE" "$BACK_UPDATER" || return 1
++  case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
++}
++
++forget() { if [ -n "$SERVER_DIR" ]; then rm -f "$SERVER_DIR/backups/update.json"; fi; }
++
++# The commit an app image was made from, from its label; empty for a build made by hand.
++commit_of() { docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1" 2> /dev/null || true; }
++
++# The digests Docker keeps for the image the service runs now.
++service_digests() {
++  local id
++  id=$(docker inspect --format '{{.Image}}' "$(compose ps -q "$1" 2> /dev/null || true)" 2> /dev/null || true)
++  [ -n "$id" ] || return 0
++  docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true
++}
++
++# running <service> <repository>: the image the service runs now, by the digest Docker keeps for it in that
++# repository; empty when it keeps none, as for a build made on this computer.
++running() {
++  local ref
++  for ref in $(service_digests "$1"); do
++    if own "$2" "$ref"; then
++      printf '%s' "$ref"
++      return 0
++    fi
++  done
++}
++
++# Whether the built-in node runs the exact node image of the update already.
++same_node() {
++  [ -n "$NODE_DIGEST" ] || return 1
++  case " $(service_digests node) " in *" $NODE_IMAGE@$NODE_DIGEST "*) return 0 ;; esac
++  return 1
++}
++
++services_without_node() {
++  local s list=''
++  for s in $(docker compose --project-directory "$SERVER_DIR" -f "$1" config --services 2> /dev/null || true); do
++    [ "$s" = node ] || list="$list $s"
++  done
++  printf '%s' "${list# }"
++}
++
++backup() {
++  local db file
++  db=$(compose ps -q db 2> /dev/null || true)
++  [ -n "$db" ] || return 1
++  mkdir -p "$SERVER_DIR/backups"
++  file="$SERVER_DIR/backups/hornhoof-$(date -u +%Y%m%dT%H%M%SZ)-$ID.sql.gz"
++  (umask 077 && docker exec "$db" pg_dump -U hornhoof -d hornhoof | gzip > "$file") || {
++    rm -f "$file"
++    return 1
++  }
++  BACKUP=$file
++  # A copy of the link's settings kept with an old database copy goes with it.
++  # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
++  ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old" "${old%.sql.gz}.tunnel.json"; done
++  say "Saved the database to backups/$(basename "$file")."
++}
++
++# How many migrations the database has, once it answers; empty when it does not within HEALTH_WAIT seconds, as after
++# the computer started again.
++applied() {
++  local db n i=0
++  while [ "$i" -lt "$HEALTH_WAIT" ]; do
++    db=$(compose ps -q db 2> /dev/null || true)
++    if [ -n "$db" ] && n=$(docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null) && [ -n "$n" ]; then
++      printf '%s' "$n" | tr -d ' '
++      return 0
++    fi
++    i=$((i + 1))
++    sleep 1
++  done
++}
++
++# The public link's settings as they are now, next to the database copy, readable by the owner only. A link the
++# company took on the new build is not in that copy, while its name stays taken at hornhoof.org and its key is only
++# here.
++keep_link() {
++  local file="${BACKUP%.sql.gz}.tunnel.json"
++  if [ -z "$BACKUP" ] || [ ! -f "$CONTROL/tunnel.json" ]; then return 0; fi
++  if (umask 077 && cp "$CONTROL/tunnel.json" "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
++    say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; guide/updates.md says how to take it back."
++  else
++    rm -f "$file.new"
++    say "Could not keep a copy of the public link's settings."
++  fi
++}
++
++# The database goes back to the copy saved before the update. The copy goes into a database of its own first and only
++# then takes the place of the one there, so a failed load changes nothing. The app stops before, so nothing writes
++# meanwhile; the installer of the build that goes back starts it again.
++restore() {
++  local db
++  [ -n "$BACKUP" ] && [ -f "$BACKUP" ] || return 1
++  db=$(compose ps -q db 2> /dev/null || true)
++  [ -n "$db" ] || return 1
++  compose stop app > /dev/null 2>&1 || true
++  docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
++    -c 'DROP DATABASE IF EXISTS hornhoof_restore' -c 'CREATE DATABASE hornhoof_restore OWNER hornhoof TEMPLATE template0' > /dev/null || return 1
++  gzip -dc "$BACKUP" | docker exec -i "$db" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q > /dev/null || return 1
++  docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
++    -c 'DROP DATABASE IF EXISTS hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
++}
++
++# unpack <tag> <image>: the installer and the compose file that come inside that build of the app image, in
++# WORK/<tag>.
++unpack() {
++  local dir="$WORK/$1" cid
++  mkdir -p "$dir"
++  cid=$(docker create "$2") || return 1
++  if ! docker cp "$cid:/app/scripts/install.sh" "$dir/install.sh" > /dev/null || ! docker cp "$cid:/app/compose.yaml" "$dir/compose.yaml" > /dev/null; then
++    docker rm "$cid" > /dev/null 2>&1 || true
++    return 1
++  fi
++  docker rm "$cid" > /dev/null 2>&1 || true
++}
++
++# Every image the compose file of the new build names, the update's own by digest, with the server's .env filling in
++# the rest. When the node runs that exact image already, compose leaves the node image out.
++pull_images() {
++  local services=''
++  if same_node; then
++    services=$(services_without_node "$WORK/$TAG/compose.yaml")
++    [ -n "$services" ] || return 1
++  fi
++  # shellcheck disable=SC2086 # services is a space-separated list of compose service names, or empty for all of them.
++  HORNHOOF_VERSION="$TAG" HORNHOOF_APP_REF="$IMAGE@$DIGEST" HORNHOOF_NODE_REF="$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" \
++    HORNHOOF_UPDATER_REF="$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")" \
++    docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull $services >> "$WORK/install.log" 2>&1
++}
++
++# install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and
++# they start exactly these images. They are on this computer already: the new build's came before the database was
++# saved, and the build from before ran here. Compose downloads only an image that is missing.
++install() {
++  local tag=$1 dir="$WORK/$1"
++  unpack "$tag" "$2" || return 1
++  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
++    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
++  drop_orphans
++}
++
++# The installer of a build starts only the services it knows, so after going back to a build from before a service,
++# as the tunnel, that service's container would run on, carrying the public link to a server that knows nothing of
++# it. compose removes the containers of services its file does not name; db runs already, so nothing else changes. A
++# file without the updater would take this updater for one of them, so then nothing goes.
++drop_orphans() {
++  case " $(compose config --services 2> /dev/null | tr '\n' ' ') " in
++    *' updater '*) compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names." ;;
++  esac
++}
++
++# healthy <commit>: the server answers with that commit within HEALTH_WAIT seconds; any answer for a build made by hand.
++healthy() {
++  local want=$1 body got i=0
++  while [ "$i" -lt "$HEALTH_WAIT" ]; do
++    if body=$(curl -fsS --max-time 5 "$HEALTH_URL" 2> /dev/null); then
++      got=$(printf '%s' "$body" | jq -r '.commit // empty' 2> /dev/null || true)
++      if [ -z "$want" ] || [ "$got" = "$want" ]; then return 0; fi
++    fi
++    i=$((i + 1))
++    sleep 1
++  done
++  return 1
++}
++
++# The new updater takes over from a helper container that outlives this one. Both are the updater image of the
++# update, which .env names for compose too.
++swap_updater() {
++  local image
++  image=$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")
++  docker image inspect "$image" > /dev/null 2>&1 || docker pull "$image" > /dev/null 2>&1 || return 0
++  docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -w "$SERVER_DIR" \
++    --entrypoint docker "$image" compose up -d --no-build updater > /dev/null 2>&1 || true
++}
++
++update() {
++  local tag=$1 digest=$2 node=$3 updater=$4
++  LOG=''
++  if ! plain_tag "$tag"; then
++    if [ "${#tag}" -le 128 ]; then
++      stop_with failed "$tag is not a version this updater can install." finished
++    else
++      stop_with failed "The version is too long." finished
++    fi
++    return 0
++  fi
++  { plain_digest "$digest" && digest_or_none "$node" && digest_or_none "$updater"; } || {
++    stop_with failed "The request does not name the exact build to install, so nothing changed." finished
++    return 0
++  }
++  if [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then
++    stop_with failed "This Hornhoof was not set up with install.sh server, so it updates by running that command again." finished
++    return 0
++  fi
++  TAG=$tag
++  DIGEST=$digest
++  NODE_DIGEST=$node
++  UPDATER_DIGEST=$updater
++  TARGET=''
++  BEFORE=''
++  BACKUP=''
++
++  # The build to go back to: the one running now, by its commit, or the one .env pins; and the images it runs, by the
++  # digests Docker keeps for them, or by that build's tag.
++  PREVIOUS=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -q app 2> /dev/null || true)" 2> /dev/null || true)
++  [ -n "$PREVIOUS" ] || PREVIOUS=$(env_value HORNHOOF_VERSION)
++  [ -n "$PREVIOUS" ] || PREVIOUS=latest
++  BACK_APP=$(running app "$IMAGE")
++  [ -n "$BACK_APP" ] || BACK_APP="$IMAGE:$PREVIOUS"
++  BACK_NODE=$(running node "$NODE_IMAGE")
++  [ -n "$BACK_NODE" ] || BACK_NODE="$NODE_IMAGE:$PREVIOUS"
++  BACK_UPDATER=$(running updater "$UPDATER_IMAGE")
++  [ -n "$BACK_UPDATER" ] || BACK_UPDATER="$UPDATER_IMAGE:$PREVIOUS"
++  note
++
++  step pull "Downloading $VERSION."
++  docker pull "$IMAGE@$DIGEST" > /dev/null || {
++    stop_with failed "Could not download $IMAGE:$TAG, so nothing changed."
++    return 0
++  }
++  # Downloads take minutes and the old server works on meanwhile, so they come before the copy of the database: going
++  # back to the copy then loses only what the old server did in the moment before the new build starts.
++  { unpack "$TAG" "$IMAGE@$DIGEST" && pull_images; } || {
++    stop_with failed "Could not download the images of $VERSION, so nothing changed."
++    return 0
++  }
++  TARGET=$(commit_of "$IMAGE@$DIGEST")
++  note
++
++  step backup "Saving the database."
++  BEFORE=$(applied)
++  backup || {
++    stop_with failed "Could not save the database, so nothing changed."
++    return 0
++  }
++  note
++  step install "Installing $VERSION."
++  install_new
++}
++
++# The new build goes in and has to answer; otherwise the build from before goes back.
++install_new() {
++  if install "$TAG" "$IMAGE@$DIGEST" "$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" "$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")"; then
++    check_new
++  else
++    say "The installer of $VERSION failed: $(tail -n 3 "$WORK/install.log" 2> /dev/null | tr '\n' ' ')"
++    go_back
++  fi
++}
++
++check_new() {
++  step health "Waiting for the new server to answer."
++  if healthy "$TARGET"; then
++    stop_with "done" "Hornhoof runs $VERSION now." finished
++    swap_updater
++    return 0
++  fi
++  say "$VERSION did not answer within $HEALTH_WAIT seconds."
++  go_back
++}
++
++go_back() {
++  local back="Hornhoof runs the build from before the update again. The database was saved before it."
++  step rollback "Going back to $PREVIOUS."
++  if [ "$(applied)" != "$BEFORE" ]; then
++    say "$VERSION changed the database, so it goes back to the copy saved before the update."
++    keep_link
++    restore || {
++      stop_with failed "Could not put the database back from backups/$(basename "$BACKUP"). Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
++      return 0
++    }
++    back="Hornhoof runs the build from before the update again, with the database as it was saved before the update."
++  fi
++  if install "$PREVIOUS" "$BACK_APP" "$BACK_NODE" "$BACK_UPDATER" && healthy "$(commit_of "$BACK_APP")"; then
++    stop_with rolled_back "$back" finished
++  else
++    stop_with failed "Could not go back to $PREVIOUS either. Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
++  fi
++}
++
++handle_request() {
++  local id tag digest node updater done_id
++  [ -f "$CONTROL/request.json" ] || return 0
++  id=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
++  case "$id" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
++  done_id=$(jq -r '.id // empty' "$CONTROL/status.json" 2> /dev/null || true)
++  [ "$id" != "$done_id" ] || return 0
++  ID=$id
++  VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
++  tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
++  digest=$(jq -r '.digest // empty' "$CONTROL/request.json")
++  node=$(jq -r '.nodeDigest // empty' "$CONTROL/request.json")
++  updater=$(jq -r '.updaterDigest // empty' "$CONTROL/request.json")
++  WORK=$(mktemp -d)
++  update "$tag" "$digest" "$node" "$updater"
++  rm -rf "$WORK"
++  WORK=''
++}
++
++# An update this updater was stopped in goes on from the step it was at, by the updater's own note of it. Before the
++# install nothing changed yet, so it starts over.
++interrupted() {
++  [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ] || return 0
++  ID=$(jq -r '.id // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9-')
++  VERSION=$(jq -r '.version // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
++  STEP=$(jq -r '.step // empty' "$CONTROL/status.json")
++  LOG="$(jq -r '.log // empty' "$CONTROL/status.json")
++"
++  if ! recall; then
++    stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
++    return 0
++  fi
++  say "The updater stopped during the update and goes on with it."
++  WORK=$(mktemp -d)
++  case "$STEP" in
++    backup | pull) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
++    install)
++      step install "Installing $VERSION."
++      install_new
++      ;;
++    health) check_new ;;
++    *) go_back ;;
++  esac
++  rm -rf "$WORK"
++  WORK=''
++}
++
++# Whether the CEO keeps access to the computer open now, by the time the app wrote, which ends it by itself.
++computer_open() {
++  local until
++  until=$(jq -r '.untilSec // 0' "$CONTROL/computer.json" 2> /dev/null || true)
++  case "$until" in '' | *[!0-9]*) return 1 ;; esac
++  [ "$until" -gt "$(date +%s)" ]
++}
++
++# computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved.
++computer_answer() {
++  local file="$CONTROL/computer/$1.out.json"
++  tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > "$file.new"
++  mv "$file.new" "$file"
++}
++
++# Each waiting command, one at a time, in a container of the updater's image: root with every privilege, in the
++# computer's processes, network and names, with its whole file system at /host and its Docker. chroot /host runs a
++# command on the computer itself. A command past its time, or still running when the CEO closes access, is stopped;
++# nothing runs while access is closed. A command this updater started is marked, so after a restart it never runs a
++# second time, and what still runs of it is stopped.
++computer_runs() {
++  local file id command timeout out name watch code made
++  [ -d "$CONTROL/computer" ] || return 0
++  for file in "$CONTROL"/computer/*.started; do
++    [ -f "$file" ] || continue
++    id=$(basename "$file" .started)
++    case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
++    [ ! -f "$CONTROL/computer/$id.json" ] || continue
++    docker rm -f "hornhoof-computer-$id" > /dev/null 2>&1 || true
++    rm -f "$file"
++  done
++  for file in "$CONTROL"/computer/*.json; do
++    case "$file" in *.out.json) continue ;; esac
++    [ -f "$file" ] || continue
++    id=$(basename "$file" .json)
++    case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
++    [ ! -f "$CONTROL/computer/$id.out.json" ] || continue
++    name="hornhoof-computer-$id"
++    out=$(mktemp)
++    if [ -f "$CONTROL/computer/$id.started" ]; then
++      docker rm -f "$name" > /dev/null 2>&1 || true
++      printf 'The updater restarted while this command ran, so it was stopped. Look at what it did before you run it again.\n' > "$out"
++      computer_answer "$id" 125 "$out"
++      rm -f "$out" "$CONTROL/computer/$id.started"
++      continue
++    fi
++    if ! computer_open; then
++      printf 'Access to the computer is closed.\n' > "$out"
++      computer_answer "$id" 126 "$out"
++      rm -f "$out"
++      continue
++    fi
++    command=$(jq -r '.command // empty' "$file" 2> /dev/null || true)
++    timeout=$(jq -r '.timeout // empty' "$file" 2> /dev/null || true)
++    case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
++    if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi
++    touch "$CONTROL/computer/$id.started"
++    code=0
++    made=1
++    # Made first and only then started, so the watch can always stop it.
++    docker create --rm --name "$name" --privileged --pid=host --network=host --ipc=host --uts=host -v /:/host \
++      -v /var/run/docker.sock:/var/run/docker.sock --entrypoint bash "$COMPUTER_IMAGE" -c "$command" > /dev/null 2>> "$out" || made=''
++    if [ -z "$made" ]; then
++      code=125
++    elif ! computer_open; then
++      touch "$out.closed"
++      docker rm -f "$name" > /dev/null 2>&1 || true
++    else
++      # The watch removes the container once its time is up or access closes, unless the command ended first.
++      (
++        i=0
++        while [ "$i" -lt "$timeout" ]; do
++          sleep 1
++          [ ! -f "$out.done" ] || exit 0
++          if ! computer_open; then
++            touch "$out.closed"
++            docker rm -f "$name"
++            exit 0
++          fi
++          i=$((i + 1))
++        done
++        touch "$out.late"
++        docker rm -f "$name"
++      ) > /dev/null 2>&1 &
++      watch=$!
++      docker start -a "$name" < /dev/null >> "$out" 2>&1 || code=$?
++      touch "$out.done"
++      wait "$watch" 2> /dev/null || true
++    fi
++    if [ -f "$out.late" ]; then
++      printf '\nStopped after %s seconds.\n' "$timeout" >> "$out"
++      code=124
++    elif [ -f "$out.closed" ]; then
++      printf '\nStopped: access to the computer was closed.\n' >> "$out"
++      code=125
++    fi
++    # The app stops waiting for an answer and takes the command back after a while.
++    [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"
++    rm -f "$out" "$out.done" "$out.late" "$out.closed" "$CONTROL/computer/$id.started"
++  done
++}
++
++mkdir -p "$CONTROL"
++touch "$CONTROL/alive"
++interrupted
++if [ "${1:-}" = --once ]; then
++  handle_request
++  computer_runs
++  exit 0
++fi
++# alive stays fresh through long downloads too, and commands on the computer do not wait for an update.
++(while sleep 5; do touch "$CONTROL/alive"; done) &
++ALIVE=$!
++# A command that went wrong does not end the loop.
++(while true; do
++  computer_runs || true
++  sleep 1
++done) &
++RUNS=$!
++trap 'kill $ALIVE $RUNS 2> /dev/null || true' EXIT
++while true; do
++  handle_request
++  sleep 2
++done
+diff --git a/apps/server/test/updater-stubs/docker b/apps/server/test/updater-stubs/docker
+index 5d63962d..a84309fa 100755
+--- a/apps/server/test/updater-stubs/docker
++++ b/apps/server/test/updater-stubs/docker
+@@ -1,35 +1,78 @@
+ #!/usr/bin/env bash
+ # The host's Docker as the updater sees it. STUB_COMMITS words are "tag=commit": what each build of the app image is.
+ # STUB_MIGRATIONS words are "tag=count": the migrations each build applies when it starts. STUB_STATE/migrations holds
+ # how many the database has now. STUB_DIGESTS words are "tag=digest": the build each tag points at in the registry,
+ # which also keeps every build by its digest. STUB_RUNNING_IMAGES words are "service=image": the image each service
+-# runs now, as Docker keeps it by digest.
++# runs now, as Docker keeps it by digest. STUB_BUILD_SERVICES words are "tag=service,service": the services the compose
++# file of that build names; STUB_SERVICES answers for any other file. STUB_PROJECT_CONTAINERS words are "id=service":
++# the containers of the compose project.
+ printf 'docker %s\n' "$*" >> "$STUB_LOG"
+-commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+-digest_of() { for w in ${STUB_DIGESTS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
++word() {
++  local key=$1 w
++  shift
++  for w in "$@"; do [ "${w%%=*}" = "$key" ] && { printf '%s' "${w#*=}"; return; }; done
++}
++commit_of() { word "$1" ${STUB_COMMITS:-}; }
++digest_of() { word "$1" ${STUB_DIGESTS:-}; }
++running_image() { word "$1" ${STUB_RUNNING_IMAGES:-}; }
++build_services() { word "$1" ${STUB_BUILD_SERVICES:-}; }
++project_service() { word "$1" ${STUB_PROJECT_CONTAINERS:-}; }
+ tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' "${w%%=*}"; return; }; done; }
+ # An image by digest or by tag: what tag it is a build of, and the id of the build it is.
+ ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
+ ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
+-running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
++# The compose file a command reads: the one it names, else the one in the folder it runs in.
++compose_file() {
++  while [ $# -gt 0 ]; do
++    [ "$1" = -f ] && { printf '%s' "$2"; return; }
++    shift
++  done
++  printf 'compose.yaml'
++}
++# The services a compose file names, by the build unpacking wrote into it.
++services_in() {
++  local names service
++  names=$(build_services "$(sed -n 's/^# build //p' "$1" 2> /dev/null)")
++  if [ -n "$names" ]; then
++    printf '%s\n' "$names" | tr ',' '\n'
++    return
++  fi
++  for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done
++}
+ case "$1 $2" in
+   'compose ps')
+     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
++  'ps -a')
++    for w in ${STUB_PROJECT_CONTAINERS:-}; do printf '%s %s\n' "${w%%=*}" "${w#*=}"; done ;;
++  # The container of front holds the web port until it goes. STUB_RM_FAILS names containers that cannot be removed.
++  'rm -f')
++    [ "$(project_service "$3")" = front ] && rm -f "$STUB_STATE/port-holder"
++    case " ${STUB_RM_FAILS:-} " in *" $3 "*) exit 1 ;; esac ;;
+   'exec dbcid')
+     case "$*" in
+-      *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
+-      *'FROM drizzle.__drizzle_migrations'*) cat "$STUB_STATE/migrations" ;;
++      # Each copy says which one it is. STUB_DUMP=fail: the database cannot be saved.
++      *pg_dump*)
++        [ "${STUB_DUMP:-ok}" = fail ] && { echo 'pg_dump: error: connection to server failed' >&2; exit 1; }
++        copy=$(($(cat "$STUB_STATE/copies" 2> /dev/null || echo 0) + 1))
++        printf '%s' "$copy" > "$STUB_STATE/copies"
++        printf -- '-- a dump of the hornhoof database\n-- migrations %s\n-- copy %s\n' "$(cat "$STUB_STATE/migrations")" "$copy" ;;
++      # What the updater had said by the time it first asked the database.
++      *'FROM drizzle.__drizzle_migrations'*)
++        [ -f "$STUB_STATE/status-when-asked" ] || cp "$HORNHOOF_CONTROL_DIR/status.json" "$STUB_STATE/status-when-asked"
++        cat "$STUB_STATE/migrations" ;;
+       *'RENAME TO hornhoof'*) mv "$STUB_STATE/restored" "$STUB_STATE/migrations" ;;
+     esac ;;
+   # A dump going into the copy of the database that takes the place of the one there.
+   'exec -i')
+     [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
+-    sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored" ;;
++    dump=$(cat)
++    printf '%s\n' "$dump" | sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored"
++    printf '%s\n' "$dump" | sed -n 's/^-- copy //p' | tr -d '\n' > "$STUB_STATE/restored-copy" ;;
+   'image inspect')
+     last=${!#}
+     case "${4:-}" in
+       '{{.Id}}') ref_id "$last" ;;
+       # The image of a running service by its digest, after the digest of a copy of it in another repository.
+       *RepoDigests*) image=$(running_image "${last#img-}"); [ -n "$image" ] && printf 'ghcr.io/acme/copy@sha256:%064d %s\n' 0 "$image" ;;
+       *) commit_of "$(ref_tag "$last")" ;;
+     esac ;;
+@@ -41,52 +84,82 @@ case "$1 $2" in
+   *)
+     case "$1" in
+       # STUB_PULL=images: the app image comes, the other images of its compose file do not.
+       compose)
+         case " $* " in
+           *' pull '*)
+             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
+             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
+-          # STUB_SERVICES: the services the compose file in the server folder names.
+-          *' config --services '*) for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done ;;
++          *' config --services '*) services_in "$(compose_file "$@")" ;;
++          # STUB_UPDATER_UP=fail: this build's updater does not start, the one named by HORNHOOF_UPDATER_REF does;
++          # never: no updater starts.
++          *' up '*' updater '*)
++            printf 'updater up HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
++            case "${STUB_UPDATER_UP:-ok}" in
++              never) exit 1 ;;
++              fail) [ -n "${HORNHOOF_UPDATER_REF:-}" ] || exit 1 ;;
++            esac ;;
+         esac ;;
+       pull)
+         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
+         [ "${STUB_STOP_IN:-}" = pull ] && [ ! -f "$STUB_STATE/stopped" ] && { touch "$STUB_STATE/stopped"; kill -9 "$PPID"; } ;;
+       # A command on the computer is made, then started. STUB_COMPUTER_SLEEP is how long it takes, STUB_COMPUTER_EXIT how
+       # it ends; the CEO closes access while it runs with STUB_COMPUTER_CLOSES, and while it is made with STUB_CLOSE_ON_CREATE.
+       create)
+         case " $* " in
+           *' --entrypoint bash '*)
+             printf '%s' "${!#}" > "$STUB_STATE/computer-command"
+             [ -z "${STUB_CLOSE_ON_CREATE:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
+             echo cid-computer ;;
+           *) echo "cid-$(ref_tag "$2")" ;;
+         esac ;;
++      # Any other container than a command's only starts.
+       start)
++        [ "$2" = -a ] || exit 0
+         echo "ran: $(cat "$STUB_STATE/computer-command")"
+         [ -z "${STUB_COMPUTER_CLOSES:-}" ] || echo '{"untilSec":null,"until":null,"asked":null}' > "$HORNHOOF_CONTROL_DIR/computer.json"
+         sleep "${STUB_COMPUTER_SLEEP:-0}"
+         exit "${STUB_COMPUTER_EXIT:-0}" ;;
+       cp)
+         tag=${2%%:*}; tag=${tag#cid-}
+         case "$2" in
+           *:/app/scripts/install.sh)
+             # The installer of that build: records how it was run and starts that build, unless it is broken.
+             cat > "$3" <<SCRIPT
+ #!/usr/bin/env bash
+ # STUB_STOP_IN names a build whose installer stops the updater that runs it, once, as a restart of its container would;
+ # "pull" stops it while it downloads.
+ case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
+-printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
++# As the real installer, it writes the server folder's compose file and .env before it starts anything.
++cp "\$HORNHOOF_COMPOSE_FILE" "\$HORNHOOF_SERVER_DIR/compose.yaml"
+ grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
++# STUB_HANDS_OVER names builds whose installer, run by an updater from before revision 2, starts this build's updater,
++# and compose replacing the updater that runs it stops it. STUB_HANDOVER=fail: it could not start that updater.
++if [ -z "\${HORNHOOF_UPDATER_REV:-}" ]; then
++  case " ${STUB_HANDS_OVER:-} " in
++    *" $tag "*)
++      [ "${STUB_HANDOVER:-}" != fail ] || { echo 'Could not start the updater of this build, so nothing changed.'; exit 1; }
++      echo 'installer hands over' >> "$STUB_LOG"
++      kill -9 "\$PPID"
++      exit 0 ;;
++  esac
++fi
++printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s HORNHOOF_UPDATER_REV=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" "\${HORNHOOF_UPDATER_REV:-}" >> "$STUB_LOG"
++# STUB_HANG names builds whose installer does not end: what it started sleeps, its output in the install log.
++case " ${STUB_HANG:-} " in *" $tag "*) sleep 60 & printf '%s' "\$!" > "$STUB_STATE/hung-child"; wait ;; esac
++# front holds the web port from a build that has it on, so a build without it cannot take the port.
++case ",$(build_services "$tag")," in
++  *,front,*) touch "$STUB_STATE/port-holder" ;;
++  *) [ ! -f "$STUB_STATE/port-holder" ] || { echo 'Bind for 0.0.0.0:8080 failed: port is already allocated'; exit 1; } ;;
++esac
+ # The build migrates the database when it starts, also when it fails afterwards.
+ want=\$(for w in ${STUB_MIGRATIONS:-}; do [ "\${w%%=*}" = "$tag" ] && printf '%s' "\${w#*=}"; done)
+ [ -n "\$want" ] && [ "\$want" -gt "\$(cat "$STUB_STATE/migrations")" ] && printf '%s' "\$want" > "$STUB_STATE/migrations"
+ case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
+ SCRIPT
+             ;;
+-          *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
++          # The build's name in a comment, so services_in can tell whose file it is.
++          *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
+         esac ;;
+     esac ;;
+ esac
+ exit 0
+diff --git a/apps/server/test/updater.test.ts b/apps/server/test/updater.test.ts
+index d376bffa..b6acd03f 100644
+--- a/apps/server/test/updater.test.ts
++++ b/apps/server/test/updater.test.ts
+@@ -1,16 +1,18 @@
+-import { spawnSync } from 'node:child_process';
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
++import { spawn, spawnSync } from 'node:child_process';
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { beforeAll, describe, expect, it } from 'vitest';
+ 
+ const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
++/* The updater from before revision 2, which starts the update that moves an install in. */
++const REV1 = fileURLToPath(new URL('./updater-rev1.sh', import.meta.url));
+ const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
+ /* The updater reads and writes its files with jq, so these tests take the jq of this machine, wherever it is. */
+ const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
+ const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
+ if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
+ 
+ type Stand = { dir: string; control: string; server: string; log: string };
+ 
+@@ -33,20 +35,19 @@ function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stand {
+   writeFileSync(join(server, '.env'), env);
+   writeFileSync(join(dir, 'running'), 'aaa');
+   writeFileSync(join(dir, 'migrations'), '20');
+   const log = join(dir, 'stub.log');
+   writeFileSync(log, '');
+   return { dir, control, server, log };
+ }
+ 
+-/* One pass of the updater over request.json, with stub docker and curl first on PATH. */
+-function runOnce(s: Stand, request: object | null, env: Record<string, string> = {}) {
+-  if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
+-  const res = spawnSync('bash', [SCRIPT, '--once'], {
++/* One run of an updater, with stub docker and curl first on PATH. */
++function run(script: string, flag: string, s: Stand, env: Record<string, string>) {
++  const res = spawnSync('bash', [script, flag], {
+     encoding: 'utf8',
+     timeout: 30_000,
+     env: {
+       PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`,
+       HOME: s.dir,
+       STUB_LOG: s.log,
+       STUB_STATE: s.dir,
+       STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
+@@ -60,16 +61,27 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
+       ...env,
+     },
+   });
+   const calls = readFileSync(s.log, 'utf8').trim().split('\n').filter(Boolean);
+   const status = existsSync(join(s.control, 'status.json')) ? JSON.parse(readFileSync(join(s.control, 'status.json'), 'utf8')) : null;
+   return { code: res.status, out: res.stdout + res.stderr, calls, status };
+ }
+ 
++/* One pass of an updater over request.json. */
++function pass(script: string, s: Stand, request: object | null, env: Record<string, string>) {
++  if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
++  return run(script, '--once', s, env);
++}
++
++const runOnce = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(SCRIPT, s, request, env);
++const runRev1 = (s: Stand, request: object | null, env: Record<string, string> = {}) => pass(REV1, s, request, env);
++/* The helper container this build's installer starts when an older updater runs it. */
++const takeOver = (s: Stand, env: Record<string, string> = {}) => run(SCRIPT, '--take-over', s, env);
++
+ const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
+ 
+ describe('updater', () => {
+   beforeAll(() => {
+     if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
+   });
+ 
+   it('downloads every image of the new build, then saves the database right before installing it', () => {
+@@ -395,16 +407,393 @@ describe('updater', () => {
+   it('refuses to update a Hornhoof that install.sh did not set up', () => {
+     const s = stand();
+     const r = runOnce(s, ask('u8'), { HORNHOOF_SERVER_DIR: '' });
+     expect(r.status).toMatchObject({ state: 'failed' });
+     expect(r.calls.filter(c => c.startsWith('docker'))).toEqual([]);
+   });
+ });
+ 
++/* What revision 2 changes: the copy of the database, the services a build does not name, a time limit on each install,
++   where health is asked, and an update an older updater began. */
++describe('updater, revision 2', () => {
++  /* 0.4.1 has moved in; 0.4.0 is a build from before front. */
++  const BUILDS = { STUB_BUILD_SERVICES: '0.4.1=db,app,front,keeper,migrate,node,updater 0.4.0=db,app,node,tunnel,updater' };
++  const TODAY = 'c-db=db c-app=app c-tunnel=tunnel c-up=updater';
++  const MOVED_IN = `${TODAY} c-front=front c-keeper=keeper c-migrate=migrate`;
++  /* An older updater runs an installer that hands the update over; the new build then does not answer. */
++  const HAND_OVER = { ...BUILDS, STUB_HANDS_OVER: '0.4.1', STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21', STUB_PROJECT_CONTAINERS: TODAY };
++  /* Once this build's updater runs the install, the containers of the new build are there too. */
++  const NEW_UPDATER = { ...HAND_OVER, STUB_PROJECT_CONTAINERS: MOVED_IN };
++  const GOES_ON = "This build's updater goes on with the update.";
++  const NO_START = "This build's updater did not start, so the build from before goes back.";
++
++  const installerOf = (calls: string[], tag: string) => calls.findIndex(c => c.startsWith('installer server') && c.includes(`HORNHOOF_VERSION=${tag} `));
++  const installers = (calls: string[]) => calls.filter(c => c.startsWith('installer server')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1]);
++  const curls = (calls: string[]) => calls.filter(c => c.startsWith('curl'));
++  const removals = (calls: string[]) => calls.filter(c => c.startsWith('docker rm -f'));
++  const readState = (s: Stand, name: string) => readFileSync(join(s.dir, name), 'utf8').trim();
++  const envOf = (s: Stand) => readFileSync(join(s.server, '.env'), 'utf8');
++  const noteOf = (s: Stand) => JSON.parse(readFileSync(join(s.server, 'backups', 'update.json'), 'utf8'));
++  const statusFile = (s: Stand) => join(s.control, 'status.json');
++  function editStatus(s: Stand, change: object) {
++    writeFileSync(statusFile(s), JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), ...change }));
++  }
++  /* An older updater began the update and its installer handed it over, so that updater is gone. */
++  function handedOver(id: string, env: Record<string, string> = HAND_OVER) {
++    const s = stand();
++    const first = runRev1(s, ask(id), env);
++    expect(first.status).toMatchObject({ id, state: 'running', step: 'install' });
++    expect(first.calls).toContain('installer hands over');
++    return { s, first };
++  }
++
++  it("tells each build's installer that this updater is revision 2", () => {
++    const r = runOnce(stand(), ask('v1'), { ...BUILDS, STUB_BROKEN: '0.4.1', STUB_PROJECT_CONTAINERS: MOVED_IN });
++    expect(installers(r.calls)).toEqual(['0.4.1', '0.4.0']);
++    for (const line of r.calls.filter(c => c.startsWith('installer server'))) expect(line).toContain('HORNHOOF_UPDATER_REV=2');
++  });
++
++  it('keeps its revision in the note of the update', () => {
++    const s = stand();
++    const stopped = runOnce(s, ask('v2'), { ...BUILDS, STUB_STOP_IN: '0.4.1' });
++    expect(stopped.status).toMatchObject({ state: 'running', step: 'install' });
++    expect(noteOf(s).rev).toBe('2');
++  });
++
++  it('stops the app before it saves the database, and starts it again when the copy fails', () => {
++    const ok = runOnce(stand(), ask('v3'), BUILDS);
++    expect(ok.status.state).toBe('done');
++    const stop = at(ok.calls, 'docker compose stop app');
++    expect(stop).toBeGreaterThanOrEqual(0);
++    expect(stop).toBeLessThan(at(ok.calls, 'docker exec dbcid pg_dump'));
++    expect(ok.calls).not.toContain('docker start appcid');
++
++    const s = stand();
++    const r = runOnce(s, ask('v4'), { ...BUILDS, STUB_DUMP: 'fail' });
++    expect(r.status).toMatchObject({ id: 'v4', state: 'failed', step: 'backup' });
++    expect(r.status.log).toContain('Could not save the database, so nothing changed.');
++    expect(at(r.calls, 'docker start appcid')).toBeGreaterThan(at(r.calls, 'docker exec dbcid pg_dump'));
++    expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
++    expect(readdirSync(join(s.server, 'backups')).filter(f => f.endsWith('.sql.gz'))).toEqual([]);
++  });
++
++  /* The app is stopped for the copy, and starting over means nothing changed yet. A download that fails on the way
++     says so, which would be untrue with the company's app left stopped. */
++  it('starts the app it stopped again when it was stopped while saving the database', () => {
++    const s = stand();
++    const stopped = runOnce(s, ask('v5'), { STUB_STOP_IN: 'pull' });
++    editStatus(s, { step: 'backup' });
++    const r = runOnce(s, null, { STUB_PULL: 'fail' });
++    expect(r.status).toMatchObject({ id: 'v5', state: 'failed', step: 'pull' });
++    const calls = r.calls.slice(stopped.calls.length);
++    expect(at(calls, 'docker start appcid')).toBeGreaterThanOrEqual(0);
++    expect(at(calls, 'docker start appcid')).toBeLessThan(at(calls, 'docker pull'));
++  });
++
++  it('leaves the app alone when it was stopped before the copy began', () => {
++    const s = stand();
++    runOnce(s, ask('v6'), { STUB_STOP_IN: 'pull' });
++    expect(runOnce(s, null).calls).not.toContain('docker start appcid');
++  });
++
++  it('removes the containers of services the new build does not name, before its installer runs', () => {
++    const r = runOnce(stand(), ask('v7'), { ...BUILDS, STUB_PROJECT_CONTAINERS: TODAY });
++    expect(r.status.state).toBe('done');
++    const removed = r.calls.indexOf('docker rm -f c-tunnel');
++    expect(removed).toBeGreaterThanOrEqual(0);
++    expect(removed).toBeLessThan(installerOf(r.calls, '0.4.1'));
++    expect(removals(r.calls)).toEqual(['docker rm -f c-tunnel']);
++  });
++
++  it('looks for those containers in the compose project of this server', () => {
++    const filter = (project: string) => `docker ps -a --filter label=com.docker.compose.project=${project} --format {{.ID}} {{.Label "com.docker.compose.service"}}`;
++    const named = stand('HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\nCOMPOSE_PROJECT_NAME=hornhoof-acme\n');
++    expect(runOnce(named, ask('p1'), { ...BUILDS, COMPOSE_PROJECT_NAME: 'hornhoof-other' }).calls).toContain(filter('hornhoof-acme'));
++    expect(runOnce(stand(), ask('p2'), { ...BUILDS, COMPOSE_PROJECT_NAME: 'hornhoof-other' }).calls).toContain(filter('hornhoof-other'));
++    expect(runOnce(stand(), ask('p3'), BUILDS).calls).toContain(filter('hornhoof'));
++  });
++
++  it('leaves alone a container that has no service, and one of a service the build names', () => {
++    const r = runOnce(stand(), ask('v8'), { ...BUILDS, STUB_PROJECT_CONTAINERS: 'c-none= c-node=node' });
++    expect(removals(r.calls)).toEqual([]);
++  });
++
++  it('says so and goes on with the install when a container cannot be removed', () => {
++    const r = runOnce(stand(), ask('v9'), { ...BUILDS, STUB_PROJECT_CONTAINERS: TODAY, STUB_RM_FAILS: 'c-tunnel' });
++    expect(r.status.state).toBe('done');
++    expect(r.status.log).toContain('Could not remove the container of tunnel, a service this build does not name.');
++    expect(installers(r.calls)).toEqual(['0.4.1']);
++  });
++
++  it('goes back to a build from before front even though front held the web port', () => {
++    const r = runOnce(stand(), ask('v10'), { ...BUILDS, STUB_BROKEN: '0.4.1', STUB_PROJECT_CONTAINERS: MOVED_IN });
++    expect(r.status).toMatchObject({ id: 'v10', state: 'rolled_back', step: 'finished' });
++    const check = at(r.calls, 'curl');
++    const old = installerOf(r.calls, '0.4.0');
++    expect(check).toBeGreaterThanOrEqual(0);
++    for (const id of ['c-front', 'c-keeper', 'c-migrate']) {
++      expect(r.calls.indexOf(`docker rm -f ${id}`)).toBeGreaterThan(check);
++      expect(r.calls.indexOf(`docker rm -f ${id}`)).toBeLessThan(old);
++    }
++  });
++
++  it("removes nothing when the build's compose file names no updater", () => {
++    const r = runOnce(stand(), ask('v11'), { STUB_BUILD_SERVICES: '0.4.1=db,app,node', STUB_PROJECT_CONTAINERS: TODAY });
++    expect(r.status.state).toBe('done');
++    expect(removals(r.calls)).toEqual([]);
++  });
++
++  it('checks health at front for a build that has it, and at the app for one that does not', () => {
++    const r = runOnce(stand(), ask('v12'), { ...BUILDS, STUB_BROKEN: '0.4.1', STUB_PROJECT_CONTAINERS: MOVED_IN });
++    expect(r.status.state).toBe('rolled_back');
++    const asked = curls(r.calls);
++    expect(asked[0]).toContain('http://front:8080/api/health');
++    expect(asked.at(-1)).toContain('http://app:8080/api/health');
++    expect(r.calls.findIndex(c => c.includes('http://app:8080'))).toBeGreaterThan(installerOf(r.calls, '0.4.0'));
++  });
++
++  it('asks the address it was given, when it was given one', () => {
++    const r = runOnce(stand(), ask('v13'), { ...BUILDS, HORNHOOF_HEALTH_URL: 'http://192.0.2.10:9/api/health' });
++    expect(r.status.state).toBe('done');
++    expect(curls(r.calls).every(c => c.includes('http://192.0.2.10:9/api/health'))).toBe(true);
++  });
++
++  it('stops an installer that does not end, and goes back', () => {
++    const s = stand();
++    const r = runOnce(s, ask('v14'), { ...BUILDS, STUB_HANG: '0.4.1', HORNHOOF_INSTALL_WAIT: '2' });
++    expect(r.status).toMatchObject({ id: 'v14', state: 'rolled_back', step: 'finished' });
++    expect(r.status.log).toContain('The installer of 0.4.1 did not end within 2 seconds, so it was stopped.');
++    const stop = r.calls.indexOf('docker compose stop migrate app');
++    expect(stop).toBeGreaterThanOrEqual(0);
++    expect(stop).toBeLessThan(installerOf(r.calls, '0.4.0'));
++    expect(readState(s, 'running')).toBe('aaa');
++    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
++  });
++
++  /* A compose command the installer left running would go on starting the new build while the old one goes back. */
++  it('stops what a hung installer started, too', () => {
++    const s = stand();
++    runOnce(s, ask('v15'), { ...BUILDS, STUB_HANG: '0.4.1', HORNHOOF_INSTALL_WAIT: '1' });
++    const child = Number(readState(s, 'hung-child'));
++    expect(child).toBeGreaterThan(0);
++    expect(() => process.kill(child, 0)).toThrow(/ESRCH/);
++  });
++
++  it('says what to do by hand when the install on the way back hangs too', () => {
++    const r = runOnce(stand(), ask('v16'), { ...BUILDS, STUB_HANG: '0.4.1 0.4.0', HORNHOOF_INSTALL_WAIT: '1' });
++    expect(r.status).toMatchObject({ id: 'v16', state: 'failed', step: 'finished' });
++    expect(r.status.log).toContain('The installer of 0.4.0 did not end within 1 seconds, so it was stopped.');
++    expect(r.status.log).toContain('Could not go back to 0.4.0 either.');
++  });
++
++  it('goes back when the installer fails, without waiting out its time', () => {
++    const s = stand();
++    /* Something else holds the web port, and only the build from before takes it over. */
++    writeFileSync(join(s.dir, 'port-holder'), '');
++    const started = Date.now();
++    const r = runOnce(s, ask('v17'), { STUB_BUILD_SERVICES: '0.4.1=db,app,updater 0.4.0=db,app,front,updater', HORNHOOF_INSTALL_WAIT: '25' });
++    expect(Date.now() - started).toBeLessThan(20_000);
++    expect(r.status).toMatchObject({ id: 'v17', state: 'rolled_back', step: 'finished' });
++    expect(r.status.log).toContain('The installer of 0.4.1 failed: Bind for 0.0.0.0:8080 failed: port is already allocated');
++    expect(r.status.log).not.toContain('did not end within');
++  });
++
++  it('moves in by handing over, and goes back to the old build when the new one fails', () => {
++    const { s, first } = handedOver('h1');
++    const r = runOnce(s, null, NEW_UPDATER);
++    expect(r.status.log).toContain(GOES_ON);
++    const calls = r.calls.slice(first.calls.length);
++    /* The older updater's copy was taken while the app worked on, so this one takes its own. */
++    const stop = at(calls, 'docker compose stop app');
++    const dump = at(calls, 'docker exec dbcid pg_dump');
++    expect(stop).toBeGreaterThanOrEqual(0);
++    expect(stop).toBeLessThan(dump);
++    expect(readState(s, 'copies')).toBe('2');
++    const install = calls.find(c => c.startsWith('installer server') && c.includes('HORNHOOF_VERSION=0.4.1 '));
++    expect(install).toContain('HORNHOOF_UPDATER_REV=2');
++    expect(curls(calls)[0]).toContain('http://front:8080/api/health');
++    /* What the old app confirmed up to its stop comes back. */
++    expect(readState(s, 'restored-copy')).toBe('2');
++    const old = installerOf(calls, '0.4.0');
++    const failedCheck = at(calls, 'curl');
++    for (const id of ['c-front', 'c-keeper', 'c-migrate']) {
++      expect(calls.indexOf(`docker rm -f ${id}`)).toBeGreaterThan(failedCheck);
++      expect(calls.indexOf(`docker rm -f ${id}`)).toBeLessThan(old);
++    }
++    expect(r.status).toMatchObject({ id: 'h1', state: 'rolled_back', step: 'finished' });
++    expect(curls(calls).at(-1)).toContain('http://app:8080/api/health');
++    expect(readState(s, 'running')).toBe('aaa');
++    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
++    expect(readState(s, 'migrations')).toBe('20');
++  });
++
++  it('finishes the move-in under the new updater when the new build answers', () => {
++    const env = { ...HAND_OVER, STUB_BROKEN: '' };
++    const { s } = handedOver('h2', env);
++    const r = runOnce(s, null, env);
++    expect(r.status).toMatchObject({ id: 'h2', state: 'done', step: 'finished' });
++    expect(readState(s, 'running')).toBe('bbb');
++    expect(r.calls.some(c => c.startsWith('docker run') && c.includes(`${APP}-updater@${UPDATER_DIGESTS['0.4.1']} compose up -d --no-build updater`))).toBe(true);
++  });
++
++  /* A database that takes long to answer must not look like an updater that did not start: the helper waits a minute. */
++  it('says it goes on before it asks the database anything', () => {
++    const { s } = handedOver('h16');
++    rmSync(join(s.dir, 'status-when-asked'));
++    runOnce(s, null, NEW_UPDATER);
++    expect(JSON.parse(readState(s, 'status-when-asked')).log).toContain(GOES_ON);
++  });
++
++  it('goes back when the second copy of the database fails, since the new installer wrote .env and compose.yaml already', () => {
++    const { s, first } = handedOver('h3');
++    const r = runOnce(s, null, { ...HAND_OVER, STUB_DUMP: 'fail' });
++    const calls = r.calls.slice(first.calls.length);
++    expect(r.status).toMatchObject({ id: 'h3', state: 'rolled_back', step: 'finished' });
++    expect(installers(calls)).toEqual(['0.4.0']);
++    expect(calls).toContain('docker start appcid');
++    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
++    expect(calls.some(c => c.includes('hornhoof_restore'))).toBe(false);
++  });
++
++  it('goes on with the copy it has when the new build changed the database already', () => {
++    const { s, first } = handedOver('h4');
++    writeFileSync(join(s.dir, 'migrations'), '21');
++    const r = runOnce(s, null, NEW_UPDATER);
++    expect(r.status).toMatchObject({ id: 'h4', state: 'rolled_back', step: 'finished' });
++    expect(r.calls.slice(first.calls.length).some(c => c.includes('pg_dump'))).toBe(false);
++    expect(readState(s, 'restored-copy')).toBe('1');
++  });
++
++  /* Starting over would download again and read the build to go back to anew, with .env and compose.yaml the new
++     installer's by now. Going on keeps the note, and any failure from here goes back. */
++  it('goes on from the hand-over when it was stopped during the second copy', () => {
++    const { s, first } = handedOver('h5');
++    editStatus(s, { step: 'backup' });
++    const r = runOnce(s, null, { ...NEW_UPDATER, STUB_PULL: 'fail' });
++    expect(r.status).toMatchObject({ id: 'h5', state: 'rolled_back', step: 'finished' });
++    expect(r.status.log).toContain(GOES_ON);
++    expect(r.calls.slice(first.calls.length).some(c => c.startsWith('docker pull'))).toBe(false);
++    expect(readState(s, 'copies')).toBe('2');
++  });
++
++  /* An older updater notes its copy only after it took it, so with no copy in the note nothing was handed over. */
++  it('starts over when an older updater was stopped before it saved its own copy', () => {
++    const s = stand();
++    const first = runRev1(s, ask('h14'), { ...BUILDS, STUB_STOP_IN: 'pull' });
++    editStatus(s, { step: 'backup' });
++    const r = runOnce(s, null, BUILDS);
++    expect(r.status).toMatchObject({ id: 'h14', state: 'done', step: 'finished' });
++    expect(r.status.log).not.toContain(GOES_ON);
++    expect(at(r.calls.slice(first.calls.length), 'docker pull')).toBeGreaterThanOrEqual(0);
++  });
++
++  it('copies the database once when it was stopped during an install it began itself', () => {
++    const s = stand();
++    const stopped = runOnce(s, ask('h6'), { ...BUILDS, STUB_STOP_IN: '0.4.1' });
++    const r = runOnce(s, null, BUILDS);
++    expect(r.status).toMatchObject({ id: 'h6', state: 'done' });
++    expect(r.status.log).toContain('The updater stopped during the update and goes on with it.');
++    expect(r.status.log).not.toContain(GOES_ON);
++    expect(r.calls.slice(stopped.calls.length).some(c => c.includes('pg_dump'))).toBe(false);
++  });
++
++  it('stays on the old build, working, when the new installer cannot start the hand-over helper', () => {
++    const s = stand();
++    const r = runRev1(s, ask('h7'), { ...HAND_OVER, STUB_HANDOVER: 'fail' });
++    expect(r.status).toMatchObject({ id: 'h7', state: 'rolled_back', step: 'finished' });
++    expect(r.status.log).toContain('Could not start the updater of this build, so nothing changed.');
++    expect(removals(r.calls)).toEqual([]);
++    expect(r.calls.some(c => c.includes('hornhoof_restore'))).toBe(false);
++    expect(curls(r.calls).at(-1)).toContain('http://app:8080/api/health');
++    expect(readState(s, 'running')).toBe('aaa');
++    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
++  });
++
++  it("brings the older updater back to go back when this build's updater does not start", () => {
++    const { s, first } = handedOver('h8');
++    const t = takeOver(s, { ...HAND_OVER, STUB_UPDATER_UP: 'fail', HORNHOOF_TAKE_OVER_WAIT: '1' });
++    expect(t.code).toBe(0);
++    expect(t.status).toMatchObject({ id: 'h8', state: 'running', step: 'rollback' });
++    expect(t.status.log).toContain(NO_START);
++    expect(t.calls.slice(first.calls.length)).toContain(`updater up HORNHOOF_UPDATER_REF=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`);
++    const r = runRev1(s, null, HAND_OVER);
++    expect(r.status).toMatchObject({ id: 'h8', state: 'rolled_back', step: 'finished' });
++    expect(curls(r.calls).at(-1)).toContain('http://app:8080/api/health');
++    expect(readState(s, 'running')).toBe('aaa');
++    expect(envOf(s)).toContain('HORNHOOF_VERSION=0.4.0');
++  });
++
++  it("goes back under this build's updater too, once the helper marked the way back", () => {
++    const { s } = handedOver('h15');
++    takeOver(s, { ...HAND_OVER, STUB_UPDATER_UP: 'fail', HORNHOOF_TAKE_OVER_WAIT: '1' });
++    const r = runOnce(s, null, HAND_OVER);
++    expect(r.status).toMatchObject({ id: 'h15', state: 'rolled_back', step: 'finished' });
++    expect(r.status.log).not.toContain(GOES_ON);
++    expect(readState(s, 'running')).toBe('aaa');
++  });
++
++  it("goes back the same way when this build's updater starts but never takes the update", () => {
++    const { s } = handedOver('h9');
++    const t = takeOver(s, { ...HAND_OVER, HORNHOOF_TAKE_OVER_WAIT: '1' });
++    expect(t.calls).toContain('docker compose up -d --no-build --wait updater');
++    expect(t.status).toMatchObject({ id: 'h9', state: 'running', step: 'rollback' });
++    expect(t.status.log).toContain(NO_START);
++    expect(t.calls).toContain(`updater up HORNHOOF_UPDATER_REF=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`);
++  });
++
++  it('says what to do by hand when no updater can start', () => {
++    const { s } = handedOver('h10');
++    const t = takeOver(s, { ...HAND_OVER, STUB_UPDATER_UP: 'never', HORNHOOF_TAKE_OVER_WAIT: '1' });
++    expect(t.status).toMatchObject({ id: 'h10', state: 'failed', step: 'finished' });
++    expect(t.status.log).toContain(`No updater could start. Hornhoof still runs the build from before; run install.sh server in ${s.server}.`);
++    expect(existsSync(join(s.server, 'backups', 'update.json'))).toBe(false);
++  });
++
++  it('changes nothing once the new updater has said it goes on', () => {
++    const { s, first } = handedOver('h11');
++    editStatus(s, { log: `Installing 0.4.1.\n${GOES_ON}\n` });
++    const before = readFileSync(statusFile(s), 'utf8');
++    const t = takeOver(s, HAND_OVER);
++    expect(t.code).toBe(0);
++    expect(t.calls.slice(first.calls.length).filter(c => c.startsWith('docker '))).toEqual(['docker compose up -d --no-build --wait updater']);
++    expect(readFileSync(statusFile(s), 'utf8')).toBe(before);
++  });
++
++  it('waits for the new updater to say it goes on', () => {
++    const { s } = handedOver('h12');
++    const later = join(s.dir, 'status-later.json');
++    writeFileSync(later, JSON.stringify({ ...JSON.parse(readFileSync(statusFile(s), 'utf8')), log: `${GOES_ON}\n` }));
++    spawn('sh', ['-c', `sleep 1; mv "${later}" "${statusFile(s)}"`], { stdio: 'ignore', detached: true }).unref();
++    const t = takeOver(s, { ...HAND_OVER, HORNHOOF_TAKE_OVER_WAIT: '10' });
++    expect(t.status).toMatchObject({ id: 'h12', state: 'running', step: 'install' });
++    expect(t.status.log).toContain(GOES_ON);
++    expect(t.status.log).not.toContain(NO_START);
++  });
++
++  it('does nothing unless an update waits to be taken over', () => {
++    const { s, first } = handedOver('h13');
++    for (const change of [{ state: 'done' }, { state: 'running', step: 'health' }, { state: 'running', step: 'install', id: 'another' }]) {
++      editStatus(s, change);
++      const before = readFileSync(statusFile(s), 'utf8');
++      const t = takeOver(s, HAND_OVER);
++      expect(t.code).toBe(0);
++      expect(t.calls.slice(first.calls.length)).toEqual([]);
++      expect(readFileSync(statusFile(s), 'utf8')).toBe(before);
++    }
++  });
++
++  it('does nothing when there is no status at all', () => {
++    const t = takeOver(stand());
++    expect(t.code).toBe(0);
++    expect(t.calls).toEqual([]);
++    expect(t.status).toBeNull();
++  });
++});
++
+ /* The orchestrator's commands on the server's computer, while the CEO keeps access to it open. */
+ describe('updater, the computer', () => {
+   const HELPER = `${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`;
+   const env = { HORNHOOF_COMPUTER_IMAGE: HELPER };
+   function access(s: Stand, untilSec: number) {
+     writeFileSync(join(s.control, 'computer.json'), JSON.stringify({ untilSec, until: new Date(untilSec * 1000).toISOString(), asked: null }));
+   }
+   function command(s: Stand, id: string, run: string, timeout = 60) {
+diff --git a/apps/updater/updater.sh b/apps/updater/updater.sh
+index 21b83d50..79f48f1b 100755
+--- a/apps/updater/updater.sh
++++ b/apps/updater/updater.sh
+@@ -1,66 +1,83 @@
+ #!/usr/bin/env bash
+ # Hornhoof updater: swaps this server's images when someone updates from the web app.
+ #
+-#   updater.sh          watch the control folder for update requests
+-#   updater.sh --once   handle the waiting request, if any, then exit
++#   updater.sh              watch the control folder for update requests
++#   updater.sh --once       handle the waiting request, if any, then exit
++#   updater.sh --take-over  put this build's updater in the place of an older one that runs an update, then exit
+ #
+ # The app writes request.json {id, version, tag, digest, nodeDigest, updaterDigest} into the control folder; this
+ # writes status.json {id, version, state, step, log, at} and touches alive. An update downloads the build by the
+ # digest the app read for it, and every image that build's compose file names, the node and updater images by their
+-# digests too, while the old server keeps working. Only then it saves the database, runs that build's own installer,
+-# which starts exactly these images, and waits for the new server to answer with the build's commit. If it does not,
+-# the images that ran before go back, and the database goes back to the saved copy first when the new build added
+-# migrations to it, since the old build does not know them, with the public link's settings kept next to the copy.
+-# After each install, containers of services the build's compose file does not name go. An updater stopped during an
+-# update goes on with it when it starts again. The updater holds the Docker socket, so it takes nothing from the
+-# request but the tag, which must be a plain image tag, and the digests, and only runs images of HORNHOOF_IMAGE and of
+-# its -node and -updater repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's
+-# in its image.
++# digests too, while the old server keeps working. Only then it stops the app, so every change the app confirmed is in
++# the copy, saves the database, and runs that build's own installer, which starts exactly these images, and waits for
++# the new server to answer with the build's commit, at front when the build has it. If it does not, or the installer
++# does not end in time, the images that ran before go back, and the database goes back to the saved copy first when
++# the new build added migrations to it, since the old build does not know them, with the public link's settings kept
++# next to the copy. Before each install, containers of services the build's compose file does not name go, so a build
++# from before front can take the web port again; after it, compose removes what is left of them. An updater stopped
++# during an update goes on with it when it starts again.
++#
++# This is revision 2, which each installer hears as HORNHOOF_UPDATER_REV and the note of an update keeps. An older
++# updater says no revision, so an installer that needs this one takes over: its helper container puts this build's
++# updater in the place of the older one, which then finds the update in the older one's note, saves the database again
++# with the app stopped, and goes on. If this build's updater does not start, the helper brings the older one back to
++# go back.
++#
++# The updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain image
++# tag, and the digests, and only runs images of HORNHOOF_IMAGE and of its -node and -updater repositories. It runs on
++# the bash that ships with macOS (3.2) for the tests, and on Alpine's in its image.
+ #
+ # It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
+ # the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
+ # computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
+ set -euo pipefail
+ 
+ CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
+ SERVER_DIR="${HORNHOOF_SERVER_DIR:-}"
+ IMAGE="${HORNHOOF_IMAGE:-ghcr.io/invariant0x/hornhoof}"
+ NODE_IMAGE="${IMAGE}-node"
+ UPDATER_IMAGE="${IMAGE}-updater"
+-HEALTH_URL="${HORNHOOF_HEALTH_URL:-http://app:8080/api/health}"
++# The revision each installer hears and the note of an update keeps.
++UPDATER_REV=2
+ HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
++# How long one install may take, so a migration or a database start that hangs never keeps the company in maintenance.
++INSTALL_WAIT="${HORNHOOF_INSTALL_WAIT:-900}"
++# How long this build's updater may take to say it goes on with an update it takes over.
++TAKE_OVER_WAIT="${HORNHOOF_TAKE_OVER_WAIT:-60}"
++TAKEN_OVER="This build's updater goes on with the update."
+ KEEP_BACKUPS=3
+ # The image commands on the computer run in: the updater's own, which compose names.
+ COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
+ # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
+ COMPUTER_MAX=1800
+ COMPUTER_OUTPUT=30000
+ 
+ ID=''
+ VERSION=''
+ STATE=''
+ STEP=''
+ LOG=''
+ WORK=''
+ # The update being run: its tag, the digests of its app, node and updater images, empty for one it takes by the tag,
+ # the build to go back to and the images it ran, the commit the new server answers with, how many migrations the
+-# database had before, and the copy of it.
++# database had before, the copy of it, and the revision of the updater that wrote the note, empty for an older one.
+ TAG=''
+ DIGEST=''
+ NODE_DIGEST=''
+ UPDATER_DIGEST=''
+ PREVIOUS=''
+ BACK_APP=''
+ BACK_NODE=''
+ BACK_UPDATER=''
+ TARGET=''
+ BEFORE=''
+ BACKUP=''
++NOTE_REV=''
+ 
+ say() {
+   printf '%s\n' "$*"
+   LOG="$LOG$*
+ "
+ }
+ 
+ # Written whole and then moved, so the app never reads half a file.
+@@ -116,19 +133,19 @@ own() {
+ pinned() { if [ -n "$2" ]; then printf '%s@%s' "$1" "$2"; else printf '%s:%s' "$1" "$TAG"; fi; }
+ 
+ # The updater's own note of the update it runs, so an updater that was stopped can go on with it. It lies next to
+ # the backups, where the app cannot write.
+ note() {
+   mkdir -p "$SERVER_DIR/backups"
+   (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg node "$NODE_DIGEST" \
+     --arg updater "$UPDATER_DIGEST" --arg previous "$PREVIOUS" --arg back_app "$BACK_APP" --arg back_node "$BACK_NODE" \
+-    --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" \
++    --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" --arg rev "$UPDATER_REV" \
+     '{id: $id, version: $version, tag: $tag, digest: $digest, node: $node, updater: $updater, previous: $previous,
+-      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup}' \
++      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup, rev: $rev}' \
+     > "$SERVER_DIR/backups/update.json.new")
+   mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
+ }
+ 
+ # Reads the note of the update with this ID; fails when there is none.
+ recall() {
+   local file="$SERVER_DIR/backups/update.json"
+   [ -n "$SERVER_DIR" ] && [ -f "$file" ] && [ "$(jq -r '.id // empty' "$file" 2> /dev/null || true)" = "$ID" ] || return 1
+@@ -139,16 +156,17 @@ recall() {
+   UPDATER_DIGEST=$(jq -r '.updater' "$file")
+   PREVIOUS=$(jq -r '.previous' "$file")
+   BACK_APP=$(jq -r '.back.app' "$file")
+   BACK_NODE=$(jq -r '.back.node' "$file")
+   BACK_UPDATER=$(jq -r '.back.updater' "$file")
+   TARGET=$(jq -r '.target' "$file")
+   BEFORE=$(jq -r '.before' "$file")
+   BACKUP=$(jq -r '.backup' "$file")
++  NOTE_REV=$(jq -r '.rev // empty' "$file")
+   plain_tag "$TAG" && plain_digest "$DIGEST" && digest_or_none "$NODE_DIGEST" && digest_or_none "$UPDATER_DIGEST" && plain_tag "$PREVIOUS" || return 1
+   own "$IMAGE" "$BACK_APP" && own "$NODE_IMAGE" "$BACK_NODE" && own "$UPDATER_IMAGE" "$BACK_UPDATER" || return 1
+   case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
+ }
+ 
+ forget() { if [ -n "$SERVER_DIR" ]; then rm -f "$SERVER_DIR/backups/update.json"; fi; }
+ 
+ # The commit an app image was made from, from its label; empty for a build made by hand.
+@@ -176,32 +194,48 @@ running() {
+ 
+ # Whether the built-in node runs the exact node image of the update already.
+ same_node() {
+   [ -n "$NODE_DIGEST" ] || return 1
+   case " $(service_digests node) " in *" $NODE_IMAGE@$NODE_DIGEST "*) return 0 ;; esac
+   return 1
+ }
+ 
++# The services a compose file names, one per line; none when compose cannot read it.
++services_of() { docker compose --project-directory "$SERVER_DIR" -f "$1" config --services 2> /dev/null || true; }
++
++# names_service <compose file> <service>
++names_service() {
++  case " $(services_of "$1" | tr '\n' ' ') " in *" $2 "*) return 0 ;; esac
++  return 1
++}
++
+ services_without_node() {
+   local s list=''
+-  for s in $(docker compose --project-directory "$SERVER_DIR" -f "$1" config --services 2> /dev/null || true); do
++  for s in $(services_of "$1"); do
+     [ "$s" = node ] || list="$list $s"
+   done
+   printf '%s' "${list# }"
+ }
+ 
++# The container of the app starts again; it may be gone by now, and then nothing does.
++start_app() { [ -z "$1" ] || docker start "$1" > /dev/null 2>&1 || true; }
++
++# The app stops first, so every change it confirmed is in the copy. A copy that fails leaves it running again.
+ backup() {
+-  local db file
++  local db app file
+   db=$(compose ps -q db 2> /dev/null || true)
+   [ -n "$db" ] || return 1
+   mkdir -p "$SERVER_DIR/backups"
+   file="$SERVER_DIR/backups/hornhoof-$(date -u +%Y%m%dT%H%M%SZ)-$ID.sql.gz"
++  app=$(compose ps -q app 2> /dev/null || true)
++  compose stop app > /dev/null 2>&1 || true
+   (umask 077 && docker exec "$db" pg_dump -U hornhoof -d hornhoof | gzip > "$file") || {
+     rm -f "$file"
++    start_app "$app"
+     return 1
+   }
+   BACKUP=$file
+   # A copy of the link's settings kept with an old database copy goes with it.
+   # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
+   ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old" "${old%.sql.gz}.tunnel.json"; done
+   say "Saved the database to backups/$(basename "$file")."
+ }
+@@ -273,42 +307,104 @@ pull_images() {
+     [ -n "$services" ] || return 1
+   fi
+   # shellcheck disable=SC2086 # services is a space-separated list of compose service names, or empty for all of them.
+   HORNHOOF_VERSION="$TAG" HORNHOOF_APP_REF="$IMAGE@$DIGEST" HORNHOOF_NODE_REF="$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" \
+     HORNHOOF_UPDATER_REF="$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")" \
+     docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull $services >> "$WORK/install.log" 2>&1
+ }
+ 
++# The containers of this server, one per line: id and service. .env names the compose project; a server set up before
++# it did goes by the name this updater's compose file gave it.
++project_containers() {
++  local project
++  project=$(env_value COMPOSE_PROJECT_NAME)
++  docker ps -a --filter "label=com.docker.compose.project=${project:-${COMPOSE_PROJECT_NAME:-hornhoof}}" \
++    --format '{{.ID}} {{.Label "com.docker.compose.service"}}' 2> /dev/null || true
++}
++
++# remove_unnamed <compose file>: containers of services that file does not name go before its installer runs, since a
++# build from before front could not take the web port while front holds it, and drop_orphans comes only after an
++# install that worked. A file without the updater would take this updater for one of them, so then nothing goes.
++remove_unnamed() {
++  local named id service
++  named=" $(services_of "$1" | tr '\n' ' ') "
++  case "$named" in *' updater '*) ;; *) return 0 ;; esac
++  while read -r id service; do
++    [ -n "$service" ] || continue
++    case "$named" in *" $service "*) continue ;; esac
++    docker rm -f "$id" > /dev/null 2>&1 || say "Could not remove the container of $service, a service this build does not name."
++  done <<< "$(project_containers)"
++}
++
++# stop_installer <process> <tag>: what it starts stops first, so a compose command waiting for it ends by itself.
++stop_installer() {
++  compose stop migrate app > /dev/null 2>&1 || true
++  kill -9 -- "-$1" "$1" 2> /dev/null || true
++  wait "$1" 2> /dev/null || true
++  say "The installer of $2 did not end within $INSTALL_WAIT seconds, so it was stopped."
++}
++
++# run_installer <tag> <app> <node> <updater>: the installer of that build, for at most INSTALL_WAIT seconds. It runs in
++# a process group of its own, so stopping it stops its compose commands too, which would go on starting this build
++# while the one before goes back.
++run_installer() {
++  local tag=$1 dir="$WORK/$1" installer i=0
++  set -m
++  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
++    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 &
++  installer=$!
++  set +m
++  while kill -0 "$installer" 2> /dev/null; do
++    if [ "$i" -ge "$INSTALL_WAIT" ]; then
++      stop_installer "$installer" "$tag"
++      return 1
++    fi
++    i=$((i + 1))
++    sleep 1
++  done
++  wait "$installer"
++}
++
+ # install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and
+ # they start exactly these images. They are on this computer already: the new build's came before the database was
+ # saved, and the build from before ran here. Compose downloads only an image that is missing.
+ install() {
+-  local tag=$1 dir="$WORK/$1"
+-  unpack "$tag" "$2" || return 1
+-  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
+-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
++  unpack "$1" "$2" || return 1
++  remove_unnamed "$WORK/$1/compose.yaml"
++  run_installer "$@" || return 1
+   drop_orphans
+ }
+ 
+ # The installer of a build starts only the services it knows, so after going back to a build from before a service,
+ # as the tunnel, that service's container would run on, carrying the public link to a server that knows nothing of
+ # it. compose removes the containers of services its file does not name; db runs already, so nothing else changes. A
+ # file without the updater would take this updater for one of them, so then nothing goes.
+ drop_orphans() {
+-  case " $(compose config --services 2> /dev/null | tr '\n' ' ') " in
+-    *' updater '*) compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names." ;;
+-  esac
++  if names_service "$SERVER_DIR/compose.yaml" updater; then
++    compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names."
++  fi
++}
++
++# Where the build that runs now answers: at front when the compose file its installer copied here names it.
++health_url() {
++  if [ -n "${HORNHOOF_HEALTH_URL:-}" ]; then
++    printf '%s' "$HORNHOOF_HEALTH_URL"
++  elif names_service "$SERVER_DIR/compose.yaml" front; then
++    printf 'http://front:8080/api/health'
++  else
++    printf 'http://app:8080/api/health'
++  fi
+ }
+ 
+ # healthy <commit>: the server answers with that commit within HEALTH_WAIT seconds; any answer for a build made by hand.
+ healthy() {
+   local want=$1 body got i=0
+   while [ "$i" -lt "$HEALTH_WAIT" ]; do
+-    if body=$(curl -fsS --max-time 5 "$HEALTH_URL" 2> /dev/null); then
++    if body=$(curl -fsS --max-time 5 "$(health_url)" 2> /dev/null); then
+       got=$(printf '%s' "$body" | jq -r '.commit // empty' 2> /dev/null || true)
+       if [ -z "$want" ] || [ "$got" = "$want" ]; then return 0; fi
+     fi
+     i=$((i + 1))
+     sleep 1
+   done
+   return 1
+ }
+@@ -442,44 +538,106 @@ handle_request() {
+   node=$(jq -r '.nodeDigest // empty' "$CONTROL/request.json")
+   updater=$(jq -r '.updaterDigest // empty' "$CONTROL/request.json")
+   WORK=$(mktemp -d)
+   update "$tag" "$digest" "$node" "$updater"
+   rm -rf "$WORK"
+   WORK=''
+ }
+ 
+-# An update this updater was stopped in goes on from the step it was at, by the updater's own note of it. Before the
+-# install nothing changed yet, so it starts over.
+-interrupted() {
+-  [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ] || return 0
++update_running() { [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ]; }
++
++# The update under way, as status.json says it.
++read_status() {
+   ID=$(jq -r '.id // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9-')
+   VERSION=$(jq -r '.version // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
+   STEP=$(jq -r '.step // empty' "$CONTROL/status.json")
+   LOG="$(jq -r '.log // empty' "$CONTROL/status.json")
+ "
+-  if ! recall; then
+-    stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
+-    return 0
++}
++
++# Whether this build's installer handed the update over: an older updater got as far as its copy of the database, which
++# it notes only after it took it. This updater may have been stopped during the second copy since.
++handed_over() {
++  [ -z "$NOTE_REV" ] && [ -n "$BACKUP" ] && { [ "$STEP" = install ] || [ "$STEP" = backup ]; }
++}
++
++# The older updater took its copy while the app worked on, so unless the new build ran already it is taken again, with
++# the app stopped. The line goes out at once, since the helper is waiting for it. This build's installer wrote .env and
++# compose.yaml already, so from here a failure goes back.
++go_on_handed_over() {
++  step install "$TAKEN_OVER"
++  if [ "$(applied)" = "$BEFORE" ]; then
++    step backup "Saving the database again, now that the app is stopped."
++    backup || {
++      say "Could not save the database again."
++      go_back
++      return 0
++    }
+   fi
++  note
++  step install "Installing $VERSION."
++  install_new
++}
++
++# The update goes on from the step it was at. Before the install nothing changed yet, so it starts over, with the app
++# running again that the copy stopped, or a download that fails would say nothing changed with the company's app down.
++go_on() {
+   say "The updater stopped during the update and goes on with it."
+-  WORK=$(mktemp -d)
++  [ "$STEP" != backup ] || start_app "$(compose ps -aq app 2> /dev/null || true)"
+   case "$STEP" in
+     backup | pull) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
+     install)
+       step install "Installing $VERSION."
+       install_new
+       ;;
+     health) check_new ;;
+     *) go_back ;;
+   esac
++}
++
++# An update this updater was stopped in, or was handed by an older one, goes on by the note of it.
++interrupted() {
++  update_running || return 0
++  read_status
++  if ! recall; then
++    stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
++    return 0
++  fi
++  WORK=$(mktemp -d)
++  if handed_over; then go_on_handed_over; else go_on; fi
+   rm -rf "$WORK"
+   WORK=''
+ }
+ 
++# Whether this build's updater says it goes on with the update, within TAKE_OVER_WAIT seconds.
++taken_over() {
++  local i=0
++  while true; do
++    case "$(jq -r '.log // empty' "$CONTROL/status.json" 2> /dev/null || true)" in *"$TAKEN_OVER"*) return 0 ;; esac
++    [ "$i" -lt "$TAKE_OVER_WAIT" ] || return 1
++    i=$((i + 1))
++    sleep 1
++  done
++}
++
++# The helper container this build's installer starts when an older updater runs it. Compose replaces that updater, and
++# the installer waiting in it, with this build's, which finds the update by the older one's note. If it does not say so
++# in time, the older updater starts again, finds step rollback and goes back, by itself.
++take_over() {
++  update_running || return 0
++  read_status
++  { [ "$STEP" = install ] && recall; } || return 0
++  if compose up -d --no-build --wait updater > /dev/null 2>&1 && taken_over; then return 0; fi
++  say "This build's updater did not start, so the build from before goes back."
++  write_status running rollback
++  HORNHOOF_UPDATER_REF="$BACK_UPDATER" compose up -d --no-build updater > /dev/null 2>&1 ||
++    stop_with failed "No updater could start. Hornhoof still runs the build from before; run install.sh server in $SERVER_DIR." finished
++}
++
+ # Whether the CEO keeps access to the computer open now, by the time the app wrote, which ends it by itself.
+ computer_open() {
+   local until
+   until=$(jq -r '.untilSec // 0' "$CONTROL/computer.json" 2> /dev/null || true)
+   case "$until" in '' | *[!0-9]*) return 1 ;; esac
+   [ "$until" -gt "$(date +%s)" ]
+ }
+ 
+@@ -572,16 +730,20 @@ computer_runs() {
+       code=125
+     fi
+     # The app stops waiting for an answer and takes the command back after a while.
+     [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"
+     rm -f "$out" "$out.done" "$out.late" "$out.closed" "$CONTROL/computer/$id.started"
+   done
+ }
+ 
++if [ "${1:-}" = --take-over ]; then
++  take_over
++  exit 0
++fi
+ mkdir -p "$CONTROL"
+ touch "$CONTROL/alive"
+ interrupted
+ if [ "${1:-}" = --once ]; then
+   handle_request
+   computer_runs
+   exit 0
+ fi
+
+## 29c2d105 Start the database, keeper and front before the app, and let the new updater run the move
+
+install.sh starts services in the new order, gives each machine its id and hands an update over to the new build's updater. Until Task 7 of this plan lands, compose.yaml has no keeper, front or migrate, so this installer does not start a real install on the branch.
+
+Ruling: a new .env keeps an empty HORNHOOF_PORT=, and PUBLIC_URL follows any new .env - why: a stopped first run otherwise took 8080 from another company - cost if wrong: one more line in .env.
+
+---
+ apps/server/test/install-script.test.ts | 100 +++++++++++++++++++++++++++-----
+ apps/server/test/install-stubs/docker   |  14 ++++-
+ scripts/install.sh                      |  68 +++++++++++++++++++---
+ 3 files changed, 159 insertions(+), 23 deletions(-)
+
+diff --git a/apps/server/test/install-script.test.ts b/apps/server/test/install-script.test.ts
+index 056a64ec..3dcf3601 100644
+--- a/apps/server/test/install-script.test.ts
++++ b/apps/server/test/install-script.test.ts
+@@ -11,17 +11,17 @@ const STUBS = fileURLToPath(new URL('./install-stubs/', import.meta.url));
+ const SERVER = 'https://hornhoof.example.test';
+ const IMAGE = 'ghcr.io/invariant0x/hornhoof-node:latest';
+ const CODE = 'Ab3_d-Ef'.repeat(5) + 'xyz';
+ const SUB_A = '1c07dac4-c52e-48b4-b316-81c19de61bd7';
+ const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
+ const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;
+ 
+ /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
+-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum'];
++const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum', 'tee'];
+ /* The installer runs Docker's and Homebrew's install scripts only when their SHA-256 is the one it pins. */
+ const sha256 = (stub: string) => createHash('sha256').update(readFileSync(join(STUBS, stub))).digest('hex');
+ 
+ type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
+ 
+ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-answer\n' }: Options = {}) {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-install-'));
+   const bin = join(dir, 'stubs');
+@@ -59,16 +59,30 @@ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-an
+     },
+   });
+   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+   return { code: res.status, out: res.stdout + res.stderr, calls, dir, docker: calls.filter(c => /^(sudo )?docker /.test(c)) };
+ }
+ 
+ const indexOf = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
+ 
++/* The installer as an updater runs it: in a server folder that has a .env, with the compose file the build brought. */
++function fromUpdater(env: Record<string, string> = {}, dotEnv = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n') {
++  const folder = mkdtempSync(join(tmpdir(), 'hh-server-'));
++  writeFileSync(join(folder, '.env'), dotEnv);
++  const compose = join(folder, 'brought.yaml');
++  writeFileSync(compose, 'services: {app: {}}\n');
++  const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: folder, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose, ...env } });
++  return { ...r, folder, dotEnv: () => readFileSync(join(folder, '.env'), 'utf8') };
++}
++/* One key's lines of a .env, so a failed check never prints the secrets beside them. */
++const linesOf = (dotEnv: string, key: string) => dotEnv.split('\n').filter(line => line.startsWith(`${key}=`));
++const COMPOSE_STEP = /^docker compose (stop|up|pull)/;
++const UPDATER_REF = `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`;
++
+ describe('install.sh', () => {
+   it('records an update intent and stops an old node gracefully before replacing it', () => {
+     const name = 'hornhoof-claude-1c07dac4';
+     const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}` } });
+     expect(r.code).toBe(0);
+     const steps = [
+       `docker exec ${name} node /app/apps/node/dist/main.js prepare-stop node_update`,
+       `docker stop --time 5 ${name}`,
+@@ -647,17 +661,17 @@ describe('install.sh', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), `HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_VERSION=0.4.0\nHORNHOOF_HOST_ID=${'e'.repeat(64)}\n`);
+     const compose = join(dir, 'brought.yaml');
+     writeFileSync(compose, 'services: {app: {}}\n');
+     const r = install({
+       args: ['server'],
+       tty: '',
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_PULLED: '1',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         HORNHOOF_COMPOSE_FILE: compose,
+         HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`,
+         HORNHOOF_NODE_REF: `ghcr.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}`,
+         HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
+@@ -674,45 +688,45 @@ describe('install.sh', () => {
+     /* compose starts exactly the images the updater checked. */
+     expect(env).toMatch(new RegExp(`^HORNHOOF_APP_REF=ghcr\\.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}$`, 'm'));
+     expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`, 'm'));
+     expect(env).toMatch(new RegExp(`^HORNHOOF_UPDATER_REF=ghcr\\.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}$`, 'm'));
+     expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
+     expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
+     /* The updater downloaded every image before it saved the database, so this only starts them. */
+     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
++    expect(r.calls).toContain('docker compose up -d --no-build app node');
+     expect(r.calls).not.toContain('docker compose up -d --no-build');
+     expect(r.calls.find(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toMatch(new RegExp(` ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`));
+   });
+ 
+   /* The first update of a server from before runs through the updater it has, which downloads nothing and names the
+      build by its tag only. */
+   it('downloads the images itself for an updater that did not', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+     const compose = join(dir, 'brought.yaml');
+     writeFileSync(compose, 'services: {app: {}}\n');
+-    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
++    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
+     expect(r.code).toBe(0);
+     expect(indexOf(r.calls, 'docker compose pull')).toBeGreaterThanOrEqual(0);
+-    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node tunnel'));
++    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build app node'));
+     const env = readFileSync(join(dir, '.env'), 'utf8');
+     expect(env).toMatch(/^HORNHOOF_APP_REF=ghcr\.io\/invariant0x\/hornhoof:0\.4\.1$/m);
+     expect(env).toMatch(/^HORNHOOF_NODE_REF=ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/m);
+     expect(env).toMatch(/^HORNHOOF_UPDATER_REF=ghcr\.io\/invariant0x\/hornhoof-updater:0\.4\.1$/m);
+   });
+ 
+   it('moves the nodes that joined through the public link to the new build too', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_TUNNEL_SETTINGS: '{"url":"https://acme.hornhoof.test","name":"acme","key":"secret","tunnel":{"serverAddr":"hornhoof.test"}}',
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-glm-33333333=https://acme.hornhoof.test hornhoof-codex-9f1e2d3c=https://other.hornhoof.test',
+       },
+     });
+     expect(r.code).toBe(0);
+     const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+@@ -722,34 +736,34 @@ describe('install.sh', () => {
+   });
+ 
+   it('moves only the nodes it knows when the tunnel settings say nothing usable', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_TUNNEL_SETTINGS: '{"url":"https://a b.test; rm -rf /","tunnel":{}}',
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081',
+       },
+     });
+     expect(r.code).toBe(0);
+     expect(r.calls.filter(c => c.startsWith('docker run -d'))).toHaveLength(1);
+   });
+ 
+   it("moves this server's nodes on this machine to the new build from the updater", () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\n');
+     const r = install({
+       args: ['server'],
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test hornhoof-codex-9f1e2d3c=https://other.example.test',
+       },
+     });
+     expect(r.code).toBe(0);
+     const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+     expect(runs).toHaveLength(2);
+@@ -764,31 +778,31 @@ describe('install.sh', () => {
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\nHORNHOOF_VERSION=0.4.0\n');
+     const compose = join(dir, 'brought.yaml');
+     writeFileSync(compose, 'services: {app: {}}\n');
+     const nodeRef = `ghcr.io/invariant0x/hornhoof-node@sha256:${'c'.repeat(64)}`;
+     const r = install({
+       args: ['server'],
+       tty: '',
+       env: {
+-        HORNHOOF_FROM_UPDATER: '1',
++        HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2',
+         HORNHOOF_PULLED: '1',
+         HORNHOOF_SERVER_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         HORNHOOF_COMPOSE_FILE: compose,
+         HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`,
+         HORNHOOF_NODE_REF: nodeRef,
+         HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+         STUB_NODE_RUNNING: nodeRef,
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test',
+       },
+     });
+     expect(r.code).toBe(0);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel');
+-    expect(r.calls).not.toContain('docker compose up -d --no-build db app node tunnel');
++    expect(r.calls).toContain('docker compose up -d --no-build app');
++    expect(r.calls).not.toContain('docker compose up -d --no-build app node');
+     expect(r.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker run -d'))).toBe(false);
+     expect(r.calls.some(c => c.includes('tunnel.json'))).toBe(false);
+   });
+ 
+   it('leaves the built-in node and plan nodes running in server mode when the node image is unchanged', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+     const r = install({
+@@ -798,17 +812,17 @@ describe('install.sh', () => {
+         HORNHOOF_DIR: dir,
+         HORNHOOF_VERSION: '0.4.1',
+         STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.4.0',
+         STUB_IMAGE_IDS: 'ghcr.io/invariant0x/hornhoof-node:0.4.0=sha256:same ghcr.io/invariant0x/hornhoof-node:0.4.1=sha256:same',
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
+       },
+     });
+     expect(r.code).toBe(0);
+-    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel updater');
++    expect(r.calls).toContain('docker compose up -d --no-build app updater');
+     expect(r.calls).not.toContain('docker compose up -d --no-build');
+     expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-claude') || c.startsWith('docker run -d'))).toBe(false);
+ 
+     /* When the node image did change, compose recreates the built-in node as before. */
+     const changed = install({
+       args: ['server'],
+       tty: '',
+       env: {
+@@ -818,17 +832,77 @@ describe('install.sh', () => {
+       },
+     });
+     expect(changed.code).toBe(0);
+     expect(changed.calls).toContain('docker compose up -d --no-build');
+     const intent = indexOf(changed.calls, 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
+     const stopped = indexOf(changed.calls, 'docker stop --time 5 nodecid');
+     expect(intent).toBeGreaterThanOrEqual(0);
+     expect(stopped).toBeGreaterThan(intent);
+-    expect(indexOf(changed.calls, 'docker compose up -d --no-build')).toBeGreaterThan(stopped);
++    expect(changed.calls.indexOf('docker compose up -d --no-build')).toBeGreaterThan(stopped);
++  });
++
++  it('starts the database, then the keeper and front, then the app, which migrates first', () => {
++    const r = install({ args: ['server'], tty: '\n' });
++    expect(r.code).toBe(0);
++    const steps = ['docker compose stop app', 'docker compose up -d --no-build --remove-orphans --wait db', 'docker compose up -d --no-build keeper front', 'docker compose up -d --no-build'].map(step => r.calls.indexOf(step));
++    expect(steps.every(index => index >= 0)).toBe(true);
++    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
++  });
++
++  it('says where to look when the database cannot be brought up to this build', () => {
++    const r = install({ args: ['server'], tty: '\n', env: { STUB_MIGRATE: 'fail' } });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain(`Hornhoof could not bring its database up to this build. Run docker compose logs migrate in ${join(r.dir, 'home', 'hornhoof')} to see why.`);
++  });
++
++  it('writes the machine id once: the host id by hand, a random one from the updater', () => {
++    const byHand = install({ args: ['server'], tty: '\n' });
++    expect(byHand.code).toBe(0);
++    const made = readFileSync(join(byHand.dir, 'home', 'hornhoof', '.env'), 'utf8');
++    expect(linesOf(made, 'HORNHOOF_MACHINE_ID')[0].split('=')[1]).toBe(linesOf(made, 'HORNHOOF_HOST_ID')[0].split('=')[1]);
++    const updater = fromUpdater({ HORNHOOF_UPDATER_REV: '2' });
++    expect(updater.code).toBe(0);
++    expect(linesOf(updater.dotEnv(), 'HORNHOOF_MACHINE_ID')[0]).toMatch(/^HORNHOOF_MACHINE_ID=[0-9a-f]{32}$/);
++
++    const kept = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_MACHINE_ID=0123abcd\n';
++    const fromKept = fromUpdater({ HORNHOOF_UPDATER_REV: '2' }, kept).dotEnv();
++    const handDir = mkdtempSync(join(tmpdir(), 'hh-server-'));
++    writeFileSync(join(handDir, '.env'), kept);
++    expect(install({ args: ['server'], tty: '\n', env: { HORNHOOF_DIR: handDir } }).code).toBe(0);
++    for (const env of [fromKept, readFileSync(join(handDir, '.env'), 'utf8')]) expect(linesOf(env, 'HORNHOOF_MACHINE_ID')).toEqual(['HORNHOOF_MACHINE_ID=0123abcd']);
++  });
++
++  it("hands an update to this build's updater when an older updater runs it", () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_HANDOVER_WAIT: '1' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain("This build's updater takes over the update first.");
++    expect(r.out).toContain(`The updater of this build did not take over, so nothing changed. Run install.sh server in ${r.folder}.`);
++    expect(readFileSync(join(r.folder, 'compose.yaml'), 'utf8')).toBe('services: {app: {}}\n');
++    const project = linesOf(r.dotEnv(), 'COMPOSE_PROJECT_NAME')[0].split('=')[1];
++    expect(r.calls).toContain(`docker run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${r.folder}:${r.folder} -v ${project}_control:/control -e HORNHOOF_SERVER_DIR=${r.folder} ${UPDATER_REF} --take-over`);
++    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
++  });
++
++  it('stops when the hand-over helper does not start', () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, STUB_RUN: 'fail' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain('Could not start the updater of this build, so nothing changed.');
++    expect(r.out).not.toContain('did not take over');
++    expect(linesOf(r.dotEnv(), 'HORNHOOF_VERSION')).toEqual(['HORNHOOF_VERSION=0.4.1']);
++    expect(linesOf(r.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
++    expect(existsSync(join(r.folder, 'compose.yaml'))).toBe(true);
++    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
++  });
++
++  it('goes on without a handover under an updater of revision 2', () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_PULLED: '1' });
++    expect(r.code).toBe(0);
++    expect(r.calls.some(c => c.includes('--take-over'))).toBe(false);
++    expect(r.calls).toContain('docker compose up -d --no-build app node');
+   });
+ 
+   it('refuses a server name it cannot use as a folder', () => {
+     const r = install({ args: ['server', '--name', 'Acme Inc'] });
+     expect(r.code).toBe(1);
+     expect(r.out).toContain('--name takes lowercase letters, digits and dashes');
+   });
+ 
+diff --git a/apps/server/test/install-stubs/docker b/apps/server/test/install-stubs/docker
+index 2811dc69..01e9cdfc 100755
+--- a/apps/server/test/install-stubs/docker
++++ b/apps/server/test/install-stubs/docker
+@@ -12,42 +12,54 @@ if [ "${1:-}" = context ] && [ "${2:-}" = show ]; then echo "${STUB_CONTEXT:-des
+ if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
+ has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
+ # STUB_NODE_RUNNING is the image the server's built-in node runs now; STUB_IMAGE_IDS words are "ref=id" for tags that
+ # point at the same image.
+ id_of() {
+   for w in ${STUB_IMAGE_IDS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s\n' "${w#*=}"; return; }; done
+   printf 'id-%s\n' "$1"
+ }
++# The services a "compose ... up" names: nothing when it starts them all.
++up_services() {
++  while [ $# -gt 0 ] && [ "$1" != up ]; do shift; done
++  [ $# -gt 0 ] && shift
++  for word in "$@"; do case "$word" in -*) ;; *) printf '%s ' "$word" ;; esac; done
++}
++# STUB_MIGRATE=fail: compose runs migrate first for every up that starts the app, and migrate fails.
++migrate_runs() {
++  case " $(up_services "$@") " in '  ' | *' app '*) ;; *) return 0 ;; esac
++  if [ "${STUB_MIGRATE:-}" = fail ]; then echo "service \"migrate\" didn't complete successfully: exit 1" >&2; exit 1; fi
++}
+ case "$1" in
+   info) echo "Server Version: 28.0.0" ;;
+   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+   create) echo cid-app ;;
+   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
+   image)
+     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
+       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
+       id_of "${!#}"
+     else
+       [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1
+     fi ;;
+   inspect) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
+   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
+   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
+   compose)
++    case " $* " in *' up '*) migrate_runs "$@" ;; esac
+     case "$*" in
+       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
+       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
+       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
+       *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;
+     esac ;;
+   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
+   run)
+     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
+-    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
++    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+   exec)
+     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
+     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.
+     WORD=/data/node.json; if has "$@"; then
+       for n in ${STUB_NODE_SERVERS:-}; do WORD=${n%%=*}; if has "$@"; then printf '{\n  "server": "%s",\n  "provider": "kimi"\n}\n' "${n#*=}"; exit 0; fi; done
+       exit 1
+     fi
+     WORD=/data/login-url; if has "$@"; then
+diff --git a/scripts/install.sh b/scripts/install.sh
+index 96e3c7cc..4e5d2c75 100755
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -7,17 +7,18 @@
+ #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
+ #   install.sh --uninstall                                       remove this machine's nodes
+ #
+ # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
+ # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
+ # starts: by the build's tag, or as HORNHOOF_APP_REF, HORNHOOF_NODE_REF and HORNHOOF_UPDATER_REF give them. The updater
+ # service runs the installer of the build it moves to with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup,
+ # the compose file it brings, the images it checked by digest, and this server's nodes on this machine move to the
+-# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them.
++# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them. An updater
++# that does not say HORNHOOF_UPDATER_REV=2 or later hands the update to the updater of this build first.
+ #
+ # Several companies can share a computer: each node carries the address of the server it works for, and an
+ # update or an uninstall touches only that server's nodes.
+ #
+ # The server fills in its own address when it serves this file. The script arrives through a pipe, so every
+ # question is read from the terminal. It runs on the bash that ships with macOS (3.2).
+ set -euo pipefail
+ 
+@@ -264,20 +265,22 @@ pull_image() {
+     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
+       say "Using the local image."
+     else
+       fail "Could not download $IMAGE. Check the internet connection, then run this command again."
+     fi
+   fi
+ }
+ 
++random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
++
+ machine_id() {
+   mkdir -p "$STATE_DIR"
+   if ! grep -Eq '^[0-9a-f]{32}$' "$STATE_DIR/machine" 2> /dev/null; then
+-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$STATE_DIR/machine"
++    random_hex 16 > "$STATE_DIR/machine"
+   fi
+   cat "$STATE_DIR/machine"
+ }
+ 
+ # A node in a container reaches the host's localhost as host.docker.internal.
+ NODE_SERVER=''
+ LOCAL_SERVER=''
+ node_server() {
+@@ -648,17 +651,17 @@ uninstall_mode() {
+   esac
+ }
+ 
+ # --- Server -------------------------------------------------------------------------------------
+ 
+ new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
+ 
+ # The database password goes into the database address, so it is hex.
+-new_password() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
++new_password() { random_hex 24; }
+ 
+ # The port a server's .env keeps; one from before servers kept a port has the first one.
+ port_of() {
+   local port
+   port=$(grep '^HORNHOOF_PORT=' "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true)
+   printf '%s\n' "${port:-$FIRST_PORT}"
+ }
+ 
+@@ -768,37 +771,79 @@ node_unchanged() {
+ # Starts the compose stack, leaving the built-in node and this server's plan nodes running when the node image is unchanged.
+ prepare_builtin_stop() {
+   local cid
+   cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
+   [ -n "$cid" ] || return 0
+   prepare_node_stop "$cid" hornhoof_update
+ }
+ 
++# What the last compose step said, for what a failure tells the person.
++STEP_OUTPUT=''
++# compose_step <compose command...>: runs in the server folder, showing what compose says as it comes.
++compose_step() {
++  local said rc=0
++  said=$(mktemp)
++  (cd "$SERVER_DIR" && "$@") 2>&1 | tee "$said" || rc=$?
++  STEP_OUTPUT=$(cat "$said")
++  rm -f "$said"
++  return "$rc"
++}
++
++start_failed() {
++  if [ -n "$FROM_UPDATER" ]; then fail "Hornhoof did not start."; fi
++  fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++}
++
++# The app waits for migrate, so compose runs it first and a failed start may be the database not reaching this build.
++# Older versions of Compose 2 say "didn't completed", so the check stops before that word.
++start_app() {
++  compose_step "$@" && return 0
++  case "$STEP_OUTPUT" in
++    *'"migrate" didn'*) fail "Hornhoof could not bring its database up to this build. Run docker compose logs migrate in $SERVER_DIR to see why." ;;
++  esac
++  start_failed
++}
++
++# The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
++# comes back, so the maintenance answer is up while migrate runs.
+ start_server_services() {
++  say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
++  (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
++  compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
++  compose_step "$@" up -d --no-build keeper front || start_failed
+   if [ -n "$FROM_UPDATER" ]; then
+-    say "Starting Hornhoof ${PIN:-latest}."
+     if node_unchanged "$@"; then
+-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
++      start_app "$@" up -d --no-build app
+     else
+       prepare_builtin_stop "$@"
+-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
++      start_app "$@" up -d --no-build app node
+       sweep_nodes "$@"
+     fi
+     return 0
+   fi
+-  say "Starting Hornhoof."
+   if node_unchanged "$@"; then
+-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++    start_app "$@" up -d --no-build app updater
+   else
+     prepare_builtin_stop "$@"
+-    (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
++    start_app "$@" up -d --no-build
+   fi
+ }
+ 
++# An older updater cannot run this build's move, so this build's updater takes the update over: the helper starts it,
++# which replaces the updater this script runs under, and with it this script. Until then only .env and compose.yaml
++# have changed, and the old installer writes both back on the way back.
++hand_over_update() {
++  say "This build's updater takes over the update first."
++  "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
++    fail "Could not start the updater of this build, so nothing changed."
++  sleep "${HORNHOOF_HANDOVER_WAIT:-300}"
++  fail "The updater of this build did not take over, so nothing changed. Run install.sh server in $SERVER_DIR."
++}
++
+ server_mode() {
+   local env_file url public port local_url project link fact id i=0
+   local -a compose
+   detect_system
+   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
+   if "${DOCKER[@]}" compose version > /dev/null 2>&1; then
+     compose=("${DOCKER[@]}" compose)
+   elif command -v docker-compose > /dev/null 2>&1; then
+@@ -855,29 +900,34 @@ server_mode() {
+   while IFS= read -r fact; do
+     [ -n "$fact" ] && set_env "${fact%%=*}" "${fact#*=}"
+   done < <(host_facts)
+   # The updater runs in a container of its own, not on this computer, so it leaves the hash the last install wrote.
+   if [ -z "$FROM_UPDATER" ]; then
+     id=$(host_id)
+     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
+   fi
++  # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
++  # random hex from the updater, whose container cannot read that key.
++  if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
+   local_url="http://localhost:$(port_of "$env_file")"
+   public=$(env_value PUBLIC_URL)
+   [ -n "$public" ] || public=$local_url
+ 
+   if [ -n "$FROM_UPDATER" ] && [ -n "$COMPOSE_SRC" ]; then
+     cp "$COMPOSE_SRC" "$SERVER_DIR/compose.yaml"
+   elif [ -n "$COMPOSE_URL" ]; then
+     say "Getting compose.yaml into $SERVER_DIR."
+     curl -fsSL "$COMPOSE_URL" -o "$SERVER_DIR/compose.yaml" || fail "Could not download $COMPOSE_URL. Check the internet connection, then run this command again."
+   else
+     compose_from_image
+   fi
+ 
++  if [ -n "$FROM_UPDATER" ] && [ "${HORNHOOF_UPDATER_REV:-1}" -lt 2 ]; then hand_over_update "$project"; fi
++
+   # The updater downloads them before it saves the database; an updater from before leaves it to this.
+   if [ -z "$PULLED" ]; then
+     say "Downloading the Hornhoof images."
+     (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+   fi
+   # The updater checks the new server's answer itself, and replaces itself once it comes.
+   start_server_services "${compose[@]}"
+   if [ -n "$FROM_UPDATER" ]; then return 0; fi
+
+## 81a58e47 Keep every company's web and peer ports in one list on the computer
+
+A host-wide registry in the hornhoof-ports volume, under a lock, so that a third or fourth company installs beside the others without a port clash.
+
+---
+ apps/server/test/install-script.test.ts | 244 +++++++++++++++++++++++++++++++-
+ apps/server/test/install-stubs/docker   |  65 ++++++++-
+ scripts/install.sh                      | 223 +++++++++++++++++++++++++----
+ 3 files changed, 500 insertions(+), 32 deletions(-)
+
+diff --git a/apps/server/test/install-script.test.ts b/apps/server/test/install-script.test.ts
+index 3dcf3601..64aa74ca 100644
+--- a/apps/server/test/install-script.test.ts
++++ b/apps/server/test/install-script.test.ts
+@@ -1,11 +1,11 @@
+ import { spawnSync } from 'node:child_process';
+ import { createHash } from 'node:crypto';
+-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
++import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { describe, expect, it } from 'vitest';
+ 
+ const SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
+ const STUBS = fileURLToPath(new URL('./install-stubs/', import.meta.url));
+ const SERVER = 'https://hornhoof.example.test';
+@@ -73,16 +73,44 @@ function fromUpdater(env: Record<string, string> = {}, dotEnv = 'HORNHOOF_SECRET
+   const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: folder, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose, ...env } });
+   return { ...r, folder, dotEnv: () => readFileSync(join(folder, '.env'), 'utf8') };
+ }
+ /* One key's lines of a .env, so a failed check never prints the secrets beside them. */
+ const linesOf = (dotEnv: string, key: string) => dotEnv.split('\n').filter(line => line.startsWith(`${key}=`));
+ const COMPOSE_STEP = /^docker compose (stop|up|pull)/;
+ const UPDATER_REF = `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`;
+ 
++/* Installs on one computer: one home, one list of ports, as several companies share them. */
++function computer() {
++  const base = mkdtempSync(join(tmpdir(), 'hh-computer-'));
++  const home = join(base, 'home');
++  const portsDir = join(base, 'ports');
++  mkdirSync(home);
++  mkdirSync(portsDir);
++  const folder = (name = 'hornhoof') => join(home, name);
++  return {
++    folder,
++    run: (args: string[] = [], env: Record<string, string> = {}) => install({ args: ['server', ...args], tty: '\n', env: { HOME: home, HORNHOOF_DIR: folder(), STUB_PORTS_DIR: portsDir, ...env } }),
++    company: (dotEnv: string, name = 'hornhoof') => {
++      mkdirSync(folder(name));
++      writeFileSync(join(folder(name), '.env'), dotEnv);
++    },
++    dotEnv: (name = 'hornhoof') => readFileSync(join(folder(name), '.env'), 'utf8'),
++    list: () => readFileSync(join(portsDir, 'registry'), 'utf8').trim().split('\n'),
++    setList: (lines: string[]) => writeFileSync(join(portsDir, 'registry'), `${lines.join('\n')}\n`),
++    holdLock: (id: string) => writeFileSync(join(portsDir, 'lock'), `${id}\n`),
++    freeLock: () => rmSync(join(portsDir, 'lock')),
++  };
++}
++/* The web and peer port lines of a .env. */
++const portsIn = (dotEnv: string) => [...linesOf(dotEnv, 'HORNHOOF_PORT'), ...linesOf(dotEnv, 'HORNHOOF_PEER_PORT')];
++const LOCK_BUSY = 'Another Hornhoof install on this computer is choosing its ports. Wait a minute, then run this command again.';
++const REGISTRY_WRITE = 'cat > /ports/registry.new';
++const portRange = (first: number, count: number) => Array.from({ length: count }, (_, i) => first + i).join(' ');
++
+ describe('install.sh', () => {
+   it('records an update intent and stops an old node gracefully before replacing it', () => {
+     const name = 'hornhoof-claude-1c07dac4';
+     const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}` } });
+     expect(r.code).toBe(0);
+     const steps = [
+       `docker exec ${name} node /app/apps/node/dist/main.js prepare-stop node_update`,
+       `docker stop --time 5 ${name}`,
+@@ -685,17 +713,17 @@ describe('install.sh', () => {
+     /* The updater runs in a container of its own, which is not the computer the server runs on. */
+     expect(env).toMatch(new RegExp(`^HORNHOOF_HOST_ID=${'e'.repeat(64)}$`, 'm'));
+     expect(env.match(/^HORNHOOF_HOST_ID=/gm)).toHaveLength(1);
+     /* compose starts exactly the images the updater checked. */
+     expect(env).toMatch(new RegExp(`^HORNHOOF_APP_REF=ghcr\\.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}$`, 'm'));
+     expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`, 'm'));
+     expect(env).toMatch(new RegExp(`^HORNHOOF_UPDATER_REF=ghcr\\.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}$`, 'm'));
+     expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
+-    expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
++    expect(r.calls.some(c => (c.startsWith('docker create') && !c.includes('hornhoof-port-lock')) || c.startsWith('docker info'))).toBe(false);
+     /* The updater downloaded every image before it saved the database, so this only starts them. */
+     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
+     expect(r.calls).toContain('docker compose up -d --no-build app node');
+     expect(r.calls).not.toContain('docker compose up -d --no-build');
+     expect(r.calls.find(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toMatch(new RegExp(` ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`));
+   });
+ 
+   /* The first update of a server from before runs through the updater it has, which downloads nothing and names the
+@@ -793,17 +821,17 @@ describe('install.sh', () => {
+         HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+         STUB_NODE_RUNNING: nodeRef,
+         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test',
+       },
+     });
+     expect(r.code).toBe(0);
+     expect(r.calls).toContain('docker compose up -d --no-build app');
+     expect(r.calls).not.toContain('docker compose up -d --no-build app node');
+-    expect(r.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker run -d'))).toBe(false);
++    expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-') || c.startsWith('docker run -d'))).toBe(false);
+     expect(r.calls.some(c => c.includes('tunnel.json'))).toBe(false);
+   });
+ 
+   it('leaves the built-in node and plan nodes running in server mode when the node image is unchanged', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+     const r = install({
+       args: ['server'],
+@@ -895,16 +923,226 @@ describe('install.sh', () => {
+ 
+   it('goes on without a handover under an updater of revision 2', () => {
+     const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_PULLED: '1' });
+     expect(r.code).toBe(0);
+     expect(r.calls.some(c => c.includes('--take-over'))).toBe(false);
+     expect(r.calls).toContain('docker compose up -d --no-build app node');
+   });
+ 
++  it('keeps a host-wide list of ports, so four companies on one computer never share one', () => {
++    const c = computer();
++    const companies: [string, string[]][] = [['hornhoof', []], ['hornhoof-b', ['--name', 'b']], ['hornhoof-c', ['--name', 'c']], ['hornhoof-d', ['--name', 'd']]];
++    companies.forEach(([name, args], i) => {
++      expect(c.run(args).code).toBe(0);
++      expect(portsIn(c.dotEnv(name))).toEqual([`HORNHOOF_PORT=${8080 + i}`, `HORNHOOF_PEER_PORT=${8180 + i}`]);
++    });
++    expect(c.list()).toEqual(companies.map(([name], i) => `${c.folder(name)} ${8080 + i} ${8180 + i}`));
++  });
++
++  it('leaves the ports of a stopped and pruned company to it', () => {
++    const c = computer();
++    c.setList([`${c.folder('hornhoof-old')} 8080 8180`]);
++    expect(c.run().code).toBe(0);
++    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
++    expect(c.list()).toEqual([`${c.folder('hornhoof-old')} 8080 8180`, `${c.folder()} 8081 8181`]);
++  });
++
++  it('skips ports any container publishes, running or stopped', () => {
++    const c = computer();
++    expect(c.run([], { STUB_BOUND_PORTS: '8080 8180' }).code).toBe(0);
++    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
++  });
++
++  it('gives an existing company a peer port and keeps its web port', () => {
++    const kept = computer();
++    kept.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8085\n');
++    expect(kept.run().code).toBe(0);
++    expect(portsIn(kept.dotEnv())).toEqual(['HORNHOOF_PORT=8085', 'HORNHOOF_PEER_PORT=8180']);
++    expect(kept.list()).toEqual([`${kept.folder()} 8085 8180`]);
++
++    const older = computer();
++    older.company('HORNHOOF_SECRET=s\nNODE_KEY=k\n');
++    expect(older.run([], { STUB_BOUND_PORTS: '8080' }).code).toBe(0);
++    expect(portsIn(older.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8180']);
++  });
++
++  it("chooses a new company's ports by the free search though its .env is there by then", () => {
++    const c = computer();
++    expect(c.run([], { STUB_BOUND_PORTS: '8080' }).code).toBe(0);
++    expect(linesOf(c.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
++    expect(linesOf(c.dotEnv(), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
++    /* Its own front binds 8081 now. */
++    expect(c.run([], { STUB_BOUND_PORTS: '8080 8081' }).code).toBe(0);
++    expect(linesOf(c.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
++  });
++
++  it('takes the lock and gives it back', () => {
++    const c = computer();
++    const r = c.run();
++    expect(r.code).toBe(0);
++    const taken = r.calls.findIndex(call => /^docker create --name hornhoof-port-lock --label io\.hornhoof\.since=\d+ \S+ true$/.test(call));
++    const written = r.calls.findIndex(call => call.includes(REGISTRY_WRITE));
++    expect(taken).toBeGreaterThanOrEqual(0);
++    expect(written).toBeGreaterThan(taken);
++    expect(r.calls.indexOf('docker rm lock-1')).toBeGreaterThan(written);
++    expect(r.calls).toContain('docker volume create hornhoof-ports');
++
++    const failing = computer();
++    const failed = failing.run([], { STUB_REGISTRY: 'fail' });
++    expect(failed.code).toBe(1);
++    expect(linesOf(failing.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
++    expect(failed.calls).toContain('docker rm lock-1');
++    expect(failed.calls.some(call => call.startsWith('docker compose up'))).toBe(false);
++  });
++
++  it('writes nothing when another install took its lock over', () => {
++    const c = computer();
++    const r = c.run([], { STUB_LOCK_TAKEN: '1' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain(LOCK_BUSY);
++    expect(r.calls.some(call => call.includes(REGISTRY_WRITE))).toBe(false);
++    expect(linesOf(c.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
++    expect(r.calls).not.toContain('docker rm lock-other');
++  });
++
++  it('takes over a lock older than two minutes by its id, and waits for a younger one', () => {
++    const now = Math.floor(Date.now() / 1000);
++    const old = computer();
++    old.holdLock('lock-old');
++    const taken = old.run([], { STUB_LOCK_SINCE: String(now - 200) });
++    expect(taken.code).toBe(0);
++    expect(taken.calls).toContain('docker rm lock-old');
++    expect(portsIn(old.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8180']);
++
++    const young = computer();
++    young.holdLock('lock-young');
++    const waited = young.run([], { STUB_LOCK_SINCE: String(now - 30), HORNHOOF_PORT_LOCK_WAIT: '2' });
++    expect(waited.code).toBe(1);
++    expect(waited.out).toContain(LOCK_BUSY);
++    expect(waited.calls).not.toContain('docker rm lock-young');
++  });
++
++  it('moves a new port that something outside Docker holds, and its address with it', () => {
++    const up = 'docker compose up -d --no-build keeper front';
++    const peer = computer();
++    const moved = peer.run([], { STUB_BIND_FAIL: '8180' });
++    expect(moved.code).toBe(0);
++    expect(portsIn(peer.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8181']);
++    expect(peer.list()).toEqual([`${peer.folder()} 8080 8181`]);
++    expect(moved.calls.filter(call => call === up)).toHaveLength(2);
++    expect(moved.out).toContain('Port 8180 is taken, so Hornhoof takes another one.');
++
++    /* Docker words it otherwise when its proxy finds the port taken. */
++    const web = computer();
++    const moves = web.run([], { STUB_BIND_FAIL: '8080', STUB_BIND_WORDS: 'address' });
++    expect(moves.code).toBe(0);
++    expect(linesOf(web.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
++    expect(linesOf(web.dotEnv(), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
++    expect(web.list()).toEqual([`${web.folder()} 8081 8180`]);
++    expect(moves.calls.some(call => call.startsWith('curl') && call.includes('http://localhost:8081/api/health'))).toBe(true);
++    expect(moves.out).toContain('Hornhoof is running at http://localhost:8081.');
++
++    const six = computer().run([], { STUB_BIND_FAIL: portRange(8180, 6) });
++    expect(six.code).toBe(1);
++    expect(six.out).toContain('Port 8185 is taken by a program outside Docker. Stop what uses it, then run this command again.');
++    expect(six.calls.filter(call => call === up)).toHaveLength(6);
++
++    const before = computer();
++    before.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8085\n');
++    const taken = before.run([], { STUB_BIND_FAIL: '8085' });
++    expect(taken.code).toBe(1);
++    expect(taken.out).toContain('Port 8085 is taken by a program outside Docker.');
++    expect(linesOf(before.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8085']);
++  });
++
++  it('takes the last port of a range, and says so when a range has none free', () => {
++    const last = computer();
++    expect(last.run([], { STUB_BOUND_PORTS: portRange(8080, 99) }).code).toBe(0);
++    expect(linesOf(last.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8179']);
++
++    const noWeb = computer();
++    const web = noWeb.run([], { STUB_BOUND_PORTS: portRange(8080, 100) });
++    expect(web.code).toBe(1);
++    expect(web.out).toContain('No free port from 8080 to 8179 for Hornhoof. Stop what uses them, then run this command again.');
++    expect(web.calls).toContain('docker rm lock-1');
++
++    const peer = computer().run([], { STUB_BOUND_PORTS: portRange(8180, 100) });
++    expect(peer.code).toBe(1);
++    expect(peer.out).toContain('No free port from 8180 to 8279 for Hornhoof. Stop what uses them, then run this command again.');
++  });
++
++  it('hands out no port when it cannot read the list', () => {
++    const c = computer();
++    const r = c.run([], { STUB_REGISTRY: 'unreadable' });
++    expect(r.code).toBe(1);
++    expect(r.out).toContain("Could not read the list of Hornhoof's ports on this computer. Run this command again.");
++    expect(r.calls.some(call => call.includes(REGISTRY_WRITE))).toBe(false);
++    expect(r.calls).toContain('docker rm lock-1');
++    expect(linesOf(c.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
++  });
++
++  it('asks no port on localhost from the updater, whose localhost is its own container', () => {
++    const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', STUB_PORTS_TAKEN: '8180' });
++    expect(r.code).toBe(0);
++    expect(linesOf(r.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual(['HORNHOOF_PEER_PORT=8180']);
++    expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
++  });
++
++  it('counts a company whose first run stopped before it chose its ports as new', () => {
++    const c = computer();
++    expect(c.run().code).toBe(0);
++    c.holdLock('lock-of-another-install');
++    expect(c.run(['--name', 'b'], { HORNHOOF_PORT_LOCK_WAIT: '0' }).code).toBe(1);
++    c.freeLock();
++    expect(c.run(['--name', 'b']).code).toBe(0);
++    expect(portsIn(c.dotEnv('hornhoof-b'))).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
++    expect(linesOf(c.dotEnv('hornhoof-b'), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
++  });
++
++  it('gives a company whose folder is gone its ports and its address back', () => {
++    const c = computer();
++    c.setList([`${c.folder('hornhoof-b')} 8083 8183`]);
++    expect(c.run(['--name', 'b']).code).toBe(0);
++    expect(portsIn(c.dotEnv('hornhoof-b'))).toEqual(['HORNHOOF_PORT=8083', 'HORNHOOF_PEER_PORT=8183']);
++    expect(linesOf(c.dotEnv('hornhoof-b'), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8083']);
++  });
++
++  it('reads a folder with a space in its name from the list', () => {
++    const c = computer();
++    const spaced = join(c.folder(), 'my company');
++    mkdirSync(c.folder());
++    c.setList([`${spaced} 8084 8184`, `${c.folder('hornhoof-old')} 8080 8180`]);
++    expect(c.run([], { HORNHOOF_SERVER_DIR: spaced, HORNHOOF_DIR: c.folder() }).code).toBe(0);
++    expect(linesOf(readFileSync(join(spaced, '.env'), 'utf8'), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8084']);
++    expect(c.list()).toEqual([`${c.folder('hornhoof-old')} 8080 8180`, `${spaced} 8084 8184`]);
++  });
++
++  it("keeps to the ports in other companies' .env files when the list is gone", () => {
++    const c = computer();
++    c.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n', 'hornhoof-a');
++    expect(c.run().code).toBe(0);
++    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
++  });
++
++  it('says what did not start when a step fails for another reason', () => {
++    const database = computer().run([], { STUB_UP_FAIL: 'db' });
++    expect(database.code).toBe(1);
++    expect(database.out).toContain('The database did not start. Run docker compose logs db in ');
++    const front = computer().run([], { STUB_UP_FAIL: 'front' });
++    expect(front.code).toBe(1);
++    expect(front.out).toContain('Hornhoof did not start. Run docker compose logs in ');
++    expect(front.calls.filter(call => call.endsWith(' keeper front'))).toHaveLength(1);
++    const app = fromUpdater({ HORNHOOF_UPDATER_REV: '2', STUB_UP_FAIL: 'app' });
++    expect(app.code).toBe(1);
++    expect(app.out).toContain('Hornhoof did not start.');
++    expect(app.out).not.toContain('could not bring its database');
++    expect(app.out).not.toContain('docker compose logs');
++  });
++
+   it('refuses a server name it cannot use as a folder', () => {
+     const r = install({ args: ['server', '--name', 'Acme Inc'] });
+     expect(r.code).toBe(1);
+     expect(r.out).toContain('--name takes lowercase letters, digits and dashes');
+   });
+ 
+   it('keeps everything on --uninstall without a y', () => {
+     const r = install({ args: ['--uninstall'], tty: 'n\n', env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4' } });
+diff --git a/apps/server/test/install-stubs/docker b/apps/server/test/install-stubs/docker
+index 01e9cdfc..c9b4ddef 100755
+--- a/apps/server/test/install-stubs/docker
++++ b/apps/server/test/install-stubs/docker
+@@ -1,10 +1,12 @@
+ #!/usr/bin/env bash
+ . "$STUB_SRC/_log.sh"
++# The list of ports and its lock live here, so several installs of one test can share them.
++PORTS=${STUB_PORTS_DIR:-$STUB_STATE}
+ works() {
+   case "${STUB_DOCKER:-ok}" in
+     ok) return 0 ;;
+     sudo_only) [ "${STUB_SUDO:-}" = 1 ] ;;
+     *) [ -f "$STUB_STATE/docker-running" ] ;;
+   esac
+ }
+ # The command line knows its context without the daemon. STUB_CONTEXT names it, as Docker Desktop or OrbStack does.
+@@ -18,46 +20,101 @@ id_of() {
+   printf 'id-%s\n' "$1"
+ }
+ # The services a "compose ... up" names: nothing when it starts them all.
+ up_services() {
+   while [ $# -gt 0 ] && [ "$1" != up ]; do shift; done
+   [ $# -gt 0 ] && shift
+   for word in "$@"; do case "$word" in -*) ;; *) printf '%s ' "$word" ;; esac; done
+ }
++# STUB_BIND_FAIL words are ports something outside Docker holds: the first up that binds one fails.
++binds_ports() {
++  case " $(up_services "$@") " in '  ' | *' keeper '* | *' front '*) ;; *) return 0 ;; esac
++  for port in ${STUB_BIND_FAIL:-}; do
++    grep -Eq "^HORNHOOF_(PEER_)?PORT=$port\$" .env || continue
++    [ ! -f "$STUB_STATE/bind-failed-$port" ] || continue
++    touch "$STUB_STATE/bind-failed-$port"
++    if [ "${STUB_BIND_WORDS:-}" = address ]; then
++      echo "Error response from daemon: failed to bind port 0.0.0.0:$port/tcp: listen tcp4 0.0.0.0:$port: bind: address already in use" >&2
++    else
++      echo "Error response from daemon: driver failed programming external connectivity on endpoint front (9f1e): Bind for 0.0.0.0:$port failed: port is already allocated" >&2
++    fi
++    exit 1
++  done
++}
++# STUB_UP_FAIL words are services whose up fails for a reason that has nothing to do with ports.
++up_fails() {
++  for service in ${STUB_UP_FAIL:-}; do
++    case " $(up_services "$@") " in *" $service "*) echo "service \"$service\" failed to build: something else went wrong" >&2; exit 1 ;; esac
++  done
++}
+ # STUB_MIGRATE=fail: compose runs migrate first for every up that starts the app, and migrate fails.
+ migrate_runs() {
+   case " $(up_services "$@") " in '  ' | *' app '*) ;; *) return 0 ;; esac
+   if [ "${STUB_MIGRATE:-}" = fail ]; then echo "service \"migrate\" didn't complete successfully: exit 1" >&2; exit 1; fi
+ }
+ case "$1" in
+   info) echo "Server Version: 28.0.0" ;;
+   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+-  create) echo cid-app ;;
++  create)
++    case "$*" in
++      *'--name hornhoof-port-lock'*)
++        if [ -f "$PORTS/lock" ]; then echo "Error response from daemon: Conflict. The container name is already in use" >&2; exit 1; fi
++        n=$(($(cat "$PORTS/lock-count" 2> /dev/null || echo 0) + 1))
++        echo "$n" > "$PORTS/lock-count"
++        echo "lock-$n" > "$PORTS/lock"
++        echo "lock-$n" ;;
++      *) echo cid-app ;;
++    esac ;;
++  rm) if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi ;;
+   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
+   image)
+     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
+       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
+       id_of "${!#}"
+     else
+       [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1
+     fi ;;
+-  inspect) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
++  inspect)
++    case "$*" in
++      # STUB_LOCK_SINCE is when the lock was made; STUB_LOCK_TAKEN=1 says another install has taken it over since.
++      *io.hornhoof.since*) [ -f "$PORTS/lock" ] || exit 1; echo "$(cat "$PORTS/lock") ${STUB_LOCK_SINCE:-$(date +%s)}" ;;
++      *hornhoof-port-lock) if [ "${STUB_LOCK_TAKEN:-}" = 1 ]; then echo lock-other; else cat "$PORTS/lock" 2> /dev/null; fi ;;
++      *PortBindings*) echo "${STUB_BOUND_PORTS:-}" ;;
++      *) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
++    esac ;;
+   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
+   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
+   compose)
+-    case " $* " in *' up '*) migrate_runs "$@" ;; esac
++    case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; migrate_runs "$@" ;; esac
+     case "$*" in
+       *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
+       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
+       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
+       *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;
+     esac ;;
+-  ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
++  ps)
++    # STUB_BOUND_PORTS are the ports containers publish, so a test that names them need not name the containers.
++    if [ "$*" = 'ps -aq' ]; then
++      if [ -n "${STUB_BOUND_IDS:-}${STUB_BOUND_PORTS:-}" ]; then echo "${STUB_BOUND_IDS:-bound-1}"; fi
++      exit 0
++    fi
++    for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
+   run)
++    case "$*" in
++      # STUB_REGISTRY=fail: the write fails; STUB_REGISTRY=unreadable: the read does.
++      *'cat > /ports/registry.new'*)
++        if [ "${STUB_REGISTRY:-}" = fail ]; then echo "docker: Error response from daemon: failed to create task" >&2; exit 1; fi
++        cat > "$PORTS/registry"
++        exit 0 ;;
++      *'cat /ports/registry'*)
++        if [ "${STUB_REGISTRY:-}" = unreadable ]; then echo "docker: Error response from daemon: failed to create task" >&2; exit 1; fi
++        cat "$PORTS/registry" 2> /dev/null
++        exit 0 ;;
++    esac
+     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
+     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+   exec)
+     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
+     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.
+     WORD=/data/node.json; if has "$@"; then
+       for n in ${STUB_NODE_SERVERS:-}; do WORD=${n%%=*}; if has "$@"; then printf '{\n  "server": "%s",\n  "provider": "kimi"\n}\n' "${n#*=}"; exit 0; fi; done
+       exit 1
+diff --git a/scripts/install.sh b/scripts/install.sh
+index 4e5d2c75..88ddfcad 100755
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -47,16 +47,17 @@ DOCKER_SCRIPT_URL=https://raw.githubusercontent.com/docker/docker-install/ada7a5
+ DOCKER_SCRIPT_SHA256="${HORNHOOF_DOCKER_SCRIPT_SHA256:-2b102d809152ea157a59f171319f489d971273b2d26dd7e9a6d1d737ce89289d}"
+ BREW_SCRIPT_URL=https://raw.githubusercontent.com/Homebrew/install/8c82c081753d4263da0cfe615ef8d9433425f22b/install.sh
+ BREW_SCRIPT_SHA256="${HORNHOOF_BREW_SCRIPT_SHA256:-5f333bbe53bc490e51e7ccb1df8779b3dd6ee73a1a7379efda216edb08ccb148}"
+ 
+ LABEL=hornhoof.subscription
+ SERVER_LABEL=hornhoof.server
+ NODE_MAIN=/app/apps/node/dist/main.js
+ FIRST_PORT=8080
++FIRST_PEER_PORT=8180
+ USAGE='Usage: install.sh [--join <code>] | server [--name <name>] | --uninstall'
+ 
+ OS=''
+ ARCH=''
+ DOCKER=(docker)
+ SUDO_SAID=''
+ 
+ say() { printf '%s\n' "$*"; }
+@@ -653,43 +654,35 @@ uninstall_mode() {
+ 
+ # --- Server -------------------------------------------------------------------------------------
+ 
+ new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
+ 
+ # The database password goes into the database address, so it is hex.
+ new_password() { random_hex 24; }
+ 
++# value_in <file> <key>: the key's value in a .env, empty when it has none or cannot be read.
++value_in() { grep "^$2=" "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
++
++env_value() { value_in "$SERVER_DIR/.env" "$1"; }
++
+ # The port a server's .env keeps; one from before servers kept a port has the first one.
+ port_of() {
+   local port
+-  port=$(grep '^HORNHOOF_PORT=' "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true)
++  port=$(value_in "$1" HORNHOOF_PORT)
+   printf '%s\n' "${port:-$FIRST_PORT}"
+ }
+ 
+ # Something listens on the port; curl ends with 7 only when nothing does.
+ port_answers() {
+   local rc=0
+   curl -s -o /dev/null --max-time 2 "http://localhost:$1/" > /dev/null 2>&1 || rc=$?
+   [ "$rc" -ne 7 ]
+ }
+ 
+-# The first port from 8080 that no other Hornhoof on this computer keeps, running or not, and nothing listens on.
+-free_port() {
+-  local port=$FIRST_PORT env claimed=' '
+-  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
+-    if [ -f "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then claimed="$claimed$(port_of "$env") "; fi
+-  done
+-  while case "$claimed" in *" $port "*) true ;; *) false ;; esac || port_answers "$port"; do
+-    port=$((port + 1))
+-    [ "$port" -lt $((FIRST_PORT + 100)) ] || fail "No free port from $FIRST_PORT to $((FIRST_PORT + 99)) for Hornhoof. Stop what uses them, then run this command again."
+-  done
+-  printf '%s' "$port"
+-}
+-
+ # set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner. The new
+ # file is written whole and then moved into place, so a failed write leaves the old one. It starts as a copy, so it
+ # keeps the owner when the updater writes it as root.
+ set_env() {
+   local file="$SERVER_DIR/.env" new="$SERVER_DIR/.env.new"
+   rm -f "$new"
+   if [ -f "$file" ]; then cp -p "$file" "$new" 2> /dev/null || true; fi
+   (
+@@ -699,18 +692,16 @@ set_env() {
+     {
+       grep -v "^$1=" "$file" 2> /dev/null || true
+       printf '%s=%s\n' "$1" "$2"
+     } > "$new"
+   )
+   mv "$new" "$file"
+ }
+ 
+-env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
+-
+ # compose.yaml comes inside the app image, so the compose file always matches the build it starts.
+ compose_from_image() {
+   local image="$APP_IMAGE:${PIN:-latest}" cid
+   say "Getting compose.yaml from $image."
+   "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+   cid=$("${DOCKER[@]}" create "$image") || fail "Could not read $image. Run this command again."
+   if ! "${DOCKER[@]}" cp "$cid:/app/compose.yaml" "$SERVER_DIR/compose.yaml" > /dev/null; then
+     "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
+@@ -771,16 +762,196 @@ node_unchanged() {
+ # Starts the compose stack, leaving the built-in node and this server's plan nodes running when the node image is unchanged.
+ prepare_builtin_stop() {
+   local cid
+   cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
+   [ -n "$cid" ] || return 0
+   prepare_node_stop "$cid" hornhoof_update
+ }
+ 
++# --- Ports: one list per computer ---------------------------------------------------------------
++
++# The list says which company's folder keeps which web and peer port, so a company that is stopped and pruned keeps them
++# too. It is the file registry in the volume hornhoof-ports, reached through a short container of the app image, since
++# the updater's container sees only its own company's folder. One line per folder: <folder> <web port> <peer port>.
++PORT_LOCK=hornhoof-port-lock
++PORT_LOCK_BUSY='Another Hornhoof install on this computer is choosing its ports. Wait a minute, then run this command again.'
++PORT_LOCK_ID=''
++# This folder's .env holds a company that ran before this run.
++ENV_BEFORE=''
++# This run chose the web or the peer port by the free search, so it may move it when something outside Docker holds it.
++NEW_WEB=''
++NEW_PEER=''
++# Ports Docker refused during this run.
++REFUSED_PORTS=''
++
++# Whoever made a lock more than 2 minutes ago is gone. It goes by the id just read, so a lock made meanwhile stays.
++remove_stale_port_lock() {
++  local seen since
++  seen=$("${DOCKER[@]}" inspect --format '{{.Id}} {{index .Config.Labels "io.hornhoof.since"}}' "$PORT_LOCK" 2> /dev/null) || return 1
++  since=${seen##* }
++  case "$since" in '' | *[!0-9]*) return 1 ;; esac
++  [ "$(($(date +%s) - since))" -gt 120 ] || return 1
++  "${DOCKER[@]}" rm "${seen%% *}" > /dev/null 2>&1
++}
++
++# A container's name is the one thing Docker hands out to one caller alone, so the lock is a container that never runs.
++take_port_lock() {
++  local deadline
++  "${DOCKER[@]}" volume create hornhoof-ports > /dev/null
++  deadline=$(($(date +%s) + ${HORNHOOF_PORT_LOCK_WAIT:-180}))
++  until PORT_LOCK_ID=$("${DOCKER[@]}" create --name "$PORT_LOCK" --label "io.hornhoof.since=$(date +%s)" "$APP_REF" true 2> /dev/null); do
++    [ "$(date +%s)" -lt "$deadline" ] || fail "$PORT_LOCK_BUSY"
++    remove_stale_port_lock || sleep 1
++  done
++}
++
++drop_port_lock() { "${DOCKER[@]}" rm "$1" > /dev/null 2>&1 || true; }
++
++read_registry() { "${DOCKER[@]}" run --rm --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat /ports/registry 2> /dev/null || true'; }
++
++write_registry() { "${DOCKER[@]}" run --rm -i --user 0 -v hornhoof-ports:/ports --entrypoint sh "$APP_REF" -c 'cat > /ports/registry.new && mv /ports/registry.new /ports/registry'; }
++
++# The host ports every container publishes, running or stopped. A container gone since the list leaves the others.
++bound_ports() {
++  local ids
++  ids=$("${DOCKER[@]}" ps -aq 2> /dev/null) || true
++  [ -n "$ids" ] || return 0
++  # shellcheck disable=SC2016,SC2086 # the dollars are the template's own; one word per container
++  "${DOCKER[@]}" inspect --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}} {{end}}{{end}}' $ids 2> /dev/null | tr '\n' ' ' || true
++}
++
++# A folder may hold spaces, so a line's ports are its last two words and the folder is what comes before them.
++line_folder() { printf '%s' "${1% * *}"; }
++
++line_ports() {
++  local rest=${1% *}
++  printf '%s %s' "${rest##* }" "${1##* }"
++}
++
++other_lines() {
++  local line
++  while IFS= read -r line; do
++    if [ -n "$line" ] && [ "$(line_folder "$line")" != "$SERVER_DIR" ]; then printf '%s\n' "$line"; fi
++  done <<< "$1"
++}
++
++own_ports() {
++  local line
++  while IFS= read -r line; do
++    if [ "$(line_folder "$line")" = "$SERVER_DIR" ]; then line_ports "$line"; fi
++  done <<< "$1"
++}
++
++# Every port another company keeps, a container publishes or Docker refused, as words.
++held_ports() {
++  local line env
++  other_lines "$1" | while IFS= read -r line; do printf '%s ' "$(line_ports "$line")"; done
++  bound_ports
++  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
++    if [ -r "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then printf '%s %s ' "$(port_of "$env")" "$(value_in "$env" HORNHOOF_PEER_PORT)"; fi
++  done
++  printf '%s ' "$REFUSED_PORTS"
++}
++
++# From the updater localhost is its own container, so only a run by hand can ask it.
++port_is_free() {
++  case "$2" in *" $1 "*) return 1 ;; esac
++  [ -n "$FROM_UPDATER" ] || ! port_answers "$1"
++}
++
++# first_free_port <first> <held words>: the first free one of the hundred from <first>.
++first_free_port() {
++  local port=$1
++  until port_is_free "$port" "$2"; do
++    port=$((port + 1))
++    [ "$port" -lt $(($1 + 100)) ] || fail "No free port from $1 to $(($1 + 99)) for Hornhoof. Stop what uses them, then run this command again."
++  done
++  printf '%s' "$port"
++}
++
++# kept_port <refused> <.env key> <list value>: the port this company keeps already, unless Docker just refused it.
++kept_port() {
++  local port
++  port=$(env_value "$2")
++  port=${port:-$3}
++  if [ "$port" != "$1" ]; then printf '%s' "$port"; fi
++}
++
++# The list comes first: a failed write leaves .env as it was, and a failed .env write a line that only holds the ports.
++record_ports() {
++  local lock
++  lock=$("${DOCKER[@]}" inspect --format '{{.Id}}' "$PORT_LOCK" 2> /dev/null) || true
++  [ "$lock" = "$PORT_LOCK_ID" ] || fail "$PORT_LOCK_BUSY"
++  { other_lines "$1"; printf '%s %s %s\n' "$SERVER_DIR" "$2" "$3"; } | write_registry ||
++    fail "Could not write the list of Hornhoof's ports on this computer. Run this command again."
++  set_env HORNHOOF_PORT "$2"
++  set_env HORNHOOF_PEER_PORT "$3"
++  # People get the company's link at setup, so the server starts at its address on this computer. Another address of
++  # its own, such as a domain, goes into PUBLIC_URL later.
++  if [ -z "$ENV_BEFORE" ]; then set_env PUBLIC_URL "http://localhost:$2"; fi
++}
++
++choose_ports() {
++  local registry own held web peer
++  registry=$(read_registry) || fail "Could not read the list of Hornhoof's ports on this computer. Run this command again."
++  own=$(own_ports "$registry")
++  held=" $(held_ports "$registry") "
++  web=$(kept_port "$1" HORNHOOF_PORT "${own%% *}")
++  peer=$(kept_port "$1" HORNHOOF_PEER_PORT "${own##* }")
++  # A company from before ports were kept runs on the first one.
++  if [ -z "$web" ] && [ -n "$ENV_BEFORE" ]; then web=$FIRST_PORT; fi
++  if [ -z "$web" ]; then
++    web=$(first_free_port "$FIRST_PORT" "$held")
++    NEW_WEB=1
++  fi
++  if [ -z "$peer" ]; then
++    peer=$(first_free_port "$FIRST_PEER_PORT" "$held")
++    NEW_PEER=1
++  fi
++  record_ports "$registry" "$web" "$peer"
++}
++
++# reserve_ports [<port>]: settles this company's two ports under the lock, which goes whatever happens. Given a port
++# Docker refused, the side it belongs to searches again and the other side keeps its port.
++reserve_ports() {
++  if [ -n "${1:-}" ]; then REFUSED_PORTS="$REFUSED_PORTS $1"; fi
++  take_port_lock
++  trap 'drop_port_lock "$PORT_LOCK_ID"' EXIT
++  choose_ports "${1:-}"
++  trap - EXIT
++  drop_port_lock "$PORT_LOCK_ID"
++}
++
++# The host port Docker could not bind, from words like "Bind for 0.0.0.0:8080 failed: port is already allocated" or
++# "listen tcp 0.0.0.0:8080: bind: address already in use". The first number after a colon is the port.
++refused_port() {
++  printf '%s\n' "$1" | grep -E 'port is already allocated|address already in use' | head -1 | grep -oE ':[0-9]+' | head -1 | tr -d ':' || true
++}
++
++port_is_new() {
++  { [ -n "$NEW_WEB" ] && [ "$1" = "$(env_value HORNHOOF_PORT)" ]; } || { [ -n "$NEW_PEER" ] && [ "$1" = "$(env_value HORNHOOF_PEER_PORT)" ]; }
++}
++
++# These two publish the ports, so this is where a port something outside Docker holds shows. A port this run chose moves
++# to the next one, up to 5 times; a port the company already has stays, as other things know it by that port.
++start_keeper_and_front() {
++  local moved=0 port
++  until compose_step "$@" up -d --no-build keeper front; do
++    port=$(refused_port "$STEP_OUTPUT")
++    [ -n "$port" ] || start_failed
++    if [ "$moved" -ge 5 ] || ! port_is_new "$port"; then
++      fail "Port $port is taken by a program outside Docker. Stop what uses it, then run this command again."
++    fi
++    moved=$((moved + 1))
++    say "Port $port is taken, so Hornhoof takes another one."
++    reserve_ports "$port"
++  done
++}
++
+ # What the last compose step said, for what a failure tells the person.
+ STEP_OUTPUT=''
+ # compose_step <compose command...>: runs in the server folder, showing what compose says as it comes.
+ compose_step() {
+   local said rc=0
+   said=$(mktemp)
+   (cd "$SERVER_DIR" && "$@") 2>&1 | tee "$said" || rc=$?
+   STEP_OUTPUT=$(cat "$said")
+@@ -804,17 +975,17 @@ start_app() {
+ }
+ 
+ # The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
+ # comes back, so the maintenance answer is up while migrate runs.
+ start_server_services() {
+   say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
+   (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
+   compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
+-  compose_step "$@" up -d --no-build keeper front || start_failed
++  start_keeper_and_front "$@"
+   if [ -n "$FROM_UPDATER" ]; then
+     if node_unchanged "$@"; then
+       start_app "$@" up -d --no-build app
+     else
+       prepare_builtin_stop "$@"
+       start_app "$@" up -d --no-build app node
+       sweep_nodes "$@"
+     fi
+@@ -835,17 +1006,17 @@ hand_over_update() {
+   say "This build's updater takes over the update first."
+   "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
+     fail "Could not start the updater of this build, so nothing changed."
+   sleep "${HORNHOOF_HANDOVER_WAIT:-300}"
+   fail "The updater of this build did not take over, so nothing changed. Run install.sh server in $SERVER_DIR."
+ }
+ 
+ server_mode() {
+-  local env_file url public port local_url project link fact id i=0
++  local env_file public local_url project link fact id i=0
+   local -a compose
+   detect_system
+   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
+   if "${DOCKER[@]}" compose version > /dev/null 2>&1; then
+     compose=("${DOCKER[@]}" compose)
+   elif command -v docker-compose > /dev/null 2>&1; then
+     compose=(docker-compose)
+   elif [ "$OS" = darwin ] && command -v brew > /dev/null 2>&1; then
+@@ -857,29 +1028,29 @@ server_mode() {
+   fi
+   # A named server is its own compose project, so its containers, network and volumes never meet another's.
+   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
+ 
+   mkdir -p "$SERVER_DIR"
+   env_file="$SERVER_DIR/.env"
+   if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
+   if [ -f "$env_file" ]; then
++    # A new .env keeps its HORNHOOF_PORT empty until the ports are chosen, so a first run that stopped before that is
++    # not taken for a company from before ports were kept, which runs on the first port.
++    if ! grep -q '^HORNHOOF_PORT=$' "$env_file"; then ENV_BEFORE=1; fi
+     say "Keeping the settings in $env_file."
+     # A .env without POSTGRES_PASSWORD keeps the password compose gives, the one its database was made with.
+     if ! grep -q '^NODE_KEY=' "$env_file"; then
+       set_env NODE_KEY "$(new_secret)"
+       say "Added NODE_KEY to $env_file."
+     fi
+   else
+-    port=$(free_port)
+-    # People get the company's link at setup, so the server starts at its address on this computer. Another address of
+-    # its own, such as a domain, goes into PUBLIC_URL later.
+     (
+       umask 077
+-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "$(new_password)" "http://localhost:$port" "$port" > "$env_file.new"
++      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nHORNHOOF_PORT=\n' "$(new_secret)" "$(new_secret)" "$(new_password)" > "$env_file.new"
+     )
+     mv "$env_file.new" "$env_file"
+     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
+   fi
+   # .env names the compose project and the folder too, for the updater and for docker compose run by hand here.
+   if [ -n "$NAME" ]; then
+     project="hornhoof-$NAME"
+   else
+@@ -903,19 +1074,16 @@ server_mode() {
+   # The updater runs in a container of its own, not on this computer, so it leaves the hash the last install wrote.
+   if [ -z "$FROM_UPDATER" ]; then
+     id=$(host_id)
+     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
+   fi
+   # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
+   # random hex from the updater, whose container cannot read that key.
+   if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
+-  local_url="http://localhost:$(port_of "$env_file")"
+-  public=$(env_value PUBLIC_URL)
+-  [ -n "$public" ] || public=$local_url
+ 
+   if [ -n "$FROM_UPDATER" ] && [ -n "$COMPOSE_SRC" ]; then
+     cp "$COMPOSE_SRC" "$SERVER_DIR/compose.yaml"
+   elif [ -n "$COMPOSE_URL" ]; then
+     say "Getting compose.yaml into $SERVER_DIR."
+     curl -fsSL "$COMPOSE_URL" -o "$SERVER_DIR/compose.yaml" || fail "Could not download $COMPOSE_URL. Check the internet connection, then run this command again."
+   else
+     compose_from_image
+@@ -923,19 +1091,24 @@ server_mode() {
+ 
+   if [ -n "$FROM_UPDATER" ] && [ "${HORNHOOF_UPDATER_REV:-1}" -lt 2 ]; then hand_over_update "$project"; fi
+ 
+   # The updater downloads them before it saves the database; an updater from before leaves it to this.
+   if [ -z "$PULLED" ]; then
+     say "Downloading the Hornhoof images."
+     (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+   fi
++  reserve_ports
+   # The updater checks the new server's answer itself, and replaces itself once it comes.
+   start_server_services "${compose[@]}"
+   if [ -n "$FROM_UPDATER" ]; then return 0; fi
++  # Worked out only now, since a port this run chose may have moved while the services started.
++  local_url="http://localhost:$(port_of "$env_file")"
++  public=$(env_value PUBLIC_URL)
++  [ -n "$public" ] || public=$local_url
+   say "Waiting for Hornhoof to answer."
+   until curl -fsS --max-time 5 "$local_url/api/health" > /dev/null 2>&1; do
+     i=$((i + 1))
+     [ "$i" -lt 60 ] || fail "Hornhoof did not answer within 2 minutes. Run docker compose logs app in $SERVER_DIR to see why."
+     sleep 2
+   done
+   # Whoever opens a new server first would become its owner, so it sets up only through the link with its setup code,
+   # which only the server can tell. A server set up already, or one from before setup codes, gives no link.
+

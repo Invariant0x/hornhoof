@@ -1,0 +1,46 @@
+remote: snapshot p2t4-r1-gates-20261104-212035-633797 ready after 11 s, waiting for a slot
+remote: started after 12 s, log /home/altera/hornhoof-network/network-build/runs/remote-p2t4-r1-gates-20261104-212035-633797.log
+== files: apps/server/src/front.ts apps/server/src/net/front.ts apps/server/src/net/proxy.ts
+[2m   Start at [22m 21:20:49
+[2m   Duration [22m 44.78s[2m (tests 99%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+framingOf                      net.proxy                              3 100.0%      3.0
+hopByHop                       net.proxy                              3 100.0%      3.0
+openTarget                     net.proxy                              3 100.0%      3.0
+pass                           net.proxy                              3 100.0%      3.0
+passedHeaders                  net.proxy                              3 100.0%      3.0
+startFront                     net.front                              2  50.0%      2.5
+firstForwarded                 net.proxy                              2 100.0%      2.0
+holdEarlyBytes                 net.proxy                              2 100.0%      2.0
+pairsOf                        net.proxy                              2 100.0%      2.0
+socketAddress                  net.proxy                              2 100.0%      2.0
+startingAnswer                 net.proxy                              2 100.0%      2.0
+answerHeaders                  net.proxy                              1 100.0%      1.0
+askerOfRequest                 net.proxy                              1 100.0%      1.0
+askerOfUpgrade                 net.proxy                              1 100.0%      1.0
+closeAfterFlush                net.proxy                              1 100.0%      1.0
+closing                        net.proxy                              1 100.0%      1.0
+headOf                         net.proxy                              1 100.0%      1.0
+ignore                         net.proxy                              1 100.0%      1.0
+lengthOf                       net.proxy                              1 100.0%      1.0
+limitConnect                   net.proxy                              1 100.0%      1.0
+passThrough                    net.proxy                              1 100.0%      1.0
+serve                          net.proxy                              1 100.0%      1.0
+spliceSockets                  net.proxy                              1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+remote: command exited 0 after 64 s

@@ -1,0 +1,3 @@
+I have read `../brief.md` in full and will next inspect the workspace contents and read all skills in `../skills/` before reviewing `../package.diff`, the spec, and the ledger.
+I have read the skills, `../package.diff`, `../ledger.md`, and the relevant sections of `../spec.md`. Next I will read the full modified files and surrounding updater context in `repo/` to check every requirement, edge case, shell portability detail, and test assertion line by line.
+I ran `test/updater.test.ts` and reproduced a real failure: `stops what a hung installer started, too` failed because the child process spawned by the hung installer survived. I am now isolating the exact root cause in bash's `set -m` and `kill -9 -- "-$1" "$1"` behavior.

@@ -1,0 +1,587 @@
+# Review package: batch 6, slice sql-delta
+
+## f11376d6 Parse the orchestrator's SQL in a worker that can be thrown away, and name a text's first fault first
+
+Batch 6's review of the SQL check found that about 39 texts within the tool's limit, each `SELECT 1` and `+1` 9,990 times,
+overflowed the parser's WASM stack and left every later call throwing `memory access out of bounds` until a restart, with no
+log line. The flood's test was seen red with that very message. One library instance per process cannot be reloaded, so the
+parser now lives in a worker: any failure that is not the parser's own SqlError, an error or exit of the worker, or a 10 second
+deadline throws that worker away, logs one line without the text, refuses the text with kind syntax, and the next text
+starts a new worker. The worker is unref'd and only a waiting caller's timer holds the process open.
+
+The test of a real worker spinning in WASM shows the deadline frees the caller and the worker ends. A check builds sql-check.ts
+with tsc under the server's own options and runs it from that output in plain Node, with a main stack larger than the worker's:
+it starts its worker, keeps answering after a deep text, and the process ends by itself. Not run on the Alpine image, as
+this build does not use Docker.
+
+Also from that review: a star after an alias named like a refused function is no longer taken for a call, as the last field
+itself is what counts, and the walk goes in the tree's order, so `COMMIT; SELECT pg_cancel_backend(1)` hears about COMMIT.
+
+Cost: a typical call 0.11 ms, was 0.04; the first call and the first after a replacement about 50 ms, which the process
+start no longer pays; a text that breaks the parser about 130 ms; memory stayed bounded over 310 replacements.
+
+Ruling: the worker's source is a string run with eval, not a file - why: a file has another name under vitest, tsx and dist, and this runs the same in all three - cost if wrong: ten lines without types or lint, run by the tests and the built-output check.
+Ruling: the tree crosses as JSON text - why: a structured clone recurses on a deep tree on the main stack, and JSON.parse does not - cost if wrong: a stringify per call, part of the cost above.
+Ruling: the worker's stack is 2 MB, so a chain of about 3,900 operators is the new limit where about 9,600 was - why: it decides the depth on the worker's own limit, with room on both sides of the 1,000 that pass and the 9,990 refused; IN lists, AND chains and UNION chains at the tool's limit still pass - cost if wrong: a deeper text is refused and told to write it shorter.
+Ruling: one text at a time, and a stuck parser holds a caller at most 10 seconds for each text ahead of it and 10 for its own - why: a text that breaks the parser must cost only itself - cost if wrong: texts in the same instant wait for each other, a fraction of a millisecond each when nothing is stuck.
+Ruling: a failure of the parser now reads as a fixed message, not the runtime's - why: `Maximum call stack size exceeded` tells the orchestrator nothing it can act on - cost if wrong: only the words.
+Ruling: within one statement the order is the parser's fields, not the text's; sibling statements and lists are in the text's order - why: not every node carries a location, and the finding is about sibling statements - cost if wrong: one statement with two faults of different kinds may name the later one, and it is refused either way.
+
+---
+ apps/server/src/db/sql-check.ts     |  41 ++++---
+ apps/server/src/db/sql-parser.ts    | 122 +++++++++++++++++++
+ apps/server/test/sql-check.test.ts  |  52 +++++++-
+ apps/server/test/sql-parser.test.ts | 230 ++++++++++++++++++++++++++++++++++++
+ 4 files changed, 426 insertions(+), 19 deletions(-)
+
+diff --git a/apps/server/src/db/sql-check.ts b/apps/server/src/db/sql-check.ts
+index 77c8d96f..916885f4 100644
+--- a/apps/server/src/db/sql-check.ts
++++ b/apps/server/src/db/sql-check.ts
+@@ -1,9 +1,10 @@
+-import { parse, type A_Indirection, type ColumnRef, type FuncCall, type Node } from 'libpg-query';
++import type { A_Indirection, ColumnRef, FuncCall, Node } from 'libpg-query';
++import { PARSER_DEADLINE_MS, startParserWorker, ThrowawayParser } from './sql-parser.js';
+ 
+ export const ONLY_STATEMENTS = 'This tool runs only SELECT, INSERT, UPDATE, DELETE and WITH statements; Hornhoof begins and commits the transaction itself.';
+ 
+ /* What the tool refuses by name: these reach other sessions, settings or large objects, or run query text the parser never
+    sees. 'lo_*' stands for the prefix. This is the one list: what the database takes away from PUBLIC names the same functions. */
+ export const REFUSED_FUNCTIONS: string[] = [
+   'pg_cancel_backend',
+   'pg_terminate_backend',
+@@ -43,19 +44,19 @@ const namesIn = (parts: Node[] = []): string[] => parts.flatMap(part => ('String
+ 
+ /* Every part but the last counts as a qualifier, as Postgres takes `db.net.f()` when db is the database it runs in. */
+ function refusedCall({ funcname }: FuncCall): string | undefined {
+   const parts = namesIn(funcname);
+   const inFence = parts.slice(0, -1).some(part => FENCE_SCHEMAS.has(part));
+   return inFence ? parts.join('.') : ifRefused(parts.at(-1));
+ }
+ 
+-/* Postgres resolves `a.f` as the call f(a) when a has no such column, so the last name counts as a call. A lone name
+-   never does: it can only be a column. */
+-const refusedColumn = ({ fields = [] }: ColumnRef): string | undefined => (fields.length >= 2 ? ifRefused(namesIn(fields).at(-1)) : undefined);
++/* Postgres resolves `a.f` as the call f(a) when a has no such column, so a name in the last field counts as a call. A star
++   there means every column of a, which calls nothing, and a lone name can only be a column. */
++const refusedColumn = ({ fields = [] }: ColumnRef): string | undefined => (fields.length >= 2 ? ifRefused(namesIn(fields.slice(-1)).at(0)) : undefined);
+ 
+ /* `(x).f` is the call f(x) when x has no such field, wherever f stands in the chain. */
+ const refusedIndirection = ({ indirection }: A_Indirection): string | undefined => namesIn(indirection).find(isRefusedName);
+ 
+ function refusedNameIn(key: string, node: unknown): string | undefined {
+   switch (key) {
+     case 'FuncCall':
+       return refusedCall(node as FuncCall);
+@@ -69,45 +70,49 @@ function refusedNameIn(key: string, node: unknown): string | undefined {
+ }
+ 
+ /* Every statement kind of the parser's grammar starts with a capital and ends in Stmt, and its version is pinned exactly; a
+    field such as an INSERT's selectStmt starts small and only holds a kind. This looks at every level, as WITH takes a MERGE,
+    and INTO stands on the leftmost branch of a set operation, not on the statement at the top. */
+ const STATEMENT_KIND = /^[A-Z]\w*Stmt$/;
+ const isRefusedStatement = (key: string): boolean => key === 'intoClause' || (STATEMENT_KIND.test(key) && !ROW_STATEMENTS.has(key));
+ 
++const entriesInside = (value: unknown): [string, unknown][] => (typeof value === 'object' && value !== null ? Object.entries(value) : []);
++
+ /* Every key of the tree with its value, whatever kind of node holds it, so that a kind nobody listed cannot hide a call. A
+-   list of what waits, not recursion, as the parser can hand back a tree thousands of levels deep. */
++   list of what waits, not recursion, as the parser can hand back a tree thousands of levels deep. What waits goes in last
++   to first, so that it comes out in the order of the tree, and the first statement's fault is the one the text hears of. */
+ function* entriesOf(tree: unknown): Generator<[string, unknown]> {
+-  const waiting = [tree];
++  const waiting = entriesInside(tree).reverse();
+   while (waiting.length > 0) {
+-    const value = waiting.pop();
+-    if (typeof value !== 'object' || value === null) continue;
+-    for (const entry of Object.entries(value)) {
+-      yield entry;
+-      waiting.push(entry[1]);
+-    }
++    const entry = waiting.pop()!;
++    yield entry;
++    for (const inner of entriesInside(entry[1]).reverse()) waiting.push(inner);
+   }
+ }
+ 
+ function refuseWhatTheTreeHolds(tree: unknown): void {
+   for (const [key, value] of entriesOf(tree)) {
+     if (isRefusedStatement(key)) throw new SqlRefused('statement', ONLY_STATEMENTS);
+     const name = refusedNameIn(key, value);
+     if (name) throw new SqlRefused('function', `This tool does not call ${name}.`);
+   }
+ }
+ 
+-/* Whatever stops the parser stops the text: it reports a deep tree as a plain stack error, not as a parse error of its own. */
++const parser = new ThrowawayParser(startParserWorker, PARSER_DEADLINE_MS);
++const NOTHING_TO_CHECK = 'The text is empty.';
++const PARSER_GAVE_OUT = 'The parser gave up on this text, so it cannot be checked. Write it shorter or less deeply nested.';
++
++/* Whatever stops the parser stops the text. The library takes an empty text for a failure of its own, and a parser is not
++   worth replacing over that. */
+ async function parsed(text: string): Promise<unknown> {
+-  try {
+-    return await parse(text);
+-  } catch (err) {
+-    throw new SqlRefused('syntax', err instanceof Error ? err.message : String(err));
+-  }
++  if (text.trim() === '') throw new SqlRefused('syntax', NOTHING_TO_CHECK);
++  const answer = await parser.parse(text);
++  if ('tree' in answer) return JSON.parse(answer.tree);
++  throw new SqlRefused('syntax', 'refused' in answer ? answer.refused : PARSER_GAVE_OUT);
+ }
+ 
+ /* The parser reads its own copy of the text. A NUL ends that copy, and half a surrogate pair is counted short when it is
+    made, so that it loses the text's end, while the database gets all of it. Such a text could say more to the database
+    than to this check. With the u flag the class matches only a half, never a whole pair. */
+ const READ_DIFFERENTLY = /[\0\uD800-\uDFFF]/u;
+ const UNREADABLE = 'The text holds a NUL or a broken Unicode character, so it cannot be checked.';
+ 
+diff --git a/apps/server/src/db/sql-parser.ts b/apps/server/src/db/sql-parser.ts
+new file mode 100644
+index 00000000..a79c5bef
+--- /dev/null
++++ b/apps/server/src/db/sql-parser.ts
+@@ -0,0 +1,122 @@
++import { createRequire } from 'node:module';
++import { Worker } from 'node:worker_threads';
++
++/* The parser's tree as JSON text, what it says is wrong with the text, or why it could not say. The tree crosses as text
++   because a structured clone recurses on a deep tree on the receiving side, in the server's main stack, and JSON.parse does not. */
++export type ParserAnswer = { tree: string } | { refused: string } | { broken: string };
++
++/* What this file needs of a worker. */
++export type ParserWorker = {
++  on(event: 'message', listener: (answer: ParserAnswer) => void): unknown;
++  on(event: 'error', listener: (err: Error) => void): unknown;
++  on(event: 'exit', listener: () => void): unknown;
++  postMessage(text: string): void;
++  terminate(): Promise<unknown>;
++  unref(): void;
++};
++
++/* A text the parser reads takes milliseconds. This is far above that, so that only a parser that hangs reaches it, even on a
++   machine under load that has to start a new worker first. */
++export const PARSER_DEADLINE_MS = 10_000;
++
++/* The stack decides how deep a text the parser takes, so it is set here rather than left to Node's default. With 2 MB a chain
++   of about 3,900 operators parses, far past anything written by hand, and the 9,990 that fit in the tool's limit do not. */
++const WORKER_STACK_MB = 2;
++
++/* Only SqlError is the parser's verdict on a text. Anything else means the parser itself gave out, and past a stack overflow
++   in its compiled code its memory cannot be trusted any more. A name is all that crosses, as a message could quote the text.
++   A string and not a file, as a file has another name under vitest, under tsx and in dist, and this runs the same in all three. */
++const WORKER_SOURCE = `
++const { parentPort, workerData } = require('node:worker_threads');
++const { parse, SqlError } = require(workerData.libpgQuery);
++const answerTo = async text => {
++  try {
++    return { tree: JSON.stringify(await parse(text)) };
++  } catch (err) {
++    return err instanceof SqlError ? { refused: err.message } : { broken: String(err && err.name) };
++  }
++};
++parentPort.on('message', async text => parentPort.postMessage(await answerTo(text)));
++`;
++
++export function startParserWorker(): Worker {
++  return new Worker(WORKER_SOURCE, {
++    eval: true,
++    workerData: { libpgQuery: createRequire(import.meta.url).resolve('libpg-query') },
++    /* The parser needs neither the company's secrets nor the flags or the loaders of the process around it. */
++    env: {},
++    execArgv: [],
++    resourceLimits: { stackSizeMb: WORKER_STACK_MB },
++  });
++}
++
++type WaitingCaller = { resolve: (answer: ParserAnswer) => void; deadline: NodeJS.Timeout };
++
++/* Holds the parser in a worker, as one failure can leave its compiled code unusable with no way to load it again inside a
++   thread, and answers every text in a bounded time: the worker is thrown away on any failure and on the deadline, and the next
++   text starts a new one. It never rejects. */
++export class ThrowawayParser {
++  private worker: ParserWorker | undefined;
++  private waiting: WaitingCaller | undefined;
++  private lastTurn: Promise<unknown> = Promise.resolve();
++
++  constructor(
++    private readonly startWorker: () => ParserWorker,
++    private readonly deadlineMs: number,
++  ) {}
++
++  /* One text at a time, so that a text that breaks the parser costs only that text. Each turn ends within the deadline, so a
++     caller waits at most the deadline for each text ahead of it and one more for its own. */
++  parse(text: string): Promise<ParserAnswer> {
++    const answer = this.lastTurn.then(() => this.ask(text)).catch(() => this.logged('it could not start'));
++    this.lastTurn = answer;
++    return answer;
++  }
++
++  private ask(text: string): Promise<ParserAnswer> {
++    const worker = this.worker ?? this.start();
++    return new Promise(resolve => {
++      /* While a caller waits, this timer is what holds the process open; the worker itself never does. */
++      const deadline = setTimeout(() => this.throwAway(worker, 'out of time'), this.deadlineMs);
++      this.waiting = { resolve, deadline };
++      worker.postMessage(text);
++    });
++  }
++
++  private start(): ParserWorker {
++    const worker = this.startWorker();
++    worker.on('message', answer => this.heard(worker, answer));
++    worker.on('error', err => this.throwAway(worker, err.name));
++    worker.on('exit', () => this.throwAway(worker, 'it stopped'));
++    worker.unref();
++    this.worker = worker;
++    return worker;
++  }
++
++  /* A late answer from a worker already thrown away belongs to an earlier text, and must not pass for the next one's. */
++  private heard(worker: ParserWorker, answer: ParserAnswer): void {
++    if (worker !== this.worker) return;
++    if ('broken' in answer) this.throwAway(worker, answer.broken);
++    else this.settle(answer);
++  }
++
++  private throwAway(worker: ParserWorker, why: string): void {
++    if (worker !== this.worker) return;
++    this.worker = undefined;
++    void worker.terminate();
++    this.settle(this.logged(why));
++  }
++
++  /* This is the only sign that the check lost a parser, and it says nothing of the text. */
++  private logged(why: string): ParserAnswer {
++    console.warn(`The SQL parser gave out (${why}); the next text gets a new one.`);
++    return { broken: why };
++  }
++
++  private settle(answer: ParserAnswer): void {
++    if (!this.waiting) return;
++    clearTimeout(this.waiting.deadline);
++    this.waiting.resolve(answer);
++    this.waiting = undefined;
++  }
++}
+diff --git a/apps/server/test/sql-check.test.ts b/apps/server/test/sql-check.test.ts
+index fe24bd5c..f9c350e5 100644
+--- a/apps/server/test/sql-check.test.ts
++++ b/apps/server/test/sql-check.test.ts
+@@ -1,14 +1,22 @@
+-import { describe, expect, it } from 'vitest';
++import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+ import { checkAgentSql, ONLY_STATEMENTS, REFUSED_FUNCTIONS, SqlRefused } from '../src/db/sql-check.js';
+ 
+ const refusedFor = (name: string) => expect.objectContaining({ kind: 'function', message: `This tool does not call ${name}.` });
+ 
+ describe("the check on the orchestrator's SQL", () => {
++  let warn: MockInstance;
++  beforeEach(() => {
++    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++  });
++  afterEach(() => {
++    warn.mockRestore();
++  });
++
+   it.each([
+     'SELECT 1',
+     'WITH x AS (SELECT 1) SELECT * FROM x',
+     "INSERT INTO notebook_notes (id, body) VALUES (1, 'a')",
+     "UPDATE notebook_notes SET body = 'b' WHERE id = 1",
+     'DELETE FROM notebook_notes WHERE id = 1',
+     'WITH d AS (DELETE FROM notebook_notes RETURNING id) SELECT count(*) FROM d',
+     'SELECT pg_sleep(1)',
+@@ -176,12 +184,54 @@ describe("the check on the orchestrator's SQL", () => {
+   it('refuses a text the parser gives up on, and still answers after it', async () => {
+     await expect(checkAgentSql(' ')).rejects.toMatchObject({ kind: 'syntax' });
+     await expect(checkAgentSql(`SELECT ${'('.repeat(100_000)}1${')'.repeat(100_000)}`)).rejects.toMatchObject({ kind: 'syntax' });
+     /* A tree this deep runs the parser out of call stack, which it reports as no parse error of its own. */
+     await expect(checkAgentSql(`SELECT 1${'+1'.repeat(100_000)}`)).rejects.toMatchObject({ kind: 'syntax' });
+     await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
+   });
+ 
++  /* A star names no field, so nothing here can be a call, whatever the alias is called. */
++  it.each([
++    'SELECT lo_rows.* FROM (SELECT 1) lo_rows',
++    'SELECT set_config.* FROM agents set_config',
++    'SELECT public.set_config.* FROM public.set_config',
++  ])('leaves alone a star after an alias named like a refused function: %s', async text => {
++    await expect(checkAgentSql(text)).resolves.toBeUndefined();
++  });
++
++  /* The tool words its refusal by kind, so a text with two faults must hear about the one it reaches first. */
++  it.each([
++    ['COMMIT; SELECT pg_cancel_backend(1)', { kind: 'statement', message: ONLY_STATEMENTS }],
++    ['SELECT pg_cancel_backend(1); COMMIT', { kind: 'function', message: 'This tool does not call pg_cancel_backend.' }],
++    ['SELECT pg_reload_conf(), pg_cancel_backend(1)', { kind: 'function', message: 'This tool does not call pg_reload_conf.' }],
++  ])('names the first fault in the order of the text: %s', async (text, refusal) => {
++    await expect(checkAgentSql(text)).rejects.toMatchObject(refusal);
++  });
++
++  /* Looping output has this very shape, and it fits within the tool's limit of 20,000 characters. Each one overflows the
++     parser's stack, and forty of them used to kill the parser until the app restarted. */
++  it('keeps answering after a flood of texts too deep for the parser', async () => {
++    const tooDeep = `SELECT 1${'+1'.repeat(9990)}`;
++    for (let call = 0; call < 60; call++) await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax' });
++    await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
++    await expect(checkAgentSql('SELECT 1')).resolves.toBeUndefined();
++    expect(warn).toHaveBeenCalledTimes(60);
++  }, 60_000);
++
++  /* The log goes where the company's people and agents read it, and the text is what the orchestrator wrote. */
++  it('logs that it replaced a parser, without the text', async () => {
++    const tooDeep = `SELECT 'the text itself'${'+1'.repeat(9990)}`;
++    await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax', message: expect.not.stringContaining('the text itself') });
++    expect(warn).toHaveBeenCalledTimes(1);
++    expect(String(warn.mock.calls[0])).not.toContain('the text itself');
++  });
++
++  it('replaces no parser over a typo or an empty text', async () => {
++    await expect(checkAgentSql('SELEC 1')).rejects.toMatchObject({ kind: 'syntax' });
++    await expect(checkAgentSql(' ')).rejects.toMatchObject({ kind: 'syntax' });
++    expect(warn).not.toHaveBeenCalled();
++  });
++
+   it('finds a refused call at the bottom of a deep expression', async () => {
+     await expect(checkAgentSql(`SELECT pg_reload_conf()::int${'+1'.repeat(1000)}`)).rejects.toEqual(refusedFor('pg_reload_conf'));
+   });
+ });
+diff --git a/apps/server/test/sql-parser.test.ts b/apps/server/test/sql-parser.test.ts
+new file mode 100644
+index 00000000..c194bcdf
+--- /dev/null
++++ b/apps/server/test/sql-parser.test.ts
+@@ -0,0 +1,230 @@
++import { execFile } from 'node:child_process';
++import { EventEmitter, once } from 'node:events';
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { createRequire } from 'node:module';
++import { join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { Worker } from 'node:worker_threads';
++import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
++import { ThrowawayParser, type ParserAnswer } from '../src/db/sql-parser.js';
++
++class FakeWorker extends EventEmitter {
++  readonly posted: string[] = [];
++  terminated = false;
++  postMessage(text: string): void {
++    this.posted.push(text);
++  }
++  terminate(): Promise<number> {
++    this.terminated = true;
++    return Promise.resolve(0);
++  }
++  unref(): void {}
++}
++
++function parserOverFakes(deadlineMs = 60_000): { parser: ThrowawayParser; workers: FakeWorker[] } {
++  const workers: FakeWorker[] = [];
++  const startWorker = () => {
++    const worker = new FakeWorker();
++    workers.push(worker);
++    return worker;
++  };
++  return { parser: new ThrowawayParser(startWorker, deadlineMs), workers };
++}
++
++/* Lets what is already due run, so that a text in its turn has reached the worker. */
++const aTurnPasses = () => new Promise(resolve => setImmediate(resolve));
++const TREE: ParserAnswer = { tree: '{}' };
++
++describe('a parser that can be thrown away', () => {
++  let warn: MockInstance;
++  beforeEach(() => {
++    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++  });
++  afterEach(() => {
++    warn.mockRestore();
++  });
++
++  it('keeps one worker while it answers', async () => {
++    const { parser, workers } = parserOverFakes();
++    const first = parser.parse('a');
++    await aTurnPasses();
++    workers[0]!.emit('message', TREE);
++    await expect(first).resolves.toEqual(TREE);
++
++    const second = parser.parse('b');
++    await aTurnPasses();
++    workers[0]!.emit('message', { refused: 'syntax error' });
++    await expect(second).resolves.toEqual({ refused: 'syntax error' });
++    expect(workers).toHaveLength(1);
++    expect(workers[0]!.posted).toEqual(['a', 'b']);
++    expect(warn).not.toHaveBeenCalled();
++  });
++
++  it.each<[string, (worker: FakeWorker) => void]>([
++    ['says its parser broke', worker => worker.emit('message', { broken: 'RangeError' })],
++    ['throws', worker => worker.emit('error', new RangeError('out of stack'))],
++    ['stops', worker => worker.emit('exit', 1)],
++  ])('replaces a worker that %s, in one log line', async (_, breakIt) => {
++    const { parser, workers } = parserOverFakes();
++    const broken = parser.parse('a');
++    await aTurnPasses();
++    breakIt(workers[0]!);
++    await expect(broken).resolves.toEqual({ broken: expect.any(String) });
++    expect(workers[0]!.terminated).toBe(true);
++    expect(warn).toHaveBeenCalledTimes(1);
++
++    const next = parser.parse('b');
++    await aTurnPasses();
++    workers[1]!.emit('message', TREE);
++    await expect(next).resolves.toEqual(TREE);
++  });
++
++  it('replaces a worker that never answers, once its time is up', async () => {
++    const { parser, workers } = parserOverFakes(1);
++    await expect(parser.parse('a')).resolves.toEqual({ broken: expect.any(String) });
++    expect(workers[0]!.terminated).toBe(true);
++    expect(warn).toHaveBeenCalledTimes(1);
++  });
++
++  /* A late answer belongs to an earlier text, so taking it for the next one would let that one through unread. */
++  it('hears nothing more from a worker it threw away', async () => {
++    const { parser, workers } = parserOverFakes();
++    const broken = parser.parse('a');
++    await aTurnPasses();
++    workers[0]!.emit('error', new RangeError('out of stack'));
++    await broken;
++
++    const next = parser.parse('COMMIT');
++    await aTurnPasses();
++    workers[0]!.emit('message', { tree: '"a late answer"' });
++    workers[0]!.emit('exit', 1);
++    workers[1]!.emit('message', TREE);
++    await expect(next).resolves.toEqual(TREE);
++    expect(workers).toHaveLength(2);
++    expect(warn).toHaveBeenCalledTimes(1);
++  });
++
++  it('hands over one text at a time', async () => {
++    const { parser, workers } = parserOverFakes();
++    const first = parser.parse('a');
++    const second = parser.parse('b');
++    await aTurnPasses();
++    expect(workers[0]!.posted).toEqual(['a']);
++
++    workers[0]!.emit('message', TREE);
++    await first;
++    await aTurnPasses();
++    expect(workers[0]!.posted).toEqual(['a', 'b']);
++    workers[0]!.emit('message', TREE);
++    await second;
++  });
++
++  it('charges a broken parser only to the text that broke it', async () => {
++    const { parser, workers } = parserOverFakes();
++    const breaking = parser.parse('too deep');
++    const innocent = parser.parse('SELECT 1');
++    await aTurnPasses();
++    workers[0]!.emit('message', { broken: 'RangeError' });
++    await expect(breaking).resolves.toEqual({ broken: expect.any(String) });
++
++    await aTurnPasses();
++    expect(workers[1]!.posted).toEqual(['SELECT 1']);
++    workers[1]!.emit('message', TREE);
++    await expect(innocent).resolves.toEqual(TREE);
++  });
++
++  it('replaces a worker that fails while it waits for work', async () => {
++    const { parser, workers } = parserOverFakes();
++    const first = parser.parse('a');
++    await aTurnPasses();
++    workers[0]!.emit('message', TREE);
++    await first;
++
++    workers[0]!.emit('error', new Error('out of memory'));
++    expect(warn).toHaveBeenCalledTimes(1);
++    const next = parser.parse('b');
++    await aTurnPasses();
++    workers[1]!.emit('message', TREE);
++    await expect(next).resolves.toEqual(TREE);
++  });
++
++  it('tries again after a worker that could not start', async () => {
++    const worker = new FakeWorker();
++    const start = vi.fn<() => FakeWorker>().mockImplementationOnce(() => {
++      throw new Error('no thread');
++    });
++    start.mockImplementation(() => worker);
++    const parser = new ThrowawayParser(start, 60_000);
++
++    await expect(parser.parse('a')).resolves.toEqual({ broken: expect.any(String) });
++    expect(warn).toHaveBeenCalledTimes(1);
++    const next = parser.parse('b');
++    await aTurnPasses();
++    worker.emit('message', TREE);
++    await expect(next).resolves.toEqual(TREE);
++  });
++
++  /* (module (func (export "spin") (loop (br 0)))), as a parser with broken memory can spin in its own compiled code, where
++     no JavaScript around it gets a turn. */
++  const SPINS_IN_WASM = `
++    const { parentPort } = require('node:worker_threads');
++    const code = Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0, 1, 4, 1, 96, 0, 0, 3, 2, 1, 0, 7, 8, 1, 4, 115, 112, 105, 110, 0, 0, 10, 9, 1, 7, 0, 3, 64, 12, 0, 11, 11]);
++    const { spin } = new WebAssembly.Instance(new WebAssembly.Module(code)).exports;
++    parentPort.on('message', () => spin());`;
++
++  it('frees a caller from a worker stuck in compiled code, and that worker ends', async () => {
++    const stuck = new Worker(SPINS_IN_WASM, { eval: true });
++    const ended = once(stuck, 'exit');
++    const parser = new ThrowawayParser(() => stuck, 200);
++    await expect(parser.parse('anything')).resolves.toEqual({ broken: expect.any(String) });
++    await ended;
++  });
++});
++
++describe('the check as the built server runs it', () => {
++  const serverRoot = fileURLToPath(new URL('..', import.meta.url));
++  const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
++
++  const run = (args: string[], cwd: string): Promise<string> =>
++    new Promise((resolve, reject) => {
++      execFile(process.execPath, args, { cwd, timeout: 45_000 }, (err, stdout, stderr) => (err ? reject(new Error(`${err.message}\n${stdout}\n${stderr}`)) : resolve(stdout)));
++    });
++
++  function writeBuildConfig(dir: string): void {
++    const config = {
++      extends: join(serverRoot, 'tsconfig.json'),
++      compilerOptions: { outDir: dir, rootDir: join(serverRoot, 'src') },
++      include: [],
++      files: [join(serverRoot, 'src/db/sql-check.ts')],
++    };
++    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify(config));
++  }
++
++  /* Ends by itself, as the server's process must be free to. A call still waiting must hold the process, or it would die
++     on this top level await; an idle parser must not, or it would never end. */
++  const PROBE = `
++    import { checkAgentSql } from './db/sql-check.js';
++    const kindOf = text => checkAgentSql(text).then(() => 'passed', err => err.kind);
++    console.log(await kindOf('SELECT 1'));
++    console.log(await kindOf('SELECT 1' + '+1'.repeat(1000)));
++    console.log(await kindOf('SELECT 1' + '+1'.repeat(6000)));
++    console.log(await kindOf('SELECT 1' + '+1'.repeat(9990)));
++    console.log(await kindOf('SELECT 1'));
++    console.log(await kindOf('COMMIT'));`;
++
++  /* A main stack far past the worker's, and a text that Node's default stack for a worker would take: if the worker's own limit
++     were not what decides, the deep texts would pass here. */
++  it('starts its worker from dist, and leaves the process free to end', async () => {
++    mkdirSync(join(serverRoot, 'dist'), { recursive: true });
++    const dir = mkdtempSync(join(serverRoot, 'dist', '.sql-parser-test-'));
++    try {
++      writeBuildConfig(dir);
++      await run([tsc, '-p', join(dir, 'tsconfig.json')], serverRoot);
++      writeFileSync(join(dir, 'probe.js'), PROBE);
++      const kinds = await run(['--stack-size=3900', 'probe.js'], dir);
++      expect(kinds.trim().split('\n')).toEqual(['passed', 'passed', 'syntax', 'syntax', 'passed', 'statement']);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  }, 90_000);
++});
+

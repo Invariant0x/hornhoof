@@ -1,0 +1,2592 @@
+# Review package: batch 8, slice cert
+
+## 1a6926c7 Split the setup route by what it makes, with no change in what it does
+
+The next change adds one line to POST /api/setup, whose handler stood at CRAP 20, and a changed function must stand under 10. The transaction's body, the orchestrator's subscription, a template's departments, the letting go of a link and the answer become functions of their own. The route's 24 tests in setup.test.ts pass unchanged, which is the proof.
+
+---
+ apps/server/src/modules/setup/routes.ts | 198 ++++++++++++++++++--------------
+ 1 file changed, 111 insertions(+), 87 deletions(-)
+
+diff --git a/apps/server/src/modules/setup/routes.ts b/apps/server/src/modules/setup/routes.ts
+index cef23d03..8194cf39 100644
+--- a/apps/server/src/modules/setup/routes.ts
++++ b/apps/server/src/modules/setup/routes.ts
+@@ -1,19 +1,22 @@
+ import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
+ import type { FastifyInstance } from 'fastify';
+ import { z } from 'zod';
+ import type { Ctx } from '../../app.js';
+ import { hashPassword } from '../../auth/password.js';
+ import { startSession } from '../../auth/session.js';
++import type { Config } from '../../config.js';
+ import { encryptSecret } from '../../crypto/secrets.js';
++import type { Db } from '../../db/client.js';
+ import { isUniqueViolation } from '../../db/errors.js';
+ import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
+ import { ApiError } from '../../errors.js';
+ import { saveLink } from '../link/link.js';
++import type { Bound } from '../link/relay.js';
+ import { LinkBody } from '../link/routes.js';
+ import { createNodeCode } from '../nodes/codes.js';
+ import { installCommand } from '../nodes/command.js';
+ import { isSetupCode, setupNeeded } from './code.js';
+ 
+ const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
+ 
+ const DEFAULT_MODEL = 'claude-opus-5-5';
+@@ -36,25 +39,130 @@ const SetupBody = z.object({
+   /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
+   link: LinkBody.optional(),
+   /* A ready-made company to start from, which creates its departments right away; left out, the company starts empty. */
+   template: z.enum(COMPANY_TEMPLATE_KEYS).optional(),
+ });
+ const CodeQuery = z.object({ code: z.string().max(200).default('') });
+ 
+ type Orchestrator = z.infer<typeof SetupBody>['orchestrator'];
++type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+ 
+ function orchestratorModel(orchestrator: Orchestrator): string {
+   if (orchestrator.mode === 'later' || orchestrator.provider === 'anthropic_api' || orchestrator.provider === 'claude') return DEFAULT_MODEL;
+   if (orchestrator.provider === 'glm') return GLM_MODEL;
+   return orchestrator.provider;
+ }
+ 
+ const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.', 'already_set_up');
+ 
++type SetupInput = { body: z.infer<typeof SetupBody>; passwordHash: string; bound: Bound | null };
++
++/* The orchestrator's subscription when it has one now, and the code of the machine a personal plan waits for. */
++async function orchestratorSubscription(
++  tx: Tx,
++  config: Config,
++  owner: { companyId: string; personId: string },
++  orchestrator: Orchestrator,
++): Promise<{ subscriptionId: string | null; code: string | null }> {
++  if (orchestrator.mode === 'api_key') {
++    const [sub] = await tx.insert(subscriptions).values({
++      companyId: owner.companyId,
++      provider: orchestrator.provider,
++      kind: 'api_key',
++      label: 'Orchestrator',
++      ownerPersonId: owner.personId,
++      secretEnc: encryptSecret(orchestrator.apiKey, config.secret),
++      last4: orchestrator.apiKey.slice(-4),
++      status: 'ready',
++      /* The company's first key serves every department too, so the first people can be hired on it. */
++      targetKind: 'any',
++    }).returning({ id: subscriptions.id });
++    return { subscriptionId: sub!.id, code: null };
++  }
++  if (orchestrator.mode === 'personal') {
++    /* A personal subscription has no target: it serves wherever its owner works, here the whole company. */
++    const [sub] = await tx.insert(subscriptions).values({
++      companyId: owner.companyId,
++      provider: orchestrator.provider,
++      kind: 'personal',
++      label: PLAN_LABELS[orchestrator.provider],
++      ownerPersonId: owner.personId,
++      status: 'waiting_machine',
++    }).returning({ id: subscriptions.id });
++    return { subscriptionId: sub!.id, code: await createNodeCode(tx, { ...owner, subscriptionIds: [sub!.id] }) };
++  }
++  return { subscriptionId: null, code: null };
++}
++
++/* A ready-made company starts with its departments and their products, so the CEO sees the scheme at once; the
++   orchestrator offers to staff them in its greeting. It brings no people, so no subscription is needed. */
++async function templateDepartments(tx: Tx, companyId: string, template: SetupInput['body']['template']): Promise<void> {
++  const chosen = COMPANY_TEMPLATES.find(t => t.key === template);
++  if (!chosen) return;
++  let position = 0;
++  for (const dept of chosen.departments) {
++    const roleCode = roleCodeOf(dept.template);
++    const [row] = await tx
++      .insert(departments)
++      .values({ companyId, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
++      .returning({ id: departments.id });
++    for (const product of dept.products ?? []) {
++      await tx.insert(departments).values({ companyId, name: product, parentId: row!.id, roleCode, position: position++ });
++    }
++  }
++}
++
++async function createCompany(tx: Tx, config: Config, { body, passwordHash, bound }: SetupInput) {
++  const [company] = await tx.insert(companies).values({ name: body.companyName, template: body.template ?? null }).returning();
++  const [person] = await tx.insert(people).values({
++    companyId: company!.id,
++    name: body.name,
++    email: body.email,
++    title: body.title || 'CEO',
++    passwordHash,
++    status: 'active',
++    scopeKind: 'company',
++    isOwner: true,
++  }).returning();
++  const { subscriptionId, code } = await orchestratorSubscription(tx, config, { companyId: company!.id, personId: person!.id }, body.orchestrator);
++  await tx.insert(agents).values({
++    companyId: company!.id,
++    kind: 'orchestrator',
++    name: 'Orchestrator',
++    model: orchestratorModel(body.orchestrator),
++    subscriptionId,
++  });
++  await templateDepartments(tx, company!.id, body.template);
++  if (bound) await saveLink(tx, config, company!.id, bound);
++  return { company: company!, person: person!, code };
++}
++
++type Made = Awaited<ReturnType<typeof createCompany>>;
++
++/* A company that was not made lets go of the link it took, or the name stays taken at the relay. */
++async function madeOrLinkLetGo(ctx: Ctx, input: SetupInput): Promise<Made> {
++  try {
++    return await ctx.db.transaction(tx => createCompany(tx, ctx.config, input));
++  } catch (err) {
++    if (input.bound) await ctx.links.letGo(input.bound.name, input.bound.key);
++    if (isUniqueViolation(err)) throw alreadySetUp();
++    throw err;
++  }
++}
++
++function setupAnswer({ company, person, code }: Made, bound: Bound | null, publicUrl: string) {
++  return {
++    company: { id: company.id, name: company.name },
++    person: { id: person.id, name: person.name, email: person.email, title: person.title },
++    ...(bound ? { link: { name: bound.name, url: bound.url } } : {}),
++    ...(code ? { command: installCommand(bound?.url ?? publicUrl, code) } : {}),
++  };
++}
++
+ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
+   const { db, config } = ctx;
+ 
+   /* Until a company exists, only whoever has the code from the setup link gets anywhere. */
+   async function setupOnly(code: string) {
+     if (!(await setupNeeded(db))) throw alreadySetUp();
+     if (!isSetupCode(config.secret, code)) {
+       throw new ApiError(403, 'forbidden', 'This setup code is not right. Open the setup link from the server log.', 'setup_code');
+@@ -68,101 +176,17 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
+     return ctx.links.check(z.object({ name: z.string().max(200) }).parse(req.params).name);
+   });
+ 
+   app.post('/api/setup', async (req, reply) => {
+     const body = SetupBody.parse(req.body);
+     await setupOnly(body.code);
+ 
+     const passwordHash = await hashPassword(body.password);
+-    const { orchestrator } = body;
+     /* The link comes first, so a name taken meanwhile sets nothing up and the person picks another. */
+     const bound = body.link ? await ctx.links.relay.bind(body.link.name) : null;
+-    let result;
+-    try {
+-      result = await db.transaction(async tx => {
+-        const [company] = await tx.insert(companies).values({ name: body.companyName, template: body.template ?? null }).returning();
+-        const [person] = await tx.insert(people).values({
+-          companyId: company!.id,
+-          name: body.name,
+-          email: body.email,
+-          title: body.title || 'CEO',
+-          passwordHash,
+-          status: 'active',
+-          scopeKind: 'company',
+-          isOwner: true,
+-        }).returning();
+-
+-        let subscriptionId: string | null = null;
+-        let code: string | null = null;
+-        if (orchestrator.mode === 'api_key') {
+-          const [sub] = await tx.insert(subscriptions).values({
+-            companyId: company!.id,
+-            provider: orchestrator.provider,
+-            kind: 'api_key',
+-            label: 'Orchestrator',
+-            ownerPersonId: person!.id,
+-            secretEnc: encryptSecret(orchestrator.apiKey, config.secret),
+-            last4: orchestrator.apiKey.slice(-4),
+-            status: 'ready',
+-            /* The company's first key serves every department too, so the first people can be hired on it. */
+-            targetKind: 'any',
+-          }).returning({ id: subscriptions.id });
+-          subscriptionId = sub!.id;
+-        } else if (orchestrator.mode === 'personal') {
+-          /* A personal subscription has no target: it serves wherever its owner works, here the whole company. */
+-          const [sub] = await tx.insert(subscriptions).values({
+-            companyId: company!.id,
+-            provider: orchestrator.provider,
+-            kind: 'personal',
+-            label: PLAN_LABELS[orchestrator.provider],
+-            ownerPersonId: person!.id,
+-            status: 'waiting_machine',
+-          }).returning({ id: subscriptions.id });
+-          subscriptionId = sub!.id;
+-          code = await createNodeCode(tx, { companyId: company!.id, personId: person!.id, subscriptionIds: [sub!.id] });
+-        }
+-
+-        await tx.insert(agents).values({
+-          companyId: company!.id,
+-          kind: 'orchestrator',
+-          name: 'Orchestrator',
+-          model: orchestratorModel(orchestrator),
+-          subscriptionId,
+-        });
+-
+-        /* A ready-made company starts with its departments and their products, so the CEO sees the scheme at once; the
+-           orchestrator offers to staff them in its greeting. It brings no people, so no subscription is needed. */
+-        const chosen = COMPANY_TEMPLATES.find(t => t.key === body.template);
+-        if (chosen) {
+-          let position = 0;
+-          for (const dept of chosen.departments) {
+-            const roleCode = roleCodeOf(dept.template);
+-            const [row] = await tx
+-              .insert(departments)
+-              .values({ companyId: company!.id, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
+-              .returning({ id: departments.id });
+-            for (const product of dept.products ?? []) {
+-              await tx.insert(departments).values({ companyId: company!.id, name: product, parentId: row!.id, roleCode, position: position++ });
+-            }
+-          }
+-        }
+-        if (bound) await saveLink(tx, config, company!.id, bound);
+-        return { company: company!, person: person!, code };
+-      });
+-    } catch (err) {
+-      if (bound) await ctx.links.letGo(bound.name, bound.key);
+-      if (isUniqueViolation(err)) throw alreadySetUp();
+-      throw err;
+-    }
+-
+-    const { company, person, code } = result;
++    const made = await madeOrLinkLetGo(ctx, { body, passwordHash, bound });
+     if (bound) await ctx.links.sync();
+-    await startSession(reply, db, config, person.id, passwordHash);
++    await startSession(reply, db, config, made.person.id, passwordHash);
+     reply.code(201);
+-    return {
+-      company: { id: company.id, name: company.name },
+-      person: { id: person.id, name: person.name, email: person.email, title: person.title },
+-      ...(bound ? { link: { name: bound.name, url: bound.url } } : {}),
+-      ...(code ? { command: installCommand(bound?.url ?? config.publicUrl, code) } : {}),
+-    };
++    return setupAnswer(made, bound, config.publicUrl);
+   });
+ }
+
+## ef508bd1 Get and renew the link's certificate on its own, and switch the tunnel to https when the relay passes it through
+
+LinkTls orders through the tunnel, renews inside the window the CA suggests, backs off as Let's Encrypt's limits ask, and moves the tunnel to https only with the certificate in the listener, more than a day left, and a relay that says it passes TLS through, and then only if a probe through the link finds that very certificate. GET /api/link now tells the link's encryption, with the four fields of TlsView. A machine that only reads orders nothing: main.ts runs the manager's timers under ctx.mode.whenLead.
+
+Proved by link-tls.test.ts, tls-checks.test.ts, link.test.ts and setup.test.ts. npm run test:real was not run, since this build uses no Docker; this change does not touch what it tests.
+
+Ruling: main.ts starts the manager through ctx.mode.whenLead, not a bare ctx.tls.start() - why: the lead's note and plan 2's own wording, a machine that reads must not order or renew - cost if wrong: one line in main.ts.
+Ruling: tick() after stop() does nothing, and a pass that a stop overtakes moves no mode and writes no tunnel, though an order under way ends - why: a stale pass on a machine that stopped leading could rewrite tunnel.json - cost if wrong: one order finishes on a machine leaving lead mode, and the next leader's first pass probes.
+Ruling: no listener given counts as not holding the certificate, so http - why: fail toward a working link, and plan 2 says link-tls.test.ts gives LinkTls a fake Served - cost if wrong: a LinkTls with no serveOn never leaves http.
+Ruling: while the relay says up and passthrough and the block runs, the wanted mode is http - why: the plan's sentence leaves this case open, and a row under a block is in http anyway - cost if wrong: none seen.
+Ruling: PublicLinks.sync() goes in turn with set and remove, which write through a private writeSettings - why: the manager is a second writer of tunnel.json, and a write that read the link before a rename could land after the rename's own and keep the old link - cost if wrong: a sync waits up to the relay's timeouts of a change under way.
+Ruling: TlsView.mode comes from linkMode, not the row - why: right after a rename the row still says https while tunnel.json says http, and the view should say what the tunnel does - cost if wrong: two more reads per GET /api/link.
+Ruling: anything but an AcmeError in the order's path counts as invalid - why: one wait and one log line with kind and type only, so a failure's text never reaches the log - cost if wrong: a programming error reads as invalid in the row.
+Ruling: SAN names compare lowercased through namesHost in x509.ts, used by the manager and store.ts's mayRunHttps; LEAST_LEFT_MS is exported from store.ts - why: the lead's carry from Task 7 and one decision in one place, though both files lie outside the task's list - cost if wrong: none seen.
+Ruling: accountDoesNotExist drops accountUrl and orders once more, keeping replaces - why: the plan and the lead's carry; each refusal gives up one of the two, so an order comes back at most twice - cost if wrong: one extra order on a CA that refuses both.
+
+---
+ apps/server/src/app.ts                  |   7 +-
+ apps/server/src/main.ts                 |   7 +-
+ apps/server/src/modules/link/link.ts    |  22 +-
+ apps/server/src/modules/link/routes.ts  |   2 +-
+ apps/server/src/modules/setup/routes.ts |   5 +-
+ apps/server/src/modules/tls/checks.ts   |  56 ++
+ apps/server/src/modules/tls/manager.ts  | 361 ++++++++++++
+ apps/server/src/modules/tls/store.ts    |   6 +-
+ apps/server/src/modules/tls/x509.ts     |   5 +
+ apps/server/test/link-tls.test.ts       | 944 ++++++++++++++++++++++++++++++++
+ apps/server/test/link.test.ts           |  54 +-
+ apps/server/test/tls-checks.test.ts     | 103 ++++
+ 12 files changed, 1552 insertions(+), 20 deletions(-)
+
+diff --git a/apps/server/src/app.ts b/apps/server/src/app.ts
+index 812a834c..43655987 100644
+--- a/apps/server/src/app.ts
++++ b/apps/server/src/app.ts
+@@ -36,16 +36,17 @@ import { archOf, registry } from './modules/updates/registry.js';
+ import { updateRoutes } from './modules/updates/routes.js';
+ import { attachmentRoutes } from './modules/tasks/attachments.js';
+ import { partFileRoutes } from './modules/testruns/files.js';
+ import { poolRoutes } from './modules/testruns/pool.js';
+ import { taskRoutes } from './modules/tasks/routes.js';
+ import { TerminalRelay } from './modules/terminals/relay.js';
+ import { terminalRoutes } from './modules/terminals/routes.js';
+ import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
++import { LinkTls } from './modules/tls/manager.js';
+ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
+ 
+ export type { Db } from './db/client.js';
+ import { fromOwnPages } from './auth/origin.js';
+ import { handOverSession, requirePerson } from './auth/session.js';
+ import { overLink } from './auth/tunnel.js';
+ import type { AgentSql } from './db/agent-sql.js';
+ import type { Db } from './db/client.js';
+@@ -56,28 +57,30 @@ export type Deps = {
+   db: Db;
+   config: Config;
+   logger?: FastifyServerOptions['logger'];
+   agentSql?: AgentSql | null;
+   onRoute?: (route: { method: string | string[]; url: string }) => void;
+ };
+ 
+ /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
+-   check for newer builds, access to the computer the server runs on, the company's public link and its ACME answers. */
++   check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
++   its certificate. */
+ export type Ctx = Deps & {
+   log: FastifyBaseLogger;
+   hub: NodeHub;
+   bus: EventBus;
+   terminals: TerminalRelay;
+   updates: UpdateCheck;
+   updater: UpdaterControl;
+   computer: ComputerAccess;
+   templates: Templates;
+   links: PublicLinks;
+   challenges: Challenges;
++  tls: LinkTls;
+   mode: AppMode;
+ };
+ 
+ declare module 'fastify' {
+   interface FastifyInstance {
+     /* For tests and the few places outside a route that need the same context. */
+     ctx: Ctx;
+   }
+@@ -137,16 +140,18 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+     everyMs: config.updateCheckMs,
+     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
+   });
+   ctx.updater = new UpdaterControl(config.controlDir);
+   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
+   ctx.templates = loadTemplates(config.templatesDir);
+   ctx.links = new PublicLinks(ctx);
+   ctx.challenges = new Challenges();
++  ctx.tls = new LinkTls(ctx);
++  app.addHook('onClose', async () => ctx.tls.stop());
+   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+   ctx.mode.whenLeaving(() => closeOpenSockets(app));
+   app.addHook('onReady', async () => {
+     ctx.mode.start();
+     await ctx.mode.settled();
+   });
+   app.addHook('onClose', async () => ctx.mode.stop());
+diff --git a/apps/server/src/main.ts b/apps/server/src/main.ts
+index 17687f44..4efe87a0 100644
+--- a/apps/server/src/main.ts
++++ b/apps/server/src/main.ts
+@@ -1,13 +1,13 @@
+ import { buildApp } from './app.js';
+ import { loadConfig } from './config.js';
+ import { openAgentSql } from './db/agent-sql.js';
+ import { APP_NAME, openDb } from './db/client.js';
+-import { linkOf, publicUrl } from './modules/link/link.js';
++import { publicUrl } from './modules/link/link.js';
+ import { setupLink } from './modules/setup/code.js';
+ import { LINK_TLS_PORT, LinkListener } from './modules/tls/listener.js';
+ 
+ function requireDbUrl(url: string | undefined): string {
+   if (!url) throw new Error('DATABASE_URL is not set.');
+   return url;
+ }
+ 
+@@ -18,18 +18,19 @@ const app = await buildApp({
+   db,
+   agentSql: await openAgentSql(url),
+   config,
+   logger: { level: process.env.LOG_LEVEL || 'info' },
+ });
+ await app.listen({ port: config.port, host: '0.0.0.0' });
+ const listener = new LinkListener({ app, config, log: app.log });
+ await listener.listen(LINK_TLS_PORT);
+-const publicLink = await linkOf(db);
+-await listener.use(publicLink && new URL(publicLink.url).hostname, null);
++await app.ctx.tls.serveOn(listener);
++/* A machine that only reads must not order or renew a certificate, so the manager's timers run only while the app leads. */
++app.ctx.mode.whenLead(() => app.ctx.tls.start(), () => app.ctx.tls.stop());
+ console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
+ /* Until a company exists, only the link with the setup code sets it up. */
+ const link = await setupLink(db, config);
+ if (link) console.log(`Open this link to set Hornhoof up: ${link}`);
+ 
+ /* The listener stops taking connections first; the app's close then ends the event streams and WebSockets on those it
+    already has, which lets the listener finish. */
+ async function stop(): Promise<void> {
+diff --git a/apps/server/src/modules/link/link.ts b/apps/server/src/modules/link/link.ts
+index e376e1d1..35809623 100644
+--- a/apps/server/src/modules/link/link.ts
++++ b/apps/server/src/modules/link/link.ts
+@@ -46,17 +46,17 @@ export async function writeTunnelSettings(db: Db, config: Config, log?: FastifyB
+ }
+ 
+ /* The company's link at hornhoof.org: asking the relay for it, changing and removing it, and the tunnel settings that
+    follow it. Changes go one at a time, so two people renaming at once do not leave a link nobody keeps. */
+ export class PublicLinks {
+   readonly relay: Relay;
+   private queue: Promise<unknown> = Promise.resolve();
+ 
+-  constructor(private readonly ctx: { db: Db; config: Config; log: FastifyBaseLogger }) {
++  constructor(private readonly ctx: { db: Db; config: Config; log: FastifyBaseLogger; tls?: { kick(): void } }) {
+     this.relay = new Relay(ctx.config.relayUrl);
+   }
+ 
+   /* What a link's address ends in, as people see it before they have one. */
+   domain(): string {
+     return new URL(this.ctx.config.relayUrl).hostname;
+   }
+ 
+@@ -78,40 +78,50 @@ export class PublicLinks {
+       if (old && name === old.name) return { name: old.name, url: old.url };
+       const bound = await this.relay.bind(name);
+       try {
+         await saveLink(this.ctx.db, this.ctx.config, companyId, bound);
+       } catch (err) {
+         await this.letGo(bound.name, bound.key);
+         throw err;
+       }
+-      await this.sync();
++      await this.writeSettings();
++      this.ctx.tls?.kick();
+       if (old) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
+       return { name: bound.name, url: bound.url };
+     });
+   }
+ 
+   /* The relay lets the link go first, so a link it still holds is never forgotten here. */
+   remove(companyId: string): Promise<void> {
+     return this.inTurn(async () => {
+       const [old] = await this.ctx.db.select().from(publicLinks).where(eq(publicLinks.companyId, companyId));
+       if (!old) return;
+       await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
+       await this.ctx.db.delete(publicLinks).where(eq(publicLinks.companyId, companyId));
+-      await this.sync();
++      await this.writeSettings();
++      this.ctx.tls?.kick();
+     });
+   }
+ 
+   /* A link Hornhoof no longer keeps is let go at the relay, when it answers; otherwise its name stays taken there. */
+   async letGo(name: string, key: string): Promise<void> {
+     await this.relay.unbind(name, key).catch(err => this.ctx.log.warn({ error: loggable(err), name }, 'Could not let the old public link go at the relay.'));
+   }
+ 
+-  /* The tunnel's settings for the link the database holds. A control folder that cannot be written, as when Hornhoof
+-     runs outside compose, goes to the log: the link works once the tunnel reads the settings. */
+-  async sync(): Promise<void> {
++  /* The tunnel's settings for the link the database holds, true once they are written. In turn with the changes of the
++     link, so a write that read the link before a change cannot land after the change's own. */
++  sync(): Promise<boolean> {
++    return this.inTurn(() => this.writeSettings());
++  }
++
++  /* A control folder that cannot be written, as when Hornhoof runs outside compose, goes to the log: the link works once
++     the tunnel reads the settings. */
++  private async writeSettings(): Promise<boolean> {
+     try {
+       await writeTunnelSettings(this.ctx.db, this.ctx.config, this.ctx.log);
++      return true;
+     } catch (err) {
+       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
++      return false;
+     }
+   }
+ }
+diff --git a/apps/server/src/modules/link/routes.ts b/apps/server/src/modules/link/routes.ts
+index ee03871c..5d2a5260 100644
+--- a/apps/server/src/modules/link/routes.ts
++++ b/apps/server/src/modules/link/routes.ts
+@@ -14,17 +14,17 @@ export function linkRoutes(app: FastifyInstance, ctx: Ctx): void {
+   async function companyPerson(req: FastifyRequest) {
+     const me = await requirePerson(req, ctx.db);
+     requireCompanyScope(me);
+     return me;
+   }
+ 
+   app.get('/api/link', async req => {
+     await companyPerson(req);
+-    return { link: await linkOf(ctx.db), domain: ctx.links.domain() };
++    return { link: await linkOf(ctx.db), domain: ctx.links.domain(), tls: await ctx.tls.view() };
+   });
+ 
+   app.get('/api/link/names/:name', async req => {
+     await companyPerson(req);
+     return ctx.links.check(NameParams.parse(req.params).name);
+   });
+ 
+   app.put('/api/link', async req => {
+diff --git a/apps/server/src/modules/setup/routes.ts b/apps/server/src/modules/setup/routes.ts
+index 8194cf39..11a47499 100644
+--- a/apps/server/src/modules/setup/routes.ts
++++ b/apps/server/src/modules/setup/routes.ts
+@@ -179,14 +179,17 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
+   app.post('/api/setup', async (req, reply) => {
+     const body = SetupBody.parse(req.body);
+     await setupOnly(body.code);
+ 
+     const passwordHash = await hashPassword(body.password);
+     /* The link comes first, so a name taken meanwhile sets nothing up and the person picks another. */
+     const bound = body.link ? await ctx.links.relay.bind(body.link.name) : null;
+     const made = await madeOrLinkLetGo(ctx, { body, passwordHash, bound });
+-    if (bound) await ctx.links.sync();
++    if (bound) {
++      await ctx.links.sync();
++      ctx.tls.kick();
++    }
+     await startSession(reply, db, config, made.person.id, passwordHash);
+     reply.code(201);
+     return setupAnswer(made, bound, config.publicUrl);
+   });
+ }
+diff --git a/apps/server/src/modules/tls/checks.ts b/apps/server/src/modules/tls/checks.ts
+new file mode 100644
+index 00000000..85bdc768
+--- /dev/null
++++ b/apps/server/src/modules/tls/checks.ts
+@@ -0,0 +1,56 @@
++import https from 'node:https';
++import type { TLSSocket } from 'node:tls';
++import { certInfo } from './x509.js';
++
++export type ProbeOptions = {
++  tries?: number;
++  everyMs?: number;
++  timeoutMs?: number;
++  deadlineMs?: number;
++  /* Extra trust, for tests. */
++  ca?: string;
++};
++
++const DEFAULTS = { tries: 20, everyMs: 3000, timeoutMs: 5000, deadlineMs: 60_000 };
++
++const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
++
++function fingerprintOf(certPem: string): string | null {
++  try {
++    return certInfo(certPem).fingerprint256;
++  } catch {
++    return null;
++  }
++}
++
++/* One GET on a connection of its own, since the agent's would keep the certificate of the first answer. Any failure, and
++   an answer that does not come in time, is a no. */
++function answersWith(url: string, fingerprint: string, timeoutMs: number, ca?: string): Promise<boolean> {
++  return new Promise(resolve => {
++    const req = https.get(`${url}/api/health`, { agent: false, ca }, res => {
++      const peer = (res.socket as TLSSocket).getPeerCertificate();
++      resolve(res.statusCode === 200 && peer.fingerprint256 === fingerprint);
++      req.destroy();
++    });
++    const timer = setTimeout(() => req.destroy(), timeoutMs);
++    req.on('error', () => resolve(false));
++    req.on('close', () => {
++      clearTimeout(timer);
++      resolve(false);
++    });
++  });
++}
++
++/* Whether the link really carries this certificate to this machine. The relay's own TLS would answer on the same address,
++   so the answer counts only from the certificate itself, and it may take the tunnel some seconds to come up. */
++export async function probe(url: string, certPem: string, opts: ProbeOptions = {}): Promise<boolean> {
++  const { tries, everyMs, timeoutMs, deadlineMs, ca } = { ...DEFAULTS, ...opts };
++  const fingerprint = fingerprintOf(certPem);
++  if (fingerprint === null) return false;
++  const deadline = Date.now() + deadlineMs;
++  for (let left = tries; left > 0 && Date.now() < deadline; left--) {
++    if (await answersWith(url, fingerprint, Math.min(timeoutMs, deadline - Date.now()), ca)) return true;
++    if (left > 1) await pause(Math.min(everyMs, Math.max(0, deadline - Date.now())));
++  }
++  return false;
++}
+diff --git a/apps/server/src/modules/tls/manager.ts b/apps/server/src/modules/tls/manager.ts
+new file mode 100644
+index 00000000..008e904f
+--- /dev/null
++++ b/apps/server/src/modules/tls/manager.ts
+@@ -0,0 +1,361 @@
++import type { Ctx } from '../../app.js';
++import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
++import type { Db } from '../../db/client.js';
++import { linkTls, publicLinks } from '../../db/schema.js';
++import { loggable } from '../../errors.js';
++import type { Health } from '../link/relay.js';
++import { AcmeAccount, AcmeError, newAccountKey } from './acme.js';
++import { certId, renewalInfo, type RenewalWindow } from './ari.js';
++import { probe } from './checks.js';
++import { LEAST_LEFT_MS, linkMode, saveTls, tlsOf, updateTls, type TlsRow } from './store.js';
++import { certInfo, namesHost } from './x509.js';
++
++const TICK_MS = 60_000;
++const MINUTE_MS = 60_000;
++const HOUR_MS = 60 * MINUTE_MS;
++const DAY_MS = 24 * HOUR_MS;
++const SELF_CHECK_WAIT_MS = 5 * MINUTE_MS;
++const FAILED_ORDER_WAIT_MS = HOUR_MS;
++const ASK_WITHOUT_RENEWAL_INFO_MS = 6 * HOUR_MS;
++const ASK_AFTER_ERROR_MS = HOUR_MS;
++const HEALTH_OLD_MS = 10 * MINUTE_MS;
++const HTTPS_BLOCK_MS = HOUR_MS;
++
++export type Acme = Pick<AcmeAccount, 'account' | 'issue'>;
++export type Served = { use(host: string | null, cert: { certPem: string; keyPem: string } | null): Promise<void> };
++export type TlsView = { mode: 'http' | 'https'; certificate: boolean; expiresAt: string | null; failedAt: string | null };
++
++type TunnelMode = TlsRow['mode'];
++type Link = { companyId: string; name: string; url: string };
++/* A certificate that is in, for the name of the link it was asked about. */
++type Held = { certPem: string; keyEnc: string; notAfter: Date };
++export type OrderTry = { accountUrl: string | null; replaces: string | null };
++export type RenewalAnswer = RenewalWindow | null | 'error';
++export type ModeFacts = { rowMode: TunnelMode; notAfter: Date; held: boolean; health: Health | null; blockedUntil: Date | null };
++type LinkTlsOptions = {
++  acme?: (directory: string, accountKeyPem: string, accountUrl: string | null) => Acme;
++  renewalInfo?: typeof renewalInfo;
++  probe?: typeof probe;
++  now?: () => number;
++  random?: () => number;
++};
++
++const hasType = (err: AcmeError, ending: string): boolean => err.type?.endsWith(ending) ?? false;
++
++/* What to order with after a refusal, or null to take it as the failure. Each answer gives up one of the two things tried
++   with, so a refused order comes back at most twice. */
++export function nextOrderTry(err: unknown, tried: OrderTry): OrderTry | null {
++  if (!(err instanceof AcmeError) || err.kind !== 'refused') return null;
++  if (hasType(err, 'accountDoesNotExist')) return tried.accountUrl === null ? null : { ...tried, accountUrl: null };
++  return tried.replaces === null || hasType(err, 'rateLimited') ? null : { ...tried, replaces: null };
++}
++
++function renewAtIn(window: RenewalWindow, renewAt: Date | null, now: number, random: () => number): Date {
++  const [start, end] = [window.start.getTime(), window.end.getTime()];
++  if (renewAt && start <= renewAt.getTime() && renewAt.getTime() <= end) return renewAt;
++  return end <= now ? new Date(now) : new Date(start + random() * (end - start));
++}
++
++const twoThirdsOf = ({ notBefore, notAfter }: { notBefore: Date; notAfter: Date }): Date => new Date(notBefore.getTime() + (2 / 3) * (notAfter.getTime() - notBefore.getTime()));
++
++const clamp = (value: number, least: number, most: number): number => Math.min(most, Math.max(least, value));
++
++/* When to renew and when to ask the CA again, after what it said about this certificate. */
++export function renewalPlan(answer: RenewalAnswer, cert: { renewAt: Date | null; notBefore: Date; notAfter: Date }, now: number, random: () => number): { renewAt: Date; askAt: Date } {
++  if (answer === null) return { renewAt: cert.renewAt ?? twoThirdsOf(cert), askAt: new Date(now + ASK_WITHOUT_RENEWAL_INFO_MS) };
++  if (answer === 'error') return { renewAt: cert.renewAt ?? twoThirdsOf(cert), askAt: new Date(now + ASK_AFTER_ERROR_MS) };
++  return { renewAt: renewAtIn(answer, cert.renewAt, now, random), askAt: new Date(now + clamp(answer.retryAfterS * 1000, HOUR_MS, DAY_MS)) };
++}
++
++/* Fails toward a working link: a certificate that cannot serve means http, and a relay nobody has heard from changes
++   nothing, since dropping https on every hiccup of its health would make the link blink. */
++export function wantedMode({ rowMode, notAfter, held, health, blockedUntil }: ModeFacts, now: number): TunnelMode {
++  if (!held || notAfter.getTime() - now <= LEAST_LEFT_MS) return 'http';
++  if (!health?.up) return rowMode;
++  const blocked = blockedUntil !== null && blockedUntil.getTime() > now;
++  return health.passthrough && !blocked ? 'https' : 'http';
++}
++
++/* The wait after a failed order. A check of its own that failed costs nothing at the CA, so that one comes back soon. */
++export function failureFields(failure: AcmeError, now: number): Pick<TlsRow, 'nextTryAt' | 'failure' | 'failedAt'> {
++  const waitMs = failure.kind === 'not_ready' ? SELF_CHECK_WAIT_MS : Math.max(FAILED_ORDER_WAIT_MS, (failure.retryAfterS ?? 0) * 1000);
++  return { nextTryAt: new Date(now + waitMs), failure: failure.type ?? failure.kind, failedAt: new Date(now) };
++}
++
++function certificateOf(row: TlsRow, link: Link): Held | null {
++  const { name, certPem, certKeyEnc, notAfter } = row;
++  return name === link.name && certPem && certKeyEnc && notAfter ? { certPem, keyEnc: certKeyEnc, notAfter } : null;
++}
++
++const isPast = (date: Date | null, now: number): boolean => date === null || date.getTime() <= now;
++
++function dueToOrder(row: TlsRow, link: Link, now: number): boolean {
++  const renewing = row.renewAt !== null && row.renewAt.getTime() <= now;
++  return (certificateOf(row, link) === null || renewing) && isPast(row.nextTryAt, now);
++}
++
++/* Only a renewal of the same name at the same CA replaces anything: another CA does not know the old certificate. */
++function replacesOf(row: TlsRow, link: Link): string | null {
++  const held = certificateOf(row, link);
++  return held && row.certDirectory === row.directory ? certId(held.certPem) : null;
++}
++
++const hostOf = (link: Link): string => new URL(link.url).hostname;
++
++/* What the listener is to serve: the link's host, with its certificate once that is in. */
++function servingOf(link: Link | null, row: TlsRow | null): { host: string | null; held: Held | null } {
++  if (!link) return { host: null, held: null };
++  return { host: hostOf(link), held: row && certificateOf(row, link) };
++}
++
++/* What the listener holds, to tell a change. Only public things go in. */
++const servedKey = (host: string | null, certPem: string | null): string => JSON.stringify([host, certPem]);
++
++async function linkOfCompany(db: Db): Promise<Link | null> {
++  const [link] = await db.select({ companyId: publicLinks.companyId, name: publicLinks.name, url: publicLinks.url }).from(publicLinks).limit(1);
++  return link ?? null;
++}
++
++/* The certificate of the company's link: it decides when to order, renew and back off, and which mode the tunnel runs in.
++   One pass at a time, so what the last ACME answer said is the failed step's, and only one writer moves the mode. */
++export class LinkTls {
++  private readonly acme: NonNullable<LinkTlsOptions['acme']>;
++  private readonly renewalInfo: typeof renewalInfo;
++  private readonly probe: typeof probe;
++  private readonly now: () => number;
++  private readonly random: () => number;
++  private timer: NodeJS.Timeout | null = null;
++  private running: Promise<void> | null = null;
++  private stopped = false;
++  private firstPass = true;
++  private listener: Served | null = null;
++  private given: string | null = null;
++  private health: { answer: Health; at: number } | null = null;
++  private unwritten = false;
++
++  constructor(
++    private readonly ctx: Ctx,
++    opts: LinkTlsOptions = {},
++  ) {
++    this.acme = opts.acme ?? ((directory, accountKeyPem, accountUrl) => new AcmeAccount(directory, accountKeyPem, accountUrl));
++    this.renewalInfo = opts.renewalInfo ?? renewalInfo;
++    this.probe = opts.probe ?? probe;
++    this.now = opts.now ?? Date.now;
++    this.random = opts.random ?? Math.random;
++  }
++
++  /* Not awaited by anyone who starts it: a pass may take minutes. */
++  start(): void {
++    if (this.ctx.config.acmeDirectory === null || this.timer) return;
++    this.stopped = false;
++    this.firstPass = true;
++    this.timer = setInterval(() => void this.tick(), TICK_MS);
++    this.timer.unref();
++    void this.tick();
++  }
++
++  /* A pass under way still ends the order it began, but a machine that stopped leading moves no mode and writes no tunnel. */
++  stop(): void {
++    this.stopped = true;
++    if (this.timer) clearInterval(this.timer);
++    this.timer = null;
++  }
++
++  tick(): Promise<void> {
++    const directory = this.ctx.config.acmeDirectory;
++    if (directory === null || this.stopped) return Promise.resolve();
++    this.running ??= this.pass(directory).finally(() => {
++      this.running = null;
++    });
++    return this.running;
++  }
++
++  kick(): void {
++    if (this.timer) void this.tick();
++  }
++
++  async serveOn(listener: Served): Promise<void> {
++    this.listener = listener;
++    this.given = null;
++    const link = await linkOfCompany(this.ctx.db);
++    const on = this.ctx.config.acmeDirectory !== null;
++    await this.giveListener(link, link && on ? await tlsOf(this.ctx.db, link.companyId) : null);
++  }
++
++  async view(): Promise<TlsView | null> {
++    const { db, config } = this.ctx;
++    const link = await linkOfCompany(db);
++    if (!link) return null;
++    const row = config.acmeDirectory === null ? null : await tlsOf(db, link.companyId);
++    const held = row && certificateOf(row, link);
++    return { mode: await linkMode(db, config), certificate: held !== null, expiresAt: held?.notAfter.toISOString() ?? null, failedAt: row?.failedAt?.toISOString() ?? null };
++  }
++
++  /* Never throws, so the timer and whoever kicked it have nothing to catch; the next pass starts over from the database. */
++  private async pass(directory: string): Promise<void> {
++    try {
++      const link = await linkOfCompany(this.ctx.db);
++      const row = link ? await this.withLink(link, directory) : await this.withoutLink();
++      await this.giveListener(link, row);
++      await this.settleMode(link, row);
++    } catch (err) {
++      this.ctx.log.warn({ error: loggable(err) }, "A pass of the link's certificate failed.");
++    }
++  }
++
++  private async withLink(link: Link, directory: string): Promise<TlsRow> {
++    const row = await this.withAccount(link, directory);
++    const ordered = await this.orderIfDue(link, row);
++    const planned = await this.planRenewal(link, ordered);
++    if (!this.health || this.now() - this.health.at >= HEALTH_OLD_MS) await this.askHealth();
++    return planned;
++  }
++
++  /* The account stays when the link goes, and a removed link's certificate stops being offered. */
++  private async withoutLink(): Promise<TlsRow | null> {
++    const [row] = await this.ctx.db.select().from(linkTls).limit(1);
++    if (!row?.certPem) return row ?? null;
++    return this.changed(row, { name: null, certPem: null, certDirectory: null, certKeyEnc: null, notAfter: null, renewAt: null, askAt: null, mode: 'http' });
++  }
++
++  /* A certificate the row holds stays when the CA changes, and is renewed through the new account. */
++  private async withAccount(link: Link, directory: string): Promise<TlsRow> {
++    const { db, config } = this.ctx;
++    const row = await tlsOf(db, link.companyId);
++    if (row?.directory === directory) return row;
++    await saveTls(db, link.companyId, { directory, accountKeyEnc: encryptSecret(await newAccountKey(), config.secret), accountUrl: null });
++    return (await tlsOf(db, link.companyId))!;
++  }
++
++  private async changed(row: TlsRow, fields: Partial<Omit<TlsRow, 'companyId'>>): Promise<TlsRow> {
++    await updateTls(this.ctx.db, row.companyId, fields);
++    return { ...row, ...fields };
++  }
++
++  private async orderIfDue(link: Link, row: TlsRow): Promise<TlsRow> {
++    if (!dueToOrder(row, link, this.now())) return row;
++    try {
++      return await this.order(link, row);
++    } catch (err) {
++      const failure = err instanceof AcmeError ? err : new AcmeError('invalid');
++      this.ctx.log.warn({ kind: failure.kind, type: failure.type }, "Could not get the link's certificate.");
++      return this.changed(row, failureFields(failure, this.now()));
++    }
++  }
++
++  private async order(link: Link, row: TlsRow): Promise<TlsRow> {
++    const host = hostOf(link);
++    const { certPem, keyPem } = await this.issue(row, host, { accountUrl: row.accountUrl, replaces: replacesOf(row, link) });
++    const info = certInfo(certPem);
++    if (!namesHost(info, host)) throw new AcmeError('invalid', { detail: "the chain does not name the link's host" });
++    return this.changed(row, {
++      name: link.name,
++      certPem,
++      certDirectory: row.directory,
++      certKeyEnc: encryptSecret(keyPem, this.ctx.config.secret),
++      notAfter: info.notAfter,
++      renewAt: null,
++      askAt: new Date(this.now()),
++      nextTryAt: null,
++      failure: null,
++      failedAt: null,
++      /* A new name's first https goes through the mode's probe. */
++      ...(row.name === link.name ? {} : { mode: 'http' as const }),
++    });
++  }
++
++  private async issue(row: TlsRow, host: string, tried: OrderTry): Promise<Awaited<ReturnType<Acme['issue']>>> {
++    const acme = this.acme(row.directory, decryptSecret(row.accountKeyEnc, this.ctx.config.secret), tried.accountUrl);
++    if (tried.accountUrl === null) await updateTls(this.ctx.db, row.companyId, { accountUrl: await acme.account() });
++    try {
++      return await acme.issue(host, this.ctx.challenges, tried.replaces === null ? {} : { replaces: tried.replaces });
++    } catch (err) {
++      const next = nextOrderTry(err, tried);
++      if (next === null) throw err;
++      return this.issue(row, host, next);
++    }
++  }
++
++  private async planRenewal(link: Link, row: TlsRow): Promise<TlsRow> {
++    const held = certificateOf(row, link);
++    if (!held || !isPast(row.askAt, this.now())) return row;
++    const answer = await this.renewalInfo(row.directory, held.certPem).catch((): RenewalAnswer => 'error');
++    const { notBefore, notAfter } = certInfo(held.certPem);
++    return this.changed(row, renewalPlan(answer, { renewAt: row.renewAt, notBefore, notAfter }, this.now(), this.random));
++  }
++
++  private async askHealth(): Promise<Health> {
++    const answer = await this.ctx.links.relay.health();
++    this.health = { answer, at: this.now() };
++    return answer;
++  }
++
++  /* A listener that refuses costs one line: the next pass gives it again, and until then the mode is http. */
++  private async giveListener(link: Link | null, row: TlsRow | null): Promise<void> {
++    const { host, held } = servingOf(link, row);
++    const wanted = servedKey(host, held?.certPem ?? null);
++    if (!this.listener || this.given === wanted) return;
++    this.given = null;
++    try {
++      await this.listener.use(host, this.keyPair(held));
++      this.given = wanted;
++    } catch {
++      this.ctx.log.warn("The link's listener did not take its certificate.");
++    }
++  }
++
++  private keyPair(held: Held | null): { certPem: string; keyPem: string } | null {
++    return held && { certPem: held.certPem, keyPem: decryptSecret(held.keyEnc, this.ctx.config.secret) };
++  }
++
++  private async settleMode(link: Link | null, row: TlsRow | null): Promise<void> {
++    const first = this.firstPass;
++    this.firstPass = false;
++    if (this.stopped) return;
++    if (this.unwritten) await this.writeTunnel();
++    if (link && row) await this.moveMode(link, row, first);
++  }
++
++  private async moveMode(link: Link, row: TlsRow, first: boolean): Promise<void> {
++    const held = certificateOf(row, link);
++    if (held && this.wantsHttps(link, row, held)) return this.runHttps(link, row, held, first);
++    if (row.mode === 'https') await this.saveMode(row, { mode: 'http' });
++  }
++
++  private wantsHttps(link: Link, row: TlsRow, held: Held): boolean {
++    const facts = {
++      rowMode: row.mode,
++      notAfter: held.notAfter,
++      held: this.given === servedKey(hostOf(link), held.certPem),
++      health: this.health?.answer ?? null,
++      blockedUntil: row.httpsBlockedUntil,
++    };
++    return wantedMode(facts, this.now()) === 'https';
++  }
++
++  private async runHttps(link: Link, row: TlsRow, held: Held, first: boolean): Promise<void> {
++    if (row.mode === 'https') {
++      if (first) await this.checkCarried(link, row, held);
++      return;
++    }
++    const health = await this.askHealth();
++    if (this.stopped || !health.up || !health.passthrough) return;
++    await this.saveMode(row, { mode: 'https' });
++    await this.checkCarried(link, row, held);
++  }
++
++  /* A relay can say it passes TLS through and still not carry this name, which would take the link down. */
++  private async checkCarried(link: Link, row: TlsRow, held: Held): Promise<void> {
++    if ((await this.probe(link.url, held.certPem)) || this.stopped) return;
++    await this.saveMode(row, { mode: 'http', httpsBlockedUntil: new Date(this.now() + HTTPS_BLOCK_MS) });
++  }
++
++  private async saveMode(row: TlsRow, fields: Pick<TlsRow, 'mode'> & Partial<Pick<TlsRow, 'httpsBlockedUntil'>>): Promise<void> {
++    await updateTls(this.ctx.db, row.companyId, fields);
++    await this.writeTunnel();
++  }
++
++  private async writeTunnel(): Promise<void> {
++    this.unwritten = !(await this.ctx.links.sync());
++  }
++}
+diff --git a/apps/server/src/modules/tls/store.ts b/apps/server/src/modules/tls/store.ts
+index 1cd609d6..7be99c9c 100644
+--- a/apps/server/src/modules/tls/store.ts
++++ b/apps/server/src/modules/tls/store.ts
+@@ -3,23 +3,23 @@ import { createSecureContext } from 'node:tls';
+ import { eq } from 'drizzle-orm';
+ import type { FastifyBaseLogger } from 'fastify';
+ import type { Config } from '../../config.js';
+ import { decryptSecret } from '../../crypto/secrets.js';
+ import type { Db } from '../../db/client.js';
+ import { linkTls, publicLinks } from '../../db/schema.js';
+ import { loggable } from '../../errors.js';
+ import type { LinkView } from '../link/link.js';
+-import { certInfo } from './x509.js';
++import { certInfo, namesHost } from './x509.js';
+ 
+ export type TlsRow = typeof linkTls.$inferSelect;
+ type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
+ 
+ /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
+-const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
++export const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
+ 
+ export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
+   const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
+   return row ?? null;
+ }
+ 
+ /* Makes the row, or changes the fields named in one made before. */
+ export async function saveTls(db: Db, companyId: string, set: TlsFields & Pick<TlsRow, 'directory' | 'accountKeyEnc'>): Promise<void> {
+@@ -47,17 +47,17 @@ function listenerCanServe(certPem: string, keyPem: string): boolean {
+ const hasTimeLeft = (notAfter: Date, now: Date) => notAfter.getTime() - now.getTime() > LEAST_LEFT_MS;
+ 
+ /* Whether this row may carry this link over https now: the manager chose https, for this very name, and what the
+    listener would serve is a certificate of the link's host with time left and its own key. A certificate or a key that
+    cannot be read throws, which linkMode takes as no. */
+ export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'certKeyEnc'>, link: LinkView, secret: Buffer, now: Date): boolean {
+   if (row.mode !== 'https' || row.name !== link.name || !row.certPem || !row.certKeyEnc) return false;
+   const info = certInfo(row.certPem);
+-  if (!info.names.includes(new URL(link.url).hostname)) return false;
++  if (!namesHost(info, new URL(link.url).hostname)) return false;
+   if (!hasTimeLeft(info.notAfter, now)) return false;
+   return listenerCanServe(row.certPem, decryptSecret(row.certKeyEnc, secret));
+ }
+ 
+ /* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
+    relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
+    app are the way back whatever the row says. A log, when the caller has one, says why an operator's link stays on http;
+    loggable keeps no value the error was given, so no key reaches it. */
+diff --git a/apps/server/src/modules/tls/x509.ts b/apps/server/src/modules/tls/x509.ts
+index 37cb4eb2..a121dfd3 100644
+--- a/apps/server/src/modules/tls/x509.ts
++++ b/apps/server/src/modules/tls/x509.ts
+@@ -43,16 +43,21 @@ export async function selfSigned(
+   return { certPem: toPem('CERTIFICATE', cert.rawData), keyPem: toPem('PRIVATE KEY', pkcs8) };
+ }
+ 
+ function dnsNames(cert: x509.X509Certificate): string[] {
+   const san = cert.getExtension(x509.SubjectAlternativeNameExtension);
+   return (san?.names.items ?? []).filter((name) => name.type === 'dns').map((name) => name.value);
+ }
+ 
++// DNS names are the same in any case, and a CA may write them either way.
++export function namesHost(info: Pick<CertInfo, 'names'>, host: string): boolean {
++  return info.names.some((name) => name.toLowerCase() === host.toLowerCase());
++}
++
+ // Node's reader is the one TLS uses, so it picks the certificate and the library then reads the same DER bytes.
+ export function certInfo(pem: string): CertInfo {
+   const node = new X509Certificate(pem);
+   return {
+     names: dnsNames(new x509.X509Certificate(node.raw)),
+     notBefore: new Date(node.validFrom),
+     notAfter: new Date(node.validTo),
+     fingerprint256: node.fingerprint256,
+diff --git a/apps/server/test/link-tls.test.ts b/apps/server/test/link-tls.test.ts
+new file mode 100644
+index 00000000..795d4d2b
+--- /dev/null
++++ b/apps/server/test/link-tls.test.ts
+@@ -0,0 +1,944 @@
++import { createPrivateKey, X509Certificate } from 'node:crypto';
++import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import type { PGlite } from '@electric-sql/pglite';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
++import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
++import { companies } from '../src/db/schema.js';
++import { AppMode } from '../src/modules/keeper/app-mode.js';
++import { writeKeeperState } from '../src/modules/keeper/state.js';
++import { AcmeError } from '../src/modules/tls/acme.js';
++import { certId, type RenewalWindow } from '../src/modules/tls/ari.js';
++import { failureFields, LinkTls, nextOrderTry, renewalPlan, wantedMode, type Acme, type Served } from '../src/modules/tls/manager.js';
++import { tlsOf, updateTls } from '../src/modules/tls/store.js';
++import { certInfo, selfSigned } from '../src/modules/tls/x509.js';
++import { fakeRelay } from './fake-relay.js';
++import { appOn, as, SETUP, setUpCompany, testApp, TUNNEL, until } from './helpers.js';
++
++const DIRECTORY = 'https://acme.invalid/directory';
++const OTHER_DIRECTORY = 'https://other.invalid/directory';
++const HOST = 'acme.hornhoof.test';
++const GLOBEX = 'globex.hornhoof.test';
++const ERROR_TYPE = 'urn:ietf:params:acme:error:';
++const SECOND = 1000;
++const MINUTE = 60 * SECOND;
++const HOUR = 60 * MINUTE;
++const DAY = 24 * HOUR;
++/* A busy machine may take a while to end a pass, and only a failure waits this long. */
++const PASS_MS = 20 * SECOND;
++
++type Used = Parameters<Served['use']>;
++
++/* What stands in for the CA, its renewal information, the probe through the link and the listener. A restart keeps them. */
++function fakes(clock: { now: number }, challenges: () => { get(token: string): string | undefined }) {
++  const seen = {
++    made: [] as { directory: string; accountKeyPem: string; accountUrl: string | null }[],
++    accounts: 0,
++    issues: [] as { host: string; replaces: string | undefined }[],
++    answered: [] as (string | undefined)[],
++    asked: [] as { directory: string; certPem: string }[],
++    probes: [] as { url: string; certPem: string }[],
++    used: [] as Used[],
++  };
++  const set = {
++    /* Thrown by every issue while it is set, after those in failOnce. */
++    failing: null as Error | null,
++    failOnce: [] as Error[],
++    certHost: null as string | null,
++    renewal: null as RenewalWindow | null | Error,
++    probeAnswer: true,
++    onProbe: (): void => {},
++    useFails: false,
++  };
++  const acme = (directory: string, accountKeyPem: string, accountUrl: string | null): Acme => {
++    seen.made.push({ directory, accountKeyPem, accountUrl });
++    return {
++      account: async () => `https://acme.invalid/account/${++seen.accounts}`,
++      issue: async (host, hooks, { replaces } = {}) => {
++        seen.issues.push({ host, replaces });
++        hooks.answer('tok', 'tok.ka');
++        seen.answered.push(challenges().get('tok'));
++        hooks.forget('tok');
++        const failure = set.failOnce.shift() ?? set.failing;
++        if (failure) throw failure;
++        return selfSigned(set.certHost ?? host, { days: 90, now: new Date(clock.now) });
++      },
++    };
++  };
++  const renewalInfo = async (directory: string, certPem: string) => {
++    seen.asked.push({ directory, certPem });
++    if (set.renewal instanceof Error) throw set.renewal;
++    return set.renewal;
++  };
++  const probe = async (url: string, certPem: string) => {
++    seen.probes.push({ url, certPem });
++    set.onProbe();
++    return set.probeAnswer;
++  };
++  const listener: Served = {
++    use: async (host, cert) => {
++      if (set.useFails) throw new Error('the listener refuses');
++      seen.used.push([host, cert]);
++    },
++  };
++  return { seen, set, acme, renewalInfo, probe, listener };
++}
++
++/* A company with the link acme and a LinkTls on fakes, on a clock the test moves. The clock starts now, whole seconds as a
++   certificate's dates are, since the tunnel's file is written by the real clock. */
++async function stage(env: NodeJS.ProcessEnv = {}) {
++  const relay = await fakeRelay();
++  const control = mkdtempSync(join(tmpdir(), 'hh-link-tls-'));
++  onTestFinished(() => rmSync(control, { recursive: true, force: true }));
++  const fullEnv = { ACME_DIRECTORY: DIRECTORY, RELAY_URL: relay.url, TUNNEL_HOST: TUNNEL, HORNHOOF_CONTROL_DIR: control, ...env };
++  const { app, db, config } = await testApp(fullEnv);
++  const ceo = await setUpCompany(app);
++  const [company] = await db.select().from(companies);
++  const companyId = company!.id;
++  const start = Math.floor(Date.now() / SECOND) * SECOND;
++  const clock = { now: start };
++  const { seen, set, acme, renewalInfo, probe, listener } = fakes(clock, () => app.ctx.challenges);
++  await app.ctx.links.set(companyId, 'acme');
++  const opts = { acme, renewalInfo, probe, now: () => clock.now, random: () => 0.5 };
++  const serving = async (ctx = app.ctx) => {
++    const tls = new LinkTls(ctx, opts);
++    await tls.serveOn(listener);
++    return tls;
++  };
++  const tunnelFile = join(control, 'tunnel.json');
++  return {
++    app,
++    db,
++    config,
++    relay,
++    ceo,
++    companyId,
++    fullEnv,
++    start,
++    clock,
++    seen,
++    set,
++    opts,
++    listener,
++    tunnelFile,
++    tls: await serving(),
++    /* A LinkTls as a restart makes it. */
++    serving,
++    move: (ms: number) => void (clock.now += ms),
++    row: async () => (await tlsOf(db, companyId))!,
++    tunnelMode: () => (JSON.parse(readFileSync(tunnelFile, 'utf8')) as { mode: string }).mode,
++  };
++}
++
++const windowOf = (start: number, end: number, retryAfterS = 21600): RenewalWindow => ({ start: new Date(start), end: new Date(end), retryAfterS });
++
++describe('renewalPlan', () => {
++  const NOW = Date.parse('2030-01-10T00:00:00.000Z');
++  const cert = { notBefore: new Date('2030-01-01T00:00:00.000Z'), notAfter: new Date('2030-04-01T00:00:00.000Z') };
++  const half = () => 0.5;
++  const at = (iso: string) => new Date(iso);
++  const window = windowOf(Date.parse('2030-02-01T00:00:00.000Z'), Date.parse('2030-02-03T00:00:00.000Z'));
++
++  it('keeps a renewal time the window still holds, either edge too', () => {
++    for (const iso of ['2030-02-01T00:00:00.000Z', '2030-02-01T07:00:00.000Z', '2030-02-03T00:00:00.000Z']) {
++      expect(renewalPlan(window, { ...cert, renewAt: at(iso) }, NOW, half).renewAt, iso).toEqual(at(iso));
++    }
++  });
++
++  it('draws a time in the window when it moved away, or there was none', () => {
++    const middle = at('2030-02-02T00:00:00.000Z');
++    expect(renewalPlan(window, { ...cert, renewAt: at('2030-01-31T23:59:59.000Z') }, NOW, half).renewAt).toEqual(middle);
++    expect(renewalPlan(window, { ...cert, renewAt: at('2030-02-03T00:00:01.000Z') }, NOW, half).renewAt).toEqual(middle);
++    expect(renewalPlan(window, { ...cert, renewAt: null }, NOW, half).renewAt).toEqual(middle);
++    expect(renewalPlan(window, { ...cert, renewAt: null }, NOW, () => 0).renewAt).toEqual(at('2030-02-01T00:00:00.000Z'));
++  });
++
++  it('renews now when the window has passed', () => {
++    const passed = windowOf(NOW - 2 * DAY, NOW);
++    expect(renewalPlan(passed, { ...cert, renewAt: null }, NOW, half).renewAt).toEqual(new Date(NOW));
++    expect(renewalPlan(passed, { ...cert, renewAt: at('2030-02-02T00:00:00.000Z') }, NOW, half).renewAt).toEqual(new Date(NOW));
++  });
++
++  it('asks again after the Retry-After, between an hour and a day', () => {
++    const askAfter = (retryAfterS: number) => renewalPlan({ ...window, retryAfterS }, { ...cert, renewAt: null }, NOW, half).askAt.getTime() - NOW;
++    expect(askAfter(60)).toBe(HOUR);
++    expect(askAfter(7200)).toBe(2 * HOUR);
++    expect(askAfter(7 * 86400)).toBe(DAY);
++  });
++
++  it('without renewal information keeps the time or takes two thirds of the lifetime, and asks in six hours', () => {
++    const twoThirds = at('2030-03-02T00:00:00.000Z');
++    expect(renewalPlan(null, { ...cert, renewAt: null }, NOW, half)).toEqual({ renewAt: twoThirds, askAt: new Date(NOW + 6 * HOUR) });
++    expect(renewalPlan(null, { ...cert, renewAt: at('2030-02-02T00:00:00.000Z') }, NOW, half).renewAt).toEqual(at('2030-02-02T00:00:00.000Z'));
++  });
++
++  it('after an error does the same, and asks in an hour', () => {
++    expect(renewalPlan('error', { ...cert, renewAt: null }, NOW, half)).toEqual({ renewAt: at('2030-03-02T00:00:00.000Z'), askAt: new Date(NOW + HOUR) });
++  });
++});
++
++describe('wantedMode', () => {
++  const NOW = Date.parse('2030-01-10T00:00:00.000Z');
++  const up = { up: true, relayStarted: 1, passthrough: true };
++  const facts = { rowMode: 'http' as const, notAfter: new Date(NOW + 30 * DAY), held: true, health: up, blockedUntil: null };
++
++  it('is https only with the certificate held, time left, and a relay that passes TLS through', () => {
++    expect(wantedMode(facts, NOW)).toBe('https');
++    expect(wantedMode({ ...facts, held: false }, NOW)).toBe('http');
++    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY) }, NOW)).toBe('http');
++    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY + 1) }, NOW)).toBe('https');
++    expect(wantedMode({ ...facts, health: { ...up, passthrough: false }, rowMode: 'https' }, NOW)).toBe('http');
++  });
++
++  it('waits out the block, and no longer', () => {
++    expect(wantedMode({ ...facts, blockedUntil: new Date(NOW + 1) }, NOW)).toBe('http');
++    expect(wantedMode({ ...facts, blockedUntil: new Date(NOW) }, NOW)).toBe('https');
++  });
++
++  it('keeps the mode while the relay is unknown, except when the certificate cannot serve', () => {
++    const down = { up: false, relayStarted: null, passthrough: false };
++    for (const rowMode of ['http', 'https'] as const) {
++      expect(wantedMode({ ...facts, rowMode, health: null }, NOW)).toBe(rowMode);
++      expect(wantedMode({ ...facts, rowMode, health: down }, NOW)).toBe(rowMode);
++      expect(wantedMode({ ...facts, rowMode, health: null, held: false }, NOW)).toBe('http');
++    }
++  });
++});
++
++describe('nextOrderTry', () => {
++  const refused = (name: string) => new AcmeError('refused', { type: `${ERROR_TYPE}${name}` });
++
++  it('finds the account again when the CA no longer knows it, keeping replaces', () => {
++    expect(nextOrderTry(refused('accountDoesNotExist'), { accountUrl: 'https://u', replaces: 'id' })).toEqual({ accountUrl: null, replaces: 'id' });
++  });
++
++  it('orders without replaces after a refusal of one sent with it', () => {
++    expect(nextOrderTry(refused('alreadyReplaced'), { accountUrl: 'https://u', replaces: 'id' })).toEqual({ accountUrl: 'https://u', replaces: null });
++    expect(nextOrderTry(new AcmeError('refused'), { accountUrl: 'https://u', replaces: 'id' })).toEqual({ accountUrl: 'https://u', replaces: null });
++  });
++
++  it('stops at anything else, so an order is tried a bounded number of times', () => {
++    const cases: [Error, { accountUrl: string | null; replaces: string | null }][] = [
++      [refused('rateLimited'), { accountUrl: 'https://u', replaces: 'id' }],
++      [refused('accountDoesNotExist'), { accountUrl: null, replaces: null }],
++      [refused('malformed'), { accountUrl: 'https://u', replaces: null }],
++      [new AcmeError('invalid'), { accountUrl: 'https://u', replaces: 'id' }],
++      [new AcmeError('unreachable'), { accountUrl: 'https://u', replaces: 'id' }],
++      [new AcmeError('not_ready'), { accountUrl: 'https://u', replaces: 'id' }],
++      [new Error('something else'), { accountUrl: 'https://u', replaces: 'id' }],
++    ];
++    for (const [err, tried] of cases) expect(nextOrderTry(err, tried), err.message).toBeNull();
++  });
++});
++
++describe('failureFields', () => {
++  const NOW = Date.parse('2030-01-10T00:00:00.000Z');
++
++  it('waits five minutes after its own check, and at least an hour after anything else', () => {
++    expect(failureFields(new AcmeError('not_ready'), NOW)).toEqual({ nextTryAt: new Date(NOW + 5 * MINUTE), failure: 'not_ready', failedAt: new Date(NOW) });
++    expect(failureFields(new AcmeError('invalid'), NOW).nextTryAt).toEqual(new Date(NOW + HOUR));
++    expect(failureFields(new AcmeError('refused', { retryAfterS: 60 }), NOW).nextTryAt).toEqual(new Date(NOW + HOUR));
++    expect(failureFields(new AcmeError('refused', { retryAfterS: 7200 }), NOW).nextTryAt).toEqual(new Date(NOW + 2 * HOUR));
++  });
++
++  it('names the failure by its type, or else its kind', () => {
++    expect(failureFields(new AcmeError('refused', { type: `${ERROR_TYPE}rateLimited` }), NOW).failure).toBe(`${ERROR_TYPE}rateLimited`);
++    expect(failureFields(new AcmeError('unreachable'), NOW).failure).toBe('unreachable');
++  });
++});
++
++describe('ordering the certificate', () => {
++  it("orders the link's first certificate and keeps its key encrypted", async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect(w.seen.issues).toEqual([{ host: HOST, replaces: undefined }]);
++    expect(w.seen.answered).toEqual(['tok.ka']);
++    expect(w.app.ctx.challenges.get('tok')).toBeUndefined();
++    const row = await w.row();
++    expect(certInfo(row.certPem!).names).toEqual([HOST]);
++    const sealed = decryptSecret(row.certKeyEnc!, w.config.secret);
++    expect(new X509Certificate(row.certPem!).checkPrivateKey(createPrivateKey(sealed))).toBe(true);
++    expect(row.certKeyEnc!.includes('PRIVATE KEY')).toBe(false);
++    expect(row.accountKeyEnc.includes('PRIVATE KEY')).toBe(false);
++    expect(decryptSecret(row.accountKeyEnc, w.config.secret).includes('PRIVATE KEY')).toBe(true);
++    expect(row.accountUrl).toBe('https://acme.invalid/account/1');
++    expect(row).toMatchObject({ name: 'acme', certDirectory: DIRECTORY, directory: DIRECTORY, renewAt: new Date(w.start + 60 * DAY), nextTryAt: null, failure: null, failedAt: null });
++    expect(row.notAfter).toEqual(new Date(w.start + 90 * DAY));
++  });
++
++  it('does nothing without a link, or when certificates are off', async () => {
++    const w = await stage();
++    await w.app.ctx.links.remove(w.companyId);
++    w.relay.calls.length = 0;
++    await w.tls.tick();
++    expect(w.seen.issues).toEqual([]);
++    expect(w.relay.calls).toEqual([]);
++    expect(await tlsOf(w.db, w.companyId)).toBeNull();
++
++    const off = await stage({ ACME_DIRECTORY: 'off' });
++    off.relay.calls.length = 0;
++    off.tls.start();
++    onTestFinished(() => off.tls.stop());
++    off.tls.kick();
++    await off.tls.tick();
++    expect(off.seen.issues).toEqual([]);
++    expect(off.relay.calls).toEqual([]);
++    expect(await tlsOf(off.db, off.companyId)).toBeNull();
++  });
++
++  it('waits an hour after a failed order, and longer when the CA says so', async () => {
++    const w = await stage();
++    w.set.failing = new AcmeError('refused', { type: `${ERROR_TYPE}rateLimited`, retryAfterS: 7200 });
++    await w.tls.tick();
++    expect(await w.row()).toMatchObject({ failure: `${ERROR_TYPE}rateLimited`, failedAt: new Date(w.start), nextTryAt: new Date(w.start + 2 * HOUR) });
++    expect(w.seen.issues).toHaveLength(1);
++    w.move(HOUR);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++    w.set.failing = new AcmeError('invalid');
++    w.move(HOUR + SECOND);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++    expect((await w.row()).failure).toBe('invalid');
++    w.move(HOUR - 2 * SECOND);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++    w.move(3 * SECOND);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(3);
++  });
++
++  it('waits five minutes when its own check of the challenge fails', async () => {
++    const w = await stage();
++    w.set.failing = new AcmeError('not_ready');
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++    expect((await w.row()).failure).toBe('not_ready');
++    w.move(4 * MINUTE);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++    w.move(MINUTE + SECOND);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++  });
++
++  it('says a failure in one line, with its kind and type only', async () => {
++    const w = await stage();
++    const warn = vi.spyOn(w.app.ctx.log, 'warn');
++    w.set.failing = new AcmeError('refused', { type: `${ERROR_TYPE}rateLimited`, detail: 'what the CA said' });
++    await w.tls.tick();
++    expect(warn.mock.calls).toEqual([[{ kind: 'refused', type: `${ERROR_TYPE}rateLimited` }, expect.any(String)]]);
++    expect(JSON.stringify(warn.mock.calls).includes('what the CA said')).toBe(false);
++  });
++
++  it('counts a chain that does not name the host as invalid, and reads names in any case', async () => {
++    const w = await stage();
++    w.set.certHost = 'other.hornhoof.test';
++    await w.tls.tick();
++    expect(await w.row()).toMatchObject({ failure: 'invalid', certPem: null, nextTryAt: new Date(w.start + HOUR) });
++    w.set.certHost = 'ACME.hornhoof.test';
++    w.move(HOUR + SECOND);
++    await w.tls.tick();
++    expect(certInfo((await w.row()).certPem!).names).toEqual(['ACME.hornhoof.test']);
++    expect((await w.row()).failure).toBeNull();
++    expect(w.tunnelMode()).toBe('https');
++  });
++
++  it('finds the account again when the CA answers that it no longer knows it', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const old = await w.row();
++    w.set.failOnce = [new AcmeError('refused', { type: `${ERROR_TYPE}accountDoesNotExist` })];
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    w.seen.made.length = 0;
++    await w.tls.tick();
++    const accountKeyPem = decryptSecret(old.accountKeyEnc, w.config.secret);
++    /* Booleans only: a failure here must not print a key. */
++    expect(w.seen.made.map(made => made.accountKeyPem === accountKeyPem)).toEqual([true, true]);
++    expect(w.seen.made.map(made => made.accountUrl)).toEqual(['https://acme.invalid/account/1', null]);
++    expect(w.seen.issues.slice(1).map(issue => issue.host)).toEqual([GLOBEX, GLOBEX]);
++    expect(await w.row()).toMatchObject({ accountUrl: 'https://acme.invalid/account/2', name: 'globex', failure: null });
++  });
++
++  it('runs one pass at a time', async () => {
++    const w = await stage();
++    await Promise.all([w.tls.tick(), w.tls.tick()]);
++    expect(w.seen.issues).toHaveLength(1);
++  });
++});
++
++describe('renewing the certificate', () => {
++  it('renews inside the window the CA suggests, replacing the old certificate', async () => {
++    const w = await stage();
++    w.set.renewal = windowOf(w.start + 10 * DAY, w.start + 12 * DAY);
++    await w.tls.tick();
++    const old = await w.row();
++    expect(old.renewAt).toEqual(new Date(w.start + 11 * DAY));
++    w.move(10 * DAY);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++    w.move(DAY);
++    await w.tls.tick();
++    expect(w.seen.issues).toEqual([
++      { host: HOST, replaces: undefined },
++      { host: HOST, replaces: certId(old.certPem!)! },
++    ]);
++    expect((await w.row()).notAfter).toEqual(new Date(w.start + 101 * DAY));
++  });
++
++  it('renews at two thirds of the lifetime without renewal information', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect((await w.row()).renewAt).toEqual(new Date(w.start + 60 * DAY));
++    expect(w.seen.asked.map(asked => asked.directory)).toEqual([DIRECTORY]);
++  });
++
++  it('asks the CA again after its Retry-After, between an hour and a day', async () => {
++    const w = await stage();
++    w.set.renewal = windowOf(w.start + 10 * DAY, w.start + 12 * DAY, 60);
++    await w.tls.tick();
++    expect((await w.row()).askAt).toEqual(new Date(w.start + HOUR));
++    w.set.renewal = windowOf(w.start + 10 * DAY, w.start + 12 * DAY, 7 * 86400);
++    w.move(HOUR);
++    await w.tls.tick();
++    expect(w.seen.asked).toHaveLength(2);
++    expect((await w.row()).askAt).toEqual(new Date(w.start + HOUR + DAY));
++    w.move(HOUR);
++    await w.tls.tick();
++    expect(w.seen.asked).toHaveLength(2);
++  });
++
++  it('orders once more without replaces when the CA will not take it', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const old = await w.row();
++    w.set.failOnce = [new AcmeError('refused', { type: `${ERROR_TYPE}alreadyReplaced` })];
++    w.move(60 * DAY);
++    await w.tls.tick();
++    expect(w.seen.issues.slice(1)).toEqual([
++      { host: HOST, replaces: certId(old.certPem!)! },
++      { host: HOST, replaces: undefined },
++    ]);
++    expect((await w.row()).failure).toBeNull();
++  });
++
++  it('takes a rate limit on a renewal as it is, without a second order', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    w.set.failOnce = [new AcmeError('refused', { type: `${ERROR_TYPE}rateLimited` })];
++    w.move(60 * DAY);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++    expect((await w.row()).failure).toBe(`${ERROR_TYPE}rateLimited`);
++  });
++
++  it('makes a new account when the CA changes', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const old = await w.row();
++    const moved = { ...w.app.ctx, config: { ...w.app.ctx.config, acmeDirectory: OTHER_DIRECTORY } };
++    w.seen.made.length = 0;
++    const accounts = w.seen.accounts;
++    const tls = await w.serving(moved);
++    await tls.tick();
++    const row = await w.row();
++    expect(row.directory).toBe(OTHER_DIRECTORY);
++    expect(row.accountKeyEnc === old.accountKeyEnc).toBe(false);
++    expect(row.certPem).toBe(old.certPem);
++    expect(row.certDirectory).toBe(DIRECTORY);
++
++    /* A restart in between, and the certificate is renewed only when due. */
++    w.move(DAY);
++    await tls.tick();
++    const restarted = await w.serving(moved);
++    await restarted.tick();
++    expect(w.seen.issues).toHaveLength(1);
++    w.move(60 * DAY);
++    await restarted.tick();
++    expect(w.seen.issues[1]).toEqual({ host: HOST, replaces: undefined });
++    expect(w.seen.accounts).toBe(accounts + 1);
++    expect(w.seen.made[0]!.directory).toBe(OTHER_DIRECTORY);
++    expect(w.seen.made[0]!.accountUrl).toBeNull();
++    expect((await w.row()).accountUrl).toBe(`https://acme.invalid/account/${accounts + 1}`);
++    expect((await w.row()).certDirectory).toBe(OTHER_DIRECTORY);
++  });
++});
++
++describe("the tunnel's mode", () => {
++  it('moves the tunnel to https once the relay passes TLS through and the certificate is in', async () => {
++    const w = await stage();
++    w.relay.passthrough = true;
++    await w.tls.tick();
++    const row = await w.row();
++    expect(row.mode).toBe('https');
++    expect(w.tunnelMode()).toBe('https');
++    expect(w.seen.probes).toEqual([{ url: `https://${HOST}`, certPem: row.certPem }]);
++  });
++
++  it('stays on http while the relay does not pass TLS through, and goes back when it stops', async () => {
++    const w = await stage();
++    w.relay.passthrough = false;
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++    expect(w.seen.probes).toEqual([]);
++
++    w.relay.passthrough = true;
++    w.move(9 * MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    w.move(MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++    expect(w.tunnelMode()).toBe('https');
++
++    w.relay.passthrough = false;
++    w.move(11 * MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++  });
++
++  it('asks the relay once more before a switch, and stays when it stopped passing through', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    w.relay.passthrough = false;
++    w.move(11 * MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    w.relay.passthrough = true;
++    w.move(11 * MINUTE);
++    const asking = vi.spyOn(w.app.ctx.links.relay, 'health');
++    asking.mockResolvedValueOnce({ up: true, relayStarted: 1, passthrough: true });
++    asking.mockResolvedValueOnce({ up: true, relayStarted: 1, passthrough: false });
++    w.seen.probes.length = 0;
++    await w.tls.tick();
++    expect(asking).toHaveBeenCalledTimes(2);
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++    expect(w.seen.probes).toEqual([]);
++  });
++
++  it('keeps the mode while the relay does not answer', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect(w.tunnelMode()).toBe('https');
++    w.relay.down = true;
++    w.move(11 * MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++    expect(w.tunnelMode()).toBe('https');
++  });
++
++  it('goes back to http when the switch does not serve the certificate, and tries again an hour later', async () => {
++    const w = await stage();
++    w.set.probeAnswer = false;
++    await w.tls.tick();
++    expect(await w.row()).toMatchObject({ mode: 'http', httpsBlockedUntil: new Date(w.start + HOUR) });
++    expect(w.tunnelMode()).toBe('http');
++    expect(w.seen.probes).toHaveLength(1);
++
++    w.move(30 * MINUTE);
++    await w.tls.tick();
++    expect(w.seen.probes).toHaveLength(1);
++    expect(w.tunnelMode()).toBe('http');
++
++    w.set.probeAnswer = true;
++    w.move(31 * MINUTE);
++    await w.tls.tick();
++    expect(w.seen.probes).toHaveLength(2);
++    expect((await w.row()).mode).toBe('https');
++    expect(w.tunnelMode()).toBe('https');
++  });
++
++  it('gives the listener the certificate before it switches', async () => {
++    const w = await stage();
++    let lastUse: Used | undefined;
++    w.set.onProbe = () => {
++      lastUse = w.seen.used.at(-1);
++    };
++    await w.tls.tick();
++    const row = await w.row();
++    expect(lastUse?.[0]).toBe(HOST);
++    expect(lastUse?.[1]?.certPem).toBe(row.certPem);
++    expect(lastUse?.[1]?.keyPem === decryptSecret(row.certKeyEnc!, w.config.secret)).toBe(true);
++  });
++
++  it('stays on http while the listener will not take the certificate, and gives it again on the next pass', async () => {
++    const w = await stage();
++    const warn = vi.spyOn(w.app.ctx.log, 'warn');
++    w.set.useFails = true;
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++    expect(w.seen.probes).toEqual([]);
++    expect(warn).toHaveBeenCalledTimes(1);
++
++    w.set.useFails = false;
++    await w.tls.tick();
++    expect(w.seen.used.at(-1)?.[1]?.certPem).toBe((await w.row()).certPem);
++    expect((await w.row()).mode).toBe('https');
++  });
++
++  it("goes down to http when the listener loses the name's certificate", async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++    w.set.useFails = true;
++    await w.tls.serveOn(w.listener);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++  });
++
++  it("probes https again after a restart, and keeps the hour's block", async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++    w.seen.probes.length = 0;
++
++    w.set.probeAnswer = false;
++    await (await w.serving()).tick();
++    expect(w.seen.probes).toHaveLength(1);
++    expect(await w.row()).toMatchObject({ mode: 'http', httpsBlockedUntil: new Date(w.start + HOUR) });
++    expect(w.tunnelMode()).toBe('http');
++
++    w.set.probeAnswer = true;
++    w.move(30 * MINUTE);
++    const restarted = await w.serving();
++    await restarted.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.seen.probes).toHaveLength(1);
++
++    w.move(31 * MINUTE);
++    await restarted.tick();
++    expect((await w.row()).mode).toBe('https');
++    expect(w.seen.probes).toHaveLength(2);
++  });
++
++  it('probes on the first pass after every start, and not on the passes after it', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    w.seen.probes.length = 0;
++    const tls = await w.serving();
++    tls.start();
++    onTestFinished(() => tls.stop());
++    await tls.tick();
++    expect(w.seen.probes).toHaveLength(1);
++    await tls.tick();
++    expect(w.seen.probes).toHaveLength(1);
++    tls.stop();
++    tls.start();
++    await tls.tick();
++    expect(w.seen.probes).toHaveLength(2);
++  });
++
++  it("writes the tunnel's mode again after a failed write", async () => {
++    const w = await stage();
++    const sync = vi.spyOn(w.app.ctx.links, 'sync');
++    w.set.probeAnswer = false;
++    /* The switch's own write goes through, so the file says https; the write of the way back fails. */
++    w.set.onProbe = () => void sync.mockResolvedValueOnce(false);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('https');
++    w.set.onProbe = () => {};
++    await w.tls.tick();
++    expect(w.tunnelMode()).toBe('http');
++    const calls = sync.mock.calls.length;
++    await w.tls.tick();
++    expect(sync.mock.calls.length).toBe(calls);
++  });
++
++  it('goes back to http a day before the certificate ends', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect(w.tunnelMode()).toBe('https');
++
++    /* Renewal failing for days: one try an hour at most, and the old certificate stays in. */
++    w.set.failing = new AcmeError('unreachable');
++    w.move(60 * DAY);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++    w.move(59 * MINUTE);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(2);
++    w.move(2 * MINUTE);
++    await w.tls.tick();
++    expect(w.seen.issues).toHaveLength(3);
++
++    w.clock.now = w.start + 90 * DAY - 25 * HOUR;
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++    w.clock.now = w.start + 90 * DAY - 23 * HOUR;
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++  });
++
++  it('keeps https across a restart', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect(w.tunnelMode()).toBe('https');
++    rmSync(w.tunnelFile);
++    const calls = w.relay.calls.length;
++    const { app } = await appOn((w.db as unknown as { $client: PGlite }).$client, w.fullEnv);
++    await app.ready();
++    expect(w.tunnelMode()).toBe('https');
++    expect(w.relay.calls.length).toBe(calls);
++  });
++
++  it('orders anew for a renamed link, without replaces, on http until it is in', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    expect(w.tunnelMode()).toBe('https');
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    expect(w.tunnelMode()).toBe('http');
++    await w.tls.tick();
++    expect(w.seen.issues[1]).toEqual({ host: GLOBEX, replaces: undefined });
++    expect(certInfo((await w.row()).certPem!).names).toEqual([GLOBEX]);
++  });
++
++  it("switches a new name's certificate to https only through the probe", async () => {
++    const w = await stage();
++    await w.tls.tick();
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    w.set.probeAnswer = false;
++    w.seen.probes.length = 0;
++    await w.tls.tick();
++    const row = await w.row();
++    expect(certInfo(row.certPem!).names).toEqual([GLOBEX]);
++    expect(w.seen.probes).toEqual([{ url: `https://${GLOBEX}`, certPem: row.certPem }]);
++    expect(row.mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++  });
++});
++
++describe('the listener', () => {
++  it('serves the stored certificate, and a stand-in without one', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const row = await w.row();
++    const fresh: Used[] = [];
++    const tls = new LinkTls(w.app.ctx, w.opts);
++    await tls.serveOn({ use: async (host, cert) => void fresh.push([host, cert]) });
++    expect(fresh.map(([host, cert]) => [host, cert?.certPem])).toEqual([[HOST, row.certPem]]);
++    expect(fresh[0]![1]?.keyPem === decryptSecret(row.certKeyEnc!, w.config.secret)).toBe(true);
++
++    w.set.failing = new AcmeError('unreachable');
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    await tls.tick();
++    expect(fresh.at(-1)).toEqual([GLOBEX, null]);
++
++    await w.app.ctx.links.remove(w.companyId);
++    await tls.tick();
++    expect(fresh.at(-1)).toEqual([null, null]);
++    expect(await w.row()).toMatchObject({ name: null, certPem: null, certDirectory: null, certKeyEnc: null, notAfter: null, renewAt: null, askAt: null, mode: 'http', directory: DIRECTORY, accountUrl: row.accountUrl, accountKeyEnc: row.accountKeyEnc });
++  });
++
++  it('is given a certificate only when it changes', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const uses = w.seen.used.length;
++    await w.tls.tick();
++    expect(w.seen.used).toHaveLength(uses);
++    w.move(60 * DAY);
++    await w.tls.tick();
++    expect(w.seen.used).toHaveLength(uses + 1);
++    expect(w.seen.used.at(-1)?.[1]?.certPem).toBe((await w.row()).certPem);
++  });
++
++  it('gets a stand-in with certificates off, whatever the row holds', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const off = new LinkTls({ ...w.app.ctx, config: { ...w.app.ctx.config, acmeDirectory: null } }, w.opts);
++    const given: Used[] = [];
++    await off.serveOn({ use: async (host, cert) => void given.push([host, cert]) });
++    expect(given).toEqual([[HOST, null]]);
++  });
++
++  it('counts as not holding a key it cannot read', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const warn = vi.spyOn(w.app.ctx.log, 'warn');
++    await updateTls(w.db, w.companyId, { certKeyEnc: encryptSecret('text', Buffer.alloc(32, 9)) });
++    await (await w.serving()).tick();
++    expect(warn).toHaveBeenCalled();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.tunnelMode()).toBe('http');
++  });
++});
++
++describe('running on its own', () => {
++  const KEEPER_FRESH = () => new Date().toISOString();
++  /* Long enough for a pass nobody should have started to show. */
++  const aMoment = () => new Promise(resolve => setTimeout(resolve, 50));
++
++  it('ticks now and every minute until it is stopped', async () => {
++    const w = await stage();
++    await w.tls.tick();
++    const tls = await w.serving();
++    w.seen.issues.length = 0;
++    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
++    onTestFinished(() => {
++      tls.stop();
++      vi.useRealTimers();
++    });
++    w.move(60 * DAY);
++    tls.start();
++    await until(() => w.seen.issues.length === 1, PASS_MS);
++    await tls.tick();
++
++    w.move(60 * DAY);
++    vi.advanceTimersByTime(59_999);
++    await aMoment();
++    expect(w.seen.issues).toHaveLength(1);
++    vi.advanceTimersByTime(1);
++    await until(() => w.seen.issues.length === 2, PASS_MS);
++    await tls.tick();
++
++    tls.stop();
++    w.move(60 * DAY);
++    vi.advanceTimersByTime(60_000);
++    await aMoment();
++    expect(w.seen.issues).toHaveLength(2);
++  });
++
++  it('kicks only while it runs, and every change of the link kicks it', async () => {
++    const w = await stage();
++    const tls = await w.serving();
++    w.app.ctx.tls = tls;
++    tls.kick();
++    await aMoment();
++    expect(w.seen.issues).toEqual([]);
++
++    tls.start();
++    onTestFinished(() => tls.stop());
++    await until(() => w.seen.issues.length === 1, PASS_MS);
++    await tls.tick();
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    await until(() => w.seen.issues.length === 2, PASS_MS);
++    expect(w.seen.issues[1]!.host).toBe(GLOBEX);
++    await tls.tick();
++    await w.app.ctx.links.remove(w.companyId);
++    await until(async () => (await w.row()).certPem === null, PASS_MS);
++
++    tls.stop();
++    await w.app.ctx.links.set(w.companyId, 'initech');
++    await aMoment();
++    expect(w.seen.issues).toHaveLength(2);
++  });
++
++  it('gets its word from a new link in setup', async () => {
++    const relay = await fakeRelay();
++    const control = mkdtempSync(join(tmpdir(), 'hh-link-tls-'));
++    onTestFinished(() => rmSync(control, { recursive: true, force: true }));
++    const { app } = await testApp({ ACME_DIRECTORY: DIRECTORY, RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: control });
++    await app.ready();
++    const clock = { now: Date.now() };
++    const { seen, acme, renewalInfo, probe, listener } = fakes(clock, () => app.ctx.challenges);
++    const tls = new LinkTls(app.ctx, { acme, renewalInfo, probe, now: () => clock.now, random: () => 0.5 });
++    await tls.serveOn(listener);
++    app.ctx.tls = tls;
++    tls.start();
++    onTestFinished(() => tls.stop());
++    await tls.tick();
++    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'acme' } } });
++    expect(res.statusCode).toBe(201);
++    await until(() => seen.issues.length === 1, PASS_MS);
++    expect(seen.issues).toEqual([{ host: HOST, replaces: undefined }]);
++  });
++
++  it('orders only while the app leads', async () => {
++    const w = await stage();
++    const dir = mkdtempSync(join(tmpdir(), 'hh-link-tls-mode-'));
++    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
++    const say = (mode: 'lead' | 'read') => writeKeeperState(dir, { mode, at: KEEPER_FRESH(), link: null });
++    const mode = new AppMode({ dir, fromKeeper: true, log: () => {} });
++    const tls = await w.serving();
++    mode.whenLead(() => tls.start(), () => tls.stop());
++    onTestFinished(() => tls.stop());
++
++    say('read');
++    await mode.check();
++    tls.kick();
++    await aMoment();
++    expect(w.seen.issues).toEqual([]);
++
++    say('lead');
++    await mode.check();
++    await tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++
++    say('read');
++    await mode.check();
++    w.move(60 * DAY);
++    tls.kick();
++    await tls.tick();
++    expect(w.seen.issues).toHaveLength(1);
++  });
++
++  const PASSING = { up: true, relayStarted: 1, passthrough: true };
++
++  it('moves no mode once it is stopped during a pass, at the first word of the relay or the second', async () => {
++    for (const stopAt of [1, 2]) {
++      const w = await stage();
++      const tls = await w.serving();
++      let asked = 0;
++      vi.spyOn(w.app.ctx.links.relay, 'health').mockImplementation(async () => {
++        if (++asked === stopAt) tls.stop();
++        return PASSING;
++      });
++      await tls.tick();
++      expect(asked, `stopped at ${stopAt}`).toBe(stopAt);
++      expect((await w.row()).mode).toBe('http');
++      expect(w.seen.probes).toEqual([]);
++      expect(w.tunnelMode()).toBe('http');
++    }
++  });
++
++  it('leaves the way back to the next leader when it is stopped during the probe', async () => {
++    const w = await stage();
++    const tls = await w.serving();
++    w.set.probeAnswer = false;
++    w.set.onProbe = () => tls.stop();
++    await tls.tick();
++    expect(await w.row()).toMatchObject({ mode: 'https', httpsBlockedUntil: null });
++    expect(w.tunnelMode()).toBe('https');
++  });
++
++  it('takes a pass that fails as one line, and the next starts over', async () => {
++    const w = await stage();
++    const warn = vi.spyOn(w.app.ctx.log, 'warn');
++    vi.spyOn(w.app.ctx.links.relay, 'health').mockRejectedValueOnce(new Error('out of the blue'));
++    await w.tls.tick();
++    expect(warn).toHaveBeenCalledTimes(1);
++    expect((await w.row()).mode).toBe('http');
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('https');
++  });
++});
++
++describe('GET /api/link', () => {
++  const secrets = /PRIVATE KEY|certKeyEnc|accountKeyEnc|keyPem|certPem/;
++
++  it("tells the link's encryption", async () => {
++    const w = await stage();
++    const tlsOfAnswer = async () => (await w.app.inject({ url: '/api/link', ...as(w.ceo) })).json().tls as unknown;
++    expect(await tlsOfAnswer()).toEqual({ mode: 'http', certificate: false, expiresAt: null, failedAt: null });
++
++    await w.tls.tick();
++    const res = await w.app.inject({ url: '/api/link', ...as(w.ceo) });
++    expect(res.json().tls).toEqual({ mode: 'https', certificate: true, expiresAt: new Date(w.start + 90 * DAY).toISOString(), failedAt: null });
++    expect(secrets.test(res.body)).toBe(false);
++
++    w.set.failing = new AcmeError('invalid');
++    await w.app.ctx.links.set(w.companyId, 'globex');
++    await w.tls.tick();
++    expect(await tlsOfAnswer()).toEqual({ mode: 'http', certificate: false, expiresAt: null, failedAt: new Date(w.start).toISOString() });
++
++    await w.app.ctx.links.remove(w.companyId);
++    expect(await tlsOfAnswer()).toBeNull();
++  });
++});
+diff --git a/apps/server/test/link.test.ts b/apps/server/test/link.test.ts
+index 3500ba60..df7020b5 100644
+--- a/apps/server/test/link.test.ts
++++ b/apps/server/test/link.test.ts
+@@ -1,21 +1,21 @@
+-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+-import { describe, expect, it } from 'vitest';
++import { describe, expect, it, vi } from 'vitest';
+ import { runCli } from '../src/cli.js';
+ import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
+ import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
+ import { PublicLinks, writeTunnelSettings } from '../src/modules/link/link.js';
+ import { newAccountKey } from '../src/modules/tls/acme.js';
+ import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
+ import { selfSigned } from '../src/modules/tls/x509.js';
+ import { fakeRelay } from './fake-relay.js';
+-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
++import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
+ 
+ /* A company with its own control folder, asking the fake relay for links. */
+ async function company(env: NodeJS.ProcessEnv = {}) {
+   const relay = await fakeRelay();
+   const control = mkdtempSync(join(tmpdir(), 'hh-link-'));
+   const { app, db, config } = await testApp({ RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: control, ...env });
+   const ceo = await setUpCompany(app);
+   const put = (payload: object, token = ceo) => app.inject({ method: 'PUT', url: '/api/link', payload, ...as(token) });
+@@ -123,16 +123,23 @@ describe("the tunnel's mode", () => {
+ 
+   it('puts the link on http when certificates are off, which is how tests run unless they ask', async () => {
+     for (const env of [{ ACME_DIRECTORY: 'off' }, {}]) {
+       const { good, modeWith } = await companyWithCertificate(env);
+       expect(await modeWith(good), JSON.stringify(env)).toBe('http');
+     }
+   });
+ 
++  it('reads the names in a certificate in any case', async () => {
++    const secret = Buffer.alloc(32, 3);
++    const pair = await selfSigned('ACME.hornhoof.test');
++    const row = { mode: 'https' as const, name: 'acme', certPem: pair.certPem, certKeyEnc: encryptSecret(pair.keyPem, secret) };
++    expect(mayRunHttps(row, { name: 'acme', url: `https://${LINK_HOST}` }, secret, new Date())).toBe(true);
++  });
++
+   it('asks for more than a day left on the certificate, read from the first of a chain', async () => {
+     const secret = Buffer.alloc(32, 3);
+     const notBefore = new Date('2026-11-04T12:00:00.000Z');
+     const pair = await selfSigned(LINK_HOST, { days: 3, now: notBefore });
+     const other = await selfSigned('intermediate.hornhoof.test');
+     const row = { mode: 'https' as const, name: 'acme', certPem: `${pair.certPem}${other.certPem}`, certKeyEnc: encryptSecret(pair.keyPem, secret) };
+     const link = { name: 'acme', url: `https://${LINK_HOST}` };
+     const DAY_MS = 24 * 60 * 60 * 1000;
+@@ -187,17 +194,17 @@ describe("the certificate's row", () => {
+     await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed' });
+     expect(await updatedAt()).toBeGreaterThan(longAgo.getTime());
+   });
+ });
+ 
+ describe('binding the company to a public link', () => {
+   it('takes the name at the relay, keeps the key encrypted and writes the tunnel settings', async () => {
+     const { app, db, config, relay, ceo, put, tunnelFile } = await company();
+-    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: null, domain: '127.0.0.1' });
++    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: null, domain: '127.0.0.1', tls: null });
+     const res = await put({ name: 'acme' });
+     expect(res.statusCode).toBe(200);
+     expect(res.json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
+     const { key } = relay.bindings.get('acme')!;
+     expect(res.body).not.toContain(key);
+ 
+     const [row] = await db.select().from(publicLinks);
+     const [acme] = await db.select().from(companies);
+@@ -210,17 +217,21 @@ describe('binding the company to a public link', () => {
+       url: 'https://acme.hornhoof.test',
+       name: 'acme',
+       key,
+       tunnel: expect.objectContaining({ serverAddr: 'hornhoof.test', serverPort: 443, protocol: 'wss' }),
+       mode: 'http',
+     });
+     /* The link's key is for the tunnel container alone. */
+     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
+-    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' }, domain: '127.0.0.1' });
++    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({
++      link: { name: 'acme', url: 'https://acme.hornhoof.test' },
++      domain: '127.0.0.1',
++      tls: { mode: 'http', certificate: false, expiresAt: null, failedAt: null },
++    });
+   });
+ 
+   it('gets a long random name when none is asked for', async () => {
+     const { relay, put } = await company();
+     const res = await put({});
+     expect(res.statusCode).toBe(200);
+     const { name, url } = res.json().link;
+     expect(name).toMatch(/^[a-z0-9]{20,}$/);
+@@ -430,16 +441,49 @@ describe('the tunnel settings', () => {
+   it('follow the database when Hornhoof starts', async () => {
+     const { app, put, tunnelFile } = await company();
+     await put({ name: 'acme' });
+     writeFileSync(tunnelFile, '{}');
+     await app.ctx.links.sync();
+     expect(JSON.parse(readFileSync(tunnelFile, 'utf8')).url).toBe('https://acme.hornhoof.test');
+   });
+ 
++  it('say whether they were written, and a failure goes to the log', async () => {
++    const { app, put, tunnelFile, control } = await company();
++    await put({ name: 'acme' });
++    expect(await app.ctx.links.sync()).toBe(true);
++    rmSync(control, { recursive: true });
++    const error = vi.spyOn(app.ctx.log, 'error');
++    expect(await app.ctx.links.sync()).toBe(false);
++    expect(error).toHaveBeenCalledTimes(1);
++    expect(existsSync(tunnelFile)).toBe(false);
++  });
++
++  it('wait for a change of the link under way, so they never write what it replaced', async () => {
++    const { app, put, tunnelFile, db } = await company();
++    await put({ name: 'acme' });
++    const [acme] = await db.select().from(companies);
++    const { relay } = app.ctx.links;
++    const bind = relay.bind.bind(relay);
++    let letBind: () => void = () => {};
++    const held = new Promise<void>(resolve => (letBind = resolve));
++    const binding = vi.spyOn(relay, 'bind').mockImplementation(async name => {
++      await held;
++      return bind(name);
++    });
++    const finished: string[] = [];
++    const renamed = app.ctx.links.set(acme!.id, 'globex').then(() => finished.push('rename'));
++    await until(() => binding.mock.calls.length === 1);
++    const synced = app.ctx.links.sync().then(() => finished.push('sync'));
++    letBind();
++    await Promise.all([renamed, synced]);
++    expect(finished).toEqual(['rename', 'sync']);
++    expect(JSON.parse(readFileSync(tunnelFile, 'utf8')).name).toBe('globex');
++  });
++
+   it('go when there is no link', async () => {
+     const control = mkdtempSync(join(tmpdir(), 'hh-link-'));
+     writeFileSync(join(control, 'tunnel.json'), '{"url":"https://old.hornhoof.test"}');
+     const { app } = await testApp({ HORNHOOF_CONTROL_DIR: control });
+     await app.ready();
+     expect(existsSync(join(control, 'tunnel.json'))).toBe(false);
+   });
+ });
+diff --git a/apps/server/test/tls-checks.test.ts b/apps/server/test/tls-checks.test.ts
+new file mode 100644
+index 00000000..2ba9d263
+--- /dev/null
++++ b/apps/server/test/tls-checks.test.ts
+@@ -0,0 +1,103 @@
++import type { RequestListener } from 'node:http';
++import https from 'node:https';
++import net, { type AddressInfo } from 'node:net';
++import { createSecureContext } from 'node:tls';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { probe } from '../src/modules/tls/checks.js';
++import { selfSigned } from '../src/modules/tls/x509.js';
++import { closedPort } from './closed-port.js';
++
++const QUICK = { tries: 2, everyMs: 10 };
++
++/* The address of a server on a free local port, which goes when the test ends. */
++async function urlOf(server: net.Server): Promise<string> {
++  const sockets = new Set<net.Socket>();
++  server.on('connection', socket => sockets.add(socket));
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  onTestFinished(() => {
++    sockets.forEach(socket => socket.destroy());
++    return new Promise<void>(resolve => server.close(() => resolve()));
++  });
++  return `https://localhost:${(server.address() as AddressInfo).port}`;
++}
++
++type Pair = Awaited<ReturnType<typeof selfSigned>>;
++
++const healthOnly: RequestListener = (req, res) => {
++  res.statusCode = req.url === '/api/health' ? 200 : 404;
++  res.end('{}');
++};
++
++const serverOf = (pair: Pair, listener: RequestListener = healthOnly) => https.createServer({ key: pair.keyPem, cert: pair.certPem }, listener);
++
++const quickly = async (asked: Promise<boolean>): Promise<{ answer: boolean; ms: number }> => {
++  const started = performance.now();
++  return { answer: await asked, ms: performance.now() - started };
++};
++
++describe('probe', () => {
++  it('probe is true for its own certificate and false for another or a closed port', async () => {
++    const own = await selfSigned('localhost');
++    const other = await selfSigned('localhost');
++    const url = await urlOf(serverOf(own));
++    expect(await probe(url, own.certPem, { ca: own.certPem })).toBe(true);
++    expect(await probe(url, other.certPem, { ca: own.certPem, ...QUICK })).toBe(false);
++    expect(await probe(`https://localhost:${await closedPort()}`, own.certPem, { ca: own.certPem, ...QUICK })).toBe(false);
++  });
++
++  it('checks the certificate, so one nobody trusts is no answer', async () => {
++    const own = await selfSigned('localhost');
++    expect(await probe(await urlOf(serverOf(own)), own.certPem, QUICK)).toBe(false);
++  });
++
++  it('wants a 200', async () => {
++    const own = await selfSigned('localhost');
++    const url = await urlOf(serverOf(own, (_req, res) => void res.writeHead(503).end()));
++    expect(await probe(url, own.certPem, { ca: own.certPem, ...QUICK })).toBe(false);
++  });
++
++  it('takes text that is no certificate as a failed probe', async () => {
++    const own = await selfSigned('localhost');
++    expect(await probe(await urlOf(serverOf(own)), 'not a certificate', { ca: own.certPem, ...QUICK })).toBe(false);
++  });
++
++  it('gives up on a server that never finishes TLS, or never answers', async () => {
++    const own = await selfSigned('localhost');
++    const silent = await urlOf(net.createServer(() => {}));
++    const mute = await urlOf(serverOf(own, () => {}));
++    for (const url of [silent, mute]) {
++      const { answer, ms } = await quickly(probe(url, own.certPem, { ca: own.certPem, tries: 3, everyMs: 10, timeoutMs: 200, deadlineMs: 500 }));
++      expect(answer).toBe(false);
++      expect(ms).toBeLessThan(1500);
++    }
++  });
++
++  it('stops at the deadline, however many tries are left', async () => {
++    const own = await selfSigned('localhost');
++    const mute = await urlOf(serverOf(own, () => {}));
++    const { answer, ms } = await quickly(probe(mute, own.certPem, { ca: own.certPem, tries: 100, everyMs: 10, timeoutMs: 200, deadlineMs: 300 }));
++    expect(answer).toBe(false);
++    expect(ms).toBeLessThan(1500);
++  });
++
++  it('asks over a new connection each time', async () => {
++    const right = await selfSigned('localhost');
++    const wrong = await selfSigned('localhost');
++    let connections = 0;
++    const server = https.createServer(
++      {
++        key: right.keyPem,
++        cert: right.certPem,
++        SNICallback: (_name, done) => {
++          const pair = connections === 0 ? wrong : right;
++          done(null, createSecureContext({ key: pair.keyPem, cert: pair.certPem }));
++        },
++      },
++      healthOnly,
++    );
++    server.on('secureConnection', () => connections++);
++    const url = await urlOf(server);
++    expect(await probe(url, right.certPem, { ca: `${right.certPem}${wrong.certPem}`, tries: 3, everyMs: 10 })).toBe(true);
++    expect(connections).toBe(2);
++  });
++});
+
+## b4679ea6 Ask the certificate's own rule before https, and take a row gone under a pass as one line
+
+The lead's word on what Task 7 hands over. The manager kept its own copy of the 24-hour rule beside mayRunHttps, so a stored key that was not the certificate's own moved the row to https and ran a probe while tunnel.json said http. It now asks mayRunHttps, as if the row were in https, and the rule lives in store.ts alone, so LEAST_LEFT_MS is private there again. A row gone under a pass made two warning lines, one of them a false failure of the order; the failure is now saved before it is logged, so such a pass makes one line and the next pass makes the row again. link-tls.test.ts reads tunnel.json through tunnel.ts's Settings, as the tunnel container does.
+
+Proved by two new tests in link-tls.test.ts, each watched failing first, and by wantedMode's table.
+
+Ruling: LEAST_LEFT_MS stays private to store.ts, in place of the earlier commit's export - why: the lead's word to use mayRunHttps rather than a second copy of the rule - cost if wrong: none seen.
+Ruling: mayRunHttps is asked with mode https on a copy of the row, and a throw counts as no - why: it answers whether the row may run https now and starts by refusing a row in http, which is the case a switch asks about; its comment says a throw means no - cost if wrong: one decrypt and key check per pass while a certificate is in.
+
+---
+ apps/server/src/modules/tls/manager.ts | 27 ++++++++++++------
+ apps/server/src/modules/tls/store.ts   |  2 +-
+ apps/server/test/link-tls.test.ts      | 50 ++++++++++++++++++++++++++++------
+ 3 files changed, 62 insertions(+), 17 deletions(-)
+
+diff --git a/apps/server/src/modules/tls/manager.ts b/apps/server/src/modules/tls/manager.ts
+index 008e904f..95bddb0c 100644
+--- a/apps/server/src/modules/tls/manager.ts
++++ b/apps/server/src/modules/tls/manager.ts
+@@ -2,17 +2,17 @@ import type { Ctx } from '../../app.js';
+ import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
+ import type { Db } from '../../db/client.js';
+ import { linkTls, publicLinks } from '../../db/schema.js';
+ import { loggable } from '../../errors.js';
+ import type { Health } from '../link/relay.js';
+ import { AcmeAccount, AcmeError, newAccountKey } from './acme.js';
+ import { certId, renewalInfo, type RenewalWindow } from './ari.js';
+ import { probe } from './checks.js';
+-import { LEAST_LEFT_MS, linkMode, saveTls, tlsOf, updateTls, type TlsRow } from './store.js';
++import { linkMode, mayRunHttps, saveTls, tlsOf, updateTls, type TlsRow } from './store.js';
+ import { certInfo, namesHost } from './x509.js';
+ 
+ const TICK_MS = 60_000;
+ const MINUTE_MS = 60_000;
+ const HOUR_MS = 60 * MINUTE_MS;
+ const DAY_MS = 24 * HOUR_MS;
+ const SELF_CHECK_WAIT_MS = 5 * MINUTE_MS;
+ const FAILED_ORDER_WAIT_MS = HOUR_MS;
+@@ -26,17 +26,17 @@ export type Served = { use(host: string | null, cert: { certPem: string; keyPem:
+ export type TlsView = { mode: 'http' | 'https'; certificate: boolean; expiresAt: string | null; failedAt: string | null };
+ 
+ type TunnelMode = TlsRow['mode'];
+ type Link = { companyId: string; name: string; url: string };
+ /* A certificate that is in, for the name of the link it was asked about. */
+ type Held = { certPem: string; keyEnc: string; notAfter: Date };
+ export type OrderTry = { accountUrl: string | null; replaces: string | null };
+ export type RenewalAnswer = RenewalWindow | null | 'error';
+-export type ModeFacts = { rowMode: TunnelMode; notAfter: Date; held: boolean; health: Health | null; blockedUntil: Date | null };
++export type ModeFacts = { rowMode: TunnelMode; canServe: boolean; health: Health | null; blockedUntil: Date | null };
+ type LinkTlsOptions = {
+   acme?: (directory: string, accountKeyPem: string, accountUrl: string | null) => Acme;
+   renewalInfo?: typeof renewalInfo;
+   probe?: typeof probe;
+   now?: () => number;
+   random?: () => number;
+ };
+ 
+@@ -64,18 +64,18 @@ const clamp = (value: number, least: number, most: number): number => Math.min(m
+ export function renewalPlan(answer: RenewalAnswer, cert: { renewAt: Date | null; notBefore: Date; notAfter: Date }, now: number, random: () => number): { renewAt: Date; askAt: Date } {
+   if (answer === null) return { renewAt: cert.renewAt ?? twoThirdsOf(cert), askAt: new Date(now + ASK_WITHOUT_RENEWAL_INFO_MS) };
+   if (answer === 'error') return { renewAt: cert.renewAt ?? twoThirdsOf(cert), askAt: new Date(now + ASK_AFTER_ERROR_MS) };
+   return { renewAt: renewAtIn(answer, cert.renewAt, now, random), askAt: new Date(now + clamp(answer.retryAfterS * 1000, HOUR_MS, DAY_MS)) };
+ }
+ 
+ /* Fails toward a working link: a certificate that cannot serve means http, and a relay nobody has heard from changes
+    nothing, since dropping https on every hiccup of its health would make the link blink. */
+-export function wantedMode({ rowMode, notAfter, held, health, blockedUntil }: ModeFacts, now: number): TunnelMode {
+-  if (!held || notAfter.getTime() - now <= LEAST_LEFT_MS) return 'http';
++export function wantedMode({ rowMode, canServe, health, blockedUntil }: ModeFacts, now: number): TunnelMode {
++  if (!canServe) return 'http';
+   if (!health?.up) return rowMode;
+   const blocked = blockedUntil !== null && blockedUntil.getTime() > now;
+   return health.passthrough && !blocked ? 'https' : 'http';
+ }
+ 
+ /* The wait after a failed order. A check of its own that failed costs nothing at the CA, so that one comes back soon. */
+ export function failureFields(failure: AcmeError, now: number): Pick<TlsRow, 'nextTryAt' | 'failure' | 'failedAt'> {
+   const waitMs = failure.kind === 'not_ready' ? SELF_CHECK_WAIT_MS : Math.max(FAILED_ORDER_WAIT_MS, (failure.retryAfterS ?? 0) * 1000);
+@@ -233,18 +233,20 @@ export class LinkTls {
+   }
+ 
+   private async orderIfDue(link: Link, row: TlsRow): Promise<TlsRow> {
+     if (!dueToOrder(row, link, this.now())) return row;
+     try {
+       return await this.order(link, row);
+     } catch (err) {
+       const failure = err instanceof AcmeError ? err : new AcmeError('invalid');
++      /* Saved first: a row that went meanwhile is the pass's failure, and its one line, not this one's too. */
++      const failed = await this.changed(row, failureFields(failure, this.now()));
+       this.ctx.log.warn({ kind: failure.kind, type: failure.type }, "Could not get the link's certificate.");
+-      return this.changed(row, failureFields(failure, this.now()));
++      return failed;
+     }
+   }
+ 
+   private async order(link: Link, row: TlsRow): Promise<TlsRow> {
+     const host = hostOf(link);
+     const { certPem, keyPem } = await this.issue(row, host, { accountUrl: row.accountUrl, replaces: replacesOf(row, link) });
+     const info = certInfo(certPem);
+     if (!namesHost(info, host)) throw new AcmeError('invalid', { detail: "the chain does not name the link's host" });
+@@ -318,24 +320,33 @@ export class LinkTls {
+ 
+   private async moveMode(link: Link, row: TlsRow, first: boolean): Promise<void> {
+     const held = certificateOf(row, link);
+     if (held && this.wantsHttps(link, row, held)) return this.runHttps(link, row, held, first);
+     if (row.mode === 'https') await this.saveMode(row, { mode: 'http' });
+   }
+ 
+   private wantsHttps(link: Link, row: TlsRow, held: Held): boolean {
++    const now = this.now();
+     const facts = {
+       rowMode: row.mode,
+-      notAfter: held.notAfter,
+-      held: this.given === servedKey(hostOf(link), held.certPem),
++      canServe: this.given === servedKey(hostOf(link), held.certPem) && this.mayServe(link, row, now),
+       health: this.health?.answer ?? null,
+       blockedUntil: row.httpsBlockedUntil,
+     };
+-    return wantedMode(facts, this.now()) === 'https';
++    return wantedMode(facts, now) === 'https';
++  }
++
++  /* The rule the tunnel's file is written by, asked as if the row were in https. What cannot be read cannot serve. */
++  private mayServe(link: Link, row: TlsRow, now: number): boolean {
++    try {
++      return mayRunHttps({ ...row, mode: 'https' }, link, this.ctx.config.secret, new Date(now));
++    } catch {
++      return false;
++    }
+   }
+ 
+   private async runHttps(link: Link, row: TlsRow, held: Held, first: boolean): Promise<void> {
+     if (row.mode === 'https') {
+       if (first) await this.checkCarried(link, row, held);
+       return;
+     }
+     const health = await this.askHealth();
+diff --git a/apps/server/src/modules/tls/store.ts b/apps/server/src/modules/tls/store.ts
+index 7be99c9c..7ff16673 100644
+--- a/apps/server/src/modules/tls/store.ts
++++ b/apps/server/src/modules/tls/store.ts
+@@ -9,17 +9,17 @@ import { linkTls, publicLinks } from '../../db/schema.js';
+ import { loggable } from '../../errors.js';
+ import type { LinkView } from '../link/link.js';
+ import { certInfo, namesHost } from './x509.js';
+ 
+ export type TlsRow = typeof linkTls.$inferSelect;
+ type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
+ 
+ /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
+-export const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
++const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
+ 
+ export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
+   const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
+   return row ?? null;
+ }
+ 
+ /* Makes the row, or changes the fields named in one made before. */
+ export async function saveTls(db: Db, companyId: string, set: TlsFields & Pick<TlsRow, 'directory' | 'accountKeyEnc'>): Promise<void> {
+diff --git a/apps/server/test/link-tls.test.ts b/apps/server/test/link-tls.test.ts
+index 795d4d2b..1098caf1 100644
+--- a/apps/server/test/link-tls.test.ts
++++ b/apps/server/test/link-tls.test.ts
+@@ -1,17 +1,19 @@
+ import { createPrivateKey, X509Certificate } from 'node:crypto';
+ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import type { PGlite } from '@electric-sql/pglite';
++import { eq } from 'drizzle-orm';
+ import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
+-import { companies } from '../src/db/schema.js';
++import { companies, linkTls } from '../src/db/schema.js';
+ import { AppMode } from '../src/modules/keeper/app-mode.js';
++import { Settings } from '../src/modules/link/tunnel.js';
+ import { writeKeeperState } from '../src/modules/keeper/state.js';
+ import { AcmeError } from '../src/modules/tls/acme.js';
+ import { certId, type RenewalWindow } from '../src/modules/tls/ari.js';
+ import { failureFields, LinkTls, nextOrderTry, renewalPlan, wantedMode, type Acme, type Served } from '../src/modules/tls/manager.js';
+ import { tlsOf, updateTls } from '../src/modules/tls/store.js';
+ import { certInfo, selfSigned } from '../src/modules/tls/x509.js';
+ import { fakeRelay } from './fake-relay.js';
+ import { appOn, as, SETUP, setUpCompany, testApp, TUNNEL, until } from './helpers.js';
+@@ -45,23 +47,25 @@ function fakes(clock: { now: number }, challenges: () => { get(token: string): s
+     /* Thrown by every issue while it is set, after those in failOnce. */
+     failing: null as Error | null,
+     failOnce: [] as Error[],
+     certHost: null as string | null,
+     renewal: null as RenewalWindow | null | Error,
+     probeAnswer: true,
+     onProbe: (): void => {},
+     useFails: false,
++    onIssue: async (): Promise<unknown> => undefined,
+   };
+   const acme = (directory: string, accountKeyPem: string, accountUrl: string | null): Acme => {
+     seen.made.push({ directory, accountKeyPem, accountUrl });
+     return {
+       account: async () => `https://acme.invalid/account/${++seen.accounts}`,
+       issue: async (host, hooks, { replaces } = {}) => {
+         seen.issues.push({ host, replaces });
++        await set.onIssue();
+         hooks.answer('tok', 'tok.ka');
+         seen.answered.push(challenges().get('tok'));
+         hooks.forget('tok');
+         const failure = set.failOnce.shift() ?? set.failing;
+         if (failure) throw failure;
+         return selfSigned(set.certHost ?? host, { days: 90, now: new Date(clock.now) });
+       },
+     };
+@@ -122,17 +126,18 @@ async function stage(env: NodeJS.ProcessEnv = {}) {
+     opts,
+     listener,
+     tunnelFile,
+     tls: await serving(),
+     /* A LinkTls as a restart makes it. */
+     serving,
+     move: (ms: number) => void (clock.now += ms),
+     row: async () => (await tlsOf(db, companyId))!,
+-    tunnelMode: () => (JSON.parse(readFileSync(tunnelFile, 'utf8')) as { mode: string }).mode,
++    /* Read as the tunnel container reads it. */
++    tunnelMode: () => Settings.parse(JSON.parse(readFileSync(tunnelFile, 'utf8'))).mode,
+   };
+ }
+ 
+ const windowOf = (start: number, end: number, retryAfterS = 21600): RenewalWindow => ({ start: new Date(start), end: new Date(end), retryAfterS });
+ 
+ describe('renewalPlan', () => {
+   const NOW = Date.parse('2030-01-10T00:00:00.000Z');
+   const cert = { notBefore: new Date('2030-01-01T00:00:00.000Z'), notAfter: new Date('2030-04-01T00:00:00.000Z') };
+@@ -176,37 +181,35 @@ describe('renewalPlan', () => {
+   it('after an error does the same, and asks in an hour', () => {
+     expect(renewalPlan('error', { ...cert, renewAt: null }, NOW, half)).toEqual({ renewAt: at('2030-03-02T00:00:00.000Z'), askAt: new Date(NOW + HOUR) });
+   });
+ });
+ 
+ describe('wantedMode', () => {
+   const NOW = Date.parse('2030-01-10T00:00:00.000Z');
+   const up = { up: true, relayStarted: 1, passthrough: true };
+-  const facts = { rowMode: 'http' as const, notAfter: new Date(NOW + 30 * DAY), held: true, health: up, blockedUntil: null };
++  const facts = { rowMode: 'http' as const, canServe: true, health: up, blockedUntil: null };
+ 
+-  it('is https only with the certificate held, time left, and a relay that passes TLS through', () => {
++  it('is https only with a certificate that can serve, and a relay that passes TLS through', () => {
+     expect(wantedMode(facts, NOW)).toBe('https');
+-    expect(wantedMode({ ...facts, held: false }, NOW)).toBe('http');
+-    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY) }, NOW)).toBe('http');
+-    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY + 1) }, NOW)).toBe('https');
++    expect(wantedMode({ ...facts, canServe: false }, NOW)).toBe('http');
+     expect(wantedMode({ ...facts, health: { ...up, passthrough: false }, rowMode: 'https' }, NOW)).toBe('http');
+   });
+ 
+   it('waits out the block, and no longer', () => {
+     expect(wantedMode({ ...facts, blockedUntil: new Date(NOW + 1) }, NOW)).toBe('http');
+     expect(wantedMode({ ...facts, blockedUntil: new Date(NOW) }, NOW)).toBe('https');
+   });
+ 
+   it('keeps the mode while the relay is unknown, except when the certificate cannot serve', () => {
+     const down = { up: false, relayStarted: null, passthrough: false };
+     for (const rowMode of ['http', 'https'] as const) {
+       expect(wantedMode({ ...facts, rowMode, health: null }, NOW)).toBe(rowMode);
+       expect(wantedMode({ ...facts, rowMode, health: down }, NOW)).toBe(rowMode);
+-      expect(wantedMode({ ...facts, rowMode, health: null, held: false }, NOW)).toBe('http');
++      expect(wantedMode({ ...facts, rowMode, health: null, canServe: false }, NOW)).toBe('http');
+     }
+   });
+ });
+ 
+ describe('nextOrderTry', () => {
+   const refused = (name: string) => new AcmeError('refused', { type: `${ERROR_TYPE}${name}` });
+ 
+   it('finds the account again when the CA no longer knows it, keeping replaces', () => {
+@@ -587,16 +590,30 @@ describe("the tunnel's mode", () => {
+     expect((await w.row()).mode).toBe('https');
+     w.set.useFails = true;
+     await w.tls.serveOn(w.listener);
+     await w.tls.tick();
+     expect((await w.row()).mode).toBe('http');
+     expect(w.tunnelMode()).toBe('http');
+   });
+ 
++  it("stays on http when the stored key is not the certificate's own", async () => {
++    const w = await stage();
++    w.relay.passthrough = false;
++    await w.tls.tick();
++    const other = await selfSigned(HOST);
++    await updateTls(w.db, w.companyId, { certKeyEnc: encryptSecret(other.keyPem, w.config.secret) });
++    w.relay.passthrough = true;
++    w.move(11 * MINUTE);
++    await w.tls.tick();
++    expect((await w.row()).mode).toBe('http');
++    expect(w.seen.probes).toEqual([]);
++    expect(w.tunnelMode()).toBe('http');
++  });
++
+   it("probes https again after a restart, and keeps the hour's block", async () => {
+     const w = await stage();
+     await w.tls.tick();
+     expect((await w.row()).mode).toBe('https');
+     w.seen.probes.length = 0;
+ 
+     w.set.probeAnswer = false;
+     await (await w.serving()).tick();
+@@ -903,16 +920,33 @@ describe('running on its own', () => {
+     const tls = await w.serving();
+     w.set.probeAnswer = false;
+     w.set.onProbe = () => tls.stop();
+     await tls.tick();
+     expect(await w.row()).toMatchObject({ mode: 'https', httpsBlockedUntil: null });
+     expect(w.tunnelMode()).toBe('https');
+   });
+ 
++  it('takes a row gone under a pass as one line, and the next pass makes it again', async () => {
++    const w = await stage();
++    const warn = vi.spyOn(w.app.ctx.log, 'warn');
++    w.set.onIssue = () => w.db.delete(linkTls).where(eq(linkTls.companyId, w.companyId));
++    await w.tls.tick();
++    expect(warn).toHaveBeenCalledTimes(1);
++    expect(JSON.stringify(warn.mock.calls).includes('The link has no certificate row to change.')).toBe(true);
++    expect(await tlsOf(w.db, w.companyId)).toBeNull();
++
++    w.set.onIssue = async () => undefined;
++    await w.tls.tick();
++    const row = await w.row();
++    expect(certInfo(row.certPem!).names).toEqual([HOST]);
++    expect(row.mode).toBe('https');
++    expect(warn).toHaveBeenCalledTimes(1);
++  });
++
+   it('takes a pass that fails as one line, and the next starts over', async () => {
+     const w = await stage();
+     const warn = vi.spyOn(w.app.ctx.log, 'warn');
+     vi.spyOn(w.app.ctx.links.relay, 'health').mockRejectedValueOnce(new Error('out of the blue'));
+     await w.tls.tick();
+     expect(warn).toHaveBeenCalledTimes(1);
+     expect((await w.row()).mode).toBe('http');
+     await w.tls.tick();
+

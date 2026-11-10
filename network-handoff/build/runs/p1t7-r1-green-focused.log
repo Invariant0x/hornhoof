@@ -1,0 +1,39 @@
+...new link key for acme
+..new link key for acme
+bound gu2onahllkrrf5tokr0zkyb5 for 127.0.0.1
+....bound globex for 203.0.113.7
+.bound tocbqflowub0gv6xc2us44bj for 203.0.113.7
+.bound 3rxmwenc33owbtg3grohdma5 for 203.0.113.7
+...bound sf47mpxtv9lz5tvqoyrkyoq8 for 203.0.113.7
+bound nxo1volpbwnpdo1ioecej1kx for 203.0.113.8
+....bound am5xr1y9lt4c662vfe226il0 for 203.0.113.7
+.bound rmwdng15kjpe40er5qtr5t25 for 198.51.100.2
+bound 1cpwbf6o9zxbx17yb2iftj2r for 198.51.100.0
+bound s0nyi3ka23deim1d583fujr5 for 198.51.100.14
+.new link key for acme
+new link key for acme
+new visitor key for acme
+.bound 5z960efzq0touoxntqmtqvv0 for 127.0.0.1
+bound efq94bqn2dydxbad6tvn7r5u for 127.0.0.1
+bound bwbaohztwoq46ygmu624xzya for 127.0.0.1
+bound q0y1cpb6jfz00q1ulc5gvspy for 127.0.0.1
+bound yga5cslp2wcg06bwaagu37us for 127.0.0.1
+..bound qe6muh5473ssjgau97erl965 for 127.0.0.1
+..new link key for acme
+.....new link key for acme
+new link key for acme
+new link key for acme
+.new link key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+released acme for 127.0.0.1
+......private-words: none here, skipped
+...............
+----------------------------------------------------------------------
+Ran 54 tests in 30.692s
+
+OK

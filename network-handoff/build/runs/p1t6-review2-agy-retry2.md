@@ -1,0 +1,2 @@
+I will begin the read-only Round 2 review of Plan 1 Task 6 by inspecting the pending diff against `75e8a3d`, reading the changed files and build/fix briefs, and checking every accepted Round 1 finding (`C1`, `C2`, `I1`–`I7`) along with the full contract and code.
+I have read the full diff against `75e8a3d` and the fix/review briefs. I am starting the full `Done when` test suite (`python3.12`) in the background while I audit the code and tests line by line.

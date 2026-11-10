@@ -1,0 +1,12 @@
+== relay that lets the proxy in, the assertion as fixed: started(name)
+  File "/home/altera/hornhoof-network/network-build/tmp/p1t7-i4.qyoPFe/relay/test/test_route.py", line 190, in
+    self.assertFalse(client.started(name, within=2), client.log())
+AssertionError: True is not false
+Ran 1 test in 1.011s
+FAILED (failures=1)
+== the same relay, the assertion as it was: started('acme')
+  File "/home/altera/hornhoof-network/network-build/tmp/p1t7-i4.qyoPFe/relay/test/test_route.py", line 191, in
+    self.assertIn('relay error: frps does not answer', client.log())
+AssertionError: 'relay error: frps does not answer' not found in '2026-11-04 14:00:38.804 [I] [sub/root.go:194
+Ran 1 test in 3.018s
+FAILED (failures=1)

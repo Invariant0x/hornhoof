@@ -1,0 +1,42 @@
+== changed files
+apps/server/src/app.ts
+apps/server/src/modules/agents/timers.ts
+apps/server/src/modules/keeper/app-mode.ts
+apps/server/src/modules/keeper/state.ts
+apps/server/src/modules/nodes/nodes.ts
+apps/server/src/modules/subscriptions/views.ts
+apps/server/src/modules/testruns/load.ts
+apps/server/src/modules/updates/routes.ts
+apps/server/src/modules/updates/wait.ts
+apps/server/test/app-mode.test.ts
+apps/server/test/socket.test.ts
+apps/server/test/timers.test.ts
+apps/server/test/updates.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+Planning Time: 6.979 ms
+Execution Time: 3.076 ms
+
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 10220[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 10215[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m92 passed[39m[22m[90m (92)[39m
+[2m   Affected [22m 92 of 125 test files [2m(related to 13 files)[22m
+[2m      Tests [22m [1m[32m1642 passed[39m[22m[90m (1642)[39m
+[2m   Start at [22m 04:08:10
+[2m   Duration [22m 1678.62s[2m (tests 95%, import 5%)[22m
+
+== crapper
+OVER 10: apps/server/src/modules/updates/wait.ts:75 holdAfterHandOver CRAP 12.0
+worst changed CRAP: 12.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at 14442431

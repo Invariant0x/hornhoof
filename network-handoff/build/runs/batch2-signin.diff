@@ -1,0 +1,311 @@
+# Review package: batch 2, slice signin
+
+## fb8ff224 Tell nothing about the company before sign-in on the link, and ask search engines to stay away
+
+A test walks every route that answers without a session and checks that none names the company, its people or its departments. Over the link /api/health says only ok, /api/version needs a session, and each answer carries noindex.
+
+Ruling: the public-routes list also holds /install.sh and POST /api/auth/logout - why: both answer without a session - cost if wrong: none.
+
+---
+ apps/server/src/app.ts                  |  30 +++++--
+ apps/server/src/web.ts                  |   1 +
+ apps/server/test/before-sign-in.test.ts | 153 ++++++++++++++++++++++++++++++++
+ apps/server/test/static.test.ts         |   1 +
+ 4 files changed, 179 insertions(+), 6 deletions(-)
+
+diff --git a/apps/server/src/app.ts b/apps/server/src/app.ts
+index 8acf6479..859a2deb 100644
+--- a/apps/server/src/app.ts
++++ b/apps/server/src/app.ts
+@@ -38,23 +38,30 @@ import { partFileRoutes } from './modules/testruns/files.js';
+ import { poolRoutes } from './modules/testruns/pool.js';
+ import { taskRoutes } from './modules/tasks/routes.js';
+ import { TerminalRelay } from './modules/terminals/relay.js';
+ import { terminalRoutes } from './modules/terminals/routes.js';
+ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
+ 
+ export type { Db } from './db/client.js';
+ import { fromOwnPages } from './auth/origin.js';
+-import { handOverSession } from './auth/session.js';
++import { handOverSession, requirePerson } from './auth/session.js';
+ import { overLink } from './auth/tunnel.js';
+ import type { AgentSql } from './db/agent-sql.js';
+ import type { Db } from './db/client.js';
+ 
+-/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
+-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null };
++/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. onRoute is called
++   for every route before any is added; a test uses it to ask each route what it tells a stranger. */
++export type Deps = {
++  db: Db;
++  config: Config;
++  logger?: FastifyServerOptions['logger'];
++  agentSql?: AgentSql | null;
++  onRoute?: (route: { method: string | string[]; url: string }) => void;
++};
+ 
+ /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
+    check for newer builds, access to the computer the server runs on and the company's public link. */
+ export type Ctx = Deps & {
+   log: FastifyBaseLogger;
+   hub: NodeHub;
+   bus: EventBus;
+   terminals: TerminalRelay;
+@@ -71,19 +78,32 @@ declare module 'fastify' {
+     ctx: Ctx;
+   }
+   interface FastifyRequest {
+     /* The request came over the public link: its session cookie is the __Host- one. Set by the first onRequest hook. */
+     overLink: boolean;
+   }
+ }
+ 
++/* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
++   company or which build is behind the name. */
++function publicRoutes(app: FastifyInstance, { config, db }: Deps): void {
++  const { version, commit, migrations } = config;
++  app.get('/api/health', async req => (req.overLink ? { ok: true } : { ok: true, version, commit }));
++  app.get('/api/version', async req => {
++    if (req.overLink) await requirePerson(req, db);
++    return { version, commit, migrations };
++  });
++  app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
++}
++
+ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
+   const web = hasWebApp(deps.config.webDist);
++  if (deps.onRoute) app.addHook('onRoute', deps.onRoute);
+   app.decorateRequest('overLink', false);
+   app.addHook('onRequest', async req => {
+     req.overLink = await overLink(req, deps.config);
+   });
+   addSecurityHeaders(app);
+   registerErrorHandling(app, web ? webAppRoutes : undefined);
+   const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+   app.decorate('ctx', ctx);
+@@ -111,19 +131,17 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+   app.addHook('onReady', async () => ctx.links.sync());
+   await app.register(cookie);
+   await app.register(websocket, SOCKET_OPTIONS);
+   /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+   app.addHook('onRequest', async (req, reply) => handOverSession(req, reply, deps.db, deps.config));
+   /* After the socket plugin, so a refused socket is closed by it. */
+   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
+   if (web) await serveWebApp(app, deps.config.webDist);
+-  const { version, commit, migrations } = deps.config;
+-  app.get('/api/health', async () => ({ ok: true, version, commit }));
+-  app.get('/api/version', async () => ({ version, commit, migrations }));
++  publicRoutes(app, deps);
+   setupRoutes(app, ctx);
+   authRoutes(app, deps);
+   peopleRoutes(app, ctx);
+   orgRoutes(app, ctx);
+   subscriptionRoutes(app, ctx);
+   signinRoutes(app, ctx);
+   nodeRoutes(app, ctx);
+   nodeSocket(app, ctx);
+diff --git a/apps/server/src/web.ts b/apps/server/src/web.ts
+index 84a40637..39935445 100644
+--- a/apps/server/src/web.ts
++++ b/apps/server/src/web.ts
+@@ -22,16 +22,17 @@ const SECURITY_HEADERS = {
+     "font-src 'self' data:",
+     "connect-src 'self' ws: wss:",
+     "object-src 'none'",
+     "base-uri 'none'",
+     "form-action 'self'",
+     "frame-ancestors 'none'",
+   ].join('; '),
+   'x-content-type-options': 'nosniff',
++  'x-robots-tag': 'noindex, nofollow',
+ };
+ 
+ export function addSecurityHeaders(app: FastifyInstance): void {
+   app.addHook('onRequest', async (_req, reply) => {
+     reply.headers(SECURITY_HEADERS);
+   });
+ }
+ 
+diff --git a/apps/server/test/before-sign-in.test.ts b/apps/server/test/before-sign-in.test.ts
+new file mode 100644
+index 00000000..f0f71856
+--- /dev/null
++++ b/apps/server/test/before-sign-in.test.ts
+@@ -0,0 +1,153 @@
++import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { sql } from 'drizzle-orm';
++import type { FastifyInstance } from 'fastify';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { buildApp } from '../src/app.js';
++import { loadConfig } from '../src/config.js';
++import type { Db } from '../src/db/client.js';
++import * as schema from '../src/db/schema.js';
++import { createTestDb, invitePerson, SETUP, sessionFrom, TEST_SECRET, TUNNEL, viaLink } from './helpers.js';
++
++type Route = { method: string; url: string };
++type Origin = 'local' | 'link';
++
++const NAMES_THE_COMPANY = ['Acme', 'Ivan', 'ivan@acme.com', 'Maria', 'maria@acme.com', 'Zebra Payments'];
++
++/* Every route that answers 2xx without a session today, with the origin it does so from. A new public route fails the
++   test until it is listed here, and the lead reads this list in review. */
++const EVERYWHERE: Origin[] = ['local', 'link'];
++const PUBLIC: Record<string, Origin[]> = {
++  'GET /*': EVERYWHERE,
++  'HEAD /*': EVERYWHERE,
++  'GET /api/health': EVERYWHERE,
++  'HEAD /api/health': EVERYWHERE,
++  'GET /api/version': ['local'],
++  'HEAD /api/version': ['local'],
++  'GET /robots.txt': EVERYWHERE,
++  'HEAD /robots.txt': EVERYWHERE,
++  'GET /api/setup': EVERYWHERE,
++  'HEAD /api/setup': EVERYWHERE,
++  'POST /api/auth/logout': EVERYWHERE,
++  'GET /install.sh': EVERYWHERE,
++  'HEAD /install.sh': EVERYWHERE,
++};
++
++function fakeDist(): string {
++  const dir = mkdtempSync(join(tmpdir(), 'hornhoof-web-'));
++  writeFileSync(join(dir, 'index.html'), '<!doctype html><title>Hornhoof</title><div id="root"></div>');
++  mkdirSync(join(dir, 'assets'));
++  writeFileSync(join(dir, 'assets', 'app-1a2b.js'), 'console.log(1)');
++  return dir;
++}
++
++/* The id of the first row of every table that has an id column and a row. */
++async function idsOfEveryTable(db: Db): Promise<string[]> {
++  const rowsOf = async <T>(query: ReturnType<typeof sql>) => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
++  const tables = await rowsOf<{ table_name: string }>(sql`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'id'`);
++  const ids: string[] = [];
++  for (const { table_name } of tables) {
++    const [row] = await rowsOf<{ id: string | number }>(sql.raw(`select id from "${table_name}" limit 1`));
++    if (row) ids.push(String(row.id));
++  }
++  return [...new Set(ids)];
++}
++
++const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', '*': 'x' };
++
++/* The urls a route is asked at: its parameters are filled by name, `:id` once with each real id. */
++function urlsOf(url: string, ids: string[]): string[] {
++  return (/:(id|teamId)\b/.test(url) ? ids : ['']).map(id =>
++    url.replace(/:(\w+)|\*/g, (found, param?: string) => {
++      const key = param ?? '*';
++      const value = key === 'id' || key === 'teamId' ? id : FIXED_PARAMS[key];
++      if (value === undefined) throw new Error(`Add the parameter "${key}" of ${url} to FIXED_PARAMS.`);
++      return value;
++    }),
++  );
++}
++
++describe('urlsOf', () => {
++  it('asks a route with an id once for each id and fills the other parameters by name', () => {
++    expect(urlsOf('/api/links/:name/keys/:id', ['a', 'b'])).toEqual(['/api/links/acme/keys/a', '/api/links/acme/keys/b']);
++    expect(urlsOf('/*', ['a'])).toEqual(['/x']);
++  });
++
++  it('refuses a parameter it does not know', () => {
++    expect(() => urlsOf('/api/things/:mystery', [])).toThrow(/mystery/);
++  });
++});
++
++async function companyWithPeople() {
++  const routes: Route[] = [];
++  const db = (await createTestDb()) as unknown as Db;
++  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', TUNNEL_HOST: TUNNEL, WEB_DIST: fakeDist() });
++  const app = await buildApp({ db, config, onRoute: r => routes.push(...[r.method].flat().map(method => ({ method, url: r.url }))) });
++  onTestFinished(() => app.close());
++  const ceoToken = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'startup' } }));
++  const [made] = await db.select().from(schema.departments).limit(1);
++  await db.insert(schema.departments).values({ ...made!, id: crypto.randomUUID(), name: 'Zebra Payments' });
++  await invitePerson(app, ceoToken, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
++  return { app, db, routes, ceoToken };
++}
++
++const askFrom = (app: FastifyInstance, route: Route, url: string, origin: Origin) =>
++  app.inject({
++    method: route.method as 'GET',
++    url,
++    ...(origin === 'link' ? viaLink() : { remoteAddress: '127.0.0.1' }),
++    ...(route.method === 'GET' || route.method === 'HEAD' ? {} : { payload: {} }),
++  });
++
++describe('before sign-in', () => {
++  it('answers nothing that names the company before sign-in, locally and over the link', async () => {
++    const { app, db, routes } = await companyWithPeople();
++    await app.ready();
++    const ids = await idsOfEveryTable(db);
++    expect(routes.length).toBeGreaterThanOrEqual(30);
++    const unlisted: string[] = [];
++    for (const route of routes) {
++      for (const origin of ['local', 'link'] as const) {
++        for (const url of urlsOf(route.url, ids)) {
++          const res = await askFrom(app, route, url, origin);
++          const seen = res.body + Object.values(res.headers).join('\n');
++          for (const word of NAMES_THE_COMPANY) expect(seen, `${route.method} ${url} ${origin}`).not.toContain(word);
++          const listed = PUBLIC[`${route.method} ${route.url}`]?.includes(origin);
++          if (res.statusCode < 300 && !listed) unlisted.push(`${route.method} ${route.url} ${origin}`);
++        }
++      }
++    }
++    expect([...new Set(unlisted)]).toEqual([]);
++  });
++});
++
++describe('what the link tells a stranger', () => {
++  it('gives only ok on /api/health over the link', async () => {
++    const { app } = await companyWithPeople();
++    expect((await app.inject({ url: '/api/health', ...viaLink() })).json()).toEqual({ ok: true });
++    expect((await app.inject({ url: '/api/health', remoteAddress: '127.0.0.1' })).json()).toMatchObject({ ok: true, version: expect.any(String), commit: expect.any(String) });
++  });
++
++  it('asks for a session on /api/version over the link', async () => {
++    const { app, ceoToken } = await companyWithPeople();
++    const stranger = await app.inject({ url: '/api/version', ...viaLink() });
++    expect(stranger.statusCode).toBe(401);
++    expect(stranger.json().error.reason).toBe('signed_out');
++    const signedIn = await app.inject({ url: '/api/version', ...viaLink(ceoToken) });
++    expect(signedIn.statusCode).toBe(200);
++    expect(Object.keys(signedIn.json()).sort()).toEqual(['commit', 'migrations', 'version']);
++    expect((await app.inject({ url: '/api/version', remoteAddress: '127.0.0.1' })).statusCode).toBe(200);
++  });
++
++  it('asks search engines to stay away', async () => {
++    const { app } = await companyWithPeople();
++    const robots = await app.inject({ url: '/robots.txt' });
++    expect(robots.statusCode).toBe(200);
++    expect(robots.headers['content-type']).toBe('text/plain; charset=utf-8');
++    expect(robots.body).toBe('User-agent: *\nDisallow: /\n');
++    for (const url of ['/robots.txt', '/api/health', '/api/nope']) {
++      expect((await app.inject({ url })).headers['x-robots-tag']).toBe('noindex, nofollow');
++    }
++  });
++});
+diff --git a/apps/server/test/static.test.ts b/apps/server/test/static.test.ts
+index d0d1112f..03c65b8c 100644
+--- a/apps/server/test/static.test.ts
++++ b/apps/server/test/static.test.ts
+@@ -45,16 +45,17 @@ describe('web app serving', () => {
+   it('tells browsers not to show Hornhoof inside another page or guess what a file is', async () => {
+     const { app } = await testApp({ WEB_DIST: fakeDist() });
+     for (const url of ['/', '/people', '/assets/app-1a2b.js', '/api/health', '/api/nope']) {
+       const res = await app.inject({ url, headers: { accept: 'text/html' } });
+       expect(res.headers['x-frame-options']).toBe('DENY');
+       expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+       expect(res.headers['content-security-policy']).toContain("script-src 'self';");
+       expect(res.headers['x-content-type-options']).toBe('nosniff');
++      expect(res.headers['x-robots-tag']).toBe('noindex, nofollow');
+     }
+   });
+ 
+   it('works without a built web app', async () => {
+     const { app } = await testApp({ WEB_DIST: join(tmpdir(), 'hornhoof-no-such-dir') });
+     const res = await app.inject({ url: '/people', headers: { accept: 'text/html' } });
+     expect(res.statusCode).toBe(404);
+     expect((await app.inject({ url: '/api/health' })).json()).toMatchObject({ ok: true });
+

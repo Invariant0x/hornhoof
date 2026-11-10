@@ -1,0 +1,36 @@
+# How this build works now: conveyor v4, Ivan's word
+
+Rules that bind you, not optional: `/home/altera/hornhoof-network/CLAUDE.md`, the build rulings below, and
+`/home/altera/hornhoof-network/FROM-DAVID-conveyor-v4.md`, sections 2 to 4. You are a fresh writer for one task, in your own lane, your own clone of
+the repository, on the branch `task-<lane>`. Other writers work beside you in theirs. Do not touch the real repositories or another lane.
+
+**Skills.** Before you write a line, read and follow, and name in your hand-in: `test-driven-development`, `systematic-debugging` for any failure, `verification-before-completion`, in `/home/altera/hornhoof-network/plugins/superpowers/skills/<name>/SKILL.md`. For Hornhoof also `hornhoof/AGENTS.md` and `hornhoof/templates/skills/dev-engineering-rules.md`.
+
+**The task's kind** is in your notes. Known behaviour, nearly every task, since plans give exact tests: test-first, as the plan says. A bug: a failing test that reproduces it, then the fix. An unknown way (a library or protocol not used here yet): one acceptance test from the plan first, then make it work, split into pure functions, cut what is extra, then direct fast tests on the pure functions. Old code with no tests: characterization tests first, then structural commits apart from behaviour commits.
+
+**How to write tests.** Uncle Bob's way, without chasing coverage. Logic in a pure function, tested directly, with no database and no process. One or two integration tests per route or seam, for what only they can show, not one per branch. A test checks what a person of the code would see; if it would pass with the code wrong, throw it out. No test only to cover a line or raise a number. To get a function under CRAP 10, split it first. Tests are deterministic: nothing depends on the date, the time zone, the order of tests, randomness or ids; a flaky test is fixed at its cause, never retried. Old tests are not rewritten. Never a secret in a test's message: compare with booleans.
+
+**While you work,** run a few tests at a time from your lane with `/home/altera/hornhoof-network/network-build/light.sh <command>`, with at most `--maxWorkers=2`. You do not run a repository's whole suite, and you do not run mutator.
+
+**Hand-in, one command, once, on your final commit:**
+
+1. Commit your work on your branch: write the message to a file (English, a subject as the plan's Commit step names it, then why; no trailers; no em dashes), then `/home/altera/hornhoof-network/network-build/lane.sh commit <lane> <file>`.
+2. The author check, on that commit. Hornhoof: `REMOTE_HORNHOOF_TREE=/home/altera/hornhoof-network/wt/<lane> /home/altera/hornhoof-network/network-build/remote.sh run <lane>-check 'cd /home/altera/hornhoof-network/hornhoof && /home/altera/hornhoof-network/network-build/author-check.sh lanebase'`. Relay: `REMOTE_EDGE_TREE=/home/altera/hornhoof-network/wt/<lane> /home/altera/hornhoof-network/network-build/remote.sh run <lane>-check 'cd /home/altera/hornhoof-network/hornhoof-edge && /home/altera/hornhoof-network/network-build/author-check-relay.sh lanebase "<the unittest modules your change reaches>"'`. It may queue. Start it in the background and wait with `/home/altera/hornhoof-network/network-build/remote-wait.sh <lane>-check` in the foreground, calling it again while it says WAITING. Never end your turn while it is pending.
+3. Red: at most two tries to fix your own red, each commit followed by the check. Still red: stop and tell the lead.
+
+**Reply to the lead:** the status (DONE, DONE_WITH_CONCERNS, BLOCKED or NEEDS_CONTEXT), the commit, and the log path `network-build/runs/remote-<lane>-check-*.log`, in at most five lines. That log on that commit is the evidence, and nobody reruns it. There is no review agent per task; tasks land in batches, and the batch gets one review and one fix round. A deviation from the plan, and every place where the plan proved wrong, goes in your commit message's body and your reply, as a line `Ruling: <what> - why: <why> - cost if wrong: <cost>`. Never push. No subagents.
+
+
+# Notes for this task from the build lead
+
+- Your lane: `/home/altera/hornhoof-network/wt/p3t3`, Hornhoof repo, branch `task-p3t3`. Kind: known behaviour, test-first as the plan says. Security class: read twice in its batch.
+- This is the rest of Plan 3 Task 3. `apps/server/src/db/sql-check.ts`, `sql-parser.ts`, their tests and the `libpg-query` dependency are done and below your `lanebase`: read them, and do not add the dependency again. Everything else in the task is yours: `confirm.ts`, `agent-sql.ts`, `client.ts`, `main.ts`, `cli.ts`, `tools/database.ts`, `errors.ts`, `app-mode.ts`'s export, en and ru, `helpers.ts`, their tests, `fence-lint.test.ts`, and `test/real/agent-sql.test.ts`.
+- Your lane stands on batch 6 with its fixes, then Plan 3 Tasks 1 and 2 and the pure `lease.ts`. None has landed yet. Diff only against `lanebase`.
+- What differs from the plan's text. `checkAgentSql` is async and already keeps its own worker, so `tools/database.ts` awaits it. `REFUSED_FUNCTIONS` lives in `db/sql-check.ts`, not in `agent-sql.ts`: import it from there for `PUBLIC_REVOKES`, where `'lo_*'` stands for the prefix, and let `agent-sql.ts` re-export it, since Plan 4 names it there. The constructor is `new SqlRefused(kind, message)`. The tool must check the very same string it hands to `run`: no trim and no change between them.
+- A depth limit moved: a chain of about 3,900 operators is now refused with kind `syntax`. Do not write a test against the old number.
+- A worry to look at while you are there, and only say what you see: `apps/server/test/sql-parser.test.ts`'s flood test takes 21.7 s under coverage against its own 60 s limit.
+- Step 1's list of transactions. 1b T8, 2 T5 and 2 T6 are not under your lane (they sit in `/home/altera/hornhoof-network/wt/p2t6`, read only for you). Grep there too for `.transaction(`, so that the list covers them, and say in the report which lane each came from. `.transaction(` waiting on more than the database goes to the lead before Step 4, as the plan says.
+- `main.ts` is also changed by 2 T6 in that lane. Keep your change there to the one `openDb` line, so the batch's cherry-pick stays small.
+- From this batch's first reader, on the real-test helper `test/real/pg.ts`: `realDatabase().drop()` removes only `agentRole(name)` and `readerRole(name)`, `url` and `admin` are the `postgres` superuser, and `urlOf` is not exported. If your real test needs a connection as an agent role, go through `openAgentSql`, as the plan does. A role you create is yours to drop.
+- `test/real/agent-sql.test.ts` belongs on the test machine, inside your own run: `REMOTE_HORNHOOF_TREE=/home/altera/hornhoof-network/wt/p3t3 /home/altera/hornhoof-network/network-build/remote.sh run --dind p3t3-real 'cd /home/altera/hornhoof-network/hornhoof && npm run test:real'`. Its `ALTER SYSTEM` test changes a server setting: reset it in `afterEach`, as the plan says, because `fileParallelism` is off but the next file shares that server.
+- Your commit subject is the plan's, since this finishes the task. A migration is not expected here; if you find you need one, stop and say so, since the chain has one lane at a time.

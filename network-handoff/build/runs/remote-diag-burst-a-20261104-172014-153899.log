@@ -1,0 +1,14 @@
+mode=plain burners=0 rc=0 secs=9 load=9.41 throttled_ms=0 periods=0 np=40 p50=171 p90=460 max=810 over800=1 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=plain burners=0 rc=0 secs=8 load=10.32 throttled_ms=0 periods=0 np=40 p50=164 p90=442 max=815 over800=1 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=plain burners=0 rc=0 secs=9 load=9.83 throttled_ms=0 periods=0 np=40 p50=195 p90=549 max=656 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=plain burners=0 rc=1 secs=40 load=8.18 throttled_ms=0 periods=0 np=40 p50=117 p90=547 max=811 over800=1 rejected=1 reasons={'relay error: busy': 1} rejected_ms=[810.7] dashfail={} dashspent=0 dashslow=0 maxdash=0
+FAIL: test_restart_burst (test_restart.RestartTests.test_restart_burst)
+AssertionError: [{'op': 'NewProxy', 'proxy_name': 'burst39', 'run_id': 'd2b9aedd2a81871d', 'client': 'burst39-aaaaaaaa-link', 'ms': 810.7, 'reject': True, 'reason': 'relay error: busy'}] is not false 
+FAILED (failures=1)
+mode=plain burners=0 rc=0 secs=8 load=8.25 throttled_ms=0 periods=0 np=40 p50=158 p90=459 max=742 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=cov burners=0 rc=0 secs=9 load=8.44 throttled_ms=0 periods=0 np=40 p50=168 p90=502 max=808 over800=1 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=cov burners=0 rc=0 secs=8 load=7.76 throttled_ms=0 periods=0 np=40 p50=176 p90=492 max=741 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=cov burners=0 rc=0 secs=9 load=8.75 throttled_ms=0 periods=0 np=40 p50=180 p90=450 max=605 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=cov burners=0 rc=0 secs=9 load=8.41 throttled_ms=0 periods=0 np=40 p50=156 p90=388 max=584 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+mode=cov burners=0 rc=0 secs=9 load=7.88 throttled_ms=0 periods=0 np=40 p50=162 p90=419 max=713 over800=0 rejected=0 reasons={} rejected_ms=[] dashfail={} dashspent=0 dashslow=0 maxdash=0
+diag done

@@ -1,0 +1,43 @@
+== changed files
+apps/server/drizzle/0057_net.sql
+apps/server/src/db/client.ts
+apps/server/src/db/net.ts
+apps/server/src/modules/keeper/lease.ts
+apps/server/test/compose.test.ts
+apps/server/test/journal.test.ts
+apps/server/test/migrations.test.ts
+apps/server/test/real/auth-locks.test.ts
+apps/server/test/real/journal.test.ts
+apps/server/test/real/pg.test.ts
+apps/server/test/real/pg.ts
+apps/server/test/real/run.sh
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 21410[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 21406[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m128 passed[39m[22m[90m (128)[39m
+[2m      Tests [22m [1m[32m2480 passed[39m[22m[90m (2480)[39m
+[2m   Start at [22m 11:46:03
+[2m   Duration [22m 1746.13s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m128 workers spawned[39m[2m · ~289ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~12.03s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+OVER 10: apps/server/test/real/pg.ts:25 onServer CRAP 12.0
+worst changed CRAP: 12.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+DUPLICATE score=0.84
+  apps/server/src/db/client.ts:73-76
+  apps/server/src/db/client.ts:91-94
+AUTHOR CHECK RED at 0f3946c3

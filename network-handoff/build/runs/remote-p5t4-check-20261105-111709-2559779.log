@@ -1,0 +1,34 @@
+== changed files
+apps/server/src/modules/keeper/certificate.ts
+apps/server/src/modules/keeper/machine-keys.ts
+apps/server/src/modules/keeper/measures.ts
+apps/server/test/keeper-certificate.test.ts
+apps/server/test/machine-keys.test.ts
+apps/server/test/measures.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m test/machine-keys.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m test/measures.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 386[2mms[22m[39m
+ [32m✓[39m test/keeper-certificate.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 824[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Affected [22m 3 of 129 test files [2m(related to 6 files)[22m
+[2m      Tests [22m [1m[32m35 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m 11:23:01
+[2m   Duration [22m 5.96s[2m (tests 74%, import 20%, worker 6%)[22m
+
+== crapper
+worst changed CRAP: 6.036
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 061a0111

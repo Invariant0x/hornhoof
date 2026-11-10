@@ -1,0 +1,430 @@
+../home/altera/hornhoof-network/hornhoof-edge/relay/test/.bin/download.chMXwB/caddy.tgz: OK
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/_weakrefset.py:45: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63858f5b0>
+  def add(self, item):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/_weakrefset.py:45: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63858f6a0>
+  def add(self, item):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+............................................................
+NewUserConn in a crowd of 200: median 0.1 ms, worst 9.5 ms
+eviction took 20.24 s (network)
+.eviction took 20.26 s (network)
+.eviction took 20.26 s (today)
+..client-id retry after silent client dropped: 5.89 s
+..proxy-name retry after first stopped: 28.10 s
+..bound globex for 203.0.113.7
+.bound v1lc0vbeel91f4joj8z8t93e for 203.0.113.7
+.bound 4dib6sfk3qsphuj3gk5lqjrk for 203.0.113.7
+...bound c7f90v3u08b82fxgkv8rf5rf for 203.0.113.7
+bound lu3vrx089ald43mbll4cjnay for 203.0.113.8
+....bound ch39x94g1f84o28zztuu51dp for 203.0.113.7
+.bound gwpx7z735mtw7yedtezwupdo for 198.51.100.2
+bound 7866ytbptjra1wul7rzmlfgz for 198.51.100.0
+bound 28nbe21h3swstkv28rnrtu5s for 198.51.100.14
+.....new link key for acme
+...new link key for acme
+.new visitor key for acme
+..new link key for acme
+bound 4l7w0z7xdu2f4imk9pt1pfjg for 127.0.0.1
+...new link key for acme
+new link key for acme
+new visitor key for acme
+.bound v6nen56olycywc81jx0gsg0c for 127.0.0.1
+bound 311l4m65kqvsrtijaddz6n1c for 127.0.0.1
+bound 93ya8xe5zb28jwu4l0akk7je for 127.0.0.1
+bound 3o6r3lcd8zlkn1n78l2cnrou for 127.0.0.1
+bound q86tqiw0tuig6uxpamhxwkk0 for 127.0.0.1
+..bound 1hf48v6xjytvq4dz1v13zsoo for 127.0.0.1
+..new link key for acme
+.....new link key for acme
+new link key for acme
+new link key for acme
+.new link key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+released acme for 127.0.0.1
+............./home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:472: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e53f0>
+  class WriteBusy(Exception):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:472: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7790>
+  class WriteBusy(Exception):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 42472)
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1001, in do_GET
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+.----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 42464)
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/http/server.py", line 488, in handle_one_request
+    method()
+    ~~~~~~^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 1001, in do_GET
+    self.wfile.write(body)
+    ~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 845, in write
+    self._sock.sendall(b)
+    ~~~~~~~~~~~~~~~~~~^^^
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+......................second login with one client id after the drop: 5.98 s
+.............<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7b50>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e63e0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5210>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e62f0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e72e0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5f30>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5e40>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e56c0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e4e50>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e4f40>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6372127a0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6372123e0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637213790>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5990>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7880>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6372131f0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637212d40>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637213a60>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637212020>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6340dd4e0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...released acme for 127.0.0.1
+./home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7100>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5a80>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e76a0>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7d30>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e75b0>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e46d0>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b100>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:524: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716ae30>
+  class WriterQueue:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+new visitor key for acme
+........private-words: none here, skipped
+...../home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e45e0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5030>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7d30>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e76a0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5f30>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b5b0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716bc40>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716bf10>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716a5c0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371685e0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168400>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169d50>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371684f0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716a020>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168f40>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168d60>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168220>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371688b0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371689a0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168a90>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169120>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169210>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371693f0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371696c0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371697b0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371694e0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371698a0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168130>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169300>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371695d0>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/functools.py:593: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168b80>
+  def decorating_function(user_function):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......................../home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168b80>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371695d0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169300>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168130>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371698a0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371694e0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371697b0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371696c0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371693f0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169210>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169120>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637168a90>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371689a0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716bf10>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716a4d0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b3d0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b100>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b6a0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716ab60>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716ae30>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5210>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e53f0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e6890>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e66b0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e76a0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7010>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7970>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e71f0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e62f0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5e40>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e72e0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e6d40>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e65c0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5b70>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e64d0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/email/feedparser.py:59: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e63e0>
+  self._lines = deque()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+................................/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1051: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716a4d0>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1051: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b63716b100>
+  _print_lock = threading.Lock()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......................................../home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1061: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e62f0>
+  class Window:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+....................../home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7790>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e4400>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5300>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e4130>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e44f0>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e58a0>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7c40>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e6c50>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e5210>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e74c0>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7b50>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/altera/hornhoof-network/hornhoof-edge/relay/relay.py:1335: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e7010>
+  def plugin(op: str, content: dict) -> dict:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..............<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b6371e4040>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen importlib._bootstrap_external>:511: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x70b637169030>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.............
+----------------------------------------------------------------------
+Ran 320 tests in 605.924s
+
+OK

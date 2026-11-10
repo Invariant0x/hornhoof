@@ -1,0 +1,39 @@
+== changed files
+apps/server/src/auth/sign-in-limit.ts
+apps/server/src/modules/tls/acme.ts
+apps/server/src/modules/tls/challenges.ts
+apps/server/test/acme-fake.test.ts
+apps/server/test/ari.test.ts
+apps/server/test/challenges.test.ts
+apps/server/test/closed-port.ts
+apps/server/test/link-listener.test.ts
+apps/server/test/proxy-header.test.ts
+apps/server/test/proxy-v2.ts
+apps/server/test/sign-in-limit.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ [32m✓[39m test/tree-history-query.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 14150[2mms[22m[39m
+   [33m[2m✓[22m[39m reads a turn history without scanning thirty thousand unrelated event bodies[33m 14143[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m91 passed[39m[22m[90m (91)[39m
+[2m   Affected [22m 91 of 123 test files [2m(related to 11 files)[22m
+[2m      Tests [22m [1m[32m1582 passed[39m[22m[90m (1582)[39m
+[2m   Start at [22m 00:39:10
+[2m   Duration [22m 1807.84s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m91 workers spawned[39m[2m · ~382ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~11.20s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+worst changed CRAP: 5.3906
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at a1520b80

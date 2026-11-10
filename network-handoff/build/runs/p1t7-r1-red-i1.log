@@ -1,0 +1,19 @@
+F
+======================================================================
+FAIL: test_r2_4_a_freed_names_sync_record_goes_with_it (relay.test.test_keys.KeyTests.test_r2_4_a_freed_names_sync_record_goes_with_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 187, in test_r2_4_a_freed_names_sync_record_goes_with_it
+    self.assertEqual(self.route(new)['sync'],
+AssertionError: {'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 900, 'ge[26 chars]8732} != {'state': 'off', 'copy': None, 'epoch': 0, 'generatio[13 chars]None}
++ {'at': None, 'copy': None, 'epoch': 0, 'generation': 0, 'state': 'off'}
+- {'at': 1793818732,
+-  'copy': 'bbbbbbbb',
+-  'epoch': 900,
+-  'generation': 1,
+-  'state': 'on'}
+
+----------------------------------------------------------------------
+Ran 1 test in 1.012s
+
+FAILED (failures=1)

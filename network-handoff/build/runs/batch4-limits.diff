@@ -1,0 +1,1379 @@
+# Review package: batch 4, slice limits
+
+## ceb0e8a3 Count failed sign-ins in the database, per address too, so a restart does not reset them
+
+The limits on sign-ins and invites live in the database: 30 failed sign-ins per address an hour across all emails, with
+today's limits per email kept. The count takes an advisory lock, so a hundred tries at once cannot slip past it. The logic
+of the limits is a pure function with direct tests. A restart no longer forgives a guesser.
+
+---
+ apps/server/drizzle/0054_sign_in_attempts.sql |  10 +++
+ apps/server/drizzle/meta/_journal.json        |   7 ++
+ apps/server/src/auth/limit.ts                 |  10 ++-
+ apps/server/src/auth/sign-in-limit.ts         | 112 ++++++++++++++++++++++++
+ apps/server/src/db/agent-sql.ts               |   2 +-
+ apps/server/src/db/schema.ts                  |  12 +++
+ apps/server/src/modules/auth/routes.ts        |  15 ++--
+ apps/server/test/migration-history.test.ts    |   4 +-
+ apps/server/test/migration-metadata.test.ts   |   4 +-
+ apps/server/test/orchestrator-control.test.ts |   4 +-
+ apps/server/test/sign-in-limit.test.ts        | 120 ++++++++++++++++++++++++++
+ 11 files changed, 282 insertions(+), 18 deletions(-)
+
+diff --git a/apps/server/drizzle/0054_sign_in_attempts.sql b/apps/server/drizzle/0054_sign_in_attempts.sql
+new file mode 100644
+index 00000000..2cfb23a9
+--- /dev/null
++++ b/apps/server/drizzle/0054_sign_in_attempts.sql
+@@ -0,0 +1,10 @@
++CREATE TABLE "sign_in_attempts" (
++	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
++	"email_hash" text NOT NULL,
++	"address_hash" text NOT NULL,
++	"at" timestamp with time zone DEFAULT now() NOT NULL
++);
++--> statement-breakpoint
++CREATE INDEX "sign_in_attempts_email" ON "sign_in_attempts" USING btree ("email_hash","at");--> statement-breakpoint
++CREATE INDEX "sign_in_attempts_address" ON "sign_in_attempts" USING btree ("address_hash","at");--> statement-breakpoint
++CREATE INDEX "sign_in_attempts_at" ON "sign_in_attempts" USING btree ("at");
+\ No newline at end of file
+diff --git a/apps/server/drizzle/meta/_journal.json b/apps/server/drizzle/meta/_journal.json
+index 8a5cd908..94fdf6f2 100644
+--- a/apps/server/drizzle/meta/_journal.json
++++ b/apps/server/drizzle/meta/_journal.json
+@@ -367,11 +367,18 @@
+       "breakpoints": true
+     },
+     {
+       "idx": 53,
+       "version": "7",
+       "when": 1793807004545,
+       "tag": "0053_session_handover",
+       "breakpoints": true
++    },
++    {
++      "idx": 54,
++      "version": "7",
++      "when": 1793830928774,
++      "tag": "0054_sign_in_attempts",
++      "breakpoints": true
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/apps/server/src/auth/limit.ts b/apps/server/src/auth/limit.ts
+index f318c6ad..995e2a72 100644
+--- a/apps/server/src/auth/limit.ts
++++ b/apps/server/src/auth/limit.ts
+@@ -22,15 +22,19 @@ export function limiter({ max = 10, windowMs = 15 * 60 * 1000 }: { max?: number;
+     }
+     recent.push(now);
+     seen.set(key, recent);
+     return { allowed: true, retryAfterS: 0 };
+   };
+   return Object.assign(attempts, { size: () => seen.size, windowMs });
+ }
+ 
++/* Answers 429 with Retry-After: the one refusal every limit gives. */
++export function refuse(reply: FastifyReply, retryAfterS: number, windowMs: number): never {
++  reply.header('retry-after', String(retryAfterS));
++  throw new ApiError(429, 'too_many', `Too many attempts. Wait up to ${Math.round(windowMs / 60_000)} minutes, then try again.`, 'too_many_attempts');
++}
++
+ /* Answers 429 with Retry-After once the key is over the limit. */
+ export function guard(reply: FastifyReply, attempts: Attempts, key: string): void {
+   const { allowed, retryAfterS } = attempts(key);
+-  if (allowed) return;
+-  reply.header('retry-after', String(retryAfterS));
+-  throw new ApiError(429, 'too_many', `Too many attempts. Wait up to ${Math.round(attempts.windowMs / 60_000)} minutes, then try again.`, 'too_many_attempts');
++  if (!allowed) refuse(reply, retryAfterS, attempts.windowMs);
+ }
+diff --git a/apps/server/src/auth/sign-in-limit.ts b/apps/server/src/auth/sign-in-limit.ts
+new file mode 100644
+index 00000000..9f8a008d
+--- /dev/null
++++ b/apps/server/src/auth/sign-in-limit.ts
+@@ -0,0 +1,112 @@
++import { eq, sql, type SQL } from 'drizzle-orm';
++import { hashToken } from '../crypto/tokens.js';
++import type { Db } from '../db/client.js';
++import { signInAttempts } from '../db/schema.js';
++
++const MINUTE = 60_000;
++const HOUR = 60 * MINUTE;
++
++/* A try counts against all three: one email from one address, one email from anywhere, one address across all emails. */
++export const SIGN_IN_LIMITS = {
++  emailAddress: { max: 10, windowMs: 15 * MINUTE },
++  email: { max: 50, windowMs: HOUR },
++  address: { max: 30, windowMs: HOUR },
++} as const;
++
++type LimitName = keyof typeof SIGN_IN_LIMITS;
++const LIMIT_NAMES = Object.keys(SIGN_IN_LIMITS) as LimitName[];
++const KEEP_MS = Math.max(...LIMIT_NAMES.map(name => SIGN_IN_LIMITS[name].windowMs));
++
++/* The pg_advisory_xact_lock key of sign-in tries, used for nothing else. */
++export const SIGN_IN_LOCK = 0x68680001;
++
++const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
++const DOTTED_TAIL = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
++
++const hexGroup = (n: number) => n.toString(16);
++const asGroups = (side: string) => (side ? side.split(':') : []);
++
++/* Replaces a trailing dotted IPv4 with its two hex groups, so every address is plain colon groups. */
++function withoutDottedTail(address: string): string {
++  const tail = DOTTED_TAIL.exec(address);
++  if (!tail) return address;
++  const [a, b, c, d] = tail.slice(1).map(Number) as [number, number, number, number];
++  return `${address.slice(0, tail.index)}${hexGroup(a * 256 + b)}:${hexGroup(c * 256 + d)}`;
++}
++
++function firstFourGroups(address: string): string[] {
++  const [left = '', right = ''] = withoutDottedTail(address.split('%')[0]!).split('::');
++  const head = asGroups(left);
++  const tail = address.includes('::') ? asGroups(right) : [];
++  const gap = Array<string>(Math.max(0, 8 - head.length - tail.length)).fill('0');
++  return [...head, ...gap, ...tail].slice(0, 4).map(group => hexGroup(parseInt(group, 16)));
++}
++
++/* What the limit counts an address as: an IPv4 as its text, an IPv6 as its /64, since one visitor holds a whole /64. */
++export function addressKey(address: string): string {
++  const mapped = IPV4_MAPPED.exec(address);
++  if (mapped) return mapped[1]!;
++  return address.includes(':') ? `${firstFourGroups(address).join(':')}::/64` : address;
++}
++
++export interface FullLimit {
++  oldest: Date;
++  windowMs: number;
++}
++
++/* How long to wait: the longest of the full limits, each free again when its oldest try leaves its window. */
++export function longestWait(full: FullLimit[], now: Date): { retryAfterS: number; windowMs: number } {
++  const waits = full.map(({ oldest, windowMs }) => ({ retryAfterS: Math.ceil((oldest.getTime() + windowMs - now.getTime()) / 1000), windowMs }));
++  const longest = waits.reduce((a, b) => (b.retryAfterS > a.retryAfterS ? b : a), { retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
++  return { ...longest, retryAfterS: Math.max(1, longest.retryAfterS) };
++}
++
++/* Db is generic over the driver, so a raw statement's result is unknown here; both drivers answer { rows }. */
++const rowsIn = <T>(result: unknown): T[] => (result as { rows: T[] }).rows;
++
++type Hashes = { e: string; a: string };
++
++const scopeOf = ({ e, a }: Hashes): Record<LimitName, SQL> => ({
++  emailAddress: sql`email_hash = ${e} AND address_hash = ${a}`,
++  email: sql`email_hash = ${e}`,
++  address: sql`address_hash = ${a}`,
++});
++
++const inWindow = (windowMs: number) => sql`at > now() - ${windowMs / 1000}::int * interval '1 second'`;
++const rowsOf = (name: LimitName, hashes: Hashes) => sql`FROM sign_in_attempts WHERE ${scopeOf(hashes)[name]} AND ${inWindow(SIGN_IN_LIMITS[name].windowMs)}`;
++const underLimit = (name: LimitName, hashes: Hashes) => sql`(SELECT count(*) ${rowsOf(name, hashes)}) < ${SIGN_IN_LIMITS[name].max}`;
++
++async function insertIfUnder(db: Db, hashes: Hashes): Promise<string | undefined> {
++  const allUnder = sql.join(LIMIT_NAMES.map(name => underLimit(name, hashes)), sql` AND `);
++  /* The lock is its own statement so the insert, run after it, takes a new snapshot that sees every try committed
++     before; the commit lets the lock go before the password is checked. */
++  const inserted: unknown = await db.transaction(async tx => {
++    await tx.execute(sql`SELECT pg_advisory_xact_lock(${SIGN_IN_LOCK}::bigint)`);
++    return tx.execute(sql`INSERT INTO sign_in_attempts (email_hash, address_hash) SELECT ${hashes.e}, ${hashes.a} WHERE ${allUnder} RETURNING id`);
++  });
++  return rowsIn<{ id: string }>(inserted)[0]?.id;
++}
++
++async function fullLimits(db: Db, hashes: Hashes): Promise<{ full: FullLimit[]; now: Date }> {
++  const perLimit = LIMIT_NAMES.map(name => sql`SELECT ${name}::text AS name, count(*)::int AS n, min(at) AS oldest, now() AS now ${rowsOf(name, hashes)}`);
++  const rows = rowsIn<{ name: LimitName; n: number; oldest: Date | string | null; now: Date | string }>(await db.execute(sql.join(perLimit, sql` UNION ALL `)));
++  const full = rows.filter(row => row.oldest && row.n >= SIGN_IN_LIMITS[row.name].max).map(row => ({ oldest: new Date(row.oldest!), windowMs: SIGN_IN_LIMITS[row.name].windowMs }));
++  return { full, now: new Date(rows[0]!.now) };
++}
++
++export type SignInTry = { allowed: true; id: string } | { allowed: false; retryAfterS: number; windowMs: number };
++
++/* Writes the try before the password is checked, only while all three counts are under their limit, so a burst counts. */
++export async function signInTry(db: Db, email: string, address: string): Promise<SignInTry> {
++  const hashes = { e: hashToken(email), a: hashToken(addressKey(address)) };
++  await db.delete(signInAttempts).where(sql`${signInAttempts.at} < now() - ${KEEP_MS / 1000}::int * interval '1 second'`);
++  const id = await insertIfUnder(db, hashes);
++  if (id) return { allowed: true, id };
++  const { full, now } = await fullLimits(db, hashes);
++  return { allowed: false, ...longestWait(full, now) };
++}
++
++/* A sign-in that worked is not a failure, so its try is taken back. */
++export async function signInWorked(db: Db, id: string): Promise<void> {
++  await db.delete(signInAttempts).where(eq(signInAttempts.id, id));
++}
+diff --git a/apps/server/src/db/agent-sql.ts b/apps/server/src/db/agent-sql.ts
+index 98b3f185..7f47b496 100644
+--- a/apps/server/src/db/agent-sql.ts
++++ b/apps/server/src/db/agent-sql.ts
+@@ -7,17 +7,17 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
+ /* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
+ export type SqlMode = 'write' | 'read';
+ 
+ /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
+ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+ 
+ /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
+    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. */
+-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials'];
++export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'sign_in_attempts'];
+ /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
+    every join from it, so it is one too. The account a node is signed in to names a person's email. */
+ export const SECRET: Record<string, string[]> = {
+   people: ['password_hash'],
+   jobs: ['tool_token_hash'],
+   subscriptions: ['secret_enc'],
+   nodes: ['key_hash', 'account'],
+   machines: ['machine_key'],
+diff --git a/apps/server/src/db/schema.ts b/apps/server/src/db/schema.ts
+index 8b324206..edac6ed1 100644
+--- a/apps/server/src/db/schema.ts
++++ b/apps/server/src/db/schema.ts
+@@ -50,16 +50,28 @@ export const sessions = pgTable(
+     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+     createdAt: createdAt(),
+     /* True only on rows made before the __Host- cookie existed: the migration's default marks them, startSession never does. */
+     beforeHostCookie: boolean('before_host_cookie').notNull().default(true),
+   },
+   t => [index('sessions_person_id').on(t.personId)],
+ );
+ 
++/* One row per sign-in try that was let through, kept an hour. Only SHA-256 hashes of the email and the address are stored. */
++export const signInAttempts = pgTable(
++  'sign_in_attempts',
++  {
++    id: id(),
++    emailHash: text('email_hash').notNull(),
++    addressHash: text('address_hash').notNull(),
++    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
++  },
++  t => [index('sign_in_attempts_email').on(t.emailHash, t.at), index('sign_in_attempts_address').on(t.addressHash, t.at), index('sign_in_attempts_at').on(t.at)],
++);
++
+ export const invites = pgTable(
+   'invites',
+   {
+     tokenHash: text('token_hash').primaryKey(),
+     companyId: companyId(),
+     personId: uuid('person_id').notNull().references(() => people.id),
+     createdBy: uuid('created_by').notNull().references(() => people.id),
+     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+diff --git a/apps/server/src/modules/auth/routes.ts b/apps/server/src/modules/auth/routes.ts
+index edcd2eec..2d5901d3 100644
+--- a/apps/server/src/modules/auth/routes.ts
++++ b/apps/server/src/modules/auth/routes.ts
+@@ -1,49 +1,48 @@
+ import { eq } from 'drizzle-orm';
+ import type { FastifyInstance } from 'fastify';
+ import { z } from 'zod';
+ import type { Deps } from '../../app.js';
+-import { guard, limiter } from '../../auth/limit.js';
++import { refuse } from '../../auth/limit.js';
+ import { hashPassword, verifyPassword } from '../../auth/password.js';
+ import { actsAsCeo } from '../../auth/decisions.js';
+ import { endSession, personColumns, requirePerson, startSession } from '../../auth/session.js';
++import { signInTry, signInWorked } from '../../auth/sign-in-limit.js';
+ import { clientAddress } from '../../auth/tunnel.js';
+ import { companies, people } from '../../db/schema.js';
+ import { ApiError } from '../../errors.js';
+ 
+ const LoginBody = z.object({
+   email: z.string().trim().toLowerCase().min(1).max(320),
+   password: z.string().min(1).max(200),
+ });
+ 
+ /* Unknown emails still pay for one hash check, so response time does not reveal who has an account. */
+ let dummyHash: Promise<string> | undefined;
+ const fallbackHash = () => (dummyHash ??= hashPassword('hornhoof-no-such-person'));
+ 
+ const wrongPassword = () => new ApiError(401, 'unauthorized', 'Wrong email or password.', 'wrong_password');
+ 
+ export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
+-  /* Counted per email and address, so whoever knows the owner's email cannot lock the owner out from elsewhere; and per
+-     email from anywhere, more softly, so many addresses cannot guess one password freely. */
+-  const attempts = limiter();
+-  const perEmail = limiter({ max: 50, windowMs: 60 * 60 * 1000 });
+-
+   app.post('/api/auth/login', async (req, reply) => {
+     const body = LoginBody.parse(req.body);
+-    guard(reply, attempts, `${body.email} ${await clientAddress(req, config)}`);
+-    guard(reply, perEmail, body.email);
++    /* Counted in the database per email and address, per email and per address, so whoever knows the owner's email
++       cannot lock the owner out from elsewhere, and many addresses cannot guess one password freely. */
++    const attempt = await signInTry(db, body.email, await clientAddress(req, config));
++    if (!attempt.allowed) refuse(reply, attempt.retryAfterS, attempt.windowMs);
+     const [row] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.email, body.email));
+     const ok = await verifyPassword(body.password, row?.passwordHash ?? (await fallbackHash()));
+     if (!row?.passwordHash || !ok || row.status !== 'active') throw wrongPassword();
+ 
+     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit passwordHash from the returned person
+     const { passwordHash: _, ...person } = row;
+     /* An owner link or a disable that lands during the check above makes this password an old one. */
+     if (!(await startSession(reply, db, config, person.id, row.passwordHash))) throw wrongPassword();
++    await signInWorked(db, attempt.id);
+     return { person };
+   });
+ 
+   app.post('/api/auth/logout', async (req, reply) => {
+     await endSession(req, reply, db);
+     reply.code(204).send();
+   });
+ 
+diff --git a/apps/server/test/migration-history.test.ts b/apps/server/test/migration-history.test.ts
+index 0b5b94f5..e65abda7 100644
+--- a/apps/server/test/migration-history.test.ts
++++ b/apps/server/test/migration-history.test.ts
+@@ -83,18 +83,18 @@ describe('migration histories merged in turn 5', () => {
+ 
+     for (const [index, table] of tables.entries()) {
+       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
+       const after = await copy.query(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
+       expect(after.rows, table).toEqual(before[index]!.rows);
+     }
+     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+     expect(recorded).toEqual(expect.arrayContaining(recordedBefore));
+-    expect(recorded).toHaveLength(53);
+-    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(53);
++    expect(recorded).toHaveLength(54);
++    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(54);
+     expect(recorded.map(row => Number(row.created_at))).toEqual(expect.arrayContaining([
+       1793700000000, 1793714531704, 1793714572653, 1793716912449, 1793727699000, 1793727700000, 1793739121203,
+     ]));
+     const indexes = await copy.query<{ indexname: string }>(`select indexname from pg_indexes where indexname in (
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+       'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner')`);
+     expect(indexes.rows).toHaveLength(8);
+ 
+diff --git a/apps/server/test/migration-metadata.test.ts b/apps/server/test/migration-metadata.test.ts
+index 02284bce..246817d9 100644
+--- a/apps/server/test/migration-metadata.test.ts
++++ b/apps/server/test/migration-metadata.test.ts
+@@ -15,17 +15,17 @@ async function journal(): Promise<{ entries: JournalEntry[] }> {
+ }
+ 
+ async function snapshot(tag: string): Promise<Snapshot> {
+   return JSON.parse(await readFile(join(folder, 'meta', `${tag.slice(0, 4)}_snapshot.json`), 'utf8')) as Snapshot;
+ }
+ 
+ describe('merged migration metadata', () => {
+   it('carries both histories into the latest snapshot used to generate the next migration', async () => {
+-    const latest = await snapshot('0053_session_handover');
++    const latest = await snapshot('0054_sign_in_attempts');
+     expect(Object.keys(latest.tables['public.jobs']!.columns)).toEqual(expect.arrayContaining([
+       'failure', 'not_before', 'restarted_at', 'requested_prompt',
+     ]));
+     expect(Object.keys(latest.tables['public.agent_events']!.indexes)).toEqual(expect.arrayContaining([
+       'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+     ]));
+     expect(Object.keys(latest.tables['public.node_codes']!.columns)).toContain('dismissed_subscription_ids');
+     expect(Object.keys(latest.tables['public.node_codes']!.indexes)).toContain('node_codes_active_owner');
+@@ -54,17 +54,17 @@ describe('merged migration metadata', () => {
+       previous = current.id;
+     }
+   });
+ 
+   it('describes the columns and regular indexes of a freshly migrated database', async () => {
+     const client = new PGlite();
+     onTestFinished(() => client.close());
+     await migrate(drizzle(client), { migrationsFolder: folder });
+-    const latest = await snapshot('0053_session_handover');
++    const latest = await snapshot('0054_sign_in_attempts');
+     for (const [table, definition] of Object.entries(latest.tables)) {
+       const name = table.slice('public.'.length);
+       const columns = await client.query<{ column_name: string }>('select column_name from information_schema.columns where table_schema = $1 and table_name = $2', ['public', name]);
+       expect(columns.rows.map(column => column.column_name).sort(), table).toEqual(Object.keys(definition.columns).sort());
+       const indexes = await client.query<{ indexname: string }>(`select indexname from pg_indexes i
+         where schemaname = $1 and tablename = $2
+           and not exists (select 1 from pg_constraint c where c.conindid = (quote_ident(i.schemaname) || '.' || quote_ident(i.indexname))::regclass)`, ['public', name]);
+       expect(indexes.rows.map(index => index.indexname).sort(), table).toEqual(Object.keys(definition.indexes).sort());
+diff --git a/apps/server/test/orchestrator-control.test.ts b/apps/server/test/orchestrator-control.test.ts
+index 03290beb..8c4d10fc 100644
+--- a/apps/server/test/orchestrator-control.test.ts
++++ b/apps/server/test/orchestrator-control.test.ts
+@@ -418,17 +418,17 @@ describe('the orchestrator reads and changes the database itself', () => {
+     expect(JSON.parse(text(write))).toEqual([{ rows: [], changed: 1 }]);
+     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno Diaz');
+     expect(heard).toEqual(['org']);
+   });
+ 
+   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
+     const { app } = await company();
+     const client = await mcp(app, TOKEN);
+-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
++    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM sign_in_attempts', 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toMatch(/permission denied|must be owner/);
+     }
+     expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.');
+     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+   });
+ 
+@@ -575,17 +575,17 @@ describe('the orchestrator reads and changes the database itself', () => {
+       `SET TRANSACTION READ WRITE; UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'`,
+       'CREATE TABLE notes (id int)',
+     ];
+     for (const sql of writes) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toContain('Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.');
+     }
+-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT account FROM nodes', 'SELECT * FROM plan_credentials', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
++    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT account FROM nodes', 'SELECT * FROM sign_in_attempts', 'SELECT * FROM plan_credentials', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
+       const res = await call(client, 'database', { sql });
+       expect(res.isError, sql).toBe(true);
+       expect(text(res), sql).toMatch(/closed to this tool/);
+       expect(text(res), sql).not.toContain('Operations reads the database');
+     }
+     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
+     expect((await db.select().from(tasks).where(eq(tasks.id, task.id))).length).toBe(1);
+     const read = await call(client, 'database', { sql: `SELECT status, error FROM jobs WHERE agent_id = '${wanda.id}'` });
+diff --git a/apps/server/test/sign-in-limit.test.ts b/apps/server/test/sign-in-limit.test.ts
+new file mode 100644
+index 00000000..a77d813f
+--- /dev/null
++++ b/apps/server/test/sign-in-limit.test.ts
+@@ -0,0 +1,120 @@
++import type { PGlite } from '@electric-sql/pglite';
++import { sql } from 'drizzle-orm';
++import { describe, expect, it } from 'vitest';
++import { addressKey, longestWait, SIGN_IN_LIMITS, SIGN_IN_LOCK } from '../src/auth/sign-in-limit.js';
++import { appOn, SETUP, setUpCompany, statements, testApp } from './helpers.js';
++
++const login = (email: string, password: string, remoteAddress: string) => ({ method: 'POST' as const, url: '/api/auth/login', payload: { email, password }, remoteAddress });
++const WRONG = 'wrong password!';
++const rowsOf = (result: unknown) => (result as { rows: Record<string, unknown>[] }).rows;
++
++describe('addressKey', () => {
++  it('reads an address as the limit counts it', () => {
++    expect(addressKey('203.0.113.5')).toBe('203.0.113.5');
++    expect(addressKey('::ffff:203.0.113.5')).toBe('203.0.113.5');
++    expect(addressKey('2001:db8:1:2:3:4:5:6')).toBe('2001:db8:1:2::/64');
++    expect(addressKey('2001:0db8:0001:0002::ffff')).toBe('2001:db8:1:2::/64');
++    expect(addressKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
++    expect(addressKey('::1')).toBe('0:0:0:0::/64');
++  });
++});
++
++describe('longestWait', () => {
++  const now = new Date('2026-01-01T12:00:00Z');
++  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000);
++
++  it('waits until the oldest try of a full limit leaves its window, rounded up to whole seconds', () => {
++    const window = SIGN_IN_LIMITS.emailAddress.windowMs;
++    const oldest = new Date(minutesAgo(10).getTime() - 500);
++    expect(longestWait([{ oldest, windowMs: window }], now)).toEqual({ retryAfterS: 300, windowMs: window });
++  });
++
++  it('answers the longest wait of the full limits, with that limit window', () => {
++    const short = { oldest: minutesAgo(14), windowMs: SIGN_IN_LIMITS.emailAddress.windowMs };
++    const long = { oldest: minutesAgo(5), windowMs: SIGN_IN_LIMITS.address.windowMs };
++    expect(longestWait([short, long], now)).toEqual({ retryAfterS: 55 * 60, windowMs: SIGN_IN_LIMITS.address.windowMs });
++  });
++
++  it('answers one second when no limit is full any more', () => {
++    expect(longestWait([], now)).toEqual({ retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
++  });
++
++  it('never answers less than one second', () => {
++    expect(longestWait([{ oldest: minutesAgo(15), windowMs: SIGN_IN_LIMITS.emailAddress.windowMs }], now).retryAfterS).toBe(1);
++  });
++});
++
++describe('POST /api/auth/login limits in the database', () => {
++  it('stops one address after 30 failed sign-ins in an hour across emails', async () => {
++    const { app } = await testApp();
++    await setUpCompany(app);
++    for (let i = 0; i < 30; i++) expect((await app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.5'))).statusCode).toBe(401);
++    const blocked = await app.inject(login('ivan@acme.com', SETUP.password, '203.0.113.5'));
++    expect(blocked.statusCode).toBe(429);
++    expect(blocked.json().error).toMatchObject({ code: 'too_many', reason: 'too_many_attempts', message: 'Too many attempts. Wait up to 60 minutes, then try again.' });
++    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(15 * 60);
++    expect((await app.inject(login('ivan@acme.com', SETUP.password, '198.51.100.20'))).statusCode).toBe(200);
++  });
++
++  it('counts an IPv6 visitor by its /64', async () => {
++    const { app } = await testApp();
++    await setUpCompany(app);
++    for (let i = 1; i <= 30; i++) expect((await app.inject(login(`x${i}@acme.com`, WRONG, `2001:db8:1:2::${i}`))).statusCode).toBe(401);
++    expect((await app.inject(login('ivan@acme.com', SETUP.password, '2001:db8:1:2::ffff'))).statusCode).toBe(429);
++    expect((await app.inject(login('ivan@acme.com', WRONG, '2001:db8:1:3::1'))).statusCode).toBe(401);
++  });
++
++  it('keeps the counts across a restart', async () => {
++    const first = await testApp();
++    await setUpCompany(first.app);
++    for (let i = 0; i < 10; i++) expect((await first.app.inject(login('ivan@acme.com', WRONG, '203.0.113.5'))).statusCode).toBe(401);
++    const second = await appOn((first.db as unknown as { $client: PGlite }).$client);
++    expect((await second.app.inject(login('ivan@acme.com', SETUP.password, '203.0.113.5'))).statusCode).toBe(429);
++  });
++
++  it('does not count a sign-in that worked', async () => {
++    const { app } = await testApp();
++    await setUpCompany(app);
++    for (let i = 0; i < 9; i++) expect((await app.inject(login('ivan@acme.com', WRONG, '203.0.113.5'))).statusCode).toBe(401);
++    expect((await app.inject(login('ivan@acme.com', SETUP.password, '203.0.113.5'))).statusCode).toBe(200);
++    expect((await app.inject(login('ivan@acme.com', WRONG, '203.0.113.5'))).statusCode).toBe(401);
++    expect((await app.inject(login('ivan@acme.com', SETUP.password, '203.0.113.5'))).statusCode).toBe(429);
++  });
++
++  it('forgets tries older than an hour', async () => {
++    const { app, db } = await testApp();
++    await setUpCompany(app);
++    for (let i = 0; i < 30; i++) {
++      await app.inject(login(`old${i}@acme.com`, WRONG, '203.0.113.5'));
++    }
++    await db.execute(sql`update sign_in_attempts set at = now() - interval '61 minutes'`);
++    expect((await app.inject(login('ivan@acme.com', SETUP.password, '203.0.113.5'))).statusCode).toBe(200);
++    expect(rowsOf(await db.execute(sql`select count(*)::int as n from sign_in_attempts`))).toEqual([{ n: 0 }]);
++  });
++
++  it('keeps no email or address in the clear', async () => {
++    const { app, db } = await testApp();
++    await setUpCompany(app);
++    await app.inject(login('ivan@acme.com', WRONG, '203.0.113.5'));
++    const rows = rowsOf(await db.execute(sql`select t::text as row from sign_in_attempts t`));
++    expect(rows).toHaveLength(1);
++    expect(String(rows[0]!.row)).not.toContain('ivan@acme.com');
++    expect(String(rows[0]!.row)).not.toContain('203.0.113.5');
++  });
++
++  it('lets 30 of 100 wrong sign-ins at once from one address reach the password check', async () => {
++    const { app } = await testApp();
++    await setUpCompany(app);
++    const seen = statements();
++    const answers = await Promise.all(Array.from({ length: 100 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
++    expect(answers.filter(a => a.statusCode === 401)).toHaveLength(30);
++    expect(answers.filter(a => a.statusCode === 429)).toHaveLength(70);
++    /* PGlite has one connection, so the order of the statements is what shows the lock holds the limit on a pool. */
++    const inserts = seen.flatMap((s, at) => (s.sql.includes('INSERT INTO sign_in_attempts') ? [at] : []));
++    expect(inserts).toHaveLength(100);
++    for (const at of inserts) {
++      expect(seen[at - 1]?.sql).toContain('pg_advisory_xact_lock');
++      expect(seen[at - 1]?.params).toEqual([SIGN_IN_LOCK]);
++    }
++  });
++});
+
+## 7430ac0e Serve the link over TLS on port 8443, with the visitor's address from the PROXY header
+
+The https of a company's link is to end at the company's own machine. This adds the place it ends: a listener that
+reads the PROXY v2 header the link's frpc sends first, does TLS itself and hands the decrypted connection to Fastify's
+own http server, so every route, hook and WebSocket works on it unchanged. Every request through it counts as over the
+link, and its visitor is the header's source only when the connection comes from the tunnel container, so a visitor's
+own X-Forwarded-For and a stranger's header are never believed. Nothing sends traffic there yet; port 8080 is as it
+was.
+
+Proved by proxy-header.test.ts, link-listener.test.ts and auth.test.ts, with each listener test seen to fail on a
+listener broken that way. main.ts has no test of its own, as the plan asks none and it needs Postgres; types cover it.
+
+Ruling: the plan's test with 30 wrong sign-ins across emails is held as an it.todo, and the same test on today's limit of 10 per email and address runs instead - why: 1b T3's address limit is not in this lane's base, as the map allows - cost if wrong: the seam between 1b T3 and T5 stays unproved until that test is written at landing
+Ruling: isTunnelAddress and socketAddress live in listener.ts and auth/tunnel.ts calls them - why: tunnel.ts imports linkVisitor from listener.ts, so the other way is an import cycle, and the plan names no third source file - cost if wrong: plan 2 Task 6 moves two small functions when linkVisitor leaves the app
+Ruling: a LOCAL header gives source null whatever family and length it names - why: PROXY protocol 2.2 says to ignore them, and the plan's short lengths concern the addresses of a PROXY command - cost if wrong: a LOCAL header with a short family is taken, with no source to believe
+Ruling: the later of two use calls wins, though the plan does not say so - why: a stand-in takes longer to make than a given certificate, so an earlier call could replace a real certificate with a stand-in - cost if wrong: one counter
+Ruling: the header bytes for tests are in a new test/proxy-v2.ts, which the plan's Files do not name - why: both new test files build them, and a change to helpers.ts would run the whole server package - cost if wrong: one small file
+
+---
+ apps/server/src/auth/tunnel.ts              |  31 +--
+ apps/server/src/main.ts                     |  20 +-
+ apps/server/src/modules/tls/listener.ts     | 142 +++++++++++
+ apps/server/src/modules/tls/proxy-header.ts |  40 ++++
+ apps/server/test/link-listener.test.ts      | 356 ++++++++++++++++++++++++++++
+ apps/server/test/proxy-header.test.ts       |  85 +++++++
+ apps/server/test/proxy-v2.ts                |  30 +++
+ 7 files changed, 681 insertions(+), 23 deletions(-)
+
+diff --git a/apps/server/src/auth/tunnel.ts b/apps/server/src/auth/tunnel.ts
+index 9fddfe26..b5f73880 100644
+--- a/apps/server/src/auth/tunnel.ts
++++ b/apps/server/src/auth/tunnel.ts
+@@ -1,36 +1,29 @@
+-import { lookup } from 'node:dns/promises';
+ import type { FastifyRequest } from 'fastify';
+ import type { Config } from '../config.js';
++import { isTunnelAddress, linkVisitor, socketAddress } from '../modules/tls/listener.js';
+ 
+-const socketAddress = (req: FastifyRequest) => (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
++/* Whether the request came from the tunnel container's own address. */
++const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean> => isTunnelAddress(socketAddress(req.socket), config);
+ 
+-/* Whether the request came from the tunnel container's own address, looked up by its name each time, since the
+-   container gets a new address when it starts again. */
+-async function fromTunnel(req: FastifyRequest, config: Config): Promise<boolean> {
+-  if (!config.tunnelHost) return false;
+-  const from = socketAddress(req);
+-  try {
+-    return (await lookup(config.tunnelHost, { all: true })).some(a => a.address === from);
+-  } catch {
+-    return false;
+-  }
+-}
+-
+-/* A request the tunnel container passed on from https, as the relay's X-Forwarded-Proto says. Anyone can write that
+-   header, so it is believed only from the tunnel container. */
++/* A request through the TLS listener, or one the tunnel container passed on from https, as the relay's X-Forwarded-Proto
++   says. Anyone can write that header, so it is believed only from the tunnel container. */
+ async function cameOverHttps(req: FastifyRequest, config: Config): Promise<boolean> {
++  if (linkVisitor(req.socket) !== undefined) return true;
+   const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim();
+   return proto === 'https' && (await fromTunnel(req, config));
+ }
+ 
+ /* Whether the request is one of a visitor of the public link, the one the __Host- session cookie belongs to. */
+ export async function overLink(req: FastifyRequest, config: Config): Promise<boolean> {
+   return cameOverHttps(req, config);
+ }
+ 
+-/* Who sent the request: through the tunnel, the first address of X-Forwarded-For, where the relay puts the visitor in
+-   place of whatever the visitor wrote; otherwise the socket's own address. */
++/* Who sent the request: through the TLS listener, the visitor it read, whatever the visitor's headers say; through the
++   tunnel, the first address of X-Forwarded-For, where the relay puts the visitor in place of whatever the visitor wrote;
++   otherwise the socket's own address. */
+ export async function clientAddress(req: FastifyRequest, config: Config): Promise<string> {
++  const visitor = linkVisitor(req.socket);
++  if (visitor !== undefined) return visitor;
+   const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim();
+-  return forwarded && (await fromTunnel(req, config)) ? forwarded : socketAddress(req);
++  return forwarded && (await fromTunnel(req, config)) ? forwarded : socketAddress(req.socket);
+ }
+diff --git a/apps/server/src/main.ts b/apps/server/src/main.ts
+index 48dd4524..17687f44 100644
+--- a/apps/server/src/main.ts
++++ b/apps/server/src/main.ts
+@@ -1,32 +1,44 @@
+ import { buildApp } from './app.js';
+ import { loadConfig } from './config.js';
+ import { openAgentSql } from './db/agent-sql.js';
+ import { APP_NAME, openDb } from './db/client.js';
+-import { publicUrl } from './modules/link/link.js';
++import { linkOf, publicUrl } from './modules/link/link.js';
+ import { setupLink } from './modules/setup/code.js';
++import { LINK_TLS_PORT, LinkListener } from './modules/tls/listener.js';
+ 
+ function requireDbUrl(url: string | undefined): string {
+   if (!url) throw new Error('DATABASE_URL is not set.');
+   return url;
+ }
+ 
+ const config = loadConfig(process.env);
+ const url = requireDbUrl(config.databaseUrl);
+ const db = openDb(url, APP_NAME);
+ const app = await buildApp({
+   db,
+   agentSql: await openAgentSql(url),
+   config,
+   logger: { level: process.env.LOG_LEVEL || 'info' },
+ });
+ await app.listen({ port: config.port, host: '0.0.0.0' });
++const listener = new LinkListener({ app, config, log: app.log });
++await listener.listen(LINK_TLS_PORT);
++const publicLink = await linkOf(db);
++await listener.use(publicLink && new URL(publicLink.url).hostname, null);
+ console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
+ /* Until a company exists, only the link with the setup code sets it up. */
+ const link = await setupLink(db, config);
+ if (link) console.log(`Open this link to set Hornhoof up: ${link}`);
+ 
++/* The listener stops taking connections first; the app's close then ends the event streams and WebSockets on those it
++   already has, which lets the listener finish. */
++async function stop(): Promise<void> {
++  const closing = listener.close();
++  await app.close();
++  await closing;
++  process.exit(0);
++}
++
+ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+-  process.once(signal, () => {
+-    void app.close().then(() => process.exit(0));
+-  });
++  process.once(signal, () => void stop());
+ }
+diff --git a/apps/server/src/modules/tls/listener.ts b/apps/server/src/modules/tls/listener.ts
+new file mode 100644
+index 00000000..9c0cc500
+--- /dev/null
++++ b/apps/server/src/modules/tls/listener.ts
+@@ -0,0 +1,142 @@
++import { lookup } from 'node:dns/promises';
++import net, { type AddressInfo } from 'node:net';
++import { createSecureContext, TLSSocket } from 'node:tls';
++import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
++import type { Config } from '../../config.js';
++import { readProxyV2, type ProxyHeader } from './proxy-header.js';
++import { selfSigned } from './x509.js';
++
++/* The tunnel container reaches it on the default network; compose does not publish it. */
++export const LINK_TLS_PORT = 8443;
++
++const STAND_IN_HOST = 'hornhoof.invalid';
++const HEADER_MS = 5000;
++const HANDSHAKE_MS = 10_000;
++const CLOSE_GRACE_MS = 5000;
++
++type WholeHeader = Extract<ProxyHeader, { state: 'done' }>;
++
++/* Who each decrypted connection is for, kept beside the socket since Fastify only sees the socket. */
++const visitors = new WeakMap<object, string>();
++
++export function linkVisitor(socket: unknown): string | undefined {
++  return visitors.get(socket as object);
++}
++
++export const socketAddress = (socket: { remoteAddress?: string }): string => (socket.remoteAddress ?? '').replace(/^::ffff:/, '');
++
++/* Whether an address is the tunnel container's, looked up by its name each time, since the container gets a new address
++   when it starts again. */
++export async function isTunnelAddress(address: string, config: Config): Promise<boolean> {
++  if (!config.tunnelHost) return false;
++  try {
++    return (await lookup(config.tunnelHost, { all: true })).some(a => a.address === address);
++  } catch {
++    return false;
++  }
++}
++
++/* Anyone who reaches the port can write a header, so its source counts only from the tunnel container. */
++async function visitorOf(raw: net.Socket, source: string | null, config: Config): Promise<string> {
++  const address = socketAddress(raw);
++  return source !== null && (await isTunnelAddress(address, config)) ? source : address;
++}
++
++/* Reads until the header is whole and leaves what came after it for TLS. Null when there will be no header: it was
++   refused, it took too long, or the connection ended. */
++function wholeHeader(raw: net.Socket): Promise<WholeHeader | null> {
++  return new Promise(resolve => {
++    let read = Buffer.alloc(0);
++    const finish = (header: WholeHeader | null) => {
++      clearTimeout(deadline);
++      raw.off('data', onData);
++      raw.off('close', onClose);
++      resolve(header);
++    };
++    const onClose = () => finish(null);
++    const onData = (chunk: Buffer) => {
++      read = Buffer.concat([read, chunk]);
++      const header = readProxyV2(read);
++      if (header.state === 'more') return;
++      if (header.state === 'bad') return finish(null);
++      raw.pause();
++      raw.unshift(read.subarray(header.length));
++      finish(header);
++    };
++    const deadline = setTimeout(onClose, HEADER_MS);
++    raw.on('data', onData);
++    raw.once('close', onClose);
++  });
++}
++
++/* The company's end of the link's TLS. The link's frpc opens each connection with a PROXY v2 header and then the visitor's
++   TLS, which ends here; the decrypted connection goes to Fastify's own http server, so every route, hook and WebSocket
++   works on it unchanged. */
++export class LinkListener {
++  private readonly server: net.Server;
++  private readonly connections = new Set<net.Socket>();
++  /* Replaced in listen before a connection can arrive, so a handshake always finds a certificate. */
++  private context = createSecureContext();
++  private uses = 0;
++
++  constructor(private readonly opts: { app: FastifyInstance; config: Config; log: FastifyBaseLogger }) {
++    this.server = net.createServer({ noDelay: true }, raw => this.accept(raw));
++    this.server.on('error', err => opts.log.error({ err }, 'The link TLS listener failed.'));
++  }
++
++  async listen(port: number, host = '0.0.0.0'): Promise<number> {
++    await this.use(null, null);
++    await new Promise<void>((resolve, reject) => {
++      this.server.once('error', reject);
++      this.server.listen(port, host, () => {
++        this.server.off('error', reject);
++        resolve();
++      });
++    });
++    return (this.server.address() as AddressInfo).port;
++  }
++
++  /* For new connections. Making a stand-in takes a moment, so a later call may finish first, and the later call is the
++     one that counts. */
++  async use(host: string | null, cert: { certPem: string; keyPem: string } | null): Promise<void> {
++    const use = ++this.uses;
++    const served = cert ?? (await selfSigned(host ?? STAND_IN_HOST));
++    if (use === this.uses) this.context = createSecureContext({ cert: served.certPem, key: served.keyPem });
++  }
++
++  /* The app's own close ends the event streams and WebSockets, so the grace is for what is left after that. */
++  async close(graceMs = CLOSE_GRACE_MS): Promise<void> {
++    const grace = setTimeout(() => this.connections.forEach(raw => raw.destroy()), graceMs);
++    await new Promise<void>(resolve => this.server.close(() => resolve()));
++    clearTimeout(grace);
++  }
++
++  private accept(raw: net.Socket): void {
++    this.connections.add(raw);
++    raw.once('close', () => this.connections.delete(raw));
++    raw.on('error', err => this.opts.log.debug({ err }, 'A link connection failed.'));
++    this.open(raw).catch((err: unknown) => {
++      this.opts.log.warn({ err }, 'A link connection could not be opened.');
++      raw.destroy();
++    });
++  }
++
++  private async open(raw: net.Socket): Promise<void> {
++    const header = await wholeHeader(raw);
++    if (!header) return void raw.destroy();
++    const visitor = await visitorOf(raw, header.source, this.opts.config);
++    if (!raw.destroyed) this.startTls(raw, visitor);
++  }
++
++  private startTls(raw: net.Socket, visitor: string): void {
++    const secure = new TLSSocket(raw, { isServer: true, secureContext: this.context, ALPNProtocols: ['http/1.1'] });
++    visitors.set(secure, visitor);
++    const handshake = setTimeout(() => secure.destroy(), HANDSHAKE_MS);
++    secure.once('close', () => clearTimeout(handshake));
++    secure.on('error', err => this.opts.log.debug({ err }, 'A link connection failed in TLS.'));
++    secure.once('secure', () => {
++      clearTimeout(handshake);
++      this.opts.app.server.emit('connection', secure);
++    });
++  }
++}
+diff --git a/apps/server/src/modules/tls/proxy-header.ts b/apps/server/src/modules/tls/proxy-header.ts
+new file mode 100644
+index 00000000..9b9e1637
+--- /dev/null
++++ b/apps/server/src/modules/tls/proxy-header.ts
+@@ -0,0 +1,40 @@
++/* The PROXY protocol v2 header the link's frpc sends first on each connection (haproxy's proxy-protocol.txt, 2.2). */
++export type ProxyHeader = { state: 'more' } | { state: 'bad' } | { state: 'done'; length: number; source: string | null };
++
++const SIGNATURE = Buffer.from('0d0a0d0a000d0a515549540a', 'hex');
++const FIXED_LENGTH = 16;
++const MAX_FOLLOWING = 512;
++const V2_LOCAL = 0x20;
++const V2_PROXY = 0x21;
++
++const ipv4Source = (buf: Buffer): string => buf.subarray(FIXED_LENGTH, FIXED_LENGTH + 4).join('.');
++const ipv6Source = (buf: Buffer): string =>
++  Array.from({ length: 8 }, (_unused, i) => buf.readUInt16BE(FIXED_LENGTH + i * 2).toString(16)).join(':');
++
++/* The TCP families: how long their two addresses and two ports are, and how to read the source among them. */
++const TCP_FAMILIES = new Map([
++  [0x11, { addressesLength: 12, source: ipv4Source }],
++  [0x21, { addressesLength: 36, source: ipv6Source }],
++]);
++
++/* What a PROXY command's addresses say. Another family gives no source, and the socket's own address counts then; a TCP
++   family too short for its addresses is a broken header. */
++function fromAddresses(buf: Buffer, following: number): ProxyHeader {
++  const length = FIXED_LENGTH + following;
++  const family = TCP_FAMILIES.get(buf[13]!);
++  if (!family) return { state: 'done', length, source: null };
++  return following < family.addressesLength ? { state: 'bad' } : { state: 'done', length, source: family.source(buf) };
++}
++
++/* These bytes come from the network, so it never throws: a `bad` closes only that connection. */
++export function readProxyV2(buf: Buffer): ProxyHeader {
++  if (buf.length < FIXED_LENGTH) return { state: 'more' };
++  const versionAndCommand = buf[12];
++  if (!buf.subarray(0, SIGNATURE.length).equals(SIGNATURE)) return { state: 'bad' };
++  if (versionAndCommand !== V2_LOCAL && versionAndCommand !== V2_PROXY) return { state: 'bad' };
++  const following = buf.readUInt16BE(14);
++  if (following > MAX_FOLLOWING) return { state: 'bad' };
++  if (buf.length < FIXED_LENGTH + following) return { state: 'more' };
++  /* A LOCAL header is the sender's own connection, and the protocol says to ignore its family and addresses. */
++  return versionAndCommand === V2_LOCAL ? { state: 'done', length: FIXED_LENGTH + following, source: null } : fromAddresses(buf, following);
++}
+diff --git a/apps/server/test/link-listener.test.ts b/apps/server/test/link-listener.test.ts
+new file mode 100644
+index 00000000..ef779e4c
+--- /dev/null
++++ b/apps/server/test/link-listener.test.ts
+@@ -0,0 +1,356 @@
++import { once } from 'node:events';
++import http from 'node:http';
++import net from 'node:net';
++import { Duplex } from 'node:stream';
++import tls, { type TLSSocket } from 'node:tls';
++import type { FastifyInstance } from 'fastify';
++import { describe, expect, it, onTestFinished } from 'vitest';
++import { LinkListener } from '../src/modules/tls/listener.js';
++import { selfSigned } from '../src/modules/tls/x509.js';
++import { as, listen, SETUP, setUpCompany, testApp } from './helpers.js';
++import { visitorHeader } from './proxy-v2.js';
++
++const HOST = 'acme.hornhoof.org';
++const VISITOR = '203.0.113.7';
++const OTHER_VISITOR = '203.0.113.8';
++const IS_TUNNEL = { TUNNEL_HOST: '127.0.0.1' };
++const NOT_TUNNEL = { TUNNEL_HOST: '192.0.2.10' };
++const TLS_CLIENT = { servername: HOST, rejectUnauthorized: false };
++
++async function listening(env: NodeJS.ProcessEnv = IS_TUNNEL) {
++  const { app, config } = await testApp(env);
++  const ceo = await setUpCompany(app);
++  const listener = new LinkListener({ app, config, log: app.log });
++  const port = await listener.listen(0, '127.0.0.1');
++  onTestFinished(() => listener.close(0));
++  return { app, config, ceo, listener, port };
++}
++
++async function rawConnection(port: number): Promise<net.Socket> {
++  const socket = net.connect(port, '127.0.0.1');
++  socket.on('error', () => {});
++  onTestFinished(() => void socket.destroy());
++  await once(socket, 'connect');
++  return socket;
++}
++
++async function secured(socket: TLSSocket): Promise<TLSSocket> {
++  onTestFinished(() => void socket.destroy());
++  await once(socket, 'secureConnect');
++  return socket;
++}
++
++/* A connection as the tunnel container opens it for a visitor: the PROXY header, then TLS. */
++async function overTls(port: number, visitor = VISITOR): Promise<TLSSocket> {
++  const raw = await rawConnection(port);
++  raw.write(visitorHeader(visitor));
++  return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
++}
++
++/* TLS whose first bytes leave in one write with the header, so that the listener reads both in one segment. */
++async function overTlsInOneWrite(port: number): Promise<TLSSocket> {
++  const raw = await rawConnection(port);
++  let header: Buffer | null = visitorHeader(VISITOR);
++  const carrier = new Duplex({
++    read() {},
++    write(chunk: Buffer, _encoding, done) {
++      raw.write(header ? Buffer.concat([header, chunk]) : chunk, done);
++      header = null;
++    },
++  });
++  raw.on('data', chunk => carrier.push(chunk));
++  return secured(tls.connect({ socket: carrier, ...TLS_CLIENT }));
++}
++
++async function overTlsWithHeaderInTwoWrites(port: number): Promise<TLSSocket> {
++  const raw = await rawConnection(port);
++  const header = visitorHeader(VISITOR);
++  raw.write(header.subarray(0, 10));
++  await new Promise(resolve => setTimeout(resolve, 50));
++  raw.write(header.subarray(10));
++  return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
++}
++
++type Asked = { method?: string; path: string; body?: object; headers?: Record<string, string> };
++type Answer = { status: number; cookies: string[]; body: string };
++
++/* A request over a connection that is already open, as one http client would send it. */
++function ask(socket: TLSSocket, { method = 'GET', path, body, headers = {} }: Asked): Promise<Answer> {
++  return new Promise((resolve, reject) => {
++    const typed = body ? { 'content-type': 'application/json' } : {};
++    const request = http.request({ createConnection: () => socket, method, path, headers: { host: HOST, ...typed, ...headers } }, response => {
++      const chunks: Buffer[] = [];
++      response.on('data', chunk => chunks.push(chunk));
++      response.on('end', () => resolve({ status: response.statusCode!, cookies: response.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }));
++    });
++    request.on('error', reject);
++    request.end(body ? JSON.stringify(body) : undefined);
++  });
++}
++
++const health = { path: '/api/health' };
++
++async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}): Promise<number> {
++  const body = { email: 'x@acme.com', password: 'not the password' };
++  return (await ask(await overTls(port, visitor), { method: 'POST', path: '/api/auth/login', body, headers })).status;
++}
++
++/* The per email and address limit stops the eleventh. */
++const LIMITED_AFTER = 10;
++
++async function closedAfterMs(socket: net.Socket): Promise<number> {
++  const started = performance.now();
++  await once(socket, 'close');
++  return performance.now() - started;
++}
++
++const upgrade = (headers: string[] = []) =>
++  [
++    'GET /api/nodes/socket HTTP/1.1',
++    `Host: ${HOST}`,
++    'Upgrade: websocket',
++    'Connection: Upgrade',
++    'Sec-WebSocket-Version: 13',
++    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
++    ...headers,
++    '',
++    '',
++  ].join('\r\n');
++
++async function statusLineOf(socket: net.Socket, request: string): Promise<string> {
++  socket.write(request);
++  const [answer] = (await once(socket, 'data')) as [Buffer];
++  return answer.toString().split('\r\n')[0]!;
++}
++
++async function nodeKey(app: FastifyInstance, ceo: string): Promise<string> {
++  const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
++  const code = (connected.json().command as string).split('--join ')[1]!;
++  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
++  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload });
++  return joined.json().nodes[0].key as string;
++}
++
++describe('the certificate of the TLS listener', () => {
++  it("serves a stand-in for the link's host until it is given a certificate", async () => {
++    const { listener, port } = await listening();
++    expect((await overTls(port)).getPeerCertificate().subjectaltname).toBe('DNS:hornhoof.invalid');
++
++    await listener.use(HOST, null);
++    const standIn = (await overTls(port)).getPeerCertificate();
++    expect(standIn.subjectaltname).toBe(`DNS:${HOST}`);
++    expect(standIn.issuer).toEqual(standIn.subject);
++
++    await listener.use(HOST, await selfSigned(HOST, { serial: '0a0b' }));
++    expect((await overTls(port)).getPeerCertificate().serialNumber).toBe('0A0B');
++  });
++
++  it('goes back to the placeholder name without a host', async () => {
++    const { listener, port } = await listening();
++    await listener.use(HOST, null);
++    await listener.use(null, null);
++    expect((await overTls(port)).getPeerCertificate().subjectaltname).toBe('DNS:hornhoof.invalid');
++  });
++
++  it('keeps the certificate of the later of two calls, though a stand-in takes longer to make', async () => {
++    const { listener, port } = await listening();
++    const real = await selfSigned(HOST, { serial: '0a0b' });
++    await Promise.all([listener.use('old.hornhoof.org', null), listener.use(HOST, real)]);
++    expect((await overTls(port)).getPeerCertificate().serialNumber).toBe('0A0B');
++  });
++
++  it('keeps what it serves when it is given a certificate that does not load', async () => {
++    const { listener, port } = await listening();
++    await listener.use(HOST, null);
++    await expect(listener.use(HOST, { certPem: 'not a certificate', keyPem: 'not a key' })).rejects.toThrow();
++    expect((await overTls(port)).getPeerCertificate().subjectaltname).toBe(`DNS:${HOST}`);
++  });
++});
++
++describe('a request through the TLS listener', () => {
++  it('answers as over the link', async () => {
++    const { port } = await listening();
++    const answer = await ask(await overTls(port), health);
++    expect(JSON.parse(answer.body)).toEqual({ ok: true });
++
++    const body = { email: 'ivan@acme.com', password: SETUP.password };
++    const signedIn = await ask(await overTls(port), { method: 'POST', path: '/api/auth/login', body });
++    expect(signedIn.status).toBe(200);
++    expect(signedIn.cookies.some(cookie => cookie.startsWith('__Host-hh_session='))).toBe(true);
++  });
++
++  it('takes the visitor from the PROXY header of the tunnel container only', async () => {
++    const trusted = await listening(IS_TUNNEL);
++    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(trusted.port, VISITOR)).toBe(401);
++    expect(await wrongSignIn(trusted.port, VISITOR)).toBe(429);
++    expect(await wrongSignIn(trusted.port, OTHER_VISITOR)).toBe(401);
++
++    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
++    const other = await listening(NOT_TUNNEL);
++    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(other.port, VISITOR)).toBe(401);
++    expect(await wrongSignIn(other.port, OTHER_VISITOR)).toBe(429);
++  });
++
++  /* The plan's own form of the test above, 30 wrong sign-ins with other emails, needs the address limit of its Task 3. */
++  it.todo('counts the limit of 30 an hour per address by the visitor of the PROXY header');
++
++  it('does not believe an X-Forwarded-For the visitor wrote', async () => {
++    const { port } = await listening();
++    for (let i = 0; i < LIMITED_AFTER; i++) {
++      expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': `198.51.100.${i}` })).toBe(401);
++    }
++    expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': '198.51.100.99' })).toBe(429);
++  });
++
++  it('carries a WebSocket upgrade', async () => {
++    const { app, port } = await listening();
++    const plain = new URL((await listen(app)).replace('ws:', 'http:'));
++    const overHttp = await statusLineOf(await rawConnection(Number(plain.port)), upgrade());
++    expect(overHttp).toMatch(/^HTTP\/1\.1 \d{3} /);
++    expect(await statusLineOf(await overTls(port), upgrade())).toBe(overHttp);
++  });
++
++  it('opens a WebSocket for a node with its key', async () => {
++    const { app, ceo, port } = await listening();
++    const key = await nodeKey(app, ceo);
++    const line = await statusLineOf(await overTls(port), upgrade([`Authorization: Bearer ${key}`]));
++    expect(line).toBe('HTTP/1.1 101 Switching Protocols');
++  });
++});
++
++describe('how a connection opens', () => {
++  it('reads a TLS hello that came in one segment with the header', async () => {
++    const { port } = await listening();
++    expect((await ask(await overTlsInOneWrite(port), health)).status).toBe(200);
++  });
++
++  it('reads a header that came in two segments', async () => {
++    const { port } = await listening();
++    expect((await ask(await overTlsWithHeaderInTwoWrites(port), health)).status).toBe(200);
++  });
++
++  it('closes a connection with no header in 5 s, and a bad header at once', async () => {
++    const { port } = await listening();
++    const silent = await rawConnection(port);
++    const halfHeader = await rawConnection(port);
++    const bad = await rawConnection(port);
++    const silentMs = closedAfterMs(silent);
++    const halfHeaderMs = closedAfterMs(halfHeader);
++    const badMs = closedAfterMs(bad);
++    halfHeader.write(visitorHeader(VISITOR).subarray(0, 20));
++    bad.write('GET / HTTP/1.1\r\n');
++
++    expect(await badMs).toBeLessThan(1000);
++    for (const ms of await Promise.all([silentMs, halfHeaderMs])) {
++      expect(ms).toBeGreaterThan(4500);
++      expect(ms).toBeLessThan(6000);
++    }
++  });
++
++  it('closes a connection whose handshake does not finish in 10 s, and not one that finished', async () => {
++    const { port } = await listening();
++    const finished = await overTls(port);
++    const stalled = await rawConnection(port);
++    const stalledMs = closedAfterMs(stalled);
++    stalled.write(visitorHeader(VISITOR));
++
++    const ms = await stalledMs;
++    expect(ms).toBeGreaterThan(9500);
++    expect(ms).toBeLessThan(11000);
++    expect((await ask(finished, health)).status).toBe(200);
++  });
++
++  it('goes on after a visitor resets the connection at any stage', async () => {
++    const { port } = await listening();
++    const pause = () => new Promise(resolve => setTimeout(resolve, 50));
++
++    const inHeader = await rawConnection(port);
++    inHeader.write(visitorHeader(VISITOR).subarray(0, 20));
++    await pause();
++    inHeader.resetAndDestroy();
++
++    const inHandshake = await rawConnection(port);
++    inHandshake.write(visitorHeader(VISITOR));
++    await pause();
++    inHandshake.resetAndDestroy();
++
++    const inRequest = await rawConnection(port);
++    inRequest.write(visitorHeader(VISITOR));
++    const client = await secured(tls.connect({ socket: inRequest, ...TLS_CLIENT }));
++    client.on('error', () => {});
++    client.write('GET /api/health HTTP/1.1\r\nHost: x\r\n');
++    await pause();
++    inRequest.resetAndDestroy();
++    await pause();
++
++    expect((await ask(await overTls(port), health)).status).toBe(200);
++  });
++
++  it('closes a connection that stops speaking TLS after the handshake', async () => {
++    const { port } = await listening();
++    const raw = await rawConnection(port);
++    raw.write(visitorHeader(VISITOR));
++    const client = await secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
++    client.on('error', () => {});
++    const rawMs = closedAfterMs(raw);
++    raw.write(Buffer.alloc(64, 0x17));
++    expect(await rawMs).toBeLessThan(1000);
++    expect((await ask(await overTls(port), health)).status).toBe(200);
++  });
++
++  it('offers only http/1.1 to a client that also knows http/2', async () => {
++    const { port } = await listening();
++    const raw = await rawConnection(port);
++    raw.write(visitorHeader(VISITOR));
++    const client = await secured(tls.connect({ socket: raw, ...TLS_CLIENT, ALPNProtocols: ['h2', 'http/1.1'] }));
++    expect(client.alpnProtocol).toBe('http/1.1');
++  });
++
++  it('closes only that connection when what follows the header is not TLS', async () => {
++    const { port } = await listening();
++    const garbled = await rawConnection(port);
++    const garbledMs = closedAfterMs(garbled);
++    garbled.write(Buffer.concat([visitorHeader(VISITOR), Buffer.from('these are not the bytes of a TLS hello\r\n')]));
++
++    expect(await garbledMs).toBeLessThan(1000);
++    expect((await ask(await overTls(port), health)).status).toBe(200);
++  });
++});
++
++describe('opening the TLS listener', () => {
++  it('fails when the port is taken', async () => {
++    const { app, config, port } = await listening();
++    const second = new LinkListener({ app, config, log: app.log });
++    await expect(second.listen(port, '127.0.0.1')).rejects.toMatchObject({ code: 'EADDRINUSE' });
++    await second.close(0);
++  });
++});
++
++describe('closing the TLS listener', () => {
++  it('stops taking connections when closed', async () => {
++    const { listener, port } = await listening();
++    const asking = await overTls(port);
++    const silent = await overTls(port);
++    const silentMs = closedAfterMs(silent);
++    const started = performance.now();
++    const closing = listener.close(200);
++
++    /* One already open may still finish what it asks in the grace; what is left after the grace is closed. */
++    expect((await ask(asking, health)).status).toBe(200);
++    await expect(rawConnection(port)).rejects.toMatchObject({ code: 'ECONNREFUSED' });
++
++    await closing;
++    expect(performance.now() - started).toBeLessThan(1000);
++    expect(await silentMs).toBeLessThan(1000);
++  });
++
++  it('resolves as soon as its connections have ended', async () => {
++    const { listener, port } = await listening();
++    const open = await overTls(port);
++    const started = performance.now();
++    const closing = listener.close(10_000);
++    open.destroy();
++    await closing;
++    expect(performance.now() - started).toBeLessThan(1000);
++  });
++});
+diff --git a/apps/server/test/proxy-header.test.ts b/apps/server/test/proxy-header.test.ts
+new file mode 100644
+index 00000000..1e35ec88
+--- /dev/null
++++ b/apps/server/test/proxy-header.test.ts
+@@ -0,0 +1,85 @@
++import { describe, expect, it } from 'vitest';
++import { readProxyV2 } from '../src/modules/tls/proxy-header.js';
++import { ipv4Addresses, proxyV2, visitorHeader } from './proxy-v2.js';
++
++const LOCAL_V2 = 0x20;
++const TCP_OVER_IPV4 = 0x11;
++const TCP_OVER_IPV6 = 0x21;
++
++function ipv6Addresses(source: number[]): Buffer {
++  const addresses = Buffer.alloc(36);
++  source.forEach((group, i) => addresses.writeUInt16BE(group, i * 2));
++  return addresses;
++}
++
++describe('readProxyV2', () => {
++  it('reads an IPv4 visitor', () => {
++    expect(readProxyV2(visitorHeader('203.0.113.7'))).toEqual({ state: 'done', length: 28, source: '203.0.113.7' });
++  });
++
++  it('counts the TLVs after the addresses in the length', () => {
++    const header = proxyV2({ addresses: Buffer.concat([ipv4Addresses('203.0.113.7'), Buffer.alloc(7)]) });
++    expect(readProxyV2(header)).toEqual({ state: 'done', length: 35, source: '203.0.113.7' });
++  });
++
++  it('leaves what follows the header out of the length', () => {
++    const header = Buffer.concat([visitorHeader('203.0.113.7'), Buffer.from('a TLS hello')]);
++    expect(readProxyV2(header)).toEqual({ state: 'done', length: 28, source: '203.0.113.7' });
++  });
++
++  it('reads an IPv6 visitor as eight lowercase groups without leading zeros or a shortening', () => {
++    const header = proxyV2({ family: TCP_OVER_IPV6, addresses: ipv6Addresses([0x2001, 0x0db8, 0, 0, 0, 0, 0, 7]) });
++    expect(readProxyV2(header)).toEqual({ state: 'done', length: 52, source: '2001:db8:0:0:0:0:0:7' });
++  });
++
++  it('gives no source for a LOCAL header, whatever family it names', () => {
++    expect(readProxyV2(proxyV2({ versionAndCommand: LOCAL_V2, family: 0 }))).toEqual({ state: 'done', length: 16, source: null });
++    const claimsAFamily = proxyV2({ versionAndCommand: LOCAL_V2, family: TCP_OVER_IPV4 });
++    expect(readProxyV2(claimsAFamily)).toEqual({ state: 'done', length: 16, source: null });
++  });
++
++  it('gives no source for a family it has no address for', () => {
++    expect(readProxyV2(proxyV2({ family: 0 }))).toEqual({ state: 'done', length: 16, source: null });
++    const udp = proxyV2({ family: 0x12, addresses: ipv4Addresses('203.0.113.7') });
++    expect(readProxyV2(udp)).toEqual({ state: 'done', length: 28, source: null });
++  });
++
++  it.each([
++    ['nothing', Buffer.alloc(0)],
++    ['the first 10 bytes', visitorHeader('203.0.113.7').subarray(0, 10)],
++    ['20 bytes of an IPv4 header', visitorHeader('203.0.113.7').subarray(0, 20)],
++    ['one byte short of an IPv6 header', proxyV2({ family: TCP_OVER_IPV6, addresses: ipv6Addresses([]) }).subarray(0, 51)],
++  ])('asks for more after %s', (_what, bytes) => {
++    expect(readProxyV2(bytes)).toEqual({ state: 'more' });
++  });
++
++  it('takes 512 bytes after the fixed part and refuses 513', () => {
++    const at = (length: number) => proxyV2({ addresses: Buffer.alloc(length) });
++    expect(readProxyV2(at(512))).toMatchObject({ state: 'done', length: 528 });
++    expect(readProxyV2(at(513))).toEqual({ state: 'bad' });
++  });
++
++  const header = visitorHeader('203.0.113.7');
++  const wrongSignature = Buffer.from(header);
++  wrongSignature[3] = 0xff;
++
++  it.each([
++    ['a wrong signature', wrongSignature],
++    ['words of plain http', Buffer.from('GET / HTTP/1.1\r\n')],
++    ['version 1', proxyV2({ versionAndCommand: 0x11, addresses: ipv4Addresses('203.0.113.7') })],
++    ['version 3', proxyV2({ versionAndCommand: 0x31, addresses: ipv4Addresses('203.0.113.7') })],
++    ['command 2', proxyV2({ versionAndCommand: 0x22, addresses: ipv4Addresses('203.0.113.7') })],
++    ['a length of 600, before all of it came', proxyV2({ declaredLength: 600 })],
++  ])('refuses %s', (_what, bytes) => {
++    expect(readProxyV2(bytes)).toEqual({ state: 'bad' });
++  });
++
++  it.each([
++    ['IPv4', 0, TCP_OVER_IPV4],
++    ['IPv4', 11, TCP_OVER_IPV4],
++    ['IPv6', 0, TCP_OVER_IPV6],
++    ['IPv6', 35, TCP_OVER_IPV6],
++  ])('refuses %s with %i bytes of addresses', (_name, length, family) => {
++    expect(readProxyV2(proxyV2({ family, addresses: Buffer.alloc(length) }))).toEqual({ state: 'bad' });
++  });
++});
+diff --git a/apps/server/test/proxy-v2.ts b/apps/server/test/proxy-v2.ts
+new file mode 100644
+index 00000000..7c645da6
+--- /dev/null
++++ b/apps/server/test/proxy-v2.ts
+@@ -0,0 +1,30 @@
++/* The bytes of a PROXY protocol v2 header, for the tests of the code that reads them from the network. */
++const SIGNATURE = Buffer.from('0d0a0d0a000d0a515549540a', 'hex');
++
++const PROXY_V2 = 0x21;
++const TCP_OVER_IPV4 = 0x11;
++const PORTS = Buffer.from([0xc7, 0x38, 0x20, 0xfb]); // 51000 and 8443
++
++export type ProxyV2Fields = {
++  /* The byte at 12: the version in the high nibble and the command in the low one. */
++  versionAndCommand?: number;
++  family?: number;
++  addresses?: Buffer;
++  /* What the bytes at 14 and 15 claim, when a test has them lie about what follows. */
++  declaredLength?: number;
++};
++
++export function proxyV2(fields: ProxyV2Fields = {}): Buffer {
++  const addresses = fields.addresses ?? Buffer.alloc(0);
++  const fixed = Buffer.alloc(4);
++  fixed[0] = fields.versionAndCommand ?? PROXY_V2;
++  fixed[1] = fields.family ?? TCP_OVER_IPV4;
++  fixed.writeUInt16BE(fields.declaredLength ?? addresses.length, 2);
++  return Buffer.concat([SIGNATURE, fixed, addresses]);
++}
++
++export const ipv4Addresses = (source: string): Buffer =>
++  Buffer.concat([Buffer.from(source.split('.').map(Number)), Buffer.from([127, 0, 0, 1]), PORTS]);
++
++/* A PROXY header over IPv4 from this visitor to the listener. */
++export const visitorHeader = (visitor: string): Buffer => proxyV2({ addresses: ipv4Addresses(visitor) });
+

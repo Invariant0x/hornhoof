@@ -1,0 +1,3 @@
+[31m   [31m×[31m opens the running orchestrator task instead of a newer assigned task[39m[33m 1447[2mms[22m[39m
+[41m[1m FAIL [22m[49m test/AgentWindowCurrentTask.test.tsx[2m > [22mopens the running orchestrator task instead of a newer assigned task
+[31m[1mTestingLibraryElementError[22m[39m: Unable to find role="button" and name "Task"

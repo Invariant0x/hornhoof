@@ -1,0 +1,19 @@
+KILLED    relay/relay.py:385 0 -> 1
+KILLED    relay/relay.py:385 == -> !=
+KILLED    relay/relay.py:391 and -> or
+KILLED    relay/relay.py:869 0 -> 1
+KILLED    relay/relay.py:870 >= -> >
+KILLED    relay/relay.py:870 0 -> 1
+KILLED    relay/relay.py:875 True -> False
+KILLED    relay/relay.py:994 delete not
+SURVIVED  relay/relay.py:994 or -> and
+KILLED    relay/relay.py:994 delete not
+KILLED    relay/relay.py:995 False -> True
+KILLED    relay/relay.py:1228 True -> False
+KILLED    relay/relay.py:1237 delete not
+KILLED    relay/relay.py:1282 == -> !=
+KILLED    relay/relay.py:1282 and -> or
+KILLED    relay/relay.py:1282 == -> !=
+KILLED    relay/relay.py:1314 == -> !=
+error                     relay.relay.Handler       0         0          0      0    n/a
+ping_key_matches          relay.relay               3         1          0      4  75.0%

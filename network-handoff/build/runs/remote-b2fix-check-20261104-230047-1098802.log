@@ -1,0 +1,24 @@
+== changed files
+apps/server/test/before-sign-in.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+     [33m[2m✓[22m[39m refuses every socket route without a session before anything is sent, locally and over the link[33m 1591[2mms[22m[39m
+   [32m✓[39m what the link tells a stranger [2m(3)[22m
+     [33m[2m✓[22m[39m gives only ok on /api/health over the link[33m 1467[2mms[22m[39m
+     [33m[2m✓[22m[39m asks for a session on /api/version over the link[33m 1526[2mms[22m[39m
+     [33m[2m✓[22m[39m asks search engines to stay away[33m 1408[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Affected [22m 1 of 117 test files [2m(related to test/before-sign-in.test.ts)[22m
+[2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m   Start at [22m 23:10:46
+[2m   Duration [22m 18.16s[2m (tests 84%, import 16%)[22m
+
+AUTHOR CHECK RED at 3d4ef43c

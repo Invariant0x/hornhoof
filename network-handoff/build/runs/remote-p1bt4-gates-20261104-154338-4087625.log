@@ -1,0 +1,45 @@
+== files: apps/server/src/modules/tls/x509.ts
+[2m   Start at [22m 15:48:29
+[2m   Duration [22m 6.37s[2m (import 45%, tests 42%, transform 8%, worker 5%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+dnsNames                       modules.tls.x509                       3  50.0%      4.1
+selfSigned                     modules.tls.x509                       3 100.0%      3.0
+firstCertificateBlock          modules.tls.x509                       2 100.0%      2.0
+certInfo                       modules.tls.x509                       1 100.0%      1.0
+toPem                          modules.tls.x509                       1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/modules.tls.x509.edn
+SURVIVED  apps/server/src/modules/tls/x509.ts:25 ?? -> ||
+KILLED    apps/server/src/modules/tls/x509.ts:26 + -> -
+SURVIVED  apps/server/src/modules/tls/x509.ts:26 ?? -> ||
+KILLED    apps/server/src/modules/tls/x509.ts:26 * -> /
+KILLED    apps/server/src/modules/tls/x509.ts:27 true -> false
+KILLED    apps/server/src/modules/tls/x509.ts:48 delete !
+KILLED    apps/server/src/modules/tls/x509.ts:49 0 -> 1
+SURVIVED  apps/server/src/modules/tls/x509.ts:54 ?. -> .
+SURVIVED  apps/server/src/modules/tls/x509.ts:54 ?? -> ||
+KILLED    apps/server/src/modules/tls/x509.ts:54 === -> !==
+Function              Namespace         Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------------------------
+certInfo              modules.tls.x509       0         0          0      0    n/a
+toPem                 modules.tls.x509       0         0          0      0    n/a
+dnsNames              modules.tls.x509       1         2          0      3  33.3%
+selfSigned            modules.tls.x509       3         2          0      5  60.0%
+firstCertificateBlock modules.tls.x509       2         0          0      2 100.0%
+----------------------------------------------------------------------------------
+Total                                        6         4          0     10   60.0%

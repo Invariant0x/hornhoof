@@ -1,0 +1,10 @@
+== changed files
+Dockerfile
+apps/server/test/compose.test.ts
+apps/server/test/pins.test.ts
+compose.yaml
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint

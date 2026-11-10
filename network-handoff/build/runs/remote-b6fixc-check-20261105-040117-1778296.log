@@ -1,0 +1,36 @@
+== changed files
+apps/server/src/modules/link/client.ts
+apps/server/src/modules/link/link.ts
+apps/server/src/modules/tls/store.ts
+apps/server/test/client.test.ts
+apps/server/test/fake-relay.test.ts
+apps/server/test/fake-relay.ts
+apps/server/test/link.test.ts
+apps/server/test/sign-in-limit.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+ [32m✓[39m test/migrate.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 50[2mms[22m[39m
+ [32m✓[39m test/naming.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 67[2mms[22m[39m
+ [32m✓[39m test/migrate-masking.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 300[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m125 passed[39m[22m[90m (125)[39m
+[2m      Tests [22m [1m[32m2357 passed[39m[22m[90m (2357)[39m
+[2m   Start at [22m 04:10:08
+[2m   Duration [22m 1771.71s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m125 workers spawned[39m[2m · ~284ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~11.55s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+worst changed CRAP: 7.0957
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 1e61bb1e

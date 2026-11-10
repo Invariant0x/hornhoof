@@ -1,0 +1,373 @@
+diff --git a/apps/server/test/helpers.ts b/apps/server/test/helpers.ts
+index 1df4ea7a..66f0367c 100644
+--- a/apps/server/test/helpers.ts
++++ b/apps/server/test/helpers.ts
+@@ -1,4 +1,8 @@
+-import { readFileSync } from 'node:fs';
++import { appendFileSync, readFileSync } from 'node:fs';
++const TLOG = process.env.TLOG ?? '/dev/null';
++const tick = (phase: string, ms: number) => appendFileSync(TLOG, JSON.stringify({ phase, ms, t: Date.now(), pid: process.pid }) + '\n');
++async function timed<T>(phase: string, f: () => Promise<T> | T): Promise<T> { const a = performance.now(); try { return await f(); } finally { tick(phase, performance.now() - a); } }
++
+ import type { AddressInfo } from 'node:net';
+ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+@@ -8,7 +12,7 @@ import { eq } from 'drizzle-orm';
+ import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
+ import WebSocket from 'ws';
+ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+-import { inject, onTestFinished, vi } from 'vitest';
++import { expect, inject, onTestFinished, vi } from 'vitest';
+ import { buildApp, type Deps } from '../src/app.js';
+ import { loadConfig, type Config } from '../src/config.js';
+ import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
+@@ -34,11 +38,37 @@ export const SETUP = {
+ let migrated: Blob | undefined;
+ type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
+ 
++let wasm: WebAssembly.Module | undefined;
++async function wasmModule(): Promise<WebAssembly.Module | undefined> {
++  if (process.env.WASM !== '1') return undefined;
++  wasm ??= await WebAssembly.compile(readFileSync(new URL(import.meta.resolve('@electric-sql/pglite')).pathname.replace(/index\.js$/, 'pglite.wasm')));
++  return wasm;
++}
++/* An unmigrated database, as new PGlite() gives, opened from a dump of one initdb instead of running initdb again. */
++let emptyDump: Blob | undefined;
++export async function freshPglite(): Promise<PGlite> {
++  if (process.env.EMPTY !== '1') return new PGlite();
++  if (!emptyDump) { const c = new PGlite(); await c.waitReady; emptyDump = new Blob([Buffer.from(await (await c.dumpDataDir('none')).arrayBuffer())]); await c.close(); }
++  return new PGlite({ loadDataDir: emptyDump });
++}
++/* Files whose tests run DDL (triggers, functions) keep a database of their own, because truncate does not undo DDL. */
++const OWN_DB = /(map-state|orchestrator-control|tasks-history|migrations|db)\.test\.ts$/;
++const sharing = () => process.env.SHARE_DB === '1' && !OWN_DB.test(expect.getState().testPath ?? '');
++let shared: PGlite | undefined;
++let truncateSql = '';
+ async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
++  if (sharing() && shared) {
++    await timed('truncate', () => shared!.exec(truncateSql));
++    return { client: shared, db: drizzle(shared, { schema }) };
++  }
+   migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
+-  const client = new PGlite({ loadDataDir: migrated });
+-  const db = drizzle(client, { schema });
+-  return { client, db };
++  const client = await timed('pglite_open', async () => { const c = new PGlite({ loadDataDir: migrated, pgliteWasmModule: await wasmModule() }); await c.waitReady; return c; });
++  if (sharing()) {
++    shared = client;
++    const tabs = (await client.query<{ t: string }>(`select quote_ident(relname) t from pg_class where relkind='r' and relnamespace=(select oid from pg_namespace where nspname='public')`)).rows;
++    truncateSql = `truncate ${tabs.map(x => `public.${x.t}`).join(',')} restart identity cascade`;
++  }
++  return { client, db: drizzle(client, { schema }) };
+ }
+ 
+ /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
+@@ -58,7 +88,7 @@ export function statements(): { sql: string; params: unknown[] }[] {
+ /* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
+ export async function createTestDb(): Promise<TestDb> {
+   const { client, db } = await openTestDb();
+-  onTestFinished(() => client.close());
++  onTestFinished(() => (sharing() ? undefined : client.close()));
+   return db;
+ }
+ 
+@@ -83,7 +113,7 @@ function agentSqlOn(client: PGlite): AgentSql {
+ 
+ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
+   const { client } = await openTestDb();
+-  onTestFinished(() => client.close());
++  onTestFinished(() => sharing() ? undefined : timed('db_close', () => client.close()));
+   return appOn(client, env, logger);
+ }
+ 
+@@ -93,8 +123,8 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
+   const db = drizzle(client, { schema }) as unknown as Db;
+   /* Tests never reach the real registry unless they ask. */
+   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
+-  const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
+-  onTestFinished(() => app.close());
++  const app = await timed('build_app', () => buildApp({ db, config, logger, agentSql: agentSqlOn(client) }));
++  onTestFinished(() => timed('app_close', () => app.close()));
+   return { app, db, config };
+ }
+ 
+@@ -108,7 +138,7 @@ export function sessionFrom(res: LightMyRequestResponse): string {
+ 
+ /* Runs first-run setup and returns the CEO's session token. */
+ export async function setUpCompany(app: FastifyInstance): Promise<string> {
+-  return sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
++  return timed('setup_company', async () => sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP })));
+ }
+ 
+ export const as = (token: string) => ({ cookies: { hh_session: token } });
+diff --git a/apps/server/test/migrations.test.ts b/apps/server/test/migrations.test.ts
+index 294a69b5..3fdfbc04 100644
+--- a/apps/server/test/migrations.test.ts
++++ b/apps/server/test/migrations.test.ts
+@@ -12,7 +12,7 @@ import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+ import { hashToken } from '../src/crypto/tokens.js';
+ import { isUniqueViolation } from '../src/db/errors.js';
+ import { tasks } from '../src/db/schema.js';
+-import { appOn, approvalAsked, as } from './helpers.js';
++import { appOn, approvalAsked, as, freshPglite } from './helpers.js';
+ 
+ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<void> {
+   await migrateDrizzle(db, config);
+@@ -21,7 +21,7 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
+ 
+ describe('migration 0050', () => {
+   it('adds a nullable external wait and its deadline index on a fresh database', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+@@ -34,7 +34,7 @@ describe('migration 0050', () => {
+   });
+ 
+   it('upgrades existing tasks without changing them and defaults their wait to null', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0049_turn_program_history') });
+@@ -72,7 +72,7 @@ async function migrationsUpTo(tag: string): Promise<string> {
+ 
+ describe('migration 0049', () => {
+   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
+-    const source = new PGlite();
++    const source = await freshPglite();
+     onTestFinished(() => source.close());
+     let db = drizzle(source);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+@@ -99,7 +99,7 @@ describe('migration 0049', () => {
+ 
+ describe('migration 0047', () => {
+   it.each(['Acme', 'Moonfern'])('keeps old prompts in %s without inventing their requested text', async name => {
+-    const source = new PGlite();
++    const source = await freshPglite();
+     onTestFinished(() => source.close());
+     let db = drizzle(source);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+@@ -147,7 +147,7 @@ describe('migration 0047', () => {
+ 
+ describe('migration 0003', () => {
+   it('renames the chief of an older install to the orchestrator', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0002_indexes') });
+@@ -182,7 +182,7 @@ describe('migration 0005', () => {
+   const TEAM = '00000000-0000-4000-8000-0000000000e1';
+ 
+   async function at0004() {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0004_conversations') });
+@@ -232,7 +232,7 @@ describe('migration 0007', () => {
+   const C = '00000000-0000-4000-8000-000000000001';
+ 
+   it('adds tasks to an older install and keeps one open turn per company', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0006_access_lists') });
+@@ -257,7 +257,7 @@ describe('migration 0011', () => {
+   const C = '00000000-0000-4000-8000-000000000001';
+ 
+   it('puts the reviewer of a task at a gate on its panel, also while the task waits for a person', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0010_turn_plans') });
+@@ -287,7 +287,7 @@ describe('migration 0016', () => {
+   const D = '00000000-0000-4000-8000-0000000000d1';
+ 
+   it("keeps the company's notes as the orchestrator's notebook and lets each department number its own", async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0015_memory_timers') });
+@@ -321,7 +321,7 @@ describe('migration 0020', () => {
+   const C = '00000000-0000-4000-8000-000000000001';
+ 
+   it('takes the threat model off the red team and leaves it with security', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0019_agent_event_jobs') });
+@@ -347,7 +347,7 @@ describe('migration 0023', () => {
+   const D = '00000000-0000-4000-8000-0000000000d1';
+ 
+   it('keeps the oldest of two heads of one department, and of two orchestrators, as an older race could leave them', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0022_pending_wakes') });
+@@ -377,7 +377,7 @@ describe('migration 0024', () => {
+   const A = '00000000-0000-4000-8000-0000000000b1';
+ 
+   it("starts the agents of company keys in new sessions, as the built-in node keeps their homes apart now", async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0023_impossible_rows') });
+@@ -406,7 +406,7 @@ describe('migration 0031', () => {
+   const P = '00000000-0000-4000-8000-000000000002';
+ 
+   it('lends the machines of an older install to test runs, and its repositories need the default memory', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0030_job_answers_ceo') });
+@@ -437,7 +437,7 @@ describe('migration 0033', () => {
+   const R = '00000000-0000-4000-8000-0000000000f1';
+ 
+   it("gives each plan's machine a node of its own, with the plan's id, key and state, and puts its jobs and agents on it", async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0032_company_template') });
+@@ -473,7 +473,7 @@ describe('migration 0033', () => {
+   });
+ 
+   it('hides the code of every machine command in the conversations it was written to', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0032_company_template') });
+@@ -502,7 +502,7 @@ describe('migrations 0034 to 0037', () => {
+   const S = '00000000-0000-4000-8000-0000000000c1';
+ 
+   it('keeps how long an older part waits and that it ran nowhere before, older runs as test runs and older machines as computers', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0033_nodes') });
+@@ -532,7 +532,7 @@ describe('migrations 0034 to 0037', () => {
+ 
+ describe('migration 0038', () => {
+   it("gives an older install's plans no sign-in yet and its nodes no key", async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
+@@ -560,7 +560,7 @@ describe('migration 0039', () => {
+   const T = '00000000-0000-4000-8000-0000000000d1';
+ 
+   it('starts the lines of an older install with no result given back, and refuses a return without its cycle', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0038_plan_credentials') });
+@@ -588,7 +588,7 @@ describe('migration 0040', () => {
+   const T = '00000000-0000-4000-8000-0000000000d1';
+ 
+   it('keeps older requests with their answers and no topic, which gives them to the CEO', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0039_map_returns') });
+@@ -612,7 +612,7 @@ describe('migration 0044', () => {
+   const C = '00000000-0000-4000-8000-000000000001';
+ 
+   it('marks nobody the CEO delegate, so people who see the whole company take no decision only the CEO takes until the CEO marks one', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0043_turn_exits') });
+@@ -678,7 +678,7 @@ describe('migration 0045', () => {
+   });
+ 
+   it('creates both indexes on a fresh install', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+@@ -692,7 +692,7 @@ describe('migration 0045', () => {
+   });
+ 
+   it('upgrades existing tasks intact and uses the indexes for turn and product reads', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+@@ -753,12 +753,12 @@ describe('migration 0051', () => {
+   const ALICE_WAITING = '00000000-0000-4000-8000-000000000016';
+ 
+   it('passes on a fresh install and removes unfinished waiting_machine tails on a machine with test runs while keeping ready, agent-assigned, node-run and another owner subscriptions', async () => {
+-    const freshClient = new PGlite();
++    const freshClient = await freshPglite();
+     onTestFinished(() => freshClient.close());
+     const freshDb = drizzle(freshClient);
+     await migrate(freshDb, { migrationsFolder: MIGRATIONS });
+ 
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+@@ -828,7 +828,7 @@ describe('migration 0051', () => {
+ 
+ describe('migration 0052', () => {
+   it('keeps old sealed install commands usable and defaults dismissed plan blocks to an empty list', async () => {
+-    const source = new PGlite();
++    const source = await freshPglite();
+     onTestFinished(() => source.close());
+     let db = drizzle(source);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0051_unfinished_subscription_tails') });
+@@ -851,7 +851,7 @@ describe('migration 0046', () => {
+   it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
+     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
+     onTestFinished(() => logged.mockRestore());
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+@@ -877,7 +877,7 @@ describe('migration 0046', () => {
+   it('does nothing on a second start even if a recorded hash differs', async () => {
+     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
+     onTestFinished(() => logged.mockRestore());
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: MIGRATIONS });
+@@ -891,7 +891,7 @@ describe('migration 0046', () => {
+   });
+ 
+   it.each([['agent_events_failure_case', 'failureCase'], ['agent_events_operations_pending', 'operationsPending']])('indexes %s only when %s is present', async (name, field) => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+@@ -904,7 +904,7 @@ describe('migration 0046', () => {
+   });
+ 
+   it('keeps older turns with no failure, delayed start or program restart, and stores each on new turns', async () => {
+-    const client = new PGlite();
++    const client = await freshPglite();
+     onTestFinished(() => client.close());
+     const db = drizzle(client);
+     await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });

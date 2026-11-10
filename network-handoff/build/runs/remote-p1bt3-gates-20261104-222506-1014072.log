@@ -1,0 +1,59 @@
+== files: apps/server/src/auth/limit.ts apps/server/src/auth/sign-in-limit.ts apps/server/src/db/agent-sql.ts apps/server/src/db/schema.ts apps/server/src/modules/auth/routes.ts
+[2m   Start at [22m 22:25:19
+[2m   Duration [22m 52.79s[2m (tests 93%, import 4%, transform 3%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+openAgentSql                   db.agent-sql                           8   0.0%     72.0
+POST /api/auth/login           modules.auth.routes                    9 100.0%      9.0
+limiter                        auth.limit                             6 100.0%      6.0
+visible                        db.agent-sql                           2   0.0%      6.0
+addressKey                     auth.sign-in-limit                     3 100.0%      3.0
+guard                          auth.limit                             2  50.0%      2.5
+withoutDottedTail              auth.sign-in-limit                     2  50.0%      2.5
+asGroups                       auth.sign-in-limit                     2 100.0%      2.0
+firstFourGroups                auth.sign-in-limit                     2 100.0%      2.0
+fullLimits                     auth.sign-in-limit                     2 100.0%      2.0
+insertIfUnder                  auth.sign-in-limit                     2 100.0%      2.0
+longestWait                    auth.sign-in-limit                     2 100.0%      2.0
+signInTry                      auth.sign-in-limit                     2 100.0%      2.0
+columns                        db.agent-sql                           1   0.0%      2.0
+grantsFor                      db.agent-sql                           1  33.3%      1.3
+readerGrantsFor                db.agent-sql                           1  33.3%      1.3
+refuse                         auth.limit                             1 100.0%      1.0
+hexGroup                       auth.sign-in-limit                     1 100.0%      1.0
+inWindow                       auth.sign-in-limit                     1 100.0%      1.0
+rowsOf                         auth.sign-in-limit                     1 100.0%      1.0
+scopeOf                        auth.sign-in-limit                     1 100.0%      1.0
+signInWorked                   auth.sign-in-limit                     1 100.0%      1.0
+underLimit                     auth.sign-in-limit                     1 100.0%      1.0
+agentRole                      db.agent-sql                           1 100.0%      1.0
+eachTable                      db.agent-sql                           1 100.0%      1.0
+quoted                         db.agent-sql                           1 100.0%      1.0
+readerRole                     db.agent-sql                           1 100.0%      1.0
+role                           db.agent-sql                           1 100.0%      1.0
+roleOf                         db.agent-sql                           1 100.0%      1.0
+companyId                      db.schema                              1 100.0%      1.0
+createdAt                      db.schema                              1 100.0%      1.0
+id                             db.schema                              1 100.0%      1.0
+GET /api/me                    modules.auth.routes                    1 100.0%      1.0
+POST /api/auth/logout          modules.auth.routes                    1 100.0%      1.0
+authRoutes                     modules.auth.routes                    1 100.0%      1.0
+fallbackHash                   modules.auth.routes                    1 100.0%      1.0
+wrongPassword                  modules.auth.routes                    1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+DUPLICATE score=1.00
+  apps/server/src/db/agent-sql.ts:78-99
+  apps/server/src/db/agent-sql.ts:103-111

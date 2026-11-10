@@ -1,0 +1,1420 @@
+# Review package: batch 10, slice relay
+
+## 092a989 Let a link's owner choose its new key, so a lost answer does not lose the link
+
+Today POST /links/<name>/key answers the only copy of a new key. If that answer is lost, the old key is already refused and
+the company is locked out of its own link. Now the post may name the new key itself, so that the caller holds it before it
+asks (R6.1).
+
+No body or {} still gets a new random key. A key of 43 base64url characters that is not the current one replaces the old key
+through store_link_key, the one path a random key takes, so the old key is refused at once by the API and at Login while a
+live tunnel keeps its heartbeat and new connections. Any other form or another field answers 400 invalid, the current key
+400 same_key, and neither touches the store. The visitor path keeps ignoring its body: a visitor key is always the relay's own.
+
+Proven by: test_r6_1_chosen_key, test_r6_1_chosen_key_refused and test_r6_1_random_key_stays from the plan, direct tests of
+the rule in ChosenKeyRuleTests, and in-process tests that a chosen key retires the old one as a random key does. relay.test.test_keys
+and test_public: 72 tests pass. Four wrong versions each turned a test red: the visitor path reading the body, no ping retention,
+a regex that lets a trailing newline through, no same_key check.
+
+Ruling: a key retired earlier may be chosen again - why: the plan refuses only the current key, and it costs nothing since the rows of ping_keys stay consistent, which a test pins - cost if wrong: a stolen old key could be made current again only by the holder of the current key, who can already do anything with the link.
+Ruling: the 400 answers carry a message beside error, where the plan writes {error: 'invalid'} - why: every other refusal of this route does through Handler.error, and the fixed message holds no key - cost if wrong: a reader that wants exactly one field, and none here does.
+Ruling: test_a_new_link_key_comes_with_its_body_read now sends {} padded with spaces, not a pad field - why: another field is invalid now, and the test's point is only that the largest allowed body is read - cost if wrong: none, the size is the same 4096 bytes.
+Ruling: no Signed-off-by line, where the plan says commit -s - why: the brief says no trailers, lane.sh commit has no -s and the address is the lead's alone, and the last ten commits on this branch carry none - cost if wrong: the lead adds the DCO line when it lands the batch.
+
+---
+ relay/relay.py          |  46 ++++++++++++++---
+ relay/test/test_keys.py | 130 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 167 insertions(+), 9 deletions(-)
+
+diff --git a/relay/relay.py b/relay/relay.py
+index 753c848..2246bbc 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -2,17 +2,17 @@
+ """Hornhoof relay: hands out <name>.hornhoof.org links and checks every tunnel that frps lets in.
+ 
+ Public API (Caddy sends https://hornhoof.org/api/* here):
+   GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}, 503 if unknown
+   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}, 409 taken, 503 if unknown
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
+-  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
++  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> {key?} -> 200 {key}, 400 invalid|same_key (R6.1)
+   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
+ Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
+ 
+ Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
+ """
+ import base64
+@@ -74,16 +74,19 @@ PLUGIN_CALL_S = 1.0
+ 
+ LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+ CONTENT_LENGTH = re.compile(r'[0-9]{1,18}')
+ RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+ # JSON's "\ud800" decodes to a string with no UTF-8 form, which SQLite cannot store.
+ LONE_SURROGATE = re.compile('[\ud800-\udfff]')
+ # A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
+ CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
++# A key a link's owner may choose: 32 bytes in base64url without padding (R6.1).
++CHOSEN_KEY = re.compile(r'[A-Za-z0-9_-]{43}')
++BAD_KEY_BODY = 'Send no body, {}, or {"key": <32 bytes in base64url without padding>}.'
+ # The two stcp services a -peer client may offer, named <link>-<m8>-<service> (R5.1).
+ PEER_SERVICES = ('data', 'app')
+ 
+ 
+ def now() -> int:
+     return int(time.time())
+ 
+ 
+@@ -1273,16 +1276,43 @@ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
+     """
+     return write('INSERT INTO visitor_keys (name, key_hash, created_at) '
+                  'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+                  'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
+                  'created_at = excluded.created_at',
+                  (name, visitor_hash, now(), name, link_hash)) == 1
+ 
+ 
++class KeyRefused(Exception):
++    """R6.1: a key change's body the relay will not act on; the store is not touched. Its message goes in the answer, so
++    it never holds a key."""
++
++    def __init__(self, code: str, message: str) -> None:
++        super().__init__(message)
++        self.code = code
++
++
++def new_link_key(body: object, current_key: str) -> str:
++    """R6.1: the key a change ends on: the one the body chose, or with none chosen a new random one.
++
++    A caller that chose its key holds it before it asks, so an answer lost on the way does not lose the link. Only what the
++    relay's own keys look like is taken, and anything else raises KeyRefused.
++    """
++    if not isinstance(body, dict) or not body.keys() <= {'key'}:
++        raise KeyRefused('invalid', BAD_KEY_BODY)
++    if 'key' not in body:
++        return secrets.token_urlsafe(32)
++    chosen = body['key']
++    if not isinstance(chosen, str) or CHOSEN_KEY.fullmatch(chosen) is None:
++        raise KeyRefused('invalid', BAD_KEY_BODY)
++    if secrets.compare_digest(chosen.encode(), current_key.encode()):
++        raise KeyRefused('same_key', 'The chosen key is the current key.')
++    return chosen
++
++
+ def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
+     """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
+ 
+     The hash comparison prevents an in-flight request from changing a later owner's
+     key or overwriting another rotation. Retired hashes authorize only Ping from
+     frps's already authenticated sessions, tied to this binding's current hash.
+     A release deletes them.
+     """
+@@ -1659,31 +1689,35 @@ class Handler(BaseHTTPRequestHandler):
+ 
+     def visitor_key_answer(self, name: str) -> None:
+         """R6.2: hand out a new visitor key, replacing the one before; the relay stores its
+         hash only and never logs or answers with the key again. The store lands only while
+         the binding with the authorizing key still exists (C2)."""
+         self.key_answer(name, visitor=True)
+ 
+     def key_answer(self, name: str, visitor: bool = False) -> None:
+-        """R6.1, R6.2: hand out a fresh key once, committing its hash before answering.
++        """R6.1, R6.2: hand out a key once, committing its hash before answering. A link's owner may choose its key
++        (new_link_key); a visitor key is always the relay's own, whatever the body says.
+ 
+-        The body is read before the commit: the answer is the only copy of the key, and closing a
++        The body is read before the commit: the answer can be the only copy of the key, and closing a
+         connection over unread bytes can reset it, which would leave the company with no key.
+         """
+         if not self.authorize_link(name):
+             return
++        current_key = self.bearer_key()
+         try:
+-            self.read_json()
++            body = self.read_json()
++            new_key = secrets.token_urlsafe(32) if visitor else new_link_key(body, current_key)
++        except KeyRefused as refused:
++            return self.error(400, refused.code, str(refused))
+         except ValueError:
+             return self.error(400, 'invalid', 'The body is not valid JSON.')
+         field, store, label = (('visitorKey', store_visitor_key, 'visitor') if visitor
+                                else ('key', store_link_key, 'link'))
+-        new_key = secrets.token_urlsafe(32)
+-        if not store(name, key_hash(new_key), key_hash(self.bearer_key())):
++        if not store(name, key_hash(new_key), key_hash(current_key)):
+             return self.error(404, 'not_found', f'There is no binding {name}.')
+         log_line(f'new {label} key for {name}')
+         self.send_json(200, {field: new_key})
+ 
+     def health_answer(self):
+         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
+         if frps_ok():
+             return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started(),
+diff --git a/relay/test/test_keys.py b/relay/test/test_keys.py
+index 83016df..2e3fde4 100644
+--- a/relay/test/test_keys.py
++++ b/relay/test/test_keys.py
+@@ -1,41 +1,44 @@
+ """Link key rotation, bans and freed-name availability: R6.1 and R1.5."""
+ 
+ import base64
+ import http.client
+ import importlib.util
+ import json
+ from pathlib import Path
+ import re
++import secrets
+ import socket
+ import sqlite3
+ import subprocess
+ import sys
+ import tempfile
+ import threading
+ import time
+ import unittest
+ from collections.abc import Callable
+ from contextlib import redirect_stderr, redirect_stdout
+ from http.server import ThreadingHTTPServer
+ from io import StringIO
+ from typing import NamedTuple
+ from unittest.mock import patch
+ 
+ if __package__:
+-    from .harness import ROOT, Client, Stack, _request, _wait
++    from .harness import ROOT, Client, Stack, _request, _wait, load_relay_module
+ else:
+-    from harness import ROOT, Client, Stack, _request, _wait
++    from harness import ROOT, Client, Stack, _request, _wait, load_relay_module
+ 
+ 
+ KEY_PATH = '/api/v1/links/acme/key'
+ VISITOR_KEY_PATH = '/api/v1/links/acme/visitor-key'
+ ROUTE_PATH = '/api/v1/links/acme/route'
+ SYNC_PATH = '/api/v1/links/acme/sync'
++# Fixed, so that nothing in the in-process tests rests on randomness. No relay outside these tests knows it.
++CHOSEN_KEY = 'a' * 43
+ 
+ 
+ class KeyTests(unittest.TestCase):
+     def setUp(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-keys-'))
+         self.stack = self.enterContext(Stack(tmp))
+         self.key = self.stack.bind('acme')['key']
+ 
+@@ -129,16 +132,63 @@ class KeyTests(unittest.TestCase):
+             time.sleep(0.25)
+         pings = [call for call in self.stack.plugin_calls() if call['op'] == 'Ping']
+         self.assertTrue(all(not call['reject'] for call in pings), 'rotation must preserve legacy heartbeats')
+         self.assertEqual(self.stack.get('acme.hornhoof.org'), 200)
+         after = self.route(current)
+         self.assertEqual((after['state'], after['generation'], after['since']),
+                          ('held', original['generation'], original['since']))
+ 
++    def chosen_key(self) -> str:
++        """32 random bytes in base64url, which no log this test prints may show."""
++        chosen = secrets.token_urlsafe(32)
++        self.stack.private.append(chosen)
++        return chosen
++
++    def test_r6_1_chosen_key(self) -> None:
++        self.holder()
++        chosen = self.chosen_key()
++        status, body = self.stack.api('POST', KEY_PATH, {'key': chosen}, key=self.key)
++        self.assertEqual(status, 200, 'a well-formed chosen key must be taken')
++        self.assertTrue(body == {'key': chosen}, 'the answer must be the chosen key and nothing else')
++        self.assertEqual(self.route(chosen)['state'], 'held', 'the live tunnel must keep its route')
++        self.assertEqual(self.stack.get('acme.hornhoof.org'), 200)
++        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=self.key)[0], 401)
++        refused = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
++        self.assertTrue(_wait(lambda: 'no binding acme with this key' in refused.log(), 5), refused.log())
++        self.assertFalse(refused.started('acme', within=0.1), refused.log())
++        self.assertTrue(chosen not in self.stack.relay.log_path.read_text(), 'a chosen key must not reach the log')
++
++    def test_r6_1_chosen_key_refused(self) -> None:
++        chosen = self.chosen_key()
++        for label, body, code in (('42 characters', {'key': chosen[:42]}, 'invalid'),
++                                  ('43 with a plus', {'key': chosen[:42] + '+'}, 'invalid'),
++                                  ('another field', {'key': chosen, 'extra': 1}, 'invalid'),
++                                  ('the current key', {'key': self.key}, 'same_key')):
++            with self.subTest(label):
++                status, answer = self.stack.api('POST', KEY_PATH, body, key=self.key)
++                self.assertEqual(status, 400, 'this body must be refused')
++                self.assertTrue(answer.get('error') == code, f'the refusal must say {code}')
++                self.assertTrue(body['key'] not in json.dumps(answer), 'a refusal must not repeat the key it was sent')
++                self.route(self.key)
++        status, _ = self.stack.api('POST', KEY_PATH, {'key': chosen}, key='wrong')
++        self.assertEqual(status, 401, 'a chosen key goes nowhere without the current key')
++        self.route(self.key)
++        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=chosen)[0], 401, 'no refusal may change the key')
++
++    def test_r6_1_random_key_stays(self) -> None:
++        new = self.rotate(self.key)
++        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=self.key)[0], 401)
++        self.route(new)
++        status, body = self.stack.api('POST', KEY_PATH, {}, key=new)
++        self.assertEqual(status, 200, 'an empty object asks for a new random key too')
++        self.stack.private.append(body['key'])
++        self.assertTrue(body['key'] != new, 'the key must change')
++        self.route(body['key'])
++
+     def test_ban_without_a_restart(self) -> None:
+         client = self.holder()
+         started = Path(self.stack.env['RELAY_FRPS_STARTED']).read_bytes()
+         pid = self.stack.frps.process.pid
+         self.admin('ban', 'acme')
+         self.assertIn('acme.hornhoof.org', self.admin('banned-caddy'))
+         client.kill()
+         retry = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+@@ -210,16 +260,53 @@ class KeyTests(unittest.TestCase):
+                     self.assertEqual(status, 503, 'an unknown route must prevent a named binding')
+                     self.assertTrue(body.get('error') == 'unknown', 'the route is unknown')
+             status, body = stack.api('POST', '/api/v1/bindings', {})
+             self.assertEqual(status, 201, 'a random binding must bypass the dashboard')
+             self.assertTrue(re.fullmatch(r'[a-z0-9]{24}', body['name']) is not None,
+                             'a random binding must have a fresh random name')
+ 
+ 
++class ChosenKeyRuleTests(unittest.TestCase):
++    """R6.1: what the body of a key change asks for, by the rule alone, with nothing running."""
++
++    CURRENT = 'c' * 43
++
++    @classmethod
++    def setUpClass(cls) -> None:
++        cls.relay = load_relay_module()
++
++    def refusal_of(self, body: object) -> str:
++        with self.assertRaises(self.relay.KeyRefused) as refused:
++            self.relay.new_link_key(body, self.CURRENT)
++        return refused.exception.code
++
++    def test_a_body_that_chooses_nothing_gets_a_new_random_key(self) -> None:
++        first, second = (self.relay.new_link_key({}, self.CURRENT) for _ in range(2))
++        self.assertTrue(re.fullmatch(r'[A-Za-z0-9_-]{43}', first) is not None, 'a new key has the one form')
++        self.assertTrue(first != second, 'and is new each time')
++
++    def test_a_key_of_the_right_form_is_the_key_asked_for(self) -> None:
++        for chosen in (CHOSEN_KEY, 'aZ09_-' + 'x' * 37):
++            with self.subTest(chosen=chosen):
++                self.assertEqual(self.relay.new_link_key({'key': chosen}, self.CURRENT), chosen)
++
++    def test_any_other_body_is_invalid(self) -> None:
++        for body in (None, [], [CHOSEN_KEY], CHOSEN_KEY, 5, True,
++                     {'key': None}, {'key': 5}, {'key': [CHOSEN_KEY]}, {'key': ''},
++                     {'key': 'a' * 42}, {'key': 'a' * 44}, {'key': 'a' * 42 + '+'}, {'key': 'a' * 42 + '='},
++                     {'key': CHOSEN_KEY + '\n'}, {'key': '\u0663' * 43}, {'key': 'a' * 42 + '\ud800'},
++                     {'key': CHOSEN_KEY, 'extra': 1}, {'extra': 1}, {'Key': CHOSEN_KEY}):
++            with self.subTest(body=ascii(body)):
++                self.assertEqual(self.refusal_of(body), 'invalid')
++
++    def test_the_current_key_cannot_be_chosen(self) -> None:
++        self.assertEqual(self.refusal_of({'key': self.CURRENT}), 'same_key')
++
++
+ class RelayInProcess(unittest.TestCase):
+     """HTTP against an isolated relay with real SQLite writes; `acme` is bound with the key `old`."""
+ 
+     def setUp(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-key-auth-'))
+         spec = importlib.util.spec_from_file_location('relay_keys_under_test', ROOT / 'relay/relay.py')
+         self.relay = importlib.util.module_from_spec(spec)
+         spec.loader.exec_module(self.relay)
+@@ -382,16 +469,53 @@ class KeyAuthorizationTests(RelayInProcess):
+         self.assertFalse(self.ping('old')['reject'])
+         self.relay.release_binding('acme')
+         self.assertTrue(self.ping('old')['reject'], 'a release must refuse retired heartbeats')
+         self.bind('next-owner')
+         self.assertTrue(self.ping('old')['reject'], 'a rebind must refuse the previous lifetime heartbeat')
+         self.rotated_key('next-owner')
+         self.assertTrue(self.ping('old')['reject'], 'a new lifetime rotation must not revive prior hashes')
+ 
++    def choose(self, current: str, chosen: str) -> None:
++        status, _ = self.api('POST', KEY_PATH, current, body={'key': chosen})
++        self.assertEqual(status, 200, 'a well-formed chosen key must be taken')
++
++    def test_r6_1_a_chosen_key_retires_the_old_one_as_a_random_key_does(self) -> None:
++        self.choose('old', CHOSEN_KEY)
++        self.assertTrue(self.current_hash_matches(CHOSEN_KEY), 'the chosen key must be the key')
++        self.assertEqual(self.api('GET', ROUTE_PATH, 'old')[0], 401)
++        self.assertFalse(self.ping('old')['reject'], 'a tunnel of the old key keeps its heartbeat')
++        self.assertIsNone(self.relay.link_refusal('acme', 'old'), 'and takes new connections')
++        login = self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'old'}})
++        self.assertTrue(login['reject'], 'the old key must not log in again')
++        self.relay.release_binding('acme')
++        self.assertEqual(self.lifetime_rows()['ping_keys'], 0, 'a release takes the retired key with it')
++
++    def test_r6_1_a_retired_key_chosen_again_leaves_every_tunnel_its_heartbeat(self) -> None:
++        # A random key never returns, so only a chosen key can make a retired hash the current one.
++        again = 'b' * 43
++        self.choose('old', CHOSEN_KEY)
++        self.choose(CHOSEN_KEY, again)
++        self.choose(again, CHOSEN_KEY)
++        self.assertTrue(self.current_hash_matches(CHOSEN_KEY), 'the key chosen again must be the key')
++        self.assertEqual(self.api('GET', ROUTE_PATH, again)[0], 401)
++        self.rotated_key(CHOSEN_KEY)
++        self.assertEqual(self.api('GET', ROUTE_PATH, CHOSEN_KEY)[0], 401)
++        for retired in ('old', CHOSEN_KEY, again):
++            with self.subTest(retired=retired):
++                self.assertFalse(self.ping(retired)['reject'], 'each earlier tunnel keeps its heartbeat')
++
++    def test_r6_2_a_visitor_key_is_never_chosen(self) -> None:
++        for body in ({'key': CHOSEN_KEY}, {'key': 'short', 'extra': 1}):
++            with self.subTest(body=body):
++                status, answer = self.api('POST', VISITOR_KEY_PATH, 'old', body=body)
++                self.assertEqual(status, 200, 'a visitor key post ignores its body')
++                self.assertTrue(answer['visitorKey'] != CHOSEN_KEY, 'a visitor key is the relay\'s own')
++                self.assertTrue(self.current_hash_matches('old'), 'the link key must stay')
++
+     def test_r6_1_rotation_rolls_back_if_heartbeat_retention_fails(self) -> None:
+         original = self.relay.write
+ 
+         def fail_retention(sql: str, args: tuple) -> None:
+             if sql.startswith('INSERT INTO ping_keys'):
+                 raise self.relay.WriteBusy('test contention')
+             original(sql, args)
+ 
+@@ -762,17 +886,17 @@ class ConnectionTests(RelayInProcess):
+         self.assert_answered_once_and_closed(self.exchange(request), 400)
+ 
+     def test_a_big_unread_body_still_gets_its_answer(self) -> None:
+         request = raw_request('POST', KEY_PATH, b'x' * 65536, (FROM_OUTSIDE, WRONG_KEY))
+         self.assert_answered_once_and_closed(self.exchange(request), 401)
+ 
+     def key_from_a_kept_connection(self, path: str, field: str) -> str:
+         """A key request with the largest allowed body and a good request behind it: both run on one connection."""
+-        largest_body = b'{"pad":"' + b'x' * 4086 + b'"}'
++        largest_body = b'{' + b' ' * 4094 + b'}'
+         good = raw_request('GET', '/api/v1/names/acme', headers=(FROM_OUTSIDE,), framed=False)
+         exchange = self.exchange(raw_request('POST', path, largest_body, (FROM_OUTSIDE, GOOD_KEY)) + good, within=0.5)
+         self.assertEqual(exchange.statuses, [200, 200], 'the body must be read, so that the next request is whole')
+         self.assertFalse(exchange.closed, 'nothing is left unread, so the connection stays')
+         self.assertFalse(exchange.says_close, 'nothing is left unread, so the answer must not say close')
+         answer = exchange.raw.split(b'\r\n\r\n', 1)[1].decode()
+         return json.JSONDecoder().raw_decode(answer)[0][field]
+ 
+
+## baf4576 Make an operator's add wait for a freed name's old tunnel, as the public API does
+
+admin_add asked only check_name, and hornhoof-relay did not load /etc/hornhoof-relay.env, so relay.py had no password for frps's
+dashboard. An operator who freed a name and ran `hornhoof-relay add <name>` while the old owner's http-mode tunnel was connected
+sent that name's visitors to the old owner: an http route gets no NewUserConn, and frps refuses the new owner's frpc while the old
+one holds the route. Batch 7's delta review, Important 1.
+
+admin_add now asks requested_name_reason, as POST /bindings does (R1.5): a route frps shows or has yet to show reads as taken.
+While frps cannot tell, it says so on stderr and exits 1, which stops hornhoof-relay under set -e. hornhoof-relay sources the env
+file when it can read it.
+
+test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel now puts its second binding straight into SQLite, since an add no longer
+can, and test_admin_unban_placeholder_removes_credential_and_old_visitor_access binds through the store, since it has no frps to ask.
+
+Proven by: a real frps with an http-mode tunnel in test_r1_5_an_operators_add_waits_for_the_tunnel_too, in-process cases for each
+answer, and hornhoof-relay's own text against a stand-in dashboard that wants the env file's password. Each failed first, on the
+add handing out the name; with the source line disabled the last one fails with `cannot tell`.
+
+Ruling: an add of any name refuses while frps cannot tell, also one never bound - why: the brief's exit 1 on FrpsUnknown, and the relay cannot know that a name has no route when frps does not answer, as POST /bindings answers 503 for a named binding - cost if wrong: an operator waits for frps to answer before adding a name.
+
+---
+ relay/hornhoof-relay             |  9 ++++++-
+ relay/relay.py                   | 11 ++++++--
+ relay/test/test_block_by_name.py | 56 ++++++++++++++++++++++++++++++++++++--
+ relay/test/test_keys.py          | 58 ++++++++++++++++++++++++++++++++++++++++
+ relay/test/test_peers.py         |  3 +--
+ 5 files changed, 130 insertions(+), 7 deletions(-)
+
+diff --git a/relay/hornhoof-relay b/relay/hornhoof-relay
+index 822ea1d..e0ad252 100755
+--- a/relay/hornhoof-relay
++++ b/relay/hornhoof-relay
+@@ -1,18 +1,25 @@
+ #!/bin/sh
+ # Operator commands for the Hornhoof relay. Run as root on the droplet.
+ #   hornhoof-relay list                       every binding, when it was made and last seen
+-#   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret
++#   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret.
++#                                             Refused while the name's old tunnel lives or the relay cannot tell
+ #   hornhoof-relay ban <name> [reason] [--cut]  a ban refuses new connections at once, and its tunnel can never log in or
+ #                                             register again. Visitors get the 410 page once that tunnel is gone. Connections
+ #                                             already open stay; --cut also drops open ones, with every link, by restarting frps
+ #   hornhoof-relay unban <name>
+ #   hornhoof-relay release <name>             free a name once its old tunnel is gone
+ set -eu
++# add asks frps whether a freed name's old tunnel lives, so it needs what the service reads to reach frps's dashboard.
++if [ -r /etc/hornhoof-relay.env ]; then
++  set -a
++  . /etc/hornhoof-relay.env
++  set +a
++fi
+ relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+ said=$(relay "$@")
+ printf '%s\n' "$said"
+ case "${1:-}" in
+   ban | unban)
+     relay banned-caddy > /etc/caddy/blocked.caddy.new
+     mv /etc/caddy/blocked.caddy.new /etc/caddy/blocked.caddy
+     chmod 644 /etc/caddy/blocked.caddy
+diff --git a/relay/relay.py b/relay/relay.py
+index 2246bbc..b8a1957 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -1858,18 +1858,25 @@ def admin_banned_caddy() -> int:
+     print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
+     if hosts:
+         print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
+               f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
+     return 0
+ 
+ 
+ def admin_add(name: str) -> int:
+-    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret."""
+-    reason = check_name(name)
++    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret.
++
++    Like the public API it waits for a freed name's old route (R1.5): an http-mode tunnel gets no NewUserConn to stop it, so
++    a new owner's name would still send its visitors to the old owner's machine.
++    """
++    try:
++        reason = requested_name_reason(name)
++    except FrpsUnknown:
++        reason = 'the relay cannot tell whether its old route is gone, nothing changed'
+     if reason:
+         print(f'{name}: {reason}', file=sys.stderr)
+         return 1
+     key = secrets.token_urlsafe(32)
+     write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+           (name, key_hash(key), now(), 'operator'))
+     print(json.dumps({'name': name, 'key': key}))
+     return 0
+diff --git a/relay/test/test_block_by_name.py b/relay/test/test_block_by_name.py
+index e4894b0..4981cc7 100644
+--- a/relay/test/test_block_by_name.py
++++ b/relay/test/test_block_by_name.py
+@@ -1,11 +1,13 @@
+ """Blocking by name, per connection (R7.4): frps asks the plugin about every new connection to an https or stcp proxy."""
+ 
++import base64
+ import http.client
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ import os
+ from pathlib import Path
+ import secrets
+ import socket
+ import sqlite3
+ import ssl
+ import statistics
+ import subprocess
+@@ -110,21 +112,23 @@ class BlockByNameTests(PassthroughCase):
+         # frps sends the metas of the tunnel's login, with the key it logged in with, for as long as that tunnel lives.
+         _, key = self.holder('acme')
+         status, _ = self.stack.api('POST', '/api/v1/links/acme/key', key=key)
+         self.assertEqual(status, 200, 'changing the key must answer 200')
+         answer = self.stack.https('acme.hornhoof.org')
+         self.assertEqual(answer.status, 200, answer.error)
+ 
+     def test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel(self) -> None:
+-        # An operator's add does not ask frps, so it is a way for a live tunnel to find its name bound again.
++        # Neither the API nor an operator's add binds a name while frps shows its route, so the second binding goes straight
++        # into the store. A route frps shows only after its window finds its name bound again this way (test_keys).
+         _, key = self.holder('acme')
+         self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
+         self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=key)[0], 204)
+-        self.stack.admin('add', 'acme')
++        with sqlite3.connect(self.stack.env['RELAY_DB']) as connection:
++            connection.execute("INSERT INTO bindings (name, key_hash, created_at) VALUES ('acme', 'a new owner', 0)")
+         self.assert_refused_at_once('acme.hornhoof.org')
+ 
+     def crowd(self, host: str, seconds: float) -> list[Answer]:
+         """CROWD connections, one request each, spread evenly over these seconds."""
+         answers: list[Answer | None] = [None] * CROWD
+ 
+         def visit(index: int) -> None:
+             answers[index] = self.stack.https(host)
+@@ -435,25 +439,73 @@ class OperatorCommandTests(AdminCase):
+         (stand_ins / 'systemctl').write_text(f'#!/bin/sh\necho "$@" >> {self.calls}\n')
+         for stand_in in stand_ins.iterdir():
+             stand_in.chmod(0o755)
+         self.env['PATH'] = f'{stand_ins}:{self.env["PATH"]}'
+         self.script = self.tmp / 'hornhoof-relay'
+         self.script.write_text(render_caddyfile((ROOT / 'relay/hornhoof-relay').read_text(), [
+             ('/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py', f'{sys.executable} {ROOT}/relay/relay.py'),
+             ('/etc/caddy', str(self.tmp / 'caddy')),
++            ('/etc/hornhoof-relay.env', str(self.tmp / 'relay.env')),
+         ], file='relay/hornhoof-relay'))
+ 
+     def operator(self, *args: str) -> subprocess.CompletedProcess:
+         return subprocess.run(['sh', str(self.script), *args], env=self.env, capture_output=True, text=True,
+                               timeout=30)
+ 
+     def systemctl_calls(self) -> list[str]:
+         return self.calls.read_text().splitlines() if self.calls.exists() else []
+ 
++    def dashboard_showing_acme_to(self, password: str) -> int:
++        """A stand-in for frps's dashboard: acme's http route is online, for the one who has this password."""
++        expected = 'Basic ' + base64.b64encode(f'admin:{password}'.encode()).decode()
++
++        class Dashboard(BaseHTTPRequestHandler):
++            def do_GET(self) -> None:
++                status, body = 401, b''
++                if self.headers.get('Authorization') == expected:
++                    online = self.path == '/api/proxy/http/acme'
++                    status, body = (200, b'{"status":"online","clientID":"a-run-id"}') if online else (404, b'{}')
++                self.send_response(status)
++                self.send_header('Content-Length', str(len(body)))
++                self.end_headers()
++                self.wfile.write(body)
++
++            def log_message(self, *_args: object) -> None:
++                pass
++
++        server = ThreadingHTTPServer(('127.0.0.1', 0), Dashboard)
++        server.daemon_threads = True
++        thread = threading.Thread(target=server.serve_forever, daemon=True)
++        thread.start()
++        self.addCleanup(thread.join, 5)
++        self.addCleanup(server.server_close)
++        self.addCleanup(server.shutdown)
++        return server.server_port
++
++    def bound_names(self) -> list[str]:
++        with sqlite3.connect(self.env['RELAY_DB']) as connection:
++            return [row[0] for row in connection.execute('SELECT name FROM bindings')]
++
++    def assert_add_refused(self, reason: str) -> None:
++        done = self.operator('add', 'acme')
++        self.assertEqual(done.returncode, 1, 'the name must not go to a new owner')
++        self.assertIn(reason, done.stderr)
++        self.assertTrue(done.stdout == '', 'a refused name must hand out no key')
++        self.assertEqual(self.bound_names(), [])
++
++    def test_add_asks_frps_with_the_relays_own_settings(self) -> None:
++        port = self.dashboard_showing_acme_to('its-password')
++        (self.tmp / 'relay.env').write_text(f'RELAY_FRPS_API=http://127.0.0.1:{port}\nRELAY_FRPS_PASSWORD=its-password\n')
++        self.assert_add_refused('acme: taken')
++
++    def test_add_with_no_settings_it_can_read_refuses_and_says_so(self) -> None:
++        self.env['RELAY_FRPS_API'] = f'http://127.0.0.1:{self.dashboard_showing_acme_to("its-password")}'
++        self.assert_add_refused('acme: the relay cannot tell')
++
+     def test_a_ban_with_cut_restarts_frps_after_caddys_list(self) -> None:
+         done = self.operator('ban', 'acme', '--cut')
+         self.assertEqual(done.returncode, 0, done.stderr)
+         self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
+         self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
+ 
+     def test_a_ban_with_cut_first_blocks_the_name_it_was_given(self) -> None:
+         done = self.operator('ban', '--cut', 'acme')
+diff --git a/relay/test/test_keys.py b/relay/test/test_keys.py
+index 2e3fde4..22959dd 100644
+--- a/relay/test/test_keys.py
++++ b/relay/test/test_keys.py
+@@ -225,16 +225,31 @@ class KeyTests(unittest.TestCase):
+         self.assertEqual(status, 409, 'a freed live route must prevent rebinding')
+         self.assertTrue(body.get('error') == 'taken', 'a freed live route is taken')
+         client.stop()
+         self.assertTrue(_wait(lambda: self.stack.dash('/api/proxy/http/acme')[1]['status'] == 'offline', 5))
+         self.assertEqual(self.stack.api('GET', '/api/v1/names/acme'), (200, {'name': 'acme', 'free': True}))
+         status, _body = self.stack.api('POST', '/api/v1/bindings', {'name': 'acme'})
+         self.assertEqual(status, 201, 'an offline freed name must bind again')
+ 
++    def test_r1_5_an_operators_add_waits_for_the_tunnel_too(self) -> None:
++        # An http-mode tunnel gets no NewUserConn, so that a name bound again while it lives sends its visitors to the old owner.
++        client = self.holder('today')
++        self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=self.key)[0], 204)
++        refused = subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', 'add', 'acme'],
++                                 env=self.stack.env, capture_output=True, text=True, timeout=30)
++        self.assertEqual(refused.returncode, 1, 'a live route must keep the name from a new owner')
++        self.assertIn('acme: taken', refused.stderr)
++        self.assertTrue(refused.stdout == '', 'a refused name must hand out no key')
++        client.stop()
++        self.assertTrue(_wait(lambda: self.stack.dash('/api/proxy/http/acme')[1]['status'] == 'offline', 5))
++        added = json.loads(self.admin('add', 'acme'))
++        self.stack.private.append(added['key'])
++        self.assertEqual(added['name'], 'acme')
++
+     def test_r2_4_a_freed_names_sync_record_goes_with_it(self) -> None:
+         first = self.holder()
+         post = {'client': 'acme-aaaaaaaa-link', 'generation': self.route(self.key)['generation'],
+                 'state': 'on', 'copy': 'bbbbbbbb', 'epoch': 900}
+         self.assertEqual(self.stack.api('POST', SYNC_PATH, post, key=self.key)[0], 200)
+         first.stop()
+         self.assertTrue(_wait(lambda: self.route(self.key)['state'] == 'empty', 5))
+         self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=self.key)[0], 204)
+@@ -981,16 +996,20 @@ def frps_shows_nothing(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
+ 
+ 
+ def frps_shows_acme_online(path: str, cap: float = 0.5) -> tuple[int, bytes]:
+     if '/https/' in path:
+         return 200, b'{"status":"online","clientID":"acme-aaaaaaaa-link"}'
+     return 404, b'{}'
+ 
+ 
++def frps_cannot_tell(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
++    return 500, b''
++
++
+ class FreedNameTests(RelayInProcess):
+     """A name's change of owner, at the plugin and the API, with a stand-in for frps's dashboard, so that each step lands
+     exactly where a real frps could put it and no test waits for a moment to come. frps asks the plugin before it makes a
+     proxy, so that between that answer and its dashboard showing the proxy, only the relay's row knows of the route."""
+ 
+     NOW = 1_900_000_000
+ 
+     def registration(self, key: str = 'old') -> dict:
+@@ -1097,16 +1116,55 @@ class FreedNameTests(RelayInProcess):
+             self.free_acme()
+             next_owner.append(self.bind_acme_for_the_next_owner())
+ 
+         self.assert_registration_refused(freed_and_bound_again, 'no binding acme with this key')
+         with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+             status, route = self.api('GET', ROUTE_PATH, next_owner[0])
+         self.assertEqual((status, route['state'], route['generation']), (200, 'empty', 0))
+ 
++    def operators_add(self) -> tuple[int, str, str]:
++        """(exit code, what it said, what it refused with). What it said holds the key once it adds: never print it."""
++        with redirect_stdout(StringIO()) as said, redirect_stderr(StringIO()) as refusal:
++            code = self.relay.admin(['add', 'acme'])
++        return code, said.getvalue(), refusal.getvalue()
++
++    def assert_operators_add_refused(self, reason: str) -> None:
++        code, said, refusal = self.operators_add()
++        self.assertEqual(code, 1, 'the name must not go to a new owner')
++        self.assertIn(reason, refusal)
++        self.assertTrue(said == '', 'a refused name must hand out no key')
++        self.assertEqual(self.counts(), (0, 0), 'a refused name stores nothing')
++
++    def test_r1_5_an_operators_add_refuses_a_route_frps_shows(self) -> None:
++        self.free_acme()
++        with patch.object(self.relay, '_dash_get', frps_shows_acme_online):
++            self.assert_operators_add_refused('acme: taken')
++
++    def test_r1_5_an_operators_add_refuses_a_route_frps_has_not_shown_yet(self) -> None:
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            with self.at():
++                self.assert_passed('NewProxy', self.registration())
++                self.free_acme()
++                self.assert_operators_add_refused('acme: taken')
++            with self.at(self.relay.PENDING_S + 1):
++                self.assertEqual(self.operators_add()[0], 0, 'a route frps never showed frees the name after its window')
++
++    def test_r1_5_an_operators_add_refuses_while_frps_cannot_tell(self) -> None:
++        self.free_acme()
++        with patch.object(self.relay, '_dash_get', frps_cannot_tell):
++            self.assert_operators_add_refused('acme: the relay cannot tell')
++
++    def test_r1_5_an_operators_add_of_a_free_name_makes_the_binding(self) -> None:
++        self.free_acme()
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            code, said, _ = self.operators_add()
++        self.assertEqual(code, 0, 'a free name must bind')
++        self.assertTrue(self.current_hash_matches(json.loads(said)['key']), 'the key it hands out must be the key')
++
+     def test_r7_4_an_old_owners_route_is_refused_under_a_new_binding(self) -> None:
+         # frps shows the route later than the window allows for, when the name already has its next owner.
+         with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+             with self.at():
+                 self.assert_passed('NewProxy', self.registration())
+                 self.free_acme()
+             with self.at(self.relay.PENDING_S + 1):
+                 next_key = self.bind_acme_for_the_next_owner()
+diff --git a/relay/test/test_peers.py b/relay/test/test_peers.py
+index 0112b2f..4d3c21a 100644
+--- a/relay/test/test_peers.py
++++ b/relay/test/test_peers.py
+@@ -1411,18 +1411,17 @@ class VisitorKeyLifecycleTests(unittest.TestCase):
+         row = self.binding_row('placeholder-name')
+         self.assertIsNotNone(row)
+         self.assertEqual(row[0], '-')
+         relay.db().execute('INSERT INTO visitor_keys (name, key_hash, created_at) VALUES (?, ?, ?)',
+                            ('placeholder-name', relay.key_hash('old-visitor'), relay.now()))
+         self.admin('unban', 'placeholder-name')
+         self.assertIsNone(self.binding_row('placeholder-name'))
+         self.assertIsNone(self.stored_hash('placeholder-name'))
+-        created = json.loads(self.admin('add', 'placeholder-name'))
+-        self.assertEqual(created['name'], 'placeholder-name')
++        self.bind('placeholder-name', 'its-new-key')
+         self.assertIsNotNone(self.binding_row('placeholder-name'))
+         self.assertFalse(relay.visitor_hash_matches('placeholder-name', 'old-visitor'))
+ 
+     def test_http_delete_authorized_before_release_cannot_drop_new_owner(self) -> None:
+         # C2 stale DELETE: a DELETE paused after authorization, across a second
+         # DELETE and rebind, must refuse the stale request (404) and leave the
+         # new owner's binding and credential untouched.
+         relay = self.relay
+
+## 3880b65 Say what a retired key serves: a live tunnel's heartbeat and its new connections, nothing else
+
+README.md and relay.py's comments said that a retired hash in ping_keys serves only a heartbeat. Since batch 7's fix, link_refusal
+also takes one on NewUserConn, for a tunnel already logged in, so that a key change leaves its new connections open (R6.1). Batch 7's
+delta review, its Minor. An API call, a Login and a registration still need the current key, and the README now says so.
+
+Proven by: test_r6_1_no_text_says_a_heartbeat_is_all_a_retired_key_serves failed on each of the five claims and on the missing line
+before the text changed, and passes now. No behaviour changed.
+
+---
+ README.md               |  2 +-
+ relay/relay.py          | 16 +++++++++-------
+ relay/test/test_keys.py | 16 +++++++++++++++-
+ 3 files changed, 25 insertions(+), 9 deletions(-)
+
+diff --git a/README.md b/README.md
+index f0a3c0b..498f5ee 100644
+--- a/README.md
++++ b/README.md
+@@ -35,17 +35,17 @@ hornhoof.org itself, its API and the tunnels' way in also end at hornhoof.org, i
+ For each link, the relay keeps:
+ 
+ - its name and a hash of its key;
+ - when and from which address it was made;
+ - when its tunnel was last seen;
+ - whether it is blocked, when it was blocked, and why;
+ - which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+-- the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat. Nothing but a heartbeat can use them;
++- the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat and its new connections. They open nothing else: no API call, no login and no registration;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+ frps asks the relay about every new connection to a company's https proxy or stcp service, and to hornhoof.org, the API and the tunnels' way in, with the visitor's address among what it sends. The relay reads only the name and what the tunnel logged in with, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
+ 
+diff --git a/relay/relay.py b/relay/relay.py
+index b8a1957..6ef5228 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -1304,47 +1304,48 @@ def new_link_key(body: object, current_key: str) -> str:
+     if not isinstance(chosen, str) or CHOSEN_KEY.fullmatch(chosen) is None:
+         raise KeyRefused('invalid', BAD_KEY_BODY)
+     if secrets.compare_digest(chosen.encode(), current_key.encode()):
+         raise KeyRefused('same_key', 'The chosen key is the current key.')
+     return chosen
+ 
+ 
+ def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
+-    """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
++    """R6.1: rotate only the authorizing, unblocked binding, preserving live tunnels.
+ 
+     The hash comparison prevents an in-flight request from changing a later owner's
+-    key or overwriting another rotation. Retired hashes authorize only Ping from
+-    frps's already authenticated sessions, tied to this binding's current hash.
+-    A release deletes them.
++    key or overwriting another rotation. Retired hashes serve only frps's already
++    authenticated sessions, for their Ping and their NewUserConn, tied to this
++    binding's current hash. A release deletes them.
+     """
+     with transaction():
+         write('UPDATE bindings SET key_hash = ? WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
+               (new_hash, name, link_hash))
+         if db().execute('SELECT changes()').fetchone()[0] != 1:
+             return False
+         retain_ping_keys(name, new_hash, link_hash)
+         return True
+ 
+ 
+ def retain_ping_keys(name: str, new_hash: str, link_hash: str) -> None:
+-    """Keep prior login hashes usable only for heartbeats in this binding lifetime.
++    """Keep prior login hashes for live tunnels' heartbeats and new connections in this binding lifetime.
+ 
+     Both statements run in the key rotation's transaction. No retired credential
+     becomes a public API credential or authorizes a Login or registration.
+     """
+     write('UPDATE ping_keys SET link_hash = ? WHERE name = ? AND link_hash = ?',
+           (new_hash, name, link_hash))
+     write('INSERT INTO ping_keys (name, key_hash, link_hash) VALUES (?, ?, ?) '
+           'ON CONFLICT(name, key_hash) DO UPDATE SET link_hash = excluded.link_hash',
+           (name, link_hash, new_hash))
+ 
+ 
+ def ping_key_matches(name: str | None, key: object) -> bool:
+-    """A retired link hash serves only this still-bound, unblocked lifetime's Ping."""
++    """A retired link hash serves only this still-bound, unblocked lifetime's tunnels already logged in: their Ping
++    (authenticate_call) and their NewUserConn (link_refusal)."""
+     if not isinstance(key, str) or not key:
+         return False
+     row = db().execute('SELECT 1 FROM ping_keys AS p JOIN bindings AS b '
+                        'ON b.name = p.name AND b.key_hash = p.link_hash '
+                        'WHERE p.name = ? AND p.key_hash = ? AND b.banned_at IS NULL',
+                        (name, key_hash(key))).fetchone()
+     return row is not None
+ 
+@@ -1430,17 +1431,18 @@ def call_metas(op: str, content: dict) -> dict:
+         metas = content.get('metas')
+     else:
+         user = content.get('user')
+         metas = user.get('metas') if isinstance(user, dict) else None
+     return metas if isinstance(metas, dict) else {}
+ 
+ 
+ def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str | None]:
+-    """Live sessions retain their heartbeat after rotation; all other ops need the current key."""
++    """Live sessions retain their heartbeat after rotation; Login and NewProxy need the current key. A NewUserConn never
++    comes here: link_refusal answers it."""
+     name, kind, reason = authenticate(metas)
+     if op == 'Ping' and reason is not None and ping_key_matches(name, metas.get('key')):
+         return name, 'link', None
+     return name, kind, reason
+ 
+ 
+ def edge_token_matches(token: object) -> bool:
+     """R7.5: the edge's token, compared in constant time; with no token set, nothing matches."""
+diff --git a/relay/test/test_keys.py b/relay/test/test_keys.py
+index 22959dd..5440b12 100644
+--- a/relay/test/test_keys.py
++++ b/relay/test/test_keys.py
+@@ -312,16 +312,30 @@ class ChosenKeyRuleTests(unittest.TestCase):
+                      {'key': CHOSEN_KEY, 'extra': 1}, {'extra': 1}, {'Key': CHOSEN_KEY}):
+             with self.subTest(body=ascii(body)):
+                 self.assertEqual(self.refusal_of(body), 'invalid')
+ 
+     def test_the_current_key_cannot_be_chosen(self) -> None:
+         self.assertEqual(self.refusal_of({'key': self.CURRENT}), 'same_key')
+ 
+ 
++class RetiredKeyWordingTests(unittest.TestCase):
++    """What the README and relay.py say a retired key serves. test_r6_1_retired_ping_cannot_bypass_ban_release_or_rebind and
++    test_a_tunnel_of_a_changed_key_stays pin the behaviour itself."""
++
++    def test_r6_1_no_text_says_a_heartbeat_is_all_a_retired_key_serves(self) -> None:
++        readme = (ROOT / 'README.md').read_text()
++        source = (ROOT / 'relay/relay.py').read_text()
++        for claim in ('Nothing but a heartbeat', 'authorize only Ping', 'usable only for heartbeats', "lifetime's Ping.",
++                      'all other ops need the current key'):
++            with self.subTest(claim=claim):
++                self.assertTrue(claim not in readme + source, 'link_refusal takes a retired key on NewUserConn as well')
++        self.assertIn('keeps its heartbeat and its new connections', readme)
++
++
+ class RelayInProcess(unittest.TestCase):
+     """HTTP against an isolated relay with real SQLite writes; `acme` is bound with the key `old`."""
+ 
+     def setUp(self) -> None:
+         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-key-auth-'))
+         spec = importlib.util.spec_from_file_location('relay_keys_under_test', ROOT / 'relay/relay.py')
+         self.relay = importlib.util.module_from_spec(spec)
+         spec.loader.exec_module(self.relay)
+@@ -472,17 +486,17 @@ class KeyAuthorizationTests(RelayInProcess):
+         self.rotated_key(new)
+         self.assertFalse(self.ping('old')['reject'])
+         self.assertFalse(self.ping(new)['reject'])
+         for invalid in (None, '', [], 'wrong', 5, ['wrong']):
+             with self.subTest(invalid_type=type(invalid).__name__):
+                 self.assertTrue(self.ping(invalid)['reject'])
+         for op, content in (('Login', {'metas': {'name': 'acme', 'key': 'old'}}),
+                             ('NewProxy', {'user': {'metas': {'name': 'acme', 'key': 'old'}}})):
+-            self.assertTrue(self.relay.plugin(op, content)['reject'], 'retired keys may only keep heartbeats')
++            self.assertTrue(self.relay.plugin(op, content)['reject'], 'a retired key must not log in or register')
+         self.relay.write("UPDATE bindings SET banned_at = 1 WHERE name = 'acme'", ())
+         self.assertTrue(self.ping('old')['reject'], 'a ban must refuse retired heartbeats')
+         self.relay.unban_binding('acme')
+         self.assertFalse(self.ping('old')['reject'])
+         self.relay.release_binding('acme')
+         self.assertTrue(self.ping('old')['reject'], 'a release must refuse retired heartbeats')
+         self.bind('next-owner')
+         self.assertTrue(self.ping('old')['reject'], 'a rebind must refuse the previous lifetime heartbeat')
+
+## 1ab6550 Count the bytes the relay sends each month
+
+Every minute the relay reads the tx_bytes counter of the default route's interface and adds what was sent since the
+last read to the UTC month's total in SQLite. A reboot, another interface or a counter that went down counts the whole
+reading from zero; the first reading adds nothing. The two writes are one transaction, so a crash cannot count bytes
+twice. Past 300 GB in a month one line a day goes to the journal, from a round function that tests drive with fake
+proc and sys folders. `hornhoof-relay traffic` prints the last 12 months, oldest first.
+
+Ruling: the README sentence goes right after the "For each address" paragraph of "What it stores" - why: two other
+paragraphs there also mention addresses, and this one is the one about addresses kept - cost if wrong: one sentence moved.
+Ruling: a first read of a month that adds nothing writes no row - why: the table then lists only months with traffic -
+cost if wrong: a month shows no 0.0 GB line.
+Lock order: these writes take neither create_lock nor route_lock, only the write queue through transaction().
+
+---
+ README.md                  |   2 +
+ relay/hornhoof-relay       |   1 +
+ relay/relay.py             | 121 ++++++++++++++++++++++++++++-
+ relay/test/test_traffic.py | 185 +++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 306 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index 498f5ee..a103fc4 100644
+--- a/README.md
++++ b/README.md
+@@ -42,16 +42,18 @@ For each link, the relay keeps:
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+ - the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat and its new connections. They open nothing else: no API call, no login and no registration;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
++For the server itself, the bytes its public interface sent each month, so its operator knows when to resize it.
++
+ frps asks the relay about every new connection to a company's https proxy or stcp service, and to hornhoof.org, the API and the tunnels' way in, with the visitor's address among what it sends. The relay reads only the name and what the tunnel logged in with, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
+ 
+ The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
+ 
+ ## Run the tests
+ 
+ You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
+ 
+diff --git a/relay/hornhoof-relay b/relay/hornhoof-relay
+index e0ad252..0c4ca23 100755
+--- a/relay/hornhoof-relay
++++ b/relay/hornhoof-relay
+@@ -3,16 +3,17 @@
+ #   hornhoof-relay list                       every binding, when it was made and last seen
+ #   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret.
+ #                                             Refused while the name's old tunnel lives or the relay cannot tell
+ #   hornhoof-relay ban <name> [reason] [--cut]  a ban refuses new connections at once, and its tunnel can never log in or
+ #                                             register again. Visitors get the 410 page once that tunnel is gone. Connections
+ #                                             already open stay; --cut also drops open ones, with every link, by restarting frps
+ #   hornhoof-relay unban <name>
+ #   hornhoof-relay release <name>             free a name once its old tunnel is gone
++#   hornhoof-relay traffic                    bytes sent per month, the last 12 months
+ set -eu
+ # add asks frps whether a freed name's old tunnel lives, so it needs what the service reads to reach frps's dashboard.
+ if [ -r /etc/hornhoof-relay.env ]; then
+   set -a
+   . /etc/hornhoof-relay.env
+   set +a
+ fi
+ relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+diff --git a/relay/relay.py b/relay/relay.py
+index 6ef5228..e408472 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -6,17 +6,17 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}, 409 taken, 503 if unknown
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
+   POST   /api/v1/links/{name}/key   Authorization: Bearer <key> {key?} -> 200 {key}, 400 invalid|same_key (R6.1)
+   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
+-Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
++Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy|traffic ...
+ 
+ Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
+ """
+ import base64
+ import collections
+ import contextlib
+ import hashlib
+ import hmac
+@@ -160,16 +160,24 @@ SCHEMA = {
+             created_at INTEGER NOT NULL
+         )''',
+     'ping_keys': '''CREATE TABLE IF NOT EXISTS ping_keys (
+             name TEXT NOT NULL,
+             key_hash TEXT NOT NULL,
+             link_hash TEXT NOT NULL,
+             PRIMARY KEY (name, key_hash)
+         )''',
++    'traffic': 'CREATE TABLE IF NOT EXISTS traffic (month TEXT PRIMARY KEY, bytes INTEGER NOT NULL)',
++    'traffic_seen': '''CREATE TABLE IF NOT EXISTS traffic_seen (
++            id INTEGER PRIMARY KEY CHECK (id = 1),
++            boot TEXT NOT NULL,
++            iface TEXT NOT NULL,
++            sent INTEGER NOT NULL,
++            at INTEGER NOT NULL
++        )''',
+ }
+ 
+ 
+ def init_db() -> None:
+     """Make what is missing. A made database takes no write lock: an admin command that only reads must not wait for,
+     or fail behind, a long commit of the service."""
+     made = {row[0] for row in db().execute('SELECT name FROM sqlite_master')}
+     for name, statement in SCHEMA.items():
+@@ -278,16 +286,113 @@ def watch_once(was_ok: bool) -> bool:
+ def watch_frps() -> None:
+     """Probe frps forever; keep the last good answer and the recovery after a failure."""
+     was_ok = False
+     while True:
+         was_ok = watch_once(was_ok)
+         time.sleep(WATCH_INTERVAL_S)
+ 
+ 
++# The relay's own outbound traffic per UTC month, so its operator knows when to resize the server.
++TRAFFIC_EVERY_S = 60
++TRAFFIC_WARN_BYTES = 300 * 10**9
++TRAFFIC_MONTHS_SHOWN = 12
++
++
++def read_text(path: str) -> str | None:
++    try:
++        with open(path) as f:
++            return f.read()
++    except OSError:
++        return None
++
++
++def default_iface(proc: str = '/proc') -> str | None:
++    """The interface of the first route to destination 00000000, the one the public traffic leaves by."""
++    table = read_text(f'{proc}/net/route')
++    for line in (table or '').splitlines()[1:]:
++        fields = line.split()
++        if len(fields) > 1 and fields[1] == '00000000':
++            return fields[0]
++    return None
++
++
++def sent_bytes(iface: str, sys: str = '/sys') -> int | None:
++    """The interface's tx_bytes counter, None when it cannot be read as a number."""
++    text = read_text(f'{sys}/class/net/{iface}/statistics/tx_bytes')
++    return int(text) if text and text.strip().isdigit() else None
++
++
++def boot_id(proc: str = '/proc') -> str | None:
++    text = read_text(f'{proc}/sys/kernel/random/boot_id')
++    return text.strip() if text and text.strip() else None
++
++
++def traffic_added(seen: tuple | None, boot: str, iface: str, sent: int) -> int:
++    """What a reading adds to the month. The counter restarts from zero after a reboot, on another interface, or when it
++    went down, so the whole reading is new then. The very first reading has nothing to compare with and adds nothing."""
++    if seen is None:
++        return 0
++    seen_boot, seen_iface, seen_sent = seen
++    if seen_boot != boot or seen_iface != iface or sent < seen_sent:
++        return sent
++    return sent - seen_sent
++
++
++def utc_month(at: int) -> str:
++    return time.strftime('%Y-%m', time.gmtime(at))
++
++
++def count_traffic(at: int, proc: str = '/proc', sys: str = '/sys') -> int | None:
++    """Add what was sent since the last read to the UTC month of `at` and answer that month's total. None, and nothing
++    changed, when the interface or its counter cannot be read. Both writes are one transaction, so a crash between them
++    cannot count the same bytes twice."""
++    iface = default_iface(proc)
++    sent = sent_bytes(iface, sys) if iface else None
++    boot = boot_id(proc)
++    if iface is None or sent is None or boot is None:
++        return None
++    month = utc_month(at)
++    with transaction():
++        added = traffic_added(db().execute('SELECT boot, iface, sent FROM traffic_seen').fetchone(), boot, iface, sent)
++        if added:
++            write('INSERT INTO traffic (month, bytes) VALUES (?, ?) '
++                  'ON CONFLICT(month) DO UPDATE SET bytes = bytes + excluded.bytes', (month, added))
++        write('INSERT OR REPLACE INTO traffic_seen (id, boot, iface, sent, at) VALUES (1, ?, ?, ?, ?)',
++              (boot, iface, sent, at))
++        return db().execute('SELECT COALESCE(SUM(bytes), 0) FROM traffic WHERE month = ?', (month,)).fetchone()[0]
++
++
++def traffic_round(at: int, warned_day: str | None, proc: str = '/proc', sys: str = '/sys') -> str | None:
++    """One count. Past the limit it logs one line per UTC day; answers the day it last warned."""
++    total = count_traffic(at, proc, sys)
++    day = time.strftime('%Y-%m-%d', time.gmtime(at))
++    if total is None or total <= TRAFFIC_WARN_BYTES or warned_day == day:
++        return warned_day
++    print(f'Sent {total / 10**9:.1f} GB this month, past 300 GB: time to resize the server.', flush=True)
++    return day
++
++
++def safe_traffic_round(run_round, at: int, warned_day: str | None) -> str | None:
++    """A round that fails is one log line, and the next round runs."""
++    try:
++        return run_round(at, warned_day)
++    except Exception as failure:
++        print(f'Traffic count failed: {type(failure).__name__}: {failure}', flush=True)
++        return warned_day
++
++
++def watch_traffic() -> None:
++    """Count the traffic every TRAFFIC_EVERY_S, forever, as watch_frps probes."""
++    warned_day = None
++    while True:
++        warned_day = safe_traffic_round(traffic_round, int(time.time()), warned_day)
++        time.sleep(TRAFFIC_EVERY_S)
++
++
+ def watch_passthrough() -> None:
+     """Follow frps's https port while frps answers, on a loop of its own. Between two stamps of frps's answers a probe
+     that waits out its timeout would count against HEALTH_MAX_AGE_S, and health would read as the relay being down."""
+     while True:
+         if frps_ok():
+             _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
+         time.sleep(WATCH_INTERVAL_S)
+ 
+@@ -1850,16 +1955,25 @@ def admin_list() -> int:
+     for r in db().execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
+                           'ORDER BY created_at'):
+         seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
+         ban = f'  BLOCKED: {r[5]}' if r[4] else ''
+         print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
+     return 0
+ 
+ 
++def admin_traffic() -> int:
++    rows = db().execute('SELECT month, bytes FROM traffic ORDER BY month DESC LIMIT ?', (TRAFFIC_MONTHS_SHOWN,)).fetchall()
++    for month, sent in reversed(rows):
++        print(f'{month}  {sent / 10**9:.1f} GB')
++    if not rows:
++        print('No traffic counted yet.')
++    return 0
++
++
+ def admin_banned_caddy() -> int:
+     hosts = [f'{r[0]}.{DOMAIN}' for r in db().execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
+     print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
+     if hosts:
+         print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
+               f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
+     return 0
+ 
+@@ -1888,17 +2002,17 @@ def store_ban(name: str, reason: str) -> None:
+     if db().execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
+         write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+     else:  # block a name nobody holds, so nobody can take it
+         write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+               'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+ 
+ 
+ def admin_usage() -> int:
+-    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
++    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy | traffic',
+           file=sys.stderr)
+     return 2
+ 
+ 
+ def admin_ban(args: list[str]) -> int:
+     """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart.
+ 
+     The option may stand anywhere, so it goes before the name is read, and what is read must be able to be a name: a slip
+@@ -1924,17 +2038,17 @@ def admin_unban(name: str, _words: list[str]) -> int:
+ 
+ 
+ def admin_release(name: str, _words: list[str]) -> int:
+     release_binding(name)
+     print(f'release {name}: done')
+     return 0
+ 
+ 
+-ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
++ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy, 'traffic': admin_traffic}
+ ADMIN_CHANGES = {'unban': admin_unban, 'release': admin_release}
+ 
+ 
+ def admin(args) -> int:
+     init_db()
+     cmd = args[0] if args else 'list'
+     if cmd in ADMIN_REPORTS:
+         return ADMIN_REPORTS[cmd]()
+@@ -1957,16 +2071,17 @@ def run_admin(args) -> int:
+         return 1
+ 
+ 
+ def main() -> int:
+     if sys.argv[1:2] == ['admin']:
+         return run_admin(sys.argv[2:])
+     init_db()
+     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
++    threading.Thread(target=watch_traffic, name='traffic-counter', daemon=True).start()
+     threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
+     server = RelayServer(LISTEN, Handler)
+     server.daemon_threads = True
+     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+     server.serve_forever()
+     return 0
+ 
+ 
+diff --git a/relay/test/test_traffic.py b/relay/test/test_traffic.py
+new file mode 100644
+index 0000000..1198990
+--- /dev/null
++++ b/relay/test/test_traffic.py
+@@ -0,0 +1,185 @@
++"""The relay counts the bytes its public interface sent each month: plan 9c Task 12, addendum A2 to plan 1."""
++
++import calendar
++import contextlib
++import importlib.util
++import io
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++
++if __package__:
++    from .harness import ROOT
++else:
++    from harness import ROOT
++
++ROUTE_HEAD = 'Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n'
++GB = 10**9
++
++
++def utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0) -> int:
++    return calendar.timegm((year, month, day, hour, minute, second))
++
++
++def route_line(iface: str, destination: str) -> str:
++    return f'{iface}\t{destination}\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n'
++
++
++class TrafficCase(unittest.TestCase):
++    def setUp(self) -> None:
++        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-traffic-')))
++        spec = importlib.util.spec_from_file_location('relay_traffic_under_test', ROOT / 'relay/relay.py')
++        self.relay = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(self.relay)
++        self.relay.DB_PATH = str(self.tmp / 'relay.db')
++        self.relay.init_db()
++        self.addCleanup(self.relay.db().close)
++        self.proc = self.tmp / 'proc'
++        self.sys = self.tmp / 'sys'
++        self.set_route('eth0')
++        self.set_boot('boot-a')
++
++    def set_route(self, iface: str) -> None:
++        (self.proc / 'net').mkdir(parents=True, exist_ok=True)
++        (self.proc / 'net' / 'route').write_text(ROUTE_HEAD + route_line(iface, '00000000'))
++
++    def set_boot(self, boot: str) -> None:
++        folder = self.proc / 'sys' / 'kernel' / 'random'
++        folder.mkdir(parents=True, exist_ok=True)
++        (folder / 'boot_id').write_text(boot + '\n')
++
++    def set_sent(self, iface: str, sent: int) -> None:
++        folder = self.sys / 'class' / 'net' / iface / 'statistics'
++        folder.mkdir(parents=True, exist_ok=True)
++        (folder / 'tx_bytes').write_text(f'{sent}\n')
++
++    def count(self, at: int) -> int | None:
++        return self.relay.count_traffic(at, str(self.proc), str(self.sys))
++
++    def months(self) -> dict[str, int]:
++        return dict(self.relay.db().execute('SELECT month, bytes FROM traffic'))
++
++
++class ReadingTests(TrafficCase):
++    def test_default_iface(self) -> None:
++        (self.proc / 'net' / 'route').write_text(
++            ROUTE_HEAD + route_line('eth0', '0000A8C0') + route_line('eth1', '00000000'))
++        self.assertEqual(self.relay.default_iface(str(self.proc)), 'eth1')
++
++    def test_no_default_route(self) -> None:
++        (self.proc / 'net' / 'route').write_text(ROUTE_HEAD + route_line('eth0', '0000A8C0'))
++        self.assertIsNone(self.relay.default_iface(str(self.proc)))
++
++    def test_unreadable_files_answer_none(self) -> None:
++        nothing = str(self.tmp / 'nothing')
++        self.assertIsNone(self.relay.default_iface(nothing))
++        self.assertIsNone(self.relay.sent_bytes('eth0', nothing))
++        self.assertIsNone(self.relay.boot_id(nothing))
++
++    def test_sent_bytes_and_boot_id(self) -> None:
++        self.set_sent('eth0', 1234)
++        self.assertEqual(self.relay.sent_bytes('eth0', str(self.sys)), 1234)
++        self.assertEqual(self.relay.boot_id(str(self.proc)), 'boot-a')
++
++
++class CountingTests(TrafficCase):
++    def test_counts_since_last_read(self) -> None:
++        at = utc(2026, 11, 5, 12)
++        self.set_sent('eth0', 1000)
++        self.assertEqual(self.count(at), 0)
++        self.set_sent('eth0', 1500)
++        self.assertEqual(self.count(at + 60), 500)
++        self.set_sent('eth0', 1400)
++        self.assertEqual(self.count(at + 120), 1900)
++        self.set_boot('boot-b')
++        self.set_sent('eth0', 300)
++        self.assertEqual(self.count(at + 180), 2200)
++        self.set_route('eth1')
++        self.set_sent('eth1', 50)
++        self.assertEqual(self.count(at + 240), 2250)
++
++    def test_months_apart(self) -> None:
++        self.set_sent('eth0', 1000)
++        self.count(utc(2026, 10, 31, 23, 59, 30))
++        self.set_sent('eth0', 1700)
++        self.count(utc(2026, 11, 1, 0, 0, 30))
++        self.assertEqual(self.months(), {'2026-11': 700})
++
++    def test_unreadable_counts_nothing(self) -> None:
++        (self.proc / 'net' / 'route').unlink()
++        self.assertIsNone(self.count(utc(2026, 11, 5)))
++        self.assertEqual(self.months(), {})
++        self.assertIsNone(self.relay.db().execute('SELECT 1 FROM traffic_seen').fetchone())
++
++    def test_unreadable_counter_changes_nothing(self) -> None:
++        self.set_sent('eth0', 1000)
++        self.count(utc(2026, 11, 5))
++        (self.sys / 'class' / 'net' / 'eth0' / 'statistics' / 'tx_bytes').unlink()
++        self.assertIsNone(self.count(utc(2026, 11, 5, 0, 1)))
++        self.assertEqual(self.relay.db().execute('SELECT sent FROM traffic_seen').fetchone(), (1000,))
++
++
++class AdminTrafficTests(TrafficCase):
++    def admin_traffic(self) -> subprocess.CompletedProcess:
++        return subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', 'traffic'],
++                              env=os.environ | {'RELAY_DB': self.relay.DB_PATH}, capture_output=True, text=True,
++                              timeout=30)
++
++    def test_lists_months_oldest_first(self) -> None:
++        for month, sent in (('2026-10', 2 * GB + 340_000_000), ('2026-08', 5 * GB), ('2026-09', 1_250_000_000)):
++            self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', (month, sent))
++        said = self.admin_traffic()
++        self.assertEqual(said.returncode, 0, said.stderr)
++        self.assertEqual(said.stdout.splitlines(), ['2026-08  5.0 GB', '2026-09  1.2 GB', '2026-10  2.3 GB'])
++
++    def test_keeps_the_last_twelve(self) -> None:
++        for number in range(1, 15):
++            month = f'2025-{number:02d}' if number <= 12 else f'2026-{number - 12:02d}'
++            self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', (month, number * GB))
++        lines = self.admin_traffic().stdout.splitlines()
++        self.assertEqual((len(lines), lines[0], lines[-1]), (12, '2025-03  3.0 GB', '2026-02  14.0 GB'))
++
++    def test_no_rows(self) -> None:
++        self.assertEqual(self.admin_traffic().stdout, 'No traffic counted yet.\n')
++
++
++class WarningTests(TrafficCase):
++    def round_at(self, at: int, warned: str | None) -> tuple[str | None, str]:
++        out = io.StringIO()
++        with contextlib.redirect_stdout(out):
++            warned = self.relay.traffic_round(at, warned, str(self.proc), str(self.sys))
++        return warned, out.getvalue()
++
++    def test_warns_once_a_day(self) -> None:
++        self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', ('2026-11', 300 * GB + 60_000_000))
++        self.set_sent('eth0', 10)
++        day = utc(2026, 11, 5, 8)
++        warned, first = self.round_at(day, None)
++        warned, second = self.round_at(day + 3600, warned)
++        warned, third = self.round_at(utc(2026, 11, 6, 8), warned)
++        said = 'Sent 300.1 GB this month, past 300 GB: time to resize the server.'
++        self.assertEqual((first.strip(), second, third.strip()), (said, '', said))
++
++    def test_a_month_below_the_limit_is_quiet(self) -> None:
++        self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', ('2026-11', 299 * GB))
++        self.set_sent('eth0', 10)
++        self.assertEqual(self.round_at(utc(2026, 11, 5), None), (None, ''))
++
++    def test_an_unreadable_round_goes_on(self) -> None:
++        (self.proc / 'net' / 'route').unlink()
++        self.assertEqual(self.round_at(utc(2026, 11, 5), '2026-11-04'), ('2026-11-04', ''))
++
++    def test_a_failing_round_is_one_log_line(self) -> None:
++        def broken(*_args: object) -> None:
++            raise OSError('disk gone')
++        out = io.StringIO()
++        with contextlib.redirect_stdout(out):
++            self.assertEqual(self.relay.safe_traffic_round(broken, 1, '2026-11-04'), '2026-11-04')
++        self.assertEqual(out.getvalue().strip(), 'Traffic count failed: OSError: disk gone')
++
++
++if __name__ == '__main__':
++    unittest.main()
+

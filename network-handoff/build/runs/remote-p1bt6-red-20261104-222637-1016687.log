@@ -1,0 +1,60 @@
+
+> hornhoof@0.6.0 test:real
+> npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/server@0.6.0 test:real
+> sh test/real/run.sh
+
+Unable to find image 'ghcr.io/letsencrypt/pebble:2.10.1@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199' locally
+ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199: Pulling from letsencrypt/pebble
+17c4a357bd49: Pulling fs layer
+b69492b104cf: Pulling fs layer
+ab2e5a20523c: Download complete
+b69492b104cf: Download complete
+17c4a357bd49: Download complete
+b69492b104cf: Pull complete
+17c4a357bd49: Pull complete
+Digest: sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+Status: Downloaded newer image for ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+
+ [31m❯[39m test/real/acme.test.ts [2m([22m[2m0 test[22m[2m)[22m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/real/acme.test.ts[2m [ test/real/acme.test.ts ][22m
+[31m[1mError[22m: Cannot find module '../../src/modules/tls/acme.js' imported from /home/altera/hornhoof-network/hornhoof/apps/server/test/real/acme.test.ts[39m
+[36m [2m❯[22m test/real/acme.test.ts:[2m4:1[22m[39m
+    [90m  2|[39m import type { FastifyInstance } from 'fastify';
+    [90m  3|[39m import { describe, expect, it, vi } from 'vitest';
+    [90m  4|[39m import { AcmeAccount, AcmeError, type ChallengeHooks, newAccountKey } …
+    [90m   |[39m [31m^[39m
+    [90m  5|[39m import { certId, renewalInfo } from '../../src/modules/tls/ari.js';
+    [90m  6|[39m import { certInfo } from '../../src/modules/tls/x509.js';
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m   Start at [22m 22:27:01
+[2m   Duration [22m 4.78s[2m (worker 95%, environment 5%)[22m
+
+npm error Lifecycle script `test:real` failed with error:
+npm error code 1
+npm error path /home/altera/hornhoof-network/hornhoof/apps/server
+npm error workspace @hornhoof/server@0.6.0
+npm error location /home/altera/hornhoof-network/hornhoof/apps/server
+npm error command failed
+npm error command sh -c sh test/real/run.sh
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

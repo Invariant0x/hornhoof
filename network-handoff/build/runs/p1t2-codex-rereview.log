@@ -1,0 +1,1716 @@
+OpenAI Codex v0.162.1
+--------
+workdir: /Users/0x/Projects/hornhoof-edge
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR] (network access enabled)
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a1a19d-3eb3-7930-9a20-98541f8dea57
+--------
+user
+The writer (Kimi) answered your review of Plan 1 Task 2. The build lead accepted all seven findings, reverted
+deviation 1 to the plan's rule (and had Task 1's `test_fact_dashboard_shows_the_route` read the route while its first
+client is online), and accepted deviation 2. Check the fix, still read-only (change no file):
+- For each of your seven findings: is it fixed, and does its new test fail on the old code for the right reason
+  (read `git -C /Users/0x/Projects/hornhoof-edge diff 9c83be0` and `relay/test/test_route.py` as they are now)?
+- Anything new the fix broke or opened (the per-name lock now around every read: can it deadlock or make a plugin
+  call wait over 1 s; the generation guard; the fake dashboard tests importing relay.py).
+- Run `/opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v` once.
+Report findings as before (Critical / Important / Minor, file:line), or say none remain.
+
+codex
+I’ll check each fix and its regression test, review the locking and dashboard test setup, then run the Python 3.12 suite once without changing files.
+
+exec
+/bin/zsh -lc 'nl -ba relay/test/test_route.py' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+     1	"""Who holds a name: R1.1, R1.2, R2.1 and R2.3 against a real frps."""
+     2	
+     3	import importlib.util
+     4	import json
+     5	import re
+     6	import sqlite3
+     7	import tempfile
+     8	import threading
+     9	import time
+    10	import unittest
+    11	from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    12	from pathlib import Path
+    13	
+    14	if __package__:
+    15	    from .harness import Stack, _request, _wait
+    16	else:
+    17	    from harness import Stack, _request, _wait
+    18	
+    19	ROOT = Path(__file__).resolve().parents[2]
+    20	SUCCESS = re.compile(r'\[acme\]\s+start proxy success\b')
+    21	CONFLICT = 'router config conflict'
+    22	
+    23	
+    24	class RouteTests(unittest.TestCase):
+    25	    def setUp(self):
+    26	        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-route-'))
+    27	        self.stack = self.enterContext(Stack(self.tmp))
+    28	        self.binding = self.stack.bind('acme')
+    29	        self.key = self.binding['key']
+    30	
+    31	    def route(self, name='acme', key=None):
+    32	        return self.stack.api('GET', f'/api/v1/links/{name}/route', key=self.key if key is None else key)
+    33	
+    34	    def newproxy_calls(self):
+    35	        return [call for call in self.stack.plugin_calls() if call['op'] == 'NewProxy']
+    36	
+    37	    def race(self, clients, base):
+    38	        """Wait until every client has an outcome (started, or refused with a router config
+    39	        conflict) and the trace holds one NewProxy record per client, then return the records.
+    40	        base is the trace length before the clients were created."""
+    41	        deadline = time.monotonic() + 30
+    42	        while time.monotonic() < deadline:
+    43	            calls = self.newproxy_calls()[base:]
+    44	            done = all('start proxy success' in c.log() or CONFLICT in c.log() for c in clients)
+    45	            if done and len(calls) >= len(clients):
+    46	                return calls
+    47	            time.sleep(0.1)
+    48	        raise AssertionError('no outcome: ' + ' | '.join(c.log()[-300:] for c in clients))
+    49	
+    50	    def test_r2_1_held_then_empty(self):
+    51	        status, body = self.route()
+    52	        self.assertEqual(status, 200)
+    53	        self.assertEqual(body['state'], 'empty')
+    54	        self.assertEqual(body['generation'], 0)
+    55	        client = self.stack.client('acme', self.key)
+    56	        self.assertTrue(client.started('acme'), client.log())
+    57	        status, body = self.route()
+    58	        self.assertEqual(status, 200)
+    59	        self.assertEqual(body['state'], 'held')
+    60	        self.assertEqual(body['client'], 'legacy')
+    61	        self.assertEqual(body['generation'], 1)
+    62	        stopped = time.time()
+    63	        client.stop()
+    64	        self.assertTrue(_wait(lambda: self.route()[1]['state'] == 'empty', 5))
+    65	        status, body = self.route()
+    66	        self.assertEqual(body['generation'], 1)
+    67	        self.assertGreaterEqual(body['since'], int(stopped))
+    68	        for call in self.newproxy_calls():
+    69	            self.assertLess(call['ms'], 1000, call)
+    70	
+    71	    def test_r1_1_second_registration_refused(self):
+    72	        first = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+    73	        self.assertTrue(first.started('acme'), first.log())
+    74	        second = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
+    75	        self.assertFalse(second.started('acme', within=2), second.log())
+    76	        self.assertIn('router config conflict', second.log())
+    77	        status, body = self.route()
+    78	        self.assertEqual(status, 200)
+    79	        self.assertEqual(body['state'], 'held')
+    80	        self.assertEqual(body['client'], 'acme-aaaaaaaa-link')
+    81	        self.assertEqual(body['generation'], 1)
+    82	        rejected = [call for call in self.newproxy_calls()
+    83	                    if call['reject'] and call['client'] == 'acme-bbbbbbbb-link']
+    84	        self.assertTrue(rejected)
+    85	        for call in self.newproxy_calls():
+    86	            self.assertLess(call['ms'], 1000, call)
+    87	
+    88	    def test_r1_1_racing_registrations(self):
+    89	        base = len(self.newproxy_calls())
+    90	        clients = [self.stack.client('acme', self.key, settings='network',
+    91	                                     client=f'acme-{i:08d}-link') for i in range(10)]
+    92	        calls = self.race(clients, base)
+    93	        self.assertEqual(len(calls), len(clients))
+    94	        winners = [client for client in clients if SUCCESS.search(client.log())]
+    95	        self.assertEqual(len(winners), 1, [client.log() for client in clients])
+    96	        status, body = self.route()
+    97	        self.assertEqual(body['state'], 'held')
+    98	        self.assertEqual(body['client'], f"acme-{clients.index(winners[0]):08d}-link")
+    99	        let_through = [call for call in calls if not call['reject']]
+   100	        self.assertEqual(len(let_through), 1)
+   101	        self.assertEqual(body['generation'], len(let_through))
+   102	        for call in calls:
+   103	            self.assertLess(call['ms'], 1000, call)
+   104	
+   105	    def test_r1_1_race_after_empty(self):
+   106	        first = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+   107	        self.assertTrue(first.started('acme'), first.log())
+   108	        status, body = self.route()
+   109	        self.assertEqual(body['state'], 'held')  # the row is held, not pending, before the race
+   110	        generation = body['generation']
+   111	        first.stop()
+   112	        self.assertTrue(_wait(lambda: self.route()[1]['state'] == 'empty', 5))
+   113	        base = len(self.newproxy_calls())
+   114	        clients = [self.stack.client('acme', self.key, settings='network',
+   115	                                     client=f'acme-{i:08d}-link') for i in range(10)]
+   116	        calls = self.race(clients, base)
+   117	        self.assertEqual(len(calls), len(clients))
+   118	        let_through = [call for call in calls if not call['reject']]
+   119	        self.assertEqual(len(let_through), 1)
+   120	        status, body = self.route()
+   121	        self.assertEqual(body['generation'], generation + 1)
+   122	        winners = [client for client in clients if SUCCESS.search(client.log())]
+   123	        self.assertEqual(len(winners), 1, [client.log() for client in clients])
+   124	        self.assertEqual(body['client'], f"acme-{clients.index(winners[0]):08d}-link")
+   125	        for call in calls:
+   126	            self.assertLess(call['ms'], 1000, call)
+   127	
+   128	    def test_r1_2_shared_routes_refused(self):
+   129	        cases = [
+   130	            ('group', '\nloadBalancer.group = "g"\nloadBalancer.groupKey = "k"\n'),
+   131	            ('locations', '\nlocations = ["/x"]\n'),
+   132	            ('route_by_http_user', '\nrouteByHTTPUser = "u"\n'),
+   133	        ]
+   134	        for field, extra in cases:
+   135	            with self.subTest(field=field):
+   136	                client = self.stack.client('acme', self.key, proxies=f'''
+   137	[[proxies]]
+   138	name = "acme"
+   139	type = "http"
+   140	subdomain = "acme"
+   141	localIP = "127.0.0.1"
+   142	localPort = {self.stack.echo_port}{extra}
+   143	''')
+   144	                self.assertFalse(client.started('acme', within=2), client.log())
+   145	                self.assertIn(f'{field} is not allowed', client.log())
+   146	
+   147	    def test_r2_3_errors_are_not_empty(self):
+   148	        status, body = self.route(key='x')
+   149	        self.assertEqual(status, 401)
+   150	        self.assertEqual(body['error'], 'unauthorized')
+   151	        status, body = self.route('nope')
+   152	        self.assertEqual(status, 404)
+   153	        self.assertEqual(body['error'], 'not_found')
+   154	        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-route-nodash-'))
+   155	        with Stack(tmp, dashboard=False) as stack:
+   156	            binding = stack.bind('acme')
+   157	            status, body = stack.api('GET', '/api/v1/links/acme/route', key=binding['key'])
+   158	            self.assertEqual(status, 503)
+   159	            self.assertEqual(body['error'], 'unknown')
+   160	            client = stack.client('acme', binding['key'])
+   161	            self.assertFalse(client.started('acme', within=2), client.log())
+   162	            self.assertIn('relay error: frps does not answer', client.log())
+   163	
+   164	    def test_r2_3_online_route_without_a_row_is_unknown(self):
+   165	        first = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+   166	        self.assertTrue(first.started('acme'), first.log())
+   167	        with sqlite3.connect(str(Path(self.tmp) / 'relay.db'), timeout=5) as conn:
+   168	            conn.execute("DELETE FROM routes WHERE name = 'acme'")
+   169	        status, body = self.route()
+   170	        self.assertEqual(status, 503)
+   171	        self.assertEqual(body['error'], 'unknown')
+   172	        self.assertIn('route of acme', self.stack.relay.log())
+   173	        second = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
+   174	        self.assertFalse(second.started('acme', within=2), second.log())
+   175	        self.assertIn('relay error: frps does not answer', second.log())
+   176	
+   177	    def test_plugin_calls_stay_short(self):
+   178	        first = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+   179	        self.assertTrue(first.started('acme'), first.log())
+   180	        second = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
+   181	        self.assertFalse(second.started('acme', within=2), second.log())
+   182	        self.assertGreaterEqual(len(self.newproxy_calls()), 2)
+   183	        for call in self.newproxy_calls():
+   184	            self.assertLess(call['ms'], 1000, call)
+   185	
+   186	    def test_r2_1_route_body_has_no_key(self):
+   187	        client = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+   188	        self.assertTrue(client.started('acme'), client.log())
+   189	        status, raw = _request(self.stack.relay_port, 'GET', '/api/v1/links/acme/route',
+   190	                               headers={'Authorization': f'Bearer {self.key}'})
+   191	        self.assertEqual(status, 200)
+   192	        text = raw.decode()
+   193	        self.assertNotIn(self.key, text)
+   194	        self.assertNotIn('key', text)
+   195	
+   196	
+   197	def _relay_module():
+   198	    spec = importlib.util.spec_from_file_location('relay_under_test', ROOT / 'relay' / 'relay.py')
+   199	    module = importlib.util.module_from_spec(spec)
+   200	    spec.loader.exec_module(module)
+   201	    return module
+   202	
+   203	
+   204	def _record(status, payload=None):
+   205	    return status, json.dumps(payload if payload is not None else {}).encode()
+   206	
+   207	
+   208	class _DashboardHandler(BaseHTTPRequestHandler):
+   209	    def log_message(self, fmt, *args):
+   210	        pass
+   211	
+   212	    def do_GET(self):
+   213	        status, body = self.server.records.get(self.path, (404, b'{}'))
+   214	        self.send_response(status)
+   215	        self.send_header('Content-Type', 'application/json')
+   216	        self.send_header('Content-Length', str(len(body)))
+   217	        self.end_headers()
+   218	        self.wfile.write(body)
+   219	
+   220	
+   221	class DashboardContractTests(unittest.TestCase):
+   222	    """frps_route against a fake dashboard: both types are read, every record is validated."""
+   223	
+   224	    @classmethod
+   225	    def setUpClass(cls):
+   226	        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), _DashboardHandler)
+   227	        cls.server.daemon_threads = True
+   228	        cls.server.records = {}
+   229	        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+   230	        cls.thread.start()
+   231	        cls.relay = _relay_module()
+   232	        cls.relay.RELAY_FRPS_API = f'http://127.0.0.1:{cls.server.server_port}'
+   233	        cls.relay.FRPS_USER = 'admin'
+   234	        cls.relay.FRPS_PASSWORD = 'test'
+   235	        cls.addClassCleanup(setattr, cls.relay, 'DB_PATH', cls.relay.DB_PATH)
+   236	
+   237	    @classmethod
+   238	    def tearDownClass(cls):
+   239	        cls.server.shutdown()
+   240	        cls.server.server_close()
+   241	        cls.thread.join(timeout=5)
+   242	
+   243	    def setUp(self):
+   244	        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-dash-'))
+   245	        self.relay.DB_PATH = str(Path(self.tmp) / 'relay.db')
+   246	        self.relay._local.__dict__.clear()
+   247	        self.relay.init_db()
+   248	        self.server.records.clear()
+   249	
+   250	    def test_reads_http_then_https_and_rejects_both_found(self):
+   251	        record = _record(200, {'status': 'online', 'clientID': 'c1'})
+   252	        self.server.records['/api/proxy/http/acme'] = record
+   253	        self.server.records['/api/proxy/https/acme'] = record
+   254	        with self.assertRaises(self.relay.FrpsUnknown):
+   255	            self.relay.frps_route('acme')
+   256	
+   257	    def test_online_http_route_is_returned_with_its_type(self):
+   258	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online', 'clientID': 'c1'})
+   259	        self.assertEqual(self.relay.frps_route('acme'), ('online', 'c1', 'http'))
+   260	
+   261	    def test_online_https_route_is_returned_with_its_type(self):
+   262	        self.server.records['/api/proxy/https/acme'] = _record(200, {'status': 'offline', 'clientID': 'c2'})
+   263	        self.assertEqual(self.relay.frps_route('acme'), ('offline', 'c2', 'https'))
+   264	
+   265	    def test_absent_only_when_both_types_are_404(self):
+   266	        self.assertEqual(self.relay.frps_route('acme'), ('absent', None, None))
+   267	
+   268	    def test_missing_client_id_is_unknown(self):
+   269	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online'})
+   270	        with self.assertRaises(self.relay.FrpsUnknown):
+   271	            self.relay.frps_route('acme')
+   272	
+   273	    def test_empty_client_id_is_unknown(self):
+   274	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online', 'clientID': ''})
+   275	        with self.assertRaises(self.relay.FrpsUnknown):
+   276	            self.relay.frps_route('acme')
+   277	
+   278	    def test_unknown_status_value_is_unknown(self):
+   279	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'starting', 'clientID': 'c1'})
+   280	        with self.assertRaises(self.relay.FrpsUnknown):
+   281	            self.relay.frps_route('acme')
+   282	
+   283	    def test_other_status_code_is_unknown(self):
+   284	        self.server.records['/api/proxy/http/acme'] = _record(500)
+   285	        with self.assertRaises(self.relay.FrpsUnknown):
+   286	            self.relay.frps_route('acme')
+   287	
+   288	    def test_straighten_empties_the_row_as_read(self):
+   289	        t = self.relay.now()
+   290	        self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+   291	                                "VALUES ('acme', 5, 'c1', 'r1', 'http', 'held', ?)", (t,))
+   292	        self.relay.straighten_route('acme', (5, 'c1', 'r1', 'http', 'held', t), 'offline', t + 1)
+   293	        row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+   294	        self.assertEqual((row[0], row[1]), (5, 'empty'))
+   295	
+   296	    def test_straighten_never_clears_a_fresher_generation(self):
+   297	        # A straighten from a read taken before a newer registration landed in the same
+   298	        # second must not clear that registration: every UPDATE is guarded by the
+   299	        # generation (and state) as read, not by the second-resolution since.
+   300	        t = self.relay.now()
+   301	        self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+   302	                                "VALUES ('acme', 5, 'c1', 'r1', 'http', 'pending', ?)", (t,))
+   303	        stale = (4, 'c0', 'r0', 'http', 'held', t)
+   304	        self.relay.straighten_route('acme', stale, 'offline', t)
+   305	        row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+   306	        self.assertEqual((row[0], row[1]), (5, 'pending'))
+   307	
+   308	
+   309	if __name__ == '__main__':
+   310	    unittest.main()
+
+exec
+/bin/zsh -lc 'git status --short
+git diff --no-ext-diff 9c83be0 -- README.md relay/relay.py relay/test/test_frp_facts.py' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+ M README.md
+ M relay/relay.py
+ M relay/test/test_frp_facts.py
+?? relay/test/test_route.py
+diff --git a/README.md b/README.md
+index ce17361..019ec8a 100644
+--- a/README.md
++++ b/README.md
+@@ -29,7 +29,8 @@ For each link, the relay keeps:
+ - its name and a hash of its key;
+ - when and from which address it was made;
+ - when its tunnel was last seen;
+-- whether it is blocked, when it was blocked, and why.
++- whether it is blocked, when it was blocked, and why;
++- which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+diff --git a/relay/relay.py b/relay/relay.py
+index 516177a..e40fae3 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -5,13 +5,16 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}
+   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
++  GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+ Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
+ 
+ Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
+ """
++import base64
+ import hashlib
+ import hmac
++import http.client
+ import json
+ import os
+ import re
+@@ -21,6 +24,7 @@ import sys
+ import threading
+ import time
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from urllib.parse import urlsplit
+ 
+ DOMAIN = 'hornhoof.org'
+ DB_PATH = os.environ.get('RELAY_DB', '/var/lib/hornhoof-relay/relay.db')
+@@ -37,6 +41,15 @@ CHECKS_PER_IP_MINUTE = 60
+ BAD_KEYS_PER_IP_HOUR = 30
+ MAX_BODY = 4096
+ 
++# frps's dashboard API (loopback only): the one source for whether a route is live.
++RELAY_FRPS_API = os.environ.get('RELAY_FRPS_API', 'http://127.0.0.1:7500')
++FRPS_USER = os.environ.get('RELAY_FRPS_USER', 'admin')
++FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
++# A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
++PENDING_S = 10
++# A silent client's route goes within this bound (R3.1, measured in Task 3).
++EVICTION_BOUND_S = 30
++
+ LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+ RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+ 
+@@ -75,6 +88,15 @@ def init_db() -> None:
+         );
+         CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL);
+         CREATE INDEX IF NOT EXISTS creations_at ON creations(at);
++        CREATE TABLE IF NOT EXISTS routes (
++            name TEXT PRIMARY KEY,
++            generation INTEGER NOT NULL,
++            client TEXT NOT NULL,
++            run_id TEXT NOT NULL,
++            type TEXT NOT NULL CHECK (type IN ('http', 'https')),
++            state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
++            since INTEGER NOT NULL
++        );
+     ''')
+ 
+ 
+@@ -110,6 +132,237 @@ def check_name(name: str):
+     return 'reserved' if row[0] else 'taken'
+ 
+ 
++# relayStarted is the process start until the frps watcher lands (Task 4).
++STARTED = now()
++
++
++class FrpsUnknown(Exception):
++    """frps's dashboard gave no trustworthy answer about a route: read unknown, never empty."""
++
++
++def _dash_get(path: str) -> tuple[int, bytes]:
++    """One dashboard read with a 0.5 s timeout; any error or timeout is FrpsUnknown."""
++    parsed = urlsplit(RELAY_FRPS_API)
++    host = parsed.hostname or '127.0.0.1'
++    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
++    kind = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection
++    connection = kind(host, port, timeout=0.5)
++    try:
++        token = base64.b64encode(f'{FRPS_USER}:{FRPS_PASSWORD}'.encode()).decode()
++        connection.request('GET', path, headers={'Authorization': f'Basic {token}'})
++        response = connection.getresponse()
++        return response.status, response.read()
++    except (OSError, http.client.HTTPException) as e:
++        raise FrpsUnknown(f'{path}: {type(e).__name__}') from None
++    finally:
++        connection.close()
++
++
++def dash_answer(name: str, proxy_type: str) -> tuple[str, str] | None:
++    """One proxy type's dashboard record: (status, clientID), None on 404, FrpsUnknown otherwise.
++
++    A record is trusted only with a status of online or offline and a non-empty clientID:
++    a missing field reads as unknown, never as empty.
++    """
++    status, body = _dash_get(f'/api/proxy/{proxy_type}/{name}')
++    if status == 404:
++        return None
++    if status != 200:
++        raise FrpsUnknown(f'dashboard answered {status} for {proxy_type} {name}')
++    try:
++        answer = json.loads(body)
++        route_status = answer['status']
++        client_id = answer['clientID']
++    except (ValueError, KeyError, TypeError):
++        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} has no route record') from None
++    if route_status not in ('online', 'offline') or not isinstance(client_id, str) or not client_id:
++        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} is not a route record')
++    return route_status, client_id
++
++
++def frps_route(name: str) -> tuple[str, str | None, str | None]:
++    """frps's own view of a name's route: ('online'|'offline', clientID, type), or ('absent', None, None).
++
++    Both proxy types are read: a name holds one route of either type, and two records is unknown.
++    """
++    http = dash_answer(name, 'http')
++    https = dash_answer(name, 'https')
++    if http is not None and https is not None:
++        raise FrpsUnknown(f'dashboard shows both http and https routes for {name}')
++    for proxy_type, answer in (('http', http), ('https', https)):
++        if answer is not None:
++            return answer[0], answer[1], proxy_type
++    return 'absent', None, None
++
++
++def check_route_holder(name: str, row, status: str, client_id: str | None, proxy_type: str | None) -> None:
++    """An online route must match the relay's own record, else the answer is unknown, never empty (R2.3).
++
++    A missing row means the record was lost while frps holds the route: unknown too.
++    """
++    if status != 'online':
++        return
++    matches = (row is not None and proxy_type == row[3]
++               and client_id == (row[2] if row[1] == 'legacy' else row[1]))
++    if matches:
++        return
++    log_line(f'route of {name} is online outside the relay record')
++    raise FrpsUnknown(f'frps route of {name} does not match the relay record')
++
++
++def straighten_route(name: str, row, status: str, t: int) -> None:
++    """Move the row to what frps shows; each UPDATE is guarded by the generation as read, so a row
++    rewritten since we read frps keeps its newer registration. The per-name lock is held.
++
++    A pending row younger than PENDING_S is a registration frps has not shown yet: it reads held
++    even when frps still shows the previous registration's offline record, because frps keeps that
++    record until the new one shows. Only an online record turns it held, age or absence empties it.
++    """
++    state, generation = row[4], row[0]
++    if status == 'online':
++        db().execute("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
++                     "AND state IN ('pending', 'empty')", (name, generation))
++    elif state == 'held':
++        db().execute("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
++                     "AND state = 'held'", (t, name, generation))
++    elif state == 'pending' and t - row[5] > PENDING_S:
++        db().execute("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
++                     "AND state = 'pending'", (t, name, generation))
++
++
++def route_body(name: str, row) -> dict:
++    """The R2.1 answer from a routes row; a name with no row is empty at generation 0."""
++    if row is None:
++        binding = db().execute('SELECT created_at FROM bindings WHERE name = ?', (name,)).fetchone()
++        since = binding[0] if binding else None
++        state, client, generation = 'empty', None, 0
++    else:
++        since = row[5]
++        state = 'empty' if row[4] == 'empty' else 'held'
++        client = row[1] if state == 'held' else None
++        generation = row[0]
++    return {'state': state, 'client': client, 'since': since, 'generation': generation,
++            'relayStarted': STARTED, 'evictionBound': EVICTION_BOUND_S, 'sync': None}
++
++
++def locked_route_of(name: str) -> dict:
++    """The R2.1 body with the per-name lock already held: the row straightened against frps."""
++    status, client_id, proxy_type = frps_route(name)
++    row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
++                       (name,)).fetchone()
++    if row is not None:
++        check_route_holder(name, row, status, client_id, proxy_type)
++        straighten_route(name, row, status, now())
++        row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
++                           (name,)).fetchone()
++    else:
++        check_route_holder(name, None, status, client_id, proxy_type)
++    return route_body(name, row)
++
++
++def route_of(name: str) -> dict:
++    """The R2.1 body for a name: the routes row straightened against what frps shows right now.
++
++    The per-name lock serializes every read-and-straighten against registrations.
++    """
++    with route_lock(name):
++        return locked_route_of(name)
++
++
++_route_locks_guard = threading.Lock()
++_route_locks: dict[str, threading.Lock] = {}
++
++
++def route_lock(name: str) -> threading.Lock:
++    with _route_locks_guard:
++        lock = _route_locks.get(name)
++        if lock is None:
++            lock = threading.Lock()
++            _route_locks[name] = lock
++    return lock
++
++
++def register_route(name: str, content: dict) -> str | None:
++    """Record a registration the plugin let through; a reason when the name cannot be taken (R1.1)."""
++    user = content.get('user') or {}
++    with route_lock(name):
++        try:
++            held = locked_route_of(name)['state'] == 'held'
++        except FrpsUnknown:
++            return 'relay error: frps does not answer'
++        if held:
++            return f'router config conflict: {name} is held'
++        row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
++        generation = (row[0] if row else 0) + 1
++        metas = user.get('metas') or {}
++        db().execute(
++            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
++            'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
++            'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
++            (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
++             content.get('proxy_type') or 'http', 'pending', now()))
++    return None
++
++
++def shared_route_fields(content: dict) -> str | None:
++    """R1.2: a name is one company's one route, never shared or split across locations or users."""
++    for field in ('locations', 'route_by_http_user', 'group'):
++        if content.get(field):
++            return f'{field} is not allowed'
++    return None
++
++
++def proxy_check(name: str, content: dict) -> str | None:
++    """Today's NewProxy checks, then whether this registration may hold the name; None lets it through."""
++    if (content.get('user') or {}).get('user'):
++        return 'set no user in the tunnel config'
++    if content.get('proxy_type') != 'http':
++        return 'only http proxies are allowed'
++    if content.get('proxy_name') != name:
++        return f'the proxy must be named {name}'
++    if content.get('subdomain') != name:
++        return f'this key serves only {name}.{DOMAIN}'
++    if content.get('custom_domains'):
++        return 'custom domains are not allowed'
++    reason = shared_route_fields(content)
++    if reason is not None:
++        return reason
++    return register_route(name, content)
++
++
++def trace_run_id(op: str, content: dict) -> str:
++    user = content.get('user') or {}
++    run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
++    return run_id if isinstance(run_id, str) else ''
++
++
++def trace_client(op: str, content: dict) -> str:
++    user = content.get('user') or {}
++    metas = content.get('metas') if op == 'Login' else user.get('metas')
++    client = metas.get('client') if isinstance(metas, dict) else None
++    return client if isinstance(client, str) and client else 'legacy'
++
++
++def trace_plugin(op: str, content: dict, result: dict, started: float) -> None:
++    """With RELAY_TRACE=1, one JSON line per plugin call: no key, no metas beyond client."""
++    if not os.environ.get('RELAY_TRACE'):
++        return
++    line = {'op': op, 'proxy_name': content.get('proxy_name') or '', 'run_id': trace_run_id(op, content),
++            'client': trace_client(op, content), 'ms': round((time.monotonic() - started) * 1000, 1),
++            'reject': bool(result.get('reject'))}
++    log_line('TRACE ' + json.dumps(line))
++
++
++_print_lock = threading.Lock()
++
++
++def log_line(text: str) -> None:
++    """One complete line on stdout, written atomically so concurrent relay threads never interleave."""
++    with _print_lock:
++        sys.stdout.write(text + '\n')
++        sys.stdout.flush()
++
++
+ class Window:
+     """Counts events per key in a sliding window, in memory."""
+ 
+@@ -208,17 +461,7 @@ def plugin(op: str, content: dict) -> dict:
+     name, key = metas.get('name'), metas.get('key')
+     reason = binding_ok(name, key)
+     if reason is None and op == 'NewProxy':
+-        user = (content.get('user') or {}).get('user') or ''
+-        if user:
+-            reason = 'set no user in the tunnel config'
+-        elif content.get('proxy_type') != 'http':
+-            reason = 'only http proxies are allowed'
+-        elif content.get('proxy_name') != name:
+-            reason = f'the proxy must be named {name}'
+-        elif content.get('subdomain') != name:
+-            reason = f'this key serves only {name}.{DOMAIN}'
+-        elif content.get('custom_domains'):
+-            reason = 'custom domains are not allowed'
++        reason = proxy_check(name, content)
+     if reason is not None:
+         return {'reject': True, 'reject_reason': reason}
+     touch(name)
+@@ -262,33 +505,82 @@ class Handler(BaseHTTPRequestHandler):
+     def path_parts(self):
+         return [p for p in self.path.split('?', 1)[0].split('/') if p]
+ 
++    def bearer_key(self) -> str:
++        auth = self.headers.get('Authorization') or ''
++        return auth[7:].strip() if auth.lower().startswith('bearer ') else ''
++
++    def wrong_key(self, ip: str):
++        """The 401 for a bad key, counted like DELETE; 429 once an address passes 30 bad keys in an hour."""
++        wait = bad_keys.allow(ip)
++        if wait:
++            return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
++        return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
++
+     def do_GET(self):
+         parts = self.path_parts()
+         if parts[:3] == ['api', 'v1', 'names'] and len(parts) == 4:
+-            wait = name_checks.allow(self.client_ip())
+-            if wait:
+-                return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
+-            name = parts[3].lower()
+-            reason = check_name(name)
+-            body = {'name': name, 'free': reason is None}
+-            if reason:
+-                body['reason'] = reason
+-            return self.send_json(200, body)
++            return self.name_answer(parts[3].lower())
++        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'route':
++            return self.route_answer(parts[3].lower())
+         if parts == ['api', 'v1', 'health']:
+             return self.send_json(200, {'ok': True})
+         self.error(404, 'not_found', 'Not found.')
+ 
++    def name_answer(self, name: str):
++        wait = name_checks.allow(self.client_ip())
++        if wait:
++            return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
++        reason = check_name(name)
++        body = {'name': name, 'free': reason is None}
++        if reason:
++            body['reason'] = reason
++        return self.send_json(200, body)
++
++    def route_answer(self, name: str):
++        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
++        row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
++        if row is None:
++            return self.error(404, 'not_found', f'There is no binding {name}.')
++        key = self.bearer_key()
++        if not key or not hmac.compare_digest(row[0], key_hash(key)):
++            return self.wrong_key(self.client_ip())
++        try:
++            return self.send_json(200, route_of(name))
++        except FrpsUnknown:
++            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
++
++    def handle_plugin(self):
++        # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
++        if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
++            return self.error(403, 'forbidden', 'Forbidden.')
++        op, content, err = self.plugin_request()
++        if err is not None:
++            return self.send_json(200, {'reject': True, 'reject_reason': err})
++        started = time.monotonic()
++        try:
++            result = plugin(op, content)
++        except Exception as e:  # never let a bad plugin call through
++            result = {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'}
++        trace_plugin(op, content, result, started)
++        return self.send_json(200, result)
++
++    def plugin_request(self) -> tuple[str, dict, str | None]:
++        """Parse the plugin body into (op, content, error reason)."""
++        try:
++            req = self.read_json()
++            if not isinstance(req, dict):
++                raise TypeError('plugin request is not an object')
++            content = req.get('content')
++            if not isinstance(content, dict):
++                content = {}
++            return req.get('op', ''), content, None
++        except Exception as e:
++            return '', {}, f'relay error: {type(e).__name__}'
++
+     def do_POST(self):
+         parts = self.path_parts()
+         if parts == ['frp', 'handler']:
+-            # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
+-            if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
+-                return self.error(403, 'forbidden', 'Forbidden.')
+-            try:
+-                req = self.read_json()
+-                return self.send_json(200, plugin(req.get('op', ''), req.get('content') or {}))
+-            except Exception as e:  # never let a bad plugin call through
+-                return self.send_json(200, {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'})
++            return self.handle_plugin()
+         if parts == ['api', 'v1', 'bindings']:
+             return self.create_binding()
+         self.error(404, 'not_found', 'Not found.')
+@@ -333,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
+             conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+                          (name, key_hash(key), t, ip))
+             conn.execute('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+-        print(f'bound {name} for {ip}', flush=True)
++        log_line(f'bound {name} for {ip}')
+         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
+                              'tunnel': tunnel_info(name, key)})
+ 
+@@ -342,21 +634,16 @@ class Handler(BaseHTTPRequestHandler):
+         if not (parts[:3] == ['api', 'v1', 'bindings'] and len(parts) == 4):
+             return self.error(404, 'not_found', 'Not found.')
+         name = parts[3].lower()
+-        ip = self.client_ip()
+-        auth = self.headers.get('Authorization') or ''
+-        key = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+         row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+         if row is None:
+             return self.error(404, 'not_found', f'There is no binding {name}.')
++        key = self.bearer_key()
+         if not key or not hmac.compare_digest(row[0], key_hash(key)):
+-            wait = bad_keys.allow(ip)
+-            if wait:
+-                return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
+-            return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
++            return self.wrong_key(self.client_ip())
+         if row[1]:
+             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
+         db().execute('DELETE FROM bindings WHERE name = ?', (name,))
+-        print(f'released {name} for {ip}', flush=True)
++        log_line(f'released {name} for {self.client_ip()}')
+         self.send_json(204)
+ 
+ 
+diff --git a/relay/test/test_frp_facts.py b/relay/test/test_frp_facts.py
+index ba29a08..cfa9919 100644
+--- a/relay/test/test_frp_facts.py
++++ b/relay/test/test_frp_facts.py
+@@ -22,7 +22,10 @@ class FrpFactsTests(unittest.TestCase):
+         self.assertTrue(first.started('acme'), first.log())
+         second = self.stack.client('acme', self.binding['key'])
+         self.assertFalse(second.started('acme', within=2), second.log())
+-        self.assertIn('proxy [acme] already exists', second.log())
++        # The relay refuses the duplicate registration before frps sees it (R1.1), so frps
++        # no longer answers 'proxy [acme] already exists'; it accepts the retry once the
++        # first client below stops and the relay lets the registration through.
++        self.assertIn('router config conflict: acme is held', second.log())
+         first.stop()
+         started = time.monotonic()
+         self.assertTrue(second.started('acme', within=40), second.log())
+@@ -39,6 +42,12 @@ class FrpFactsTests(unittest.TestCase):
+         self.assertEqual(status, 200)
+         self.assertEqual(route['status'], 'online')
+         self.assertEqual(route['clientID'], 'acme-3f2a9c1b-link')
++        # Read the route through the relay while this client is online, so its routes row
++        # is held (not pending) before the client stops: an offline record does not empty
++        # a pending row within PENDING_S (R2.1), it reads held (R1.1).
++        status, route = self.stack.api('GET', '/api/v1/links/acme/route', key=self.binding['key'])
++        self.assertEqual(status, 200)
++        self.assertEqual(route['state'], 'held')
+         first.stop()
+         self.assertTrue(_wait(lambda: self.stack.dash(path)[1].get('status') == 'offline', 5))
+         status, route = self.stack.dash(path)
+
+exec
+/bin/zsh -lc "rg --files --hidden -g AGENTS.md -g '"'!.git/**'"' -g '"'!relay/test/.bin/**'"' .
+ls -l relay/test/.bin/frps relay/test/.bin/frpc
+printenv TMPDIR
+/usr/sbin/lsof -nP -iTCP -sTCP:LISTEN | rg '(frps|frpc|Python)'" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+-rwxr-xr-x  1 0x  staff  15152338 Nov  3 09:38 relay/test/.bin/frpc
+-rwxr-xr-x  1 0x  staff  18797010 Nov  3 09:38 relay/test/.bin/frps
+/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/
+Python    41994   0x   15u  IPv4 0x4cfedf089412bfde      0t0  TCP 127.0.0.1:3007 (LISTEN)
+Python    41994   0x   20u  IPv4 0xc73c0e28cd217925      0t0  TCP 127.0.0.1:3008 (LISTEN)
+Python    42136   0x    6u  IPv4 0xf0e5427358627b5d      0t0  TCP 127.0.0.1:3006 (LISTEN)
+Python    68538   0x    3u  IPv4 0x6e09ee4d4ad498dd      0t0  TCP 127.0.0.1:49167 (LISTEN)
+Python    68542   0x    6u  IPv4 0xe441f9c6a77832c4      0t0  TCP 127.0.0.1:49163 (LISTEN)
+frps      68551   0x    4u  IPv4 0x8b879af3dd5f6c69      0t0  TCP 127.0.0.1:49166 (LISTEN)
+frps      68551   0x    5u  IPv4 0x6a832da667a6e777      0t0  TCP 127.0.0.1:49164 (LISTEN)
+frps      68551   0x    6u  IPv4  0x608b9eab27b29c9      0t0  TCP 127.0.0.1:49165 (LISTEN)
+
+exec
+/bin/zsh -lc 'PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "nl -ba relay/relay.py | sed -n '135,375p'
+git diff --no-ext-diff 9c83be0 -- relay/test/test_frp_facts.py
+sed -n '20,45p' relay/test/harness.py
+sed -n '170,230p' relay/test/harness.py
+sed -n '345,365p' relay/test/harness.py" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+   135	# relayStarted is the process start until the frps watcher lands (Task 4).
+   136	STARTED = now()
+   137	
+   138	
+   139	class FrpsUnknown(Exception):
+   140	    """frps's dashboard gave no trustworthy answer about a route: read unknown, never empty."""
+   141	
+   142	
+   143	def _dash_get(path: str) -> tuple[int, bytes]:
+   144	    """One dashboard read with a 0.5 s timeout; any error or timeout is FrpsUnknown."""
+   145	    parsed = urlsplit(RELAY_FRPS_API)
+   146	    host = parsed.hostname or '127.0.0.1'
+   147	    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+   148	    kind = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection
+   149	    connection = kind(host, port, timeout=0.5)
+   150	    try:
+   151	        token = base64.b64encode(f'{FRPS_USER}:{FRPS_PASSWORD}'.encode()).decode()
+   152	        connection.request('GET', path, headers={'Authorization': f'Basic {token}'})
+   153	        response = connection.getresponse()
+   154	        return response.status, response.read()
+   155	    except (OSError, http.client.HTTPException) as e:
+   156	        raise FrpsUnknown(f'{path}: {type(e).__name__}') from None
+   157	    finally:
+   158	        connection.close()
+   159	
+   160	
+   161	def dash_answer(name: str, proxy_type: str) -> tuple[str, str] | None:
+   162	    """One proxy type's dashboard record: (status, clientID), None on 404, FrpsUnknown otherwise.
+   163	
+   164	    A record is trusted only with a status of online or offline and a non-empty clientID:
+   165	    a missing field reads as unknown, never as empty.
+   166	    """
+   167	    status, body = _dash_get(f'/api/proxy/{proxy_type}/{name}')
+   168	    if status == 404:
+   169	        return None
+   170	    if status != 200:
+   171	        raise FrpsUnknown(f'dashboard answered {status} for {proxy_type} {name}')
+   172	    try:
+   173	        answer = json.loads(body)
+   174	        route_status = answer['status']
+   175	        client_id = answer['clientID']
+   176	    except (ValueError, KeyError, TypeError):
+   177	        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} has no route record') from None
+   178	    if route_status not in ('online', 'offline') or not isinstance(client_id, str) or not client_id:
+   179	        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} is not a route record')
+   180	    return route_status, client_id
+   181	
+   182	
+   183	def frps_route(name: str) -> tuple[str, str | None, str | None]:
+   184	    """frps's own view of a name's route: ('online'|'offline', clientID, type), or ('absent', None, None).
+   185	
+   186	    Both proxy types are read: a name holds one route of either type, and two records is unknown.
+   187	    """
+   188	    http = dash_answer(name, 'http')
+   189	    https = dash_answer(name, 'https')
+   190	    if http is not None and https is not None:
+   191	        raise FrpsUnknown(f'dashboard shows both http and https routes for {name}')
+   192	    for proxy_type, answer in (('http', http), ('https', https)):
+   193	        if answer is not None:
+   194	            return answer[0], answer[1], proxy_type
+   195	    return 'absent', None, None
+   196	
+   197	
+   198	def check_route_holder(name: str, row, status: str, client_id: str | None, proxy_type: str | None) -> None:
+   199	    """An online route must match the relay's own record, else the answer is unknown, never empty (R2.3).
+   200	
+   201	    A missing row means the record was lost while frps holds the route: unknown too.
+   202	    """
+   203	    if status != 'online':
+   204	        return
+   205	    matches = (row is not None and proxy_type == row[3]
+   206	               and client_id == (row[2] if row[1] == 'legacy' else row[1]))
+   207	    if matches:
+   208	        return
+   209	    log_line(f'route of {name} is online outside the relay record')
+   210	    raise FrpsUnknown(f'frps route of {name} does not match the relay record')
+   211	
+   212	
+   213	def straighten_route(name: str, row, status: str, t: int) -> None:
+   214	    """Move the row to what frps shows; each UPDATE is guarded by the generation as read, so a row
+   215	    rewritten since we read frps keeps its newer registration. The per-name lock is held.
+   216	
+   217	    A pending row younger than PENDING_S is a registration frps has not shown yet: it reads held
+   218	    even when frps still shows the previous registration's offline record, because frps keeps that
+   219	    record until the new one shows. Only an online record turns it held, age or absence empties it.
+   220	    """
+   221	    state, generation = row[4], row[0]
+   222	    if status == 'online':
+   223	        db().execute("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
+   224	                     "AND state IN ('pending', 'empty')", (name, generation))
+   225	    elif state == 'held':
+   226	        db().execute("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+   227	                     "AND state = 'held'", (t, name, generation))
+   228	    elif state == 'pending' and t - row[5] > PENDING_S:
+   229	        db().execute("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+   230	                     "AND state = 'pending'", (t, name, generation))
+   231	
+   232	
+   233	def route_body(name: str, row) -> dict:
+   234	    """The R2.1 answer from a routes row; a name with no row is empty at generation 0."""
+   235	    if row is None:
+   236	        binding = db().execute('SELECT created_at FROM bindings WHERE name = ?', (name,)).fetchone()
+   237	        since = binding[0] if binding else None
+   238	        state, client, generation = 'empty', None, 0
+   239	    else:
+   240	        since = row[5]
+   241	        state = 'empty' if row[4] == 'empty' else 'held'
+   242	        client = row[1] if state == 'held' else None
+   243	        generation = row[0]
+   244	    return {'state': state, 'client': client, 'since': since, 'generation': generation,
+   245	            'relayStarted': STARTED, 'evictionBound': EVICTION_BOUND_S, 'sync': None}
+   246	
+   247	
+   248	def locked_route_of(name: str) -> dict:
+   249	    """The R2.1 body with the per-name lock already held: the row straightened against frps."""
+   250	    status, client_id, proxy_type = frps_route(name)
+   251	    row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+   252	                       (name,)).fetchone()
+   253	    if row is not None:
+   254	        check_route_holder(name, row, status, client_id, proxy_type)
+   255	        straighten_route(name, row, status, now())
+   256	        row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+   257	                           (name,)).fetchone()
+   258	    else:
+   259	        check_route_holder(name, None, status, client_id, proxy_type)
+   260	    return route_body(name, row)
+   261	
+   262	
+   263	def route_of(name: str) -> dict:
+   264	    """The R2.1 body for a name: the routes row straightened against what frps shows right now.
+   265	
+   266	    The per-name lock serializes every read-and-straighten against registrations.
+   267	    """
+   268	    with route_lock(name):
+   269	        return locked_route_of(name)
+   270	
+   271	
+   272	_route_locks_guard = threading.Lock()
+   273	_route_locks: dict[str, threading.Lock] = {}
+   274	
+   275	
+   276	def route_lock(name: str) -> threading.Lock:
+   277	    with _route_locks_guard:
+   278	        lock = _route_locks.get(name)
+   279	        if lock is None:
+   280	            lock = threading.Lock()
+   281	            _route_locks[name] = lock
+   282	    return lock
+   283	
+   284	
+   285	def register_route(name: str, content: dict) -> str | None:
+   286	    """Record a registration the plugin let through; a reason when the name cannot be taken (R1.1)."""
+   287	    user = content.get('user') or {}
+   288	    with route_lock(name):
+   289	        try:
+   290	            held = locked_route_of(name)['state'] == 'held'
+   291	        except FrpsUnknown:
+   292	            return 'relay error: frps does not answer'
+   293	        if held:
+   294	            return f'router config conflict: {name} is held'
+   295	        row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
+   296	        generation = (row[0] if row else 0) + 1
+   297	        metas = user.get('metas') or {}
+   298	        db().execute(
+   299	            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
+   300	            'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
+   301	            'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
+   302	            (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
+   303	             content.get('proxy_type') or 'http', 'pending', now()))
+   304	    return None
+   305	
+   306	
+   307	def shared_route_fields(content: dict) -> str | None:
+   308	    """R1.2: a name is one company's one route, never shared or split across locations or users."""
+   309	    for field in ('locations', 'route_by_http_user', 'group'):
+   310	        if content.get(field):
+   311	            return f'{field} is not allowed'
+   312	    return None
+   313	
+   314	
+   315	def proxy_check(name: str, content: dict) -> str | None:
+   316	    """Today's NewProxy checks, then whether this registration may hold the name; None lets it through."""
+   317	    if (content.get('user') or {}).get('user'):
+   318	        return 'set no user in the tunnel config'
+   319	    if content.get('proxy_type') != 'http':
+   320	        return 'only http proxies are allowed'
+   321	    if content.get('proxy_name') != name:
+   322	        return f'the proxy must be named {name}'
+   323	    if content.get('subdomain') != name:
+   324	        return f'this key serves only {name}.{DOMAIN}'
+   325	    if content.get('custom_domains'):
+   326	        return 'custom domains are not allowed'
+   327	    reason = shared_route_fields(content)
+   328	    if reason is not None:
+   329	        return reason
+   330	    return register_route(name, content)
+   331	
+   332	
+   333	def trace_run_id(op: str, content: dict) -> str:
+   334	    user = content.get('user') or {}
+   335	    run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
+   336	    return run_id if isinstance(run_id, str) else ''
+   337	
+   338	
+   339	def trace_client(op: str, content: dict) -> str:
+   340	    user = content.get('user') or {}
+   341	    metas = content.get('metas') if op == 'Login' else user.get('metas')
+   342	    client = metas.get('client') if isinstance(metas, dict) else None
+   343	    return client if isinstance(client, str) and client else 'legacy'
+   344	
+   345	
+   346	def trace_plugin(op: str, content: dict, result: dict, started: float) -> None:
+   347	    """With RELAY_TRACE=1, one JSON line per plugin call: no key, no metas beyond client."""
+   348	    if not os.environ.get('RELAY_TRACE'):
+   349	        return
+   350	    line = {'op': op, 'proxy_name': content.get('proxy_name') or '', 'run_id': trace_run_id(op, content),
+   351	            'client': trace_client(op, content), 'ms': round((time.monotonic() - started) * 1000, 1),
+   352	            'reject': bool(result.get('reject'))}
+   353	    log_line('TRACE ' + json.dumps(line))
+   354	
+   355	
+   356	_print_lock = threading.Lock()
+   357	
+   358	
+   359	def log_line(text: str) -> None:
+   360	    """One complete line on stdout, written atomically so concurrent relay threads never interleave."""
+   361	    with _print_lock:
+   362	        sys.stdout.write(text + '\n')
+   363	        sys.stdout.flush()
+   364	
+   365	
+   366	class Window:
+   367	    """Counts events per key in a sliding window, in memory."""
+   368	
+   369	    def __init__(self, limit: int, seconds: int):
+   370	        self.limit, self.seconds, self.hits, self.lock = limit, seconds, {}, threading.Lock()
+   371	
+   372	    def allow(self, key: str) -> int:
+   373	        """0 if allowed (and counted), else seconds to wait."""
+   374	        t = time.time()
+   375	        with self.lock:
+diff --git a/relay/test/test_frp_facts.py b/relay/test/test_frp_facts.py
+index ba29a08..cfa9919 100644
+--- a/relay/test/test_frp_facts.py
++++ b/relay/test/test_frp_facts.py
+@@ -22,7 +22,10 @@ class FrpFactsTests(unittest.TestCase):
+         self.assertTrue(first.started('acme'), first.log())
+         second = self.stack.client('acme', self.binding['key'])
+         self.assertFalse(second.started('acme', within=2), second.log())
+-        self.assertIn('proxy [acme] already exists', second.log())
++        # The relay refuses the duplicate registration before frps sees it (R1.1), so frps
++        # no longer answers 'proxy [acme] already exists'; it accepts the retry once the
++        # first client below stops and the relay lets the registration through.
++        self.assertIn('router config conflict: acme is held', second.log())
+         first.stop()
+         started = time.monotonic()
+         self.assertTrue(second.started('acme', within=40), second.log())
+@@ -39,6 +42,12 @@ class FrpFactsTests(unittest.TestCase):
+         self.assertEqual(status, 200)
+         self.assertEqual(route['status'], 'online')
+         self.assertEqual(route['clientID'], 'acme-3f2a9c1b-link')
++        # Read the route through the relay while this client is online, so its routes row
++        # is held (not pending) before the client stops: an offline record does not empty
++        # a pending row within PENDING_S (R2.1), it reads held (R1.1).
++        status, route = self.stack.api('GET', '/api/v1/links/acme/route', key=self.binding['key'])
++        self.assertEqual(status, 200)
++        self.assertEqual(route['state'], 'held')
+         first.stop()
+         self.assertTrue(_wait(lambda: self.stack.dash(path)[1].get('status') == 'offline', 5))
+         status, route = self.stack.dash(path)
+
+ROOT = Path(__file__).resolve().parents[2]
+BIN = Path(__file__).resolve().parent / '.bin'
+
+
+@functools.lru_cache(maxsize=1)
+def _ensure_frp():
+    subprocess.run(['sh', str(BIN.parent / 'frp.sh')], cwd=ROOT, check=True, timeout=180)
+
+
+def _request(port, method, path, body=None, headers=None):
+    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+    try:
+        connection.request(method, path, body=body, headers=headers or {})
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+def _wait(predicate, within):
+    deadline = time.monotonic() + within
+    while True:
+        if predicate():
+            return True
+        remaining = deadline - time.monotonic()
+                port = listener.getsockname()[1]
+            if port not in self._ports:
+                self._ports.add(port)
+                return port
+
+    def __enter__(self):
+        try:
+            _ensure_frp()
+            (self.tmp / 'Caddyfile').write_text('@reserved host www.hornhoof.org\n')
+            self.echo = ThreadingHTTPServer(('127.0.0.1', 0), _Echo)
+            self.echo.daemon_threads = True
+            self.echo_port = self.echo.server_port
+            self.echo_thread = threading.Thread(target=self.echo.serve_forever, daemon=True)
+            self.echo_thread.start()
+            self._start_relay()
+            self.start_frps()
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+
+    def close(self):
+        # ExitStack runs every cleanup even if one process fails to stop.
+        with ExitStack() as cleanup:
+            if self.echo is not None:
+                cleanup.callback(self.echo.server_close)
+                if self.echo_thread is not None and self.echo_thread.ident is not None:
+                    cleanup.callback(self.echo_thread.join, timeout=5)
+                    cleanup.callback(self.echo.shutdown)
+            if self.relay is not None:
+                cleanup.callback(self.relay.stop)
+            if self.frps is not None:
+                cleanup.callback(self.frps.stop)
+            for client in self.clients:
+                cleanup.callback(client.stop)
+
+    def _ready(self, process, port, path):
+        def ready():
+            if process.process.poll() is not None:
+                raise RuntimeError('Local process exited during startup:\n' + process.log())
+            try:
+                status, _ = _request(port, 'GET', path)
+                return status == 200
+            except (OSError, http.client.HTTPException):
+                return False
+
+        if not _wait(ready, 15):
+            raise RuntimeError('Local process did not become ready:\n' + process.log())
+
+    def _start_relay(self):
+        self.relay = _Process(
+            [sys.executable, '-u', str(ROOT / 'relay/relay.py')], self.tmp / 'relay.log',
+            env=self.env, private=self.private,
+        )
+        # Readiness must work before frps starts, including when health later returns 503.
+        self._ready(self.relay, self.relay_port, '/api/v1/names/www')
+
+    def restart_relay(self):
+            return status, None
+        try:
+            return status, json.loads(data)
+        except ValueError:
+            return status, data.decode('utf-8', errors='replace')
+
+    def plugin_calls(self) -> list[dict]:
+        calls = []
+        for line in self.relay.log().splitlines():
+            try:
+                value = json.loads(line.removeprefix('TRACE '))
+            except ValueError:
+                continue
+            if isinstance(value, dict) and 'op' in value:
+                calls.append(value)
+        return calls
+
+exec
+/bin/zsh -lc 'ls -l "$TMPDIR"/hornhoof-task2-review-80rs2fss/snapshot/relay/relay.py
+rg -n '"'print\\(|log_line\\(' relay/relay.py
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+from pathlib import Path
+import hashlib
+for name in ('README.md', 'relay/relay.py', 'relay/test/test_frp_facts.py', 'relay/test/test_route.py'):
+    print(name, hashlib.sha256(Path(name).read_bytes()).hexdigest())
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+-rwxr-xr-x  1 0x  staff  28560 Nov  3 10:25 /var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T//hornhoof-task2-review-80rs2fss/snapshot/relay/relay.py
+209:    log_line(f'route of {name} is online outside the relay record')
+353:    log_line('TRACE ' + json.dumps(line))
+359:def log_line(text: str) -> None:
+628:        log_line(f'bound {name} for {ip}')
+646:        log_line(f'released {name} for {self.client_ip()}')
+659:            print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
+663:        print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
+665:            print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
+673:            print(f'{name}: {reason}', file=sys.stderr)
+678:        print(json.dumps({'name': name, 'key': key}))
+694:        print(f'{cmd} {name}: done')
+696:    print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',
+707:    print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+README.md c5b560ccdbb4bee6ee424076b3258aa1e36001f4d2fd74209415b68309c30d2c
+relay/relay.py 7041367367b55ab44c4db7bec4e903aa4b16eab7d72be44aba9720ce2f81306a
+relay/test/test_frp_facts.py 49c9b5e311ab29286edf088914e71a2194b35cd08e031710306b8d5d5b03465b
+relay/test/test_route.py 3bb130026a6ea56ab3b2b04fadd1f8ea21ee66cda206932a951d5f8d0a6748c9
+
+ exited 1 in 134795ms:
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 5.12 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.03 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... FAIL
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+======================================================================
+FAIL: test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 116, in test_r1_1_race_after_empty
+    calls = self.race(clients, base)
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 48, in race
+    raise AssertionError('no outcome: ' + ' | '.join(c.log()[-300:] for c in clients))
+AssertionError: no outcome: 556 [I] [client/service.go:355] [cc4f87201070e2ae] login to server success, get run id [cc4f87201070e2ae]
+2026-11-03 11:15:42.556 [I] [proxy/proxy_manager.go:183] [cc4f87201070e2ae] proxy added: [acme]
+2026-11-03 11:15:42.558 [I] [client/control.go:174] [cc4f87201070e2ae] [acme] start proxy success
+ | go:183] [f9c0526e102741b3] proxy added: [acme]
+2026-11-03 11:15:42.558 [W] [client/control.go:172] [f9c0526e102741b3] [acme] start error: relay error: frps does not answer
+2026-11-03 11:16:12.565 [W] [client/control.go:172] [f9c0526e102741b3] [acme] start error: router config conflict: acme is held
+ | 183] [e15f85fe6910e4ed] proxy added: [acme]
+2026-11-03 11:15:42.559 [W] [client/control.go:172] [e15f85fe6910e4ed] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.566 [W] [client/control.go:172] [e15f85fe6910e4ed] [acme] start error: router config conflict: acme is held
+ | 183] [e93729bd315501c0] proxy added: [acme]
+2026-11-03 11:15:42.565 [W] [client/control.go:172] [e93729bd315501c0] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.571 [W] [client/control.go:172] [e93729bd315501c0] [acme] start error: router config conflict: acme is held
+ | 183] [977dfe0c7f1287ff] proxy added: [acme]
+2026-11-03 11:15:42.566 [W] [client/control.go:172] [977dfe0c7f1287ff] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.570 [W] [client/control.go:172] [977dfe0c7f1287ff] [acme] start error: router config conflict: acme is held
+ | 183] [0dbdaf8b81728032] proxy added: [acme]
+2026-11-03 11:15:42.567 [W] [client/control.go:172] [0dbdaf8b81728032] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.573 [W] [client/control.go:172] [0dbdaf8b81728032] [acme] start error: router config conflict: acme is held
+ | 183] [e475629fd6b74f4e] proxy added: [acme]
+2026-11-03 11:15:42.568 [W] [client/control.go:172] [e475629fd6b74f4e] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.571 [W] [client/control.go:172] [e475629fd6b74f4e] [acme] start error: router config conflict: acme is held
+ | ] [3aa3faea40cb0cc3] login to server success, get run id [3aa3faea40cb0cc3]
+2026-11-03 11:15:42.570 [I] [proxy/proxy_manager.go:183] [3aa3faea40cb0cc3] proxy added: [acme]
+2026-11-03 11:15:42.571 [W] [client/control.go:172] [3aa3faea40cb0cc3] [acme] start error: router config conflict: acme is held
+ | 183] [3a2579940178a2de] proxy added: [acme]
+2026-11-03 11:15:42.572 [W] [client/control.go:172] [3a2579940178a2de] [acme] start error: router config conflict: acme is held
+2026-11-03 11:16:12.575 [W] [client/control.go:172] [3a2579940178a2de] [acme] start error: router config conflict: acme is held
+ | ] [ac70ac001cae202c] login to server success, get run id [ac70ac001cae202c]
+2026-11-03 11:15:42.573 [I] [proxy/proxy_manager.go:183] [ac70ac001cae202c] proxy added: [acme]
+2026-11-03 11:15:42.575 [W] [client/control.go:172] [ac70ac001cae202c] [acme] start error: router config conflict: acme is held
+
+
+----------------------------------------------------------------------
+Ran 32 tests in 134.817s
+
+FAILED (failures=1)
+
+codex
+The missing-row check, dashboard validation, generation guard and atomic trace writes appear fixed. The registration path also avoids reacquiring its own lock. I’m checking whether waiting behind route reads can exceed the one-second plugin bound, and whether the new tests catch the old bugs for the intended reasons.
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import importlib.util
+import os
+from pathlib import Path
+import sys
+import unittest
+sys.path.insert(0, str(Path.cwd() / 'relay/test'))
+import test_route
+old_root = Path(os.environ['TMPDIR']) / 'hornhoof-task2-review-80rs2fss/snapshot'
+def old_module():
+    spec = importlib.util.spec_from_file_location('old_relay_under_test', old_root / 'relay/relay.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+test_route._relay_module = old_module
+suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_route.DashboardContractTests)
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+print(f'Old-code dashboard regressions: passed={result.testsRun-len(result.failures)-len(result.errors)}, failed={len(result.failures)}, errors={len(result.errors)}')
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 451ms:
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... FAIL
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... FAIL
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... FAIL
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... FAIL
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+
+======================================================================
+FAIL: test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 275, in test_empty_client_id_is_unknown
+    with self.assertRaises(self.relay.FrpsUnknown):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: FrpsUnknown not raised
+
+======================================================================
+FAIL: test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 270, in test_missing_client_id_is_unknown
+    with self.assertRaises(self.relay.FrpsUnknown):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: FrpsUnknown not raised
+
+Old-code dashboard regressions: passed=6, failed=4, errors=0
+======================================================================
+FAIL: test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 254, in test_reads_http_then_https_and_rejects_both_found
+    with self.assertRaises(self.relay.FrpsUnknown):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: FrpsUnknown not raised
+
+======================================================================
+FAIL: test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 306, in test_straighten_never_clears_a_fresher_generation
+    self.assertEqual((row[0], row[1]), (5, 'pending'))
+AssertionError: Tuples differ: (5, 'empty') != (5, 'pending')
+
+First differing element 1:
+'empty'
+'pending'
+
+- (5, 'empty')
++ (5, 'pending')
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.532s
+
+FAILED (failures=4)
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import importlib.util
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import tempfile
+import threading
+import time
+spec = importlib.util.spec_from_file_location('review_deadline', 'relay/relay.py')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+started = threading.Event()
+class Dashboard(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+    def do_GET(self):
+        started.set()
+        time.sleep(0.35)
+        self.send_response(404)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+server = ThreadingHTTPServer(('127.0.0.1', 0), Dashboard)
+server.daemon_threads = True
+thread = threading.Thread(target=server.serve_forever)
+thread.start()
+try:
+    with tempfile.TemporaryDirectory(prefix='hornhoof-lock-review-') as directory:
+        m.DB_PATH = str(Path(directory) / 'relay.db')
+        m.RELAY_FRPS_API = f'http://127.0.0.1:{server.server_port}'
+        m.init_db()
+        reads = []
+        def reader():
+            try:
+                reads.append(m.route_of('acme'))
+            finally:
+                m.db().close()
+        reader_thread = threading.Thread(target=reader)
+        reader_thread.start()
+        assert started.wait(2), 'dashboard request did not start'
+        began = time.monotonic()
+        reason = m.register_route('acme', {'proxy_type':'http','user':{'run_id':'run-a','metas':{'client':'acme-aaaaaaaa-link'}}})
+        elapsed = time.monotonic() - began
+        reader_thread.join(timeout=5)
+        print({'registration_seconds':round(elapsed,3),'reason':reason,'reader_done':not reader_thread.is_alive(),'dashboard_delay_each_seconds':0.35})
+        m.db().close()
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 1477ms:
+{'registration_seconds': 1.414, 'reason': None, 'reader_done': True, 'dashboard_delay_each_seconds': 0.35}
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import os
+from pathlib import Path
+import sys
+import unittest
+sys.path.insert(0, str(Path.cwd() / 'relay/test'))
+import harness
+import test_route
+harness.ROOT = Path(os.environ['TMPDIR']) / 'hornhoof-task2-review-80rs2fss/snapshot'
+suite = unittest.TestSuite(test_route.RouteTests(name) for name in (
+    'test_r2_3_online_route_without_a_row_is_unknown',
+    'test_r1_1_racing_registrations',
+    'test_r1_1_race_after_empty',
+))
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+print(f'Old-code integration regressions: passed={result.testsRun-len(result.failures)-len(result.errors)}, failed={len(result.failures)}, errors={len(result.errors)}')
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 1468ms:
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... FAIL
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+
+======================================================================
+FAIL: test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 170, in test_r2_3_online_route_without_a_row_is_unknown
+    self.assertEqual(status, 503)
+AssertionError: 200 != 503
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.540s
+
+FAILED (failures=1)
+Old-code integration regressions: passed=2, failed=1, errors=0
+
+codex
+The full suite finished with 31 passed and 1 failed. `test_r1_1_race_after_empty` waited for a conflict message from a client whose first attempt had been refused with `relay error: frps does not answer`.
+
+I also reproduced a registration taking 1.414 seconds behind one route read, although every dashboard request completed within its 0.5-second timeout. Several new regression tests fail against the saved old code for the expected reasons.
+
+exec
+/bin/zsh -lc "git diff --no-ext-diff 9c83be0 -- relay/relay.py | tail -100
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+from pathlib import Path
+import hashlib
+expected = {
+'README.md':'c5b560ccdbb4bee6ee424076b3258aa1e36001f4d2fd74209415b68309c30d2c',
+'relay/relay.py':'7041367367b55ab44c4db7bec4e903aa4b16eab7d72be44aba9720ce2f81306a',
+'relay/test/test_frp_facts.py':'49c9b5e311ab29286edf088914e71a2194b35cd08e031710306b8d5d5b03465b',
+'relay/test/test_route.py':'3bb130026a6ea56ab3b2b04fadd1f8ea21ee66cda206932a951d5f8d0a6748c9',
+}
+print('Review files unchanged:', all(hashlib.sha256(Path(name).read_bytes()).hexdigest()==digest for name,digest in expected.items()))
+PY
+/usr/sbin/lsof -nP -iTCP -sTCP:LISTEN | rg '(frps|frpc|Python)'" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 1ms:
++    def name_answer(self, name: str):
++        wait = name_checks.allow(self.client_ip())
++        if wait:
++            return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
++        reason = check_name(name)
++        body = {'name': name, 'free': reason is None}
++        if reason:
++            body['reason'] = reason
++        return self.send_json(200, body)
++
++    def route_answer(self, name: str):
++        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
++        row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
++        if row is None:
++            return self.error(404, 'not_found', f'There is no binding {name}.')
++        key = self.bearer_key()
++        if not key or not hmac.compare_digest(row[0], key_hash(key)):
++            return self.wrong_key(self.client_ip())
++        try:
++            return self.send_json(200, route_of(name))
++        except FrpsUnknown:
++            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
++
++    def handle_plugin(self):
++        # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
++        if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
++            return self.error(403, 'forbidden', 'Forbidden.')
++        op, content, err = self.plugin_request()
++        if err is not None:
++            return self.send_json(200, {'reject': True, 'reject_reason': err})
++        started = time.monotonic()
++        try:
++            result = plugin(op, content)
++        except Exception as e:  # never let a bad plugin call through
++            result = {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'}
++        trace_plugin(op, content, result, started)
++        return self.send_json(200, result)
++
++    def plugin_request(self) -> tuple[str, dict, str | None]:
++        """Parse the plugin body into (op, content, error reason)."""
++        try:
++            req = self.read_json()
++            if not isinstance(req, dict):
++                raise TypeError('plugin request is not an object')
++            content = req.get('content')
++            if not isinstance(content, dict):
++                content = {}
++            return req.get('op', ''), content, None
++        except Exception as e:
++            return '', {}, f'relay error: {type(e).__name__}'
++
+     def do_POST(self):
+         parts = self.path_parts()
+         if parts == ['frp', 'handler']:
+-            # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
+-            if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
+-                return self.error(403, 'forbidden', 'Forbidden.')
+-            try:
+-                req = self.read_json()
+-                return self.send_json(200, plugin(req.get('op', ''), req.get('content') or {}))
+-            except Exception as e:  # never let a bad plugin call through
+-                return self.send_json(200, {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'})
++            return self.handle_plugin()
+         if parts == ['api', 'v1', 'bindings']:
+             return self.create_binding()
+         self.error(404, 'not_found', 'Not found.')
+@@ -333,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
+             conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+                          (name, key_hash(key), t, ip))
+             conn.execute('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+-        print(f'bound {name} for {ip}', flush=True)
++        log_line(f'bound {name} for {ip}')
+         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
+                              'tunnel': tunnel_info(name, key)})
+ 
+@@ -342,21 +634,16 @@ class Handler(BaseHTTPRequestHandler):
+         if not (parts[:3] == ['api', 'v1', 'bindings'] and len(parts) == 4):
+             return self.error(404, 'not_found', 'Not found.')
+         name = parts[3].lower()
+-        ip = self.client_ip()
+-        auth = self.headers.get('Authorization') or ''
+-        key = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+         row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+         if row is None:
+             return self.error(404, 'not_found', f'There is no binding {name}.')
++        key = self.bearer_key()
+         if not key or not hmac.compare_digest(row[0], key_hash(key)):
+-            wait = bad_keys.allow(ip)
+-            if wait:
+-                return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
+-            return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
++            return self.wrong_key(self.client_ip())
+         if row[1]:
+             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
+         db().execute('DELETE FROM bindings WHERE name = ?', (name,))
+-        print(f'released {name} for {ip}', flush=True)
++        log_line(f'released {name} for {self.client_ip()}')
+         self.send_json(204)
+ 
+ 
+Review files unchanged: True
+Python    41994   0x   15u  IPv4 0x4cfedf089412bfde      0t0  TCP 127.0.0.1:3007 (LISTEN)
+Python    41994   0x   20u  IPv4 0xc73c0e28cd217925      0t0  TCP 127.0.0.1:3008 (LISTEN)
+Python    42136   0x    6u  IPv4 0xf0e5427358627b5d      0t0  TCP 127.0.0.1:3006 (LISTEN)
+
+codex
+Critical: none remain. Minor: none.
+
+Against the saved pre-fix Task 2 code:
+
+| Previous finding | Fix and regression check |
+|---|---|
+| 1. Young pending cleared by offline | Fixed; new race test **passed old code**, so coverage remains unreliable. |
+| 2. Online route without a row | Fixed; new test fails old code with **200 instead of 503**. |
+| 3. Second dashboard endpoint skipped | Fixed; new test fails old code because `FrpsUnknown` is not raised. |
+| 4. Missing clientID accepted | Fixed; missing/empty-ID tests fail old code correctly. |
+| 5. Stale generation overwritten | Fixed; new test catches old code clearing the newer pending generation. |
+| 6. Trace records interleaved | Fixed; race tests **passed old code**, leaving no reliable regression test. |
+| 7. Race checked too early | Improved; waits for all client logs, but trace identities remain unchecked. |
+
+Remaining findings:
+
+- **Important**, `relay/relay.py:288`: Lock acquisition has no deadline. A registration behind one route read took **1.414 seconds**, with each dashboard request completing in 0.35 seconds. Bound lock waiting and dashboard work by one plugin deadline; refuse on expiry. No recursive lock deadlock found.
+- **Important**, `relay/test/test_route.py:44`: The helper recognizes only success or conflict as outcomes. The suite failed when a client received the valid fail-closed refusal `relay error: frps does not answer`. Track each client’s first outcome and corresponding trace by client ID, including unknown refusals.
+- **Important**, `relay/test/test_route.py:105`: The pending regression depends on scheduling and passed old code. Add a controlled young-pending-plus-offline test that asserts held state, refusal and unchanged generation.
+- **Important**, `relay/test/test_route.py:88`: The race tests do not reliably expose old trace interleaving. Add a synchronized concurrent trace test that requires one complete record per call.
+
+The fake-dashboard import keeps database operations in temporary directories; no additional issue found there.
+
+Ran once:
+
+`PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v`
+
+**31 passed, 1 failed**: `test_r1_1_race_after_empty`.
+
+Files remained unchanged; no test listeners remained.
+tokens used
+107,313
+Critical: none remain. Minor: none.
+
+Against the saved pre-fix Task 2 code:
+
+| Previous finding | Fix and regression check |
+|---|---|
+| 1. Young pending cleared by offline | Fixed; new race test **passed old code**, so coverage remains unreliable. |
+| 2. Online route without a row | Fixed; new test fails old code with **200 instead of 503**. |
+| 3. Second dashboard endpoint skipped | Fixed; new test fails old code because `FrpsUnknown` is not raised. |
+| 4. Missing clientID accepted | Fixed; missing/empty-ID tests fail old code correctly. |
+| 5. Stale generation overwritten | Fixed; new test catches old code clearing the newer pending generation. |
+| 6. Trace records interleaved | Fixed; race tests **passed old code**, leaving no reliable regression test. |
+| 7. Race checked too early | Improved; waits for all client logs, but trace identities remain unchecked. |
+
+Remaining findings:
+
+- **Important**, `relay/relay.py:288`: Lock acquisition has no deadline. A registration behind one route read took **1.414 seconds**, with each dashboard request completing in 0.35 seconds. Bound lock waiting and dashboard work by one plugin deadline; refuse on expiry. No recursive lock deadlock found.
+- **Important**, `relay/test/test_route.py:44`: The helper recognizes only success or conflict as outcomes. The suite failed when a client received the valid fail-closed refusal `relay error: frps does not answer`. Track each client’s first outcome and corresponding trace by client ID, including unknown refusals.
+- **Important**, `relay/test/test_route.py:105`: The pending regression depends on scheduling and passed old code. Add a controlled young-pending-plus-offline test that asserts held state, refusal and unchanged generation.
+- **Important**, `relay/test/test_route.py:88`: The race tests do not reliably expose old trace interleaving. Add a synchronized concurrent trace test that requires one complete record per call.
+
+The fake-dashboard import keeps database operations in temporary directories; no additional issue found there.
+
+Ran once:
+
+`PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v`
+
+**31 passed, 1 failed**: `test_r1_1_race_after_empty`.
+
+Files remained unchanged; no test listeners remained.

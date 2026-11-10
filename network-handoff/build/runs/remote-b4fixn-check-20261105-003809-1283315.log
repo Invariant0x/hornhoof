@@ -1,0 +1,77 @@
+== changed files
+apps/node/src/main.ts
+apps/node/src/outbox.ts
+apps/node/src/removal.ts
+apps/node/test/commands.test.ts
+apps/node/test/main.test.ts
+apps/node/test/outbox.test.ts
+apps/node/test/removal.test.ts
+packages/protocol/src/index.ts
+packages/protocol/test/protocol.test.ts
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== packages/protocol tests
+
+ [32m✓[39m test/program-info.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m test/map.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m test/protocol.test.ts [2m([22m[2m89 tests[22m[2m)[22m[33m 433[2mms[22m[39m
+ [32m✓[39m test/node-exit.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m   Affected [22m 4 of 5 test files [2m(related to 2 files)[22m
+[2m      Tests [22m [1m[32m128 passed[39m[22m[90m (128)[39m
+[2m   Start at [22m 00:41:37
+[2m   Duration [22m 1.52s[2m (import 59%, tests 29%, worker 10%, transform 1%)[22m
+
+== apps/server tests
+   [32m✓[39m ACME challenge answers [2m(2)[22m
+     [33m[2m✓[22m[39m answers a token it holds as text, and nothing else[33m 2303[2mms[22m[39m
+     [33m[2m✓[22m[39m does not answer a token outside the shape of one, even when it holds it[33m 1175[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m123 passed[39m[22m[90m (123)[39m
+[2m      Tests [22m [1m[32m2184 passed[39m[22m[2m | [22m[90m1 todo[39m[90m (2185)[39m
+[2m   Start at [22m 00:41:40
+[2m   Duration [22m 1914.71s[2m (tests 95%, import 5%)[22m
+
+[2m    Isolate [22m [33m123 workers spawned[39m[2m · ~319ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~12.75s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== apps/node tests
+[22m[39mAgent slow-hook-claude (claude): no empty input box showed within 10 s of its start. The prompt goes in all the same.
+
+ [32m✓[39m test/terminal-host-hook-delivery.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 35683[2mms[22m[39m
+   [32m✓[39m turns ended by a delayed hook [2m(2)[22m
+     [33m[2m✓[22m[39m closes claude's turn by its hook after a slow owner check, with the program alive[33m 24553[2mms[22m[39m
+     [33m[2m✓[22m[39m closes antigravity's turn by its hook after a slow owner check, with the program alive[33m 11127[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m89 passed[39m[22m[90m (89)[39m
+[2m      Tests [22m [1m[32m1271 passed[39m[22m[90m (1271)[39m
+[2m   Start at [22m 01:13:36
+[2m   Duration [22m 262.66s[2m (tests 97%, import 3%, transform 1%)[22m
+
+== apps/web tests
+ [32m✓[39m test/CommandLifetime.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 116[2mms[22m[39m
+ [32m✓[39m test/restarts.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m test/dev-server.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 30[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m49 passed[39m[22m[90m (49)[39m
+[2m      Tests [22m [1m[32m769 passed[39m[22m[90m (769)[39m
+[2m   Start at [22m 01:18:00
+[2m   Duration [22m 141.88s[2m (tests 74%, environment 17%, setup 4%, import 3%, transform 2%, worker 1%)[22m
+
+[2m    Isolate [22m [33m49 workers spawned[39m[2m · ~1.66s startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~25.41s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+OVER 10: apps/node/src/main.ts:111 runNode CRAP 206.4033
+worst changed CRAP: 206.4033
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK RED at c679c64b

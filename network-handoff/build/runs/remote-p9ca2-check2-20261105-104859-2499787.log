@@ -1,0 +1,17 @@
+== changed files
+README.md
+relay/hornhoof-relay
+relay/relay.py
+relay/test/test_traffic.py
+== tests under coverage
+Ran 54 tests in 44.337s
+
+OK
+
+NewUserConn in a crowd of 200: median 0.1 ms, worst 6.4 ms
+== crapper
+worst changed CRAP: 6.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at b8b017f

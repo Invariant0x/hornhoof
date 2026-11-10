@@ -1,0 +1,2610 @@
+OpenAI Codex v0.162.1
+--------
+workdir: /Users/0x/Projects/hornhoof-edge
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR] (network access enabled)
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a1a24a-4141-7622-b1f5-769845ccd2b6
+--------
+user
+Kimi answered your review of Plan 1 Task 4 and the team lead's Fix A (a new `relay/private-file.sh` with
+`write_private`, used by `setup-relay.sh` for frps.toml and hornhoof-relay.env; `relay/test/test_setup.py`). Check,
+read-only as before: is each of your eight findings fixed with a test that fails on the old code where the code was
+wrong; is `write_private` safe (no moment a secret is readable by others, correct on a re-run, unchanged content
+keeps the old file, no clobbering of the calling script's variables, `set -eu` behavior of its callers); is the
+`handle_one_request` override in relay.py a sound single place for 503 busy (headers already sent, keep-alive). Run
+`/opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v` once. Report Critical / Important / Minor with
+file:line, or say none remain.
+
+codex
+I’ll check each fix and its regression test, review `write_private` and the request handler, then run the full Python 3.12 suite once. I’ll keep the repositories read-only and put temporary output under `$TMPDIR`.
+
+exec
+/bin/zsh -lc 'nl -ba relay/private-file.sh; nl -ba relay/test/test_setup.py; nl -ba relay/test/test_restart.py' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "rg --files -g AGENTS.md -g '*private*' -g '*setup*' -g '*restart*' -g '*route*' relay .agents .codex 2>/dev/null" in /Users/0x/Projects/hornhoof-edge
+ exited 2 in 0ms:
+relay/setup-relay.sh
+relay/private-file.sh
+relay/test/test_route.py
+relay/test/test_restart.py
+relay/test/test_setup.py
+
+ succeeded in 0ms:
+     1	# Writes one private file, atomically. Sourced by setup-relay.sh.
+     2	# Usage: write_private <dest> <mode> [group]   (content on stdin)
+     3	# The destination ends with <mode> (root:<group> when a group is given). Prints "changed"
+     4	# when the content replaced the destination, "unchanged" when the old file was kept.
+     5	write_private() {
+     6	  dest=$1
+     7	  mode=$2
+     8	  group=${3:-}
+     9	  tmp=$dest.new
+    10	  rm -f "$tmp"
+    11	  # The temp file is created already private, so a secret is never readable by others,
+    12	  # not even for a moment while the content arrives.
+    13	  ( umask 077 && : > "$tmp" ) || return 1
+    14	  cat > "$tmp" || return 1
+    15	  if [ -n "$group" ]; then
+    16	    chgrp "$group" "$tmp" || return 1
+    17	  fi
+    18	  chmod "$mode" "$tmp" || return 1
+    19	  if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+    20	    rm -f "$tmp"
+    21	    echo unchanged
+    22	  else
+    23	    mv -f "$tmp" "$dest"
+    24	    echo changed
+    25	  fi
+    26	}
+     1	"""setup-relay.sh's write_private: a secret file is never world-readable, not even for a moment."""
+     2	
+     3	import os
+     4	from pathlib import Path
+     5	import stat
+     6	import subprocess
+     7	import tempfile
+     8	import time
+     9	import unittest
+    10	
+    11	
+    12	ROOT = Path(__file__).resolve().parents[2]
+    13	HELPER = ROOT / 'relay' / 'private-file.sh'
+    14	SETUP = ROOT / 'relay' / 'setup-relay.sh'
+    15	
+    16	
+    17	def start_write_private(dest: Path, mode: str, group: str | None = None) -> subprocess.Popen:
+    18	    """Start write_private on a pipe the test controls; the caller writes the content."""
+    19	    command = ['sh', '-c', '. "$1"; shift; write_private "$@"', 'write_private',
+    20	               str(HELPER), str(dest), mode] + ([group] if group else [])
+    21	    return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    22	                            stderr=subprocess.PIPE, text=True)
+    23	
+    24	
+    25	def finish(process: subprocess.Popen) -> tuple[int, str, str]:
+    26	    out, err = process.stdout.read(), process.stderr.read()
+    27	    process.stdout.close()
+    28	    process.stderr.close()
+    29	    return process.wait(timeout=5), out.strip(), err
+    30	
+    31	
+    32	class WritePrivateTests(unittest.TestCase):
+    33	    def test_temp_file_is_private_while_the_content_arrives(self) -> None:
+    34	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    35	            dest = Path(tmp) / 'secret.env'
+    36	            process = start_write_private(dest, '640')
+    37	            process.stdin.write('first half\n')
+    38	            process.stdin.flush()
+    39	            tmp_file = Path(str(dest) + '.new')
+    40	            deadline = time.monotonic() + 5
+    41	            while not tmp_file.exists() and process.poll() is None and time.monotonic() < deadline:
+    42	                time.sleep(0.02)
+    43	            self.assertTrue(tmp_file.exists(),
+    44	                            'the temp file never appeared: write_private is not waiting on stdin')
+    45	            mode = stat.S_IMODE(tmp_file.stat().st_mode)
+    46	            self.assertEqual(mode & 0o077, 0, f'the temp file is readable by others: {oct(mode)}')
+    47	            process.stdin.write('second half\n')
+    48	            process.stdin.close()
+    49	            code, out, err = finish(process)
+    50	            self.assertEqual(code, 0, err)
+    51	            self.assertEqual(out, 'changed')
+    52	            self.assertEqual(dest.read_text(), 'first half\nsecond half\n')
+    53	            self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o640)
+    54	
+    55	    def test_unchanged_content_keeps_the_destination(self) -> None:
+    56	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    57	            dest = Path(tmp) / 'secret.env'
+    58	            for content, answer in (('same content\n', 'changed'), ('same content\n', 'unchanged')):
+    59	                process = start_write_private(dest, '640')
+    60	                process.stdin.write(content)
+    61	                process.stdin.close()
+    62	                code, out, err = finish(process)
+    63	                self.assertEqual(code, 0, err)
+    64	                self.assertEqual(out, answer)
+    65	            self.assertEqual(dest.read_text(), 'same content\n')
+    66	
+    67	    def test_unchanged_content_keeps_the_inode(self) -> None:
+    68	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    69	            dest = Path(tmp) / 'secret.env'
+    70	            process = start_write_private(dest, '640')
+    71	            process.stdin.write('content\n')
+    72	            process.stdin.close()
+    73	            self.assertEqual(finish(process)[0], 0)
+    74	            inode = os.stat(dest).st_ino
+    75	            process = start_write_private(dest, '640')
+    76	            process.stdin.write('content\n')
+    77	            process.stdin.close()
+    78	            code, out, _ = finish(process)
+    79	            self.assertEqual(code, 0)
+    80	            self.assertEqual(out, 'unchanged')
+    81	            self.assertEqual(os.stat(dest).st_ino, inode, 'an unchanged file was replaced')
+    82	
+    83	    def test_shell_files_parse(self) -> None:
+    84	        result = subprocess.run(['sh', '-n', str(SETUP), str(HELPER)], capture_output=True, text=True)
+    85	        self.assertEqual(result.returncode, 0, result.stderr)
+    86	
+    87	
+    88	if __name__ == '__main__':
+    89	    unittest.main()
+     1	"""Health follows frps, and generations survive relay and frps restarts: R2.2, R2.3 and R4.1."""
+     2	
+     3	import hashlib
+     4	import secrets
+     5	import sqlite3
+     6	import tempfile
+     7	import threading
+     8	import time
+     9	import unittest
+    10	
+    11	if __package__:
+    12	    from .harness import Stack, _wait
+    13	else:
+    14	    from harness import Stack, _wait
+    15	
+    16	
+    17	class RestartTests(unittest.TestCase):
+    18	    def setUp(self) -> None:
+    19	        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-restart-'))
+    20	        self.stack = self.enterContext(Stack(self.tmp))
+    21	
+    22	    def route(self, binding: dict) -> tuple[int, dict | None]:
+    23	        return self.stack.api('GET', f'/api/v1/links/{binding["name"]}/route', key=binding['key'])
+    24	
+    25	    def wait_route(self, binding: dict, state: str, generation: int, within: float) -> dict:
+    26	        deadline = time.monotonic() + within
+    27	        while True:
+    28	            status, body = self.route(binding)
+    29	            if status == 200 and body['state'] == state and body['generation'] == generation:
+    30	                return body
+    31	            remaining = deadline - time.monotonic()
+    32	            self.assertGreater(remaining, 0, f'no {state} at generation {generation}: {status} {body}')
+    33	            time.sleep(0.2)
+    34	
+    35	    def wait_health(self, status: int, within: float) -> dict:
+    36	        deadline = time.monotonic() + within
+    37	        while True:
+    38	            current, body = self.stack.api('GET', '/api/v1/health')
+    39	            if current == status:
+    40	                return body
+    41	            remaining = deadline - time.monotonic()
+    42	            self.assertGreater(remaining, 0, f'health stayed {current}: {body}')
+    43	            time.sleep(0.1)
+    44	
+    45	    def make_binding(self, name: str) -> dict:
+    46	        """A binding written straight into the relay's database: the API's per-address limit
+    47	        would stop 40 creations from one address."""
+    48	        key = secrets.token_urlsafe(32)
+    49	        digest = hashlib.sha256(key.encode()).hexdigest()
+    50	        with sqlite3.connect(self.stack.env['RELAY_DB'], timeout=10) as conn:
+    51	            conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+    52	                         (name, digest, int(time.time()), 'test'))
+    53	        self.stack.private.append(key)
+    54	        return {'name': name, 'key': key}
+    55	
+    56	    def start_network_client(self, binding: dict) -> None:
+    57	        client = self.stack.client(binding['name'], binding['key'], settings='network',
+    58	                                   client=f"{binding['name']}-aaaaaaaa-link")
+    59	        self.assertTrue(client.started(binding['name']), client.log())
+    60	
+    61	    def sample_route(self, binding: dict, stop: threading.Event, samples: list,
+    62	                     started: threading.Event) -> None:
+    63	        while True:
+    64	            try:
+    65	                samples.append((time.monotonic(), *self.route(binding)))
+    66	            except OSError:
+    67	                samples.append((time.monotonic(), None, None))
+    68	            started.set()
+    69	            if stop.wait(0.2):
+    70	                return
+    71	
+    72	    def sample_traffic(self, binding: dict, stop: threading.Event, answers: list,
+    73	                       started: threading.Event) -> None:
+    74	        host = f'{binding["name"]}.hornhoof.org'
+    75	        while True:
+    76	            try:
+    77	                answers.append(self.stack.get(host))
+    78	            except OSError:
+    79	                answers.append(None)
+    80	            started.set()
+    81	            if stop.wait(0.2):
+    82	                return
+    83	
+    84	    def test_r4_1_health_follows_frps(self) -> None:
+    85	        body = self.wait_health(200, 10)
+    86	        self.assertEqual(body['frps'], True)
+    87	        self.assertIsInstance(body['relayStarted'], int)
+    88	        self.stack.stop_frps()
+    89	        body = self.wait_health(503, 2)
+    90	        self.assertEqual(body, {'ok': False, 'frps': False})
+    91	        started = int(time.time())
+    92	        self.stack.start_frps()
+    93	        body = self.wait_health(200, 3)
+    94	        self.assertEqual(body['frps'], True)
+    95	        self.assertGreaterEqual(body['relayStarted'], started)
+    96	
+    97	    def refuse_route_calls(self, binding: dict, within: float = 5) -> None:
+    98	        """The route call must fail to connect while the relay is down; poll until it does."""
+    99	        deadline = time.monotonic() + within
+   100	        while True:
+   101	            try:
+   102	                self.route(binding)
+   103	            except OSError:
+   104	                return
+   105	            remaining = deadline - time.monotonic()
+   106	            self.assertGreater(remaining, 0, 'the route call still connects after the relay stopped')
+   107	            time.sleep(0.02)
+   108	
+   109	    def test_r2_2_generation_survives_relay_restart(self) -> None:
+   110	        binding = self.stack.bind('acme')
+   111	        self.start_network_client(binding)
+   112	        held = self.wait_route(binding, 'held', 1, 10)
+   113	        samples: list = []
+   114	        traffic: list = []
+   115	        stop = threading.Event()
+   116	        route_started = threading.Event()
+   117	        traffic_started = threading.Event()
+   118	        sampler = threading.Thread(target=self.sample_route,
+   119	                                   args=(binding, stop, samples, route_started), daemon=True)
+   120	        traffic_sampler = threading.Thread(target=self.sample_traffic,
+   121	                                           args=(binding, stop, traffic, traffic_started), daemon=True)
+   122	        sampler.start()
+   123	        traffic_sampler.start()
+   124	        self.assertTrue(route_started.wait(timeout=5), 'the route sampler never sampled')
+   125	        self.assertTrue(traffic_started.wait(timeout=5), 'the traffic sampler never sampled')
+   126	        try:
+   127	            # Split the restart: between stop and start the relay must refuse connections,
+   128	            # and that window is measured from the main thread, not left to sampling luck.
+   129	            self.stack.relay.stop()
+   130	            self.refuse_route_calls(binding)
+   131	            self.stack._start_relay()
+   132	        finally:
+   133	            stop.set()
+   134	            sampler.join(timeout=10)
+   135	            traffic_sampler.join(timeout=10)
+   136	        self.assertFalse(sampler.is_alive(), 'the route sampler outlived the test')
+   137	        self.assertFalse(traffic_sampler.is_alive(), 'the traffic sampler outlived the test')
+   138	        answered = [sample for sample in samples if sample[1] is not None]
+   139	        self.assertTrue(answered, 'the route call was never sampled while the relay was up')
+   140	        self.assertTrue(all(sample[1] == 200 for sample in answered), answered)
+   141	        self.assertTrue(traffic, 'company traffic was never sampled')
+   142	        self.assertTrue(all(answer == 200 for answer in traffic),
+   143	                        f'company traffic was not served throughout the restart: {traffic}')
+   144	        after = self.wait_route(binding, 'held', 1, 15)
+   145	        self.assertEqual(after['client'], 'acme-aaaaaaaa-link')
+   146	        self.assertEqual(after['generation'], held['generation'])
+   147	
+   148	    def test_r2_2_generation_survives_frps_restart(self) -> None:
+   149	        binding = self.stack.bind('acme')
+   150	        self.start_network_client(binding)
+   151	        before = self.wait_route(binding, 'held', 1, 10)
+   152	        # relayStarted has second resolution: let the second roll over before the restart,
+   153	        # so "moved to the restart" cannot pass with the pre-restart value.
+   154	        marked = int(time.time())
+   155	        while int(time.time()) == marked:
+   156	            time.sleep(0.05)
+   157	        samples: list = []
+   158	        stop = threading.Event()
+   159	        route_started = threading.Event()
+   160	        sampler = threading.Thread(target=self.sample_route,
+   161	                                   args=(binding, stop, samples, route_started), daemon=True)
+   162	        sampler.start()
+   163	        self.assertTrue(route_started.wait(timeout=5), 'the route sampler never sampled')
+   164	        self.stack.restart_frps()
+   165	        restarted = time.monotonic()
+   166	        try:
+   167	            held = self.wait_route(binding, 'held', 2, 60)
+   168	        finally:
+   169	            stop.set()
+   170	            sampler.join(timeout=10)
+   171	        self.assertFalse(sampler.is_alive(), 'the route sampler outlived the test')
+   172	        self.assertEqual(held['client'], 'acme-aaaaaaaa-link')
+   173	        self.assertGreater(held['relayStarted'], before['relayStarted'])
+   174	        self.assertTrue(samples, 'the route call was never sampled')
+   175	        stale = [sample for sample in samples
+   176	                 if sample[0] > restarted and sample[1] == 200
+   177	                 and sample[2]['state'] == 'held' and sample[2]['generation'] == 1]
+   178	        self.assertFalse(stale, stale)
+   179	
+   180	    def test_restart_burst(self) -> None:
+   181	        bindings = [self.make_binding(f'burst{i:02d}') for i in range(40)]
+   182	        for binding in bindings:
+   183	            self.start_network_client(binding)
+   184	        for binding in bindings:
+   185	            self.wait_route(binding, 'held', 1, 30)
+   186	        base = len(self.stack.plugin_calls())
+   187	        self.stack.restart_frps()
+   188	        deadline = time.monotonic() + 60
+   189	        for binding in bindings:
+   190	            self.wait_route(binding, 'held', 2, max(deadline - time.monotonic(), 0.5))
+   191	        calls = self.stack.plugin_calls()[base:]
+   192	        expected = {binding['name'] for binding in bindings}
+   193	        registered = {call['proxy_name'] for call in calls if call['op'] == 'NewProxy'}
+   194	        self.assertEqual(registered, expected,
+   195	                         f'missing registrations after the restart: {expected - registered}')
+   196	        rejected = [call for call in calls if call['reject']]
+   197	        self.assertFalse(rejected, f'plugin calls were rejected after the restart: {rejected}')
+   198	        self.assertNotIn('relay error: busy', self.stack.relay.log())
+   199	        for call in calls:
+   200	            self.assertLess(call['ms'], 1000, call)
+   201	
+   202	
+   203	if __name__ == '__main__':
+   204	    unittest.main()
+
+exec
+/bin/zsh -lc 'git diff d6a50bc -- relay/relay.py relay/setup-relay.sh relay/test/test_route.py relay/frps.service relay/hornhoof-relay.service' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+diff --git a/relay/frps.service b/relay/frps.service
+index 58ec78b..2dd11bd 100644
+--- a/relay/frps.service
++++ b/relay/frps.service
+@@ -7,6 +7,10 @@ Wants=hornhoof-relay.service
+ User=frps
+ Group=frps
+ ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
++# systemd owns /run/frps; the relay reads the file to know when frps last started.
++RuntimeDirectory=frps
++RuntimeDirectoryMode=0755
++ExecStartPost=/bin/sh -c 'date +%%s > /run/frps/started'
+ Restart=always
+ RestartSec=2
+ LimitNOFILE=1048576
+diff --git a/relay/hornhoof-relay.service b/relay/hornhoof-relay.service
+index a2e9eb9..860f05c 100644
+--- a/relay/hornhoof-relay.service
++++ b/relay/hornhoof-relay.service
+@@ -5,6 +5,7 @@ After=network.target
+ [Service]
+ User=hornhoof-relay
+ Group=hornhoof-relay
++EnvironmentFile=/etc/hornhoof-relay.env
+ ExecStart=/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py
+ StateDirectory=hornhoof-relay
+ StateDirectoryMode=0700
+diff --git a/relay/relay.py b/relay/relay.py
+index d4ab141..d57c763 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -6,6 +6,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
++  GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+ Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
+ 
+@@ -19,6 +20,7 @@ import json
+ import os
+ import re
+ import secrets
++import socket
+ import sqlite3
+ import sys
+ import threading
+@@ -45,6 +47,10 @@ MAX_BODY = 4096
+ RELAY_FRPS_API = os.environ.get('RELAY_FRPS_API', 'http://127.0.0.1:7500')
+ FRPS_USER = os.environ.get('RELAY_FRPS_USER', 'admin')
+ FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
++# The watcher probes these to know whether frps takes logins (R4.1); systemd's ExecStartPost
++# rewrites the started file every time frps starts.
++RELAY_FRPS_BIND = os.environ.get('RELAY_FRPS_BIND', '127.0.0.1:7000')
++RELAY_FRPS_STARTED = os.environ.get('RELAY_FRPS_STARTED', '/run/frps/started')
+ # A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
+ PENDING_S = 10
+ # R3.1 measured with frp 0.71.1: network 20.16/20.46 s, today 20.26 s (2026-11-03).
+@@ -86,8 +92,7 @@ def db() -> sqlite3.Connection:
+ 
+ 
+ def init_db() -> None:
+-    db().executescript('''
+-        CREATE TABLE IF NOT EXISTS bindings (
++    write('''CREATE TABLE IF NOT EXISTS bindings (
+             name TEXT PRIMARY KEY,
+             key_hash TEXT NOT NULL,
+             created_at INTEGER NOT NULL,
+@@ -95,10 +100,10 @@ def init_db() -> None:
+             last_seen INTEGER,
+             banned_at INTEGER,
+             ban_reason TEXT
+-        );
+-        CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL);
+-        CREATE INDEX IF NOT EXISTS creations_at ON creations(at);
+-        CREATE TABLE IF NOT EXISTS routes (
++        )''', ())
++    write('CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL)', ())
++    write('CREATE INDEX IF NOT EXISTS creations_at ON creations(at)', ())
++    write('''CREATE TABLE IF NOT EXISTS routes (
+             name TEXT PRIMARY KEY,
+             generation INTEGER NOT NULL,
+             client TEXT NOT NULL,
+@@ -106,8 +111,7 @@ def init_db() -> None:
+             type TEXT NOT NULL CHECK (type IN ('http', 'https')),
+             state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
+             since INTEGER NOT NULL
+-        );
+-    ''')
++        )''', ())
+ 
+ 
+ _reserved = {'mtime': None, 'names': frozenset()}
+@@ -142,18 +146,75 @@ def check_name(name: str):
+     return 'reserved' if row[0] else 'taken'
+ 
+ 
+-# relayStarted is the process start until the frps watcher lands (Task 4).
++# relayStarted is the latest of: this process's start, the watcher's first frps answer after
++# a failure or after start, and the integer in RELAY_FRPS_STARTED (R2.2, R4.1).
+ STARTED = now()
+ 
++# frps watcher state: frps_ok_at is the epoch of the last good probe, frps_back_at the epoch
++# of the first good probe after a failure or after start (0 until then).
++_frps = {'ok_at': 0.0, 'back_at': 0}
++WATCH_INTERVAL_S = 0.5
++# Health answers 200 only while the watcher's last good probe is younger than this.
++HEALTH_MAX_AGE_S = 2.0
++
++
++def frps_answers() -> bool:
++    """True when frps's bind port accepts a connection and its dashboard answers /healthz."""
++    host, _, port_text = RELAY_FRPS_BIND.rpartition(':')
++    try:
++        connection = socket.create_connection((host, int(port_text)), timeout=1)
++        connection.close()
++    except OSError:
++        return False
++    try:
++        status, _ = _dash_get('/healthz', cap=1.0)
++    except FrpsUnknown:
++        return False
++    return status == 200
++
++
++def watch_frps() -> None:
++    """Probe frps forever; keep the last good answer and the recovery after a failure."""
++    was_ok = False
++    while True:
++        if frps_answers():
++            t = time.time()
++            if not was_ok:
++                _frps['back_at'] = t
++            _frps['ok_at'] = t
++            was_ok = True
++        else:
++            was_ok = False
++        time.sleep(WATCH_INTERVAL_S)
++
++
++def frps_ok() -> bool:
++    """R4.1: true while the watcher's last frps answer is under HEALTH_MAX_AGE_S old."""
++    return time.time() - _frps['ok_at'] < HEALTH_MAX_AGE_S
++
++
++def frps_started_file() -> int:
++    """The integer systemd's ExecStartPost wrote when frps last started, 0 when unreadable."""
++    try:
++        with open(RELAY_FRPS_STARTED) as f:
++            return int(f.read().strip())
++    except (OSError, ValueError):
++        return 0
++
++
++def relay_started() -> int:
++    """The latest of the relay's start, the frps recovery and frps's own start."""
++    return int(max(STARTED, _frps['back_at'], frps_started_file()))
++
+ 
+ class FrpsUnknown(Exception):
+     """frps's dashboard gave no trustworthy answer about a route: read unknown, never empty."""
+ 
+ 
+-def _dash_get(path: str) -> tuple[int, bytes]:
+-    """One dashboard read with a 0.5 s timeout; less when the plugin call's budget is nearly spent.
++def _dash_get(path: str, cap: float = 0.5) -> tuple[int, bytes]:
++    """One dashboard read with a cap-second timeout; less when the plugin call's budget is nearly spent.
+ 
+-    Any error, timeout or a spent budget is FrpsUnknown.
++    The watcher's own probes pass cap=1. Any error, timeout or a spent budget is FrpsUnknown.
+     """
+     parsed = urlsplit(RELAY_FRPS_API)
+     host = parsed.hostname or '127.0.0.1'
+@@ -162,7 +223,7 @@ def _dash_get(path: str) -> tuple[int, bytes]:
+     left = call_deadline()
+     if left is not None and left <= 0:
+         raise FrpsUnknown(f'{path}: plugin call budget spent')
+-    connection = kind(host, port, timeout=0.5 if left is None else min(0.5, left))
++    connection = kind(host, port, timeout=cap if left is None else min(cap, left))
+     try:
+         token = base64.b64encode(f'{FRPS_USER}:{FRPS_PASSWORD}'.encode()).decode()
+         connection.request('GET', path, headers={'Authorization': f'Basic {token}'})
+@@ -226,13 +287,29 @@ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy
+     raise FrpsUnknown(f'frps route of {name} does not match the relay record')
+ 
+ 
+-def execute_bounded(statement: str, params: tuple) -> sqlite3.Cursor:
+-    """Run one write with SQLite's busy wait bounded by the plugin call's remaining budget."""
++class WriteBusy(Exception):
++    """A SQLite write could not take the lock within its budget: refuse the op, never guess."""
++
++
++def write(sql: str, args: tuple) -> None:
++    """The one SQLite write of the plugin and the API.
++
++    SQLite itself retries database is locked for the write's budget (0.8 s, or the plugin
++    call's time left, whichever is less); past the budget the write raises WriteBusy and a
++    plugin call refuses with 'relay error: busy' (Review Focus 3).
++    """
+     conn = db()
+     left = call_deadline()
+-    conn.execute(f'PRAGMA busy_timeout = {10000 if left is None else int(left * 1000)}')
++    if left is not None and left <= 0:
++        raise WriteBusy('plugin call budget spent')
++    budget = 0.8 if left is None else min(0.8, left)
++    conn.execute(f'PRAGMA busy_timeout = {max(0, int(budget * 1000))}')
+     try:
+-        return conn.execute(statement, params)
++        conn.execute(sql, args)
++    except sqlite3.OperationalError as e:
++        if 'locked' in str(e):
++            raise WriteBusy(f'database is locked for {budget:.2f} s') from None
++        raise
+     finally:
+         conn.execute('PRAGMA busy_timeout = 10000')
+ 
+@@ -247,14 +324,14 @@ def straighten_route(name: str, row, status: str, t: int) -> None:
+     """
+     state, generation = row[4], row[0]
+     if status == 'online':
+-        execute_bounded("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
+-                        "AND state IN ('pending', 'empty')", (name, generation))
++        write("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
++              "AND state IN ('pending', 'empty')", (name, generation))
+     elif state == 'held':
+-        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+-                        "AND state = 'held'", (t, name, generation))
++        write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
++              "AND state = 'held'", (t, name, generation))
+     elif state == 'pending' and t - row[5] > PENDING_S:
+-        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+-                        "AND state = 'pending'", (t, name, generation))
++        write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
++              "AND state = 'pending'", (t, name, generation))
+ 
+ 
+ def route_body(name: str, row) -> dict:
+@@ -269,7 +346,7 @@ def route_body(name: str, row) -> dict:
+         client = row[1] if state == 'held' else None
+         generation = row[0]
+     return {'state': state, 'client': client, 'since': since, 'generation': generation,
+-            'relayStarted': STARTED, 'evictionBound': EVICTION_BOUND_S, 'sync': None}
++            'relayStarted': relay_started(), 'evictionBound': EVICTION_BOUND_S, 'sync': None}
+ 
+ 
+ def locked_route_of(name: str) -> dict:
+@@ -339,26 +416,27 @@ def register_locked(name: str, content: dict, user: dict) -> str | None:
+         held = locked_route_of(name)['state'] == 'held'
+     except FrpsUnknown:
+         return 'relay error: frps does not answer'
++    except WriteBusy:
++        return 'relay error: busy'
+     if held:
+         return f'router config conflict: {name} is held'
+     return upsert_route(name, content, user)
+ 
+ 
+ def upsert_route(name: str, content: dict, user: dict) -> str | None:
+-    """Write the pending row for a let-through registration; a refusal when the call's budget ran out."""
+-    left = call_deadline()
+-    if left is not None and left <= 0:
+-        return 'relay error: frps does not answer'
++    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
+     row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
+     generation = (row[0] if row else 0) + 1
+     metas = user.get('metas') or {}
+     try:
+-        execute_bounded(
++        write(
+             'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
+             'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
+             'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
+             (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
+              content.get('proxy_type') or 'http', 'pending', now()))
++    except WriteBusy:
++        return 'relay error: busy'
+     except sqlite3.Error:
+         return 'relay error: frps does not answer'
+     return None
+@@ -508,9 +586,10 @@ _seen = {}
+ 
+ def touch(name: str) -> None:
+     t = now()
+-    if t - _seen.get(name, 0) > 600:
+-        _seen[name] = t
+-        db().execute('UPDATE bindings SET last_seen = ? WHERE name = ?', (t, name))
++    if t - _seen.get(name, 0) <= 600:
++        return
++    write('UPDATE bindings SET last_seen = ? WHERE name = ?', (t, name))
++    _seen[name] = t
+ 
+ 
+ def plugin(op: str, content: dict) -> dict:
+@@ -518,6 +597,8 @@ def plugin(op: str, content: dict) -> dict:
+     call_state.end = time.monotonic() + PLUGIN_CALL_S
+     try:
+         return plugin_decide(op, content)
++    except WriteBusy:
++        return {'reject': True, 'reject_reason': 'relay error: busy'}
+     finally:
+         call_state.end = None
+ 
+@@ -545,6 +626,13 @@ class Handler(BaseHTTPRequestHandler):
+     def log_message(self, fmt, *args):
+         pass
+ 
++    def handle_one_request(self):
++        """A busy store answers 503 instead of dropping the connection mid-request."""
++        try:
++            super().handle_one_request()
++        except WriteBusy:
++            self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
++
+     def client_ip(self) -> str:
+         fwd = self.headers.get('X-Forwarded-For')
+         return fwd.split(',')[0].strip() if fwd else self.client_address[0]
+@@ -592,7 +680,7 @@ class Handler(BaseHTTPRequestHandler):
+         if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'route':
+             return self.route_answer(parts[3].lower())
+         if parts == ['api', 'v1', 'health']:
+-            return self.send_json(200, {'ok': True})
++            return self.health_answer()
+         self.error(404, 'not_found', 'Not found.')
+ 
+     def name_answer(self, name: str):
+@@ -615,9 +703,15 @@ class Handler(BaseHTTPRequestHandler):
+             return self.wrong_key(self.client_ip())
+         try:
+             return self.send_json(200, route_of(name))
+-        except FrpsUnknown:
++        except (FrpsUnknown, WriteBusy):
+             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+ 
++    def health_answer(self):
++        """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
++        if frps_ok():
++            return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started()})
++        return self.send_json(503, {'ok': False, 'frps': False})
++
+     def handle_plugin(self):
+         # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
+         if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
+@@ -670,7 +764,7 @@ class Handler(BaseHTTPRequestHandler):
+         with create_lock:
+             t = now()
+             conn = db()
+-            conn.execute('DELETE FROM creations WHERE at < ?', (t - 3600,))
++            write('DELETE FROM creations WHERE at < ?', (t - 3600,))
+             mine = conn.execute('SELECT COUNT(*), MIN(at) FROM creations WHERE ip = ?', (ip,)).fetchone()
+             total = conn.execute('SELECT COUNT(*) FROM creations').fetchone()[0]
+             if mine[0] >= BIND_PER_IP_HOUR or total >= BIND_ALL_HOUR:
+@@ -691,9 +785,9 @@ class Handler(BaseHTTPRequestHandler):
+                 if reason:
+                     return self.error(409, reason, f'{name}.{DOMAIN} is {reason}.')
+             key = secrets.token_urlsafe(32)
+-            conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+-                         (name, key_hash(key), t, ip))
+-            conn.execute('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
++            write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
++                  (name, key_hash(key), t, ip))
++            write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+         log_line(f'bound {name} for {ip}')
+         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
+                              'tunnel': tunnel_info(name, key)})
+@@ -711,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
+             return self.wrong_key(self.client_ip())
+         if row[1]:
+             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
+-        db().execute('DELETE FROM bindings WHERE name = ?', (name,))
++        write('DELETE FROM bindings WHERE name = ?', (name,))
+         log_line(f'released {name} for {self.client_ip()}')
+         self.send_json(204)
+ 
+@@ -742,8 +836,8 @@ def admin(args) -> int:
+             print(f'{name}: {reason}', file=sys.stderr)
+             return 1
+         key = secrets.token_urlsafe(32)
+-        conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+-                     (name, key_hash(key), now(), 'operator'))
++        write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
++              (name, key_hash(key), now(), 'operator'))
+         print(json.dumps({'name': name, 'key': key}))
+         return 0
+     if cmd in ('ban', 'unban', 'release') and len(args) >= 2:
+@@ -751,15 +845,15 @@ def admin(args) -> int:
+         if cmd == 'ban':
+             reason = ' '.join(args[2:]) or 'blocked by the relay operator'
+             if conn.execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
+-                conn.execute('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
++                write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+             else:  # block a name nobody holds, so nobody can take it
+-                conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+-                             'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
++                write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
++                      'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+         elif cmd == 'unban':
+-            conn.execute('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
+-            conn.execute("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
++            write('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
++            write("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
+         else:
+-            conn.execute('DELETE FROM bindings WHERE name = ?', (name,))
++            write('DELETE FROM bindings WHERE name = ?', (name,))
+         print(f'{cmd} {name}: done')
+         return 0
+     print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',
+@@ -771,6 +865,7 @@ def main() -> int:
+     if sys.argv[1:2] == ['admin']:
+         return admin(sys.argv[2:])
+     init_db()
++    threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
+     server = ThreadingHTTPServer(LISTEN, Handler)
+     server.daemon_threads = True
+     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+diff --git a/relay/setup-relay.sh b/relay/setup-relay.sh
+index 3d79bef..46bc97e 100755
+--- a/relay/setup-relay.sh
++++ b/relay/setup-relay.sh
+@@ -4,6 +4,8 @@
+ # reconnects) only when its binary or config changed.
+ set -eu
+ cd "$(dirname "$0")"
++# shellcheck source=private-file.sh
++. ./private-file.sh
+ FRP_VERSION=0.71.1
+ FRP_SHA256=1d9875210972a5d1a62b2dc4c48df45ab0af05d3ca1b5e494a014428259df803
+ restart_frps=''
+@@ -29,13 +31,21 @@ install -d -m 750 -o root -g frps /etc/frp
+ install -m 644 404.html /etc/frp/404.html
+ pass=$(sed -n 's/^webServer.password = "\([0-9a-f]*\)"$/\1/p' /etc/frp/frps.toml 2> /dev/null || true)
+ [ -n "$pass" ] || pass=$(openssl rand -hex 16)
+-sed "s/@WEB_PASSWORD@/$pass/" frps.toml > /etc/frp/frps.toml.new
+-if ! cmp -s /etc/frp/frps.toml.new /etc/frp/frps.toml; then restart_frps=1; fi
+-install -m 640 -o root -g frps /etc/frp/frps.toml.new /etc/frp/frps.toml
+-rm -f /etc/frp/frps.toml.new
++frps_conf=$(sed "s/@WEB_PASSWORD@/$pass/" frps.toml | write_private /etc/frp/frps.toml 640 frps)
++if [ "$frps_conf" = changed ]; then restart_frps=1; fi
+ 
+ [ -f /etc/caddy/blocked.caddy ] || echo '# Generated by hornhoof-relay from blocked bindings. Do not edit.' > /etc/caddy/blocked.caddy
+ 
++# The relay's view of frps: where it listens, where its dashboard is, and the file systemd
++# updates when frps starts. Readable only by root and the relay.
++cat <<EOF | write_private /etc/hornhoof-relay.env 640 hornhoof-relay
++RELAY_FRPS_API=http://127.0.0.1:7500
++RELAY_FRPS_USER=admin
++RELAY_FRPS_PASSWORD=$pass
++RELAY_FRPS_BIND=127.0.0.1:7000
++RELAY_FRPS_STARTED=/run/frps/started
++EOF
++
+ for unit in hornhoof-relay.service frps.service; do
+   if ! cmp -s "$unit" "/etc/systemd/system/$unit"; then
+     install -m 644 "$unit" "/etc/systemd/system/$unit"
+diff --git a/relay/test/test_route.py b/relay/test/test_route.py
+index 35c2b6b..16ae6c9 100644
+--- a/relay/test/test_route.py
++++ b/relay/test/test_route.py
+@@ -3,6 +3,7 @@
+ import contextlib
+ import importlib.util
+ import io
++import http.client
+ import json
+ import os
+ import re
+@@ -22,7 +23,8 @@ else:
+ ROOT = Path(__file__).resolve().parents[2]
+ SUCCESS = re.compile(r'\[acme\]\s+start proxy success\b')
+ # A refusal is one of these documented reasons; anything else in an outcome is a failure.
+-REFUSALS = frozenset({'router config conflict: acme is held', 'relay error: frps does not answer'})
++REFUSALS = frozenset({'router config conflict: acme is held', 'relay error: frps does not answer',
++                      'relay error: busy'})
+ 
+ 
+ def first_outcome(log: str):
+@@ -208,6 +210,31 @@ localPort = {self.stack.echo_port}{extra}
+         for call in self.newproxy_calls():
+             self.assertLess(call['ms'], 1000, call)
+ 
++    def test_busy_write_answers_503_instead_of_dropping_the_connection(self):
++        # A contended API write answers 503 busy with Retry-After; it never drops the
++        # connection mid-request (R2.3: a relay error is a structured answer, not a hangup).
++        db = sqlite3.connect(str(Path(self.tmp) / 'relay.db'), timeout=10, isolation_level=None)
++        self.addCleanup(db.close)
++        db.execute('BEGIN IMMEDIATE')
++        db.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
++        try:
++            for method, path, body in (('POST', '/api/v1/bindings', b'{}'),
++                                       ('DELETE', '/api/v1/bindings/acme', None)):
++                with self.subTest(method=method):
++                    connection = http.client.HTTPConnection('127.0.0.1', self.stack.relay_port,
++                                                            timeout=5)
++                    connection.request(method, path, body=body,
++                                       headers={'Content-Type': 'application/json',
++                                                'Authorization': f'Bearer {self.key}'})
++                    response = connection.getresponse()
++                    self.assertEqual(response.status, 503)
++                    self.assertEqual(response.getheader('Retry-After'), '1')
++                    answer = json.loads(response.read())
++                    self.assertEqual(answer['error'], 'busy')
++                    connection.close()
++        finally:
++            db.execute('ROLLBACK')
++
+     def test_r2_1_route_body_has_no_key(self):
+         client = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+         self.assertTrue(client.started('acme'), client.log())
+@@ -363,6 +390,15 @@ class DashboardContractTests(unittest.TestCase):
+         with self.assertRaises(self.relay.FrpsUnknown):
+             self.relay.frps_route('acme')
+ 
++    def test_watcher_takes_a_slow_good_healthz_answer(self):
++        # The watcher's probe budget is 1 s for each probe: a good dashboard answer arriving
++        # at 0.7 s means frps is up, not down.
++        old_bind = self.relay.RELAY_FRPS_BIND
++        self.addCleanup(setattr, self.relay, 'RELAY_FRPS_BIND', old_bind)
++        self.relay.RELAY_FRPS_BIND = f'127.0.0.1:{self.server.server_port}'
++        self.server.records['/healthz'] = _record(200, delay=0.7)
++        self.assertTrue(self.relay.frps_answers())
++
+     def test_straighten_empties_the_row_as_read(self):
+         t = self.relay.now()
+         self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+@@ -476,9 +512,42 @@ class DashboardContractTests(unittest.TestCase):
+             conn.execute('ROLLBACK')
+         self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+         self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
+-        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: frps does not answer'})
++        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+         self.assertIsNone(self.relay.db().execute("SELECT generation FROM routes WHERE name = 'acme'").fetchone())
+ 
++    def test_write_refuses_before_executing_when_the_call_budget_is_spent(self):
++        # A spent budget must not run the SQL at all: write refuses before executing, or an
++        # expired upsert would move a generation after the call should have refused.
++        self.relay.call_state.end = time.monotonic() - 0.1
++        self.addCleanup(setattr, self.relay.call_state, 'end', None)
++        with self.assertRaises(self.relay.WriteBusy):
++            self.relay.write("INSERT INTO creations (ip, at) VALUES ('spent budget', 1)", ())
++        self.assertIsNone(self.relay.db().execute(
++            "SELECT 1 FROM creations WHERE ip = 'spent budget'").fetchone())
++
++    def test_login_refuses_busy_when_the_write_lock_is_held(self):
++        # touch() is a write too: a Login whose last_seen update cannot land inside the call's
++        # budget is refused with 'relay error: busy', not accepted late without the touch.
++        self._bind('acme', 'k')
++        conn = self.relay.db()
++        conn.execute('BEGIN')
++        conn.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
++        try:
++            result = []
++            worker = threading.Thread(target=lambda: result.append(
++                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}, 'run_id': 'r1'})))
++            started = time.monotonic()
++            worker.start()
++            worker.join(timeout=8)
++            elapsed = time.monotonic() - started
++        finally:
++            conn.execute('ROLLBACK')
++        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
++        self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
++        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
++        self.assertIsNone(self.relay.db().execute(
++            "SELECT last_seen FROM bindings WHERE name = 'acme'").fetchone()[0])
++
+     def test_trace_lines_are_atomic_under_concurrency(self):
+         old = os.environ.get('RELAY_TRACE')
+         os.environ['RELAY_TRACE'] = '1'
+
+exec
+/bin/zsh -lc 'GIT_OPTIONAL_LOCKS=0 git status --short; git diff --stat d6a50bc; git log -5 --oneline' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+ M .github/workflows/tests.yml
+ M relay/frps.service
+ M relay/hornhoof-relay.service
+ M relay/relay.py
+ M relay/setup-relay.sh
+ M relay/test/test_route.py
+?? relay/private-file.sh
+?? relay/test/test_restart.py
+?? relay/test/test_setup.py
+ .github/workflows/tests.yml  |   2 +-
+ relay/frps.service           |   4 +
+ relay/hornhoof-relay.service |   1 +
+ relay/relay.py               | 189 ++++++++++++++++++++++++++++++++-----------
+ relay/setup-relay.sh         |  18 ++++-
+ relay/test/test_route.py     |  73 ++++++++++++++++-
+ 6 files changed, 233 insertions(+), 54 deletions(-)
+d6a50bc Drop a silent tunnel within 30 s and keep an idle one
+dc70994 Tell a link's holder who holds its name and since which registration
+9c83be0 Test the relay against a real frps 0.71.1
+0bc6cd5 Start hornhoof-edge: the relay, its pages, and what an open project needs
+
+exec
+/bin/zsh -lc 'for p in /AGENTS.md /Users/AGENTS.md /Users/0x/AGENTS.md /Users/0x/Projects/AGENTS.md /Users/0x/Projects/hornhoof-edge/AGENTS.md; do if test -f "$p"; then cat "$p"; fi; done; rg -n '"'503|busy|headers|keep.alive|write_private|0\\.7|health' relay/test/test_*.py" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+relay/test/test_setup.py:1:"""setup-relay.sh's write_private: a secret file is never world-readable, not even for a moment."""
+relay/test/test_setup.py:17:def start_write_private(dest: Path, mode: str, group: str | None = None) -> subprocess.Popen:
+relay/test/test_setup.py:18:    """Start write_private on a pipe the test controls; the caller writes the content."""
+relay/test/test_setup.py:19:    command = ['sh', '-c', '. "$1"; shift; write_private "$@"', 'write_private',
+relay/test/test_setup.py:36:            process = start_write_private(dest, '640')
+relay/test/test_setup.py:44:                            'the temp file never appeared: write_private is not waiting on stdin')
+relay/test/test_setup.py:59:                process = start_write_private(dest, '640')
+relay/test/test_setup.py:70:            process = start_write_private(dest, '640')
+relay/test/test_setup.py:75:            process = start_write_private(dest, '640')
+relay/test/test_restart.py:35:    def wait_health(self, status: int, within: float) -> dict:
+relay/test/test_restart.py:38:            current, body = self.stack.api('GET', '/api/v1/health')
+relay/test/test_restart.py:42:            self.assertGreater(remaining, 0, f'health stayed {current}: {body}')
+relay/test/test_restart.py:84:    def test_r4_1_health_follows_frps(self) -> None:
+relay/test/test_restart.py:85:        body = self.wait_health(200, 10)
+relay/test/test_restart.py:89:        body = self.wait_health(503, 2)
+relay/test/test_restart.py:93:        body = self.wait_health(200, 3)
+relay/test/test_restart.py:198:        self.assertNotIn('relay error: busy', self.stack.relay.log())
+relay/test/test_route.py:27:                      'relay error: busy'})
+relay/test/test_route.py:185:            self.assertEqual(status, 503)
+relay/test/test_route.py:197:        self.assertEqual(status, 503)
+relay/test/test_route.py:213:    def test_busy_write_answers_503_instead_of_dropping_the_connection(self):
+relay/test/test_route.py:214:        # A contended API write answers 503 busy with Retry-After; it never drops the
+relay/test/test_route.py:227:                                       headers={'Content-Type': 'application/json',
+relay/test/test_route.py:230:                    self.assertEqual(response.status, 503)
+relay/test/test_route.py:233:                    self.assertEqual(answer['error'], 'busy')
+relay/test/test_route.py:242:                               headers={'Authorization': f'Bearer {self.key}'})
+relay/test/test_route.py:310:            self.end_headers()
+relay/test/test_route.py:393:    def test_watcher_takes_a_slow_good_healthz_answer(self):
+relay/test/test_route.py:395:        # at 0.7 s means frps is up, not down.
+relay/test/test_route.py:399:        self.server.records['/healthz'] = _record(200, delay=0.7)
+relay/test/test_route.py:476:        # 0.7 s waiting + a 0.3 s read cap against a 0.6 s dashboard refuses within 1 s.
+relay/test/test_route.py:480:        result, elapsed = self._refuse_in_worker(0.7)
+relay/test/test_route.py:515:        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+relay/test/test_route.py:528:    def test_login_refuses_busy_when_the_write_lock_is_held(self):
+relay/test/test_route.py:530:        # budget is refused with 'relay error: busy', not accepted late without the touch.
+relay/test/test_route.py:547:        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+relay/test/test_frp_facts.py:1:"""Facts about frp 0.71.1 that later relay changes depend on."""
+relay/test/test_frp_facts.py:67:            connection.request('GET', '/healthz')
+
+exec
+/bin/zsh -lc "nl -ba relay/setup-relay.sh; git diff -- .github/workflows/tests.yml; sed -n '1,120p' relay/test/test_public.py; nl -ba relay/test/test_route.py | sed -n '290,590p'" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+     1	#!/bin/sh
+     2	# Installs the Hornhoof relay on the edge droplet: frps, the relay API, their users and services.
+     3	# Run as root from the folder that holds the files next to it. Safe to run again: frps restarts (and every tunnel
+     4	# reconnects) only when its binary or config changed.
+     5	set -eu
+     6	cd "$(dirname "$0")"
+     7	# shellcheck source=private-file.sh
+     8	. ./private-file.sh
+     9	FRP_VERSION=0.71.1
+    10	FRP_SHA256=1d9875210972a5d1a62b2dc4c48df45ab0af05d3ca1b5e494a014428259df803
+    11	restart_frps=''
+    12	
+    13	if [ "$(/usr/local/bin/frps -v 2> /dev/null || true)" != "$FRP_VERSION" ]; then
+    14	  tmp=$(mktemp -d)
+    15	  curl -fsSL -o "$tmp/frp.tgz" "https://github.com/fatedier/frp/releases/download/v$FRP_VERSION/frp_${FRP_VERSION}_linux_amd64.tar.gz"
+    16	  echo "$FRP_SHA256  $tmp/frp.tgz" | sha256sum -c - > /dev/null
+    17	  tar -xzf "$tmp/frp.tgz" -C "$tmp"
+    18	  install -m 755 "$tmp/frp_${FRP_VERSION}_linux_amd64/frps" /usr/local/bin/frps
+    19	  rm -rf "$tmp"
+    20	  restart_frps=1
+    21	fi
+    22	
+    23	id frps > /dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin frps
+    24	id hornhoof-relay > /dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin hornhoof-relay
+    25	
+    26	install -d -m 755 /usr/local/lib/hornhoof-relay
+    27	install -m 755 relay.py /usr/local/lib/hornhoof-relay/relay.py
+    28	install -m 755 hornhoof-relay /usr/local/sbin/hornhoof-relay
+    29	
+    30	install -d -m 750 -o root -g frps /etc/frp
+    31	install -m 644 404.html /etc/frp/404.html
+    32	pass=$(sed -n 's/^webServer.password = "\([0-9a-f]*\)"$/\1/p' /etc/frp/frps.toml 2> /dev/null || true)
+    33	[ -n "$pass" ] || pass=$(openssl rand -hex 16)
+    34	frps_conf=$(sed "s/@WEB_PASSWORD@/$pass/" frps.toml | write_private /etc/frp/frps.toml 640 frps)
+    35	if [ "$frps_conf" = changed ]; then restart_frps=1; fi
+    36	
+    37	[ -f /etc/caddy/blocked.caddy ] || echo '# Generated by hornhoof-relay from blocked bindings. Do not edit.' > /etc/caddy/blocked.caddy
+    38	
+    39	# The relay's view of frps: where it listens, where its dashboard is, and the file systemd
+    40	# updates when frps starts. Readable only by root and the relay.
+    41	cat <<EOF | write_private /etc/hornhoof-relay.env 640 hornhoof-relay
+    42	RELAY_FRPS_API=http://127.0.0.1:7500
+    43	RELAY_FRPS_USER=admin
+    44	RELAY_FRPS_PASSWORD=$pass
+    45	RELAY_FRPS_BIND=127.0.0.1:7000
+    46	RELAY_FRPS_STARTED=/run/frps/started
+    47	EOF
+    48	
+    49	for unit in hornhoof-relay.service frps.service; do
+    50	  if ! cmp -s "$unit" "/etc/systemd/system/$unit"; then
+    51	    install -m 644 "$unit" "/etc/systemd/system/$unit"
+    52	    [ "$unit" = frps.service ] && restart_frps=1
+    53	  fi
+    54	done
+    55	systemctl daemon-reload
+    56	systemctl enable hornhoof-relay frps > /dev/null 2>&1
+    57	systemctl restart hornhoof-relay
+    58	if [ -n "$restart_frps" ] || ! systemctl is-active -q frps; then systemctl restart frps; fi
+    59	echo "relay setup done"
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 0401d69..df0535c 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -14,4 +14,4 @@ jobs:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+       - run: sh relay/test/frp.sh
+       - run: python3 -m unittest discover -s relay/test -v
+-      - run: shellcheck relay/setup-relay.sh relay/hornhoof-relay relay/test/frp.sh
++      - run: shellcheck relay/setup-relay.sh relay/private-file.sh relay/hornhoof-relay relay/test/frp.sh
+"""Keep tracked and untracked publishable files safe, including these tests."""
+
+import ipaddress
+import os
+from pathlib import Path
+import re
+import subprocess
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+ALLOWED_HOSTS = {
+    'github.com', 'www.github.com', 'developercertificate.org',
+    'scripts.sil.org', 'openfontlicense.org', 'www.contributor-covenant.org',
+    'example.com',
+}
+# These are Python names, not hosts. A reviewer approves additions as for ALLOWED_HOSTS.
+CODE_NAMES = {'threading.local'}
+
+
+class PublicTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        names = subprocess.check_output(
+            ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT,
+        )
+        cls.files = {
+            name: (ROOT / name).read_bytes().decode('utf-8')
+            for raw in names.split(b'\0') if raw
+            for name in [os.fsdecode(raw)] if not name.endswith('.woff2')
+        }
+        if not cls.files:
+            raise AssertionError('No publishable files found.')
+
+    def test_project_files(self):
+        for name in (
+            'LICENSE', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md',
+            'CODE_OF_CONDUCT.md', '.github/workflows/tests.yml',
+            '.github/workflows/sign-off.yml',
+        ):
+            self.assertTrue(name in self.files, f'Missing project file: {name}')
+        self.assertTrue('Copyright (c) 2026 Ivan Korol' in self.files['LICENSE'],
+                        'LICENSE is missing the required copyright')
+        for heading in (
+            'What it does', 'What it sees', 'What it never does',
+            'What it stores', 'Run the tests', 'What is where', 'License',
+        ):
+            self.assertTrue(re.search(rf'(?m)^## {heading}$', self.files['README.md']) is not None,
+                            f'README.md is missing heading: {heading}')
+        self.assertTrue('Signed-off-by' in self.files['CONTRIBUTING.md'],
+                        'CONTRIBUTING.md is missing sign-off instructions')
+
+    def test_no_ip_address(self):
+        allowed = tuple(ipaddress.ip_network(network) for network in (
+            '192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24',
+        ))
+        for name, text in self.files.items():
+            for match in re.finditer(r'(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])', text):
+                try:
+                    address = ipaddress.ip_address(match.group())
+                except ValueError:
+                    continue
+                self.assertTrue(
+                    str(address) in {'127.0.0.1', '0.0.0.0'}
+                    or any(address in network for network in allowed),
+                    f'{name}: IPv4 address at position {match.start()}',
+                )
+
+    def test_no_secret(self):
+        forbidden = (
+            'PRIVATE ' + 'KEY-----', 'BEGIN ' + 'CERTIFICATE',
+            'ssh-' + 'ed25519 ', 'ssh-' + 'rsa ', 'ecdsa-' + 'sha2-',
+            'Identity' + 'File', 'Host' + 'Name ',
+        )
+        for name, text in self.files.items():
+            for marker in forbidden:
+                if marker in text:
+                    self.fail(f'{name}: forbidden secret marker at position {text.index(marker)}')
+
+    def test_only_known_hosts(self):
+        pattern = r'\b(?:[a-z0-9-]+\.)+(?:org|com|net|io|dev|local|lan|internal|ru|br)\b'
+        for name, text in self.files.items():
+            for match in re.finditer(pattern, text):
+                host = match.group()
+                self.assertTrue(
+                    host == 'hornhoof.org' or host.endswith('.hornhoof.org')
+                    or host in ALLOWED_HOSTS or host in CODE_NAMES,
+                    f'{name}: unapproved host at position {match.start()}',
+                )
+
+    def test_private_words(self):
+        path = Path(os.environ.get('EDGE_PRIVATE_WORDS', '~/.hornhoof-edge/private-words')).expanduser()
+        if not path.exists():
+            print('private-words: none here, skipped', flush=True)
+            return
+        for number, word in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+            if not word:
+                continue
+            for name, text in self.files.items():
+                # Never include the word itself in a failure, even through an assertion helper.
+                if word.casefold() in text.casefold():
+                    self.fail(f'{name}: matches private-words line {number}')
+
+    def test_english_no_em_dash(self):
+        for name, text in self.files.items():
+            if re.search(r'[\u2014\u0400-\u052f\u2de0-\u2dff\ua640-\ua69f]', text):
+                self.fail(f'{name}: non-English text or forbidden dash')
+
+
+if __name__ == '__main__':
+    unittest.main()
+   290	
+   291	    def flush(self):
+   292	        pass
+   293	
+   294	    def getvalue(self):
+   295	        return ''.join(self._parts)
+   296	
+   297	
+   298	class _DashboardHandler(BaseHTTPRequestHandler):
+   299	    def log_message(self, fmt, *args):
+   300	        pass
+   301	
+   302	    def do_GET(self):
+   303	        status, body, delay = self.server.records.get(self.path, (404, b'{}', 0.0))
+   304	        if delay:
+   305	            time.sleep(delay)
+   306	        try:
+   307	            self.send_response(status)
+   308	            self.send_header('Content-Type', 'application/json')
+   309	            self.send_header('Content-Length', str(len(body)))
+   310	            self.end_headers()
+   311	            self.wfile.write(body)
+   312	        except (BrokenPipeError, ConnectionResetError):
+   313	            pass  # the relay hung up when its budget-capped read timed out
+   314	
+   315	
+   316	class DashboardContractTests(unittest.TestCase):
+   317	    """frps_route against a fake dashboard: both types are read, every record is validated."""
+   318	
+   319	    @classmethod
+   320	    def setUpClass(cls):
+   321	        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), _DashboardHandler)
+   322	        cls.server.daemon_threads = True
+   323	        cls.server.records = {}
+   324	        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+   325	        cls.thread.start()
+   326	        cls.relay = _relay_module()
+   327	        cls.relay.RELAY_FRPS_API = f'http://127.0.0.1:{cls.server.server_port}'
+   328	        cls.relay.FRPS_USER = 'admin'
+   329	        cls.relay.FRPS_PASSWORD = 'test'
+   330	        cls.addClassCleanup(setattr, cls.relay, 'DB_PATH', cls.relay.DB_PATH)
+   331	
+   332	    @classmethod
+   333	    def tearDownClass(cls):
+   334	        cls.server.shutdown()
+   335	        cls.server.server_close()
+   336	        cls.thread.join(timeout=5)
+   337	
+   338	    def setUp(self):
+   339	        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-dash-'))
+   340	        self.relay.DB_PATH = str(Path(self.tmp) / 'relay.db')
+   341	        self.relay._local.__dict__.clear()
+   342	        self.relay.init_db()
+   343	        self.server.records.clear()
+   344	
+   345	    def _bind(self, name: str, key: str) -> None:
+   346	        self.relay.db().execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) '
+   347	                                'VALUES (?, ?, ?, ?)',
+   348	                                (name, self.relay.key_hash(key), self.relay.now(), 'test'))
+   349	
+   350	    @staticmethod
+   351	    def _newproxy_content(name: str, key: str, client: str) -> dict:
+   352	        return {'user': {'user': '', 'metas': {'name': name, 'key': key, 'client': client}, 'run_id': 'r1'},
+   353	                'proxy_name': name, 'proxy_type': 'http', 'subdomain': name}
+   354	
+   355	    def test_reads_http_then_https_and_rejects_both_found(self):
+   356	        record = _record(200, {'status': 'online', 'clientID': 'c1'})
+   357	        self.server.records['/api/proxy/http/acme'] = record
+   358	        self.server.records['/api/proxy/https/acme'] = record
+   359	        with self.assertRaises(self.relay.FrpsUnknown):
+   360	            self.relay.frps_route('acme')
+   361	
+   362	    def test_online_http_route_is_returned_with_its_type(self):
+   363	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online', 'clientID': 'c1'})
+   364	        self.assertEqual(self.relay.frps_route('acme'), ('online', 'c1', 'http'))
+   365	
+   366	    def test_online_https_route_is_returned_with_its_type(self):
+   367	        self.server.records['/api/proxy/https/acme'] = _record(200, {'status': 'offline', 'clientID': 'c2'})
+   368	        self.assertEqual(self.relay.frps_route('acme'), ('offline', 'c2', 'https'))
+   369	
+   370	    def test_absent_only_when_both_types_are_404(self):
+   371	        self.assertEqual(self.relay.frps_route('acme'), ('absent', None, None))
+   372	
+   373	    def test_missing_client_id_is_unknown(self):
+   374	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online'})
+   375	        with self.assertRaises(self.relay.FrpsUnknown):
+   376	            self.relay.frps_route('acme')
+   377	
+   378	    def test_empty_client_id_is_unknown(self):
+   379	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'online', 'clientID': ''})
+   380	        with self.assertRaises(self.relay.FrpsUnknown):
+   381	            self.relay.frps_route('acme')
+   382	
+   383	    def test_unknown_status_value_is_unknown(self):
+   384	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'starting', 'clientID': 'c1'})
+   385	        with self.assertRaises(self.relay.FrpsUnknown):
+   386	            self.relay.frps_route('acme')
+   387	
+   388	    def test_other_status_code_is_unknown(self):
+   389	        self.server.records['/api/proxy/http/acme'] = _record(500)
+   390	        with self.assertRaises(self.relay.FrpsUnknown):
+   391	            self.relay.frps_route('acme')
+   392	
+   393	    def test_watcher_takes_a_slow_good_healthz_answer(self):
+   394	        # The watcher's probe budget is 1 s for each probe: a good dashboard answer arriving
+   395	        # at 0.7 s means frps is up, not down.
+   396	        old_bind = self.relay.RELAY_FRPS_BIND
+   397	        self.addCleanup(setattr, self.relay, 'RELAY_FRPS_BIND', old_bind)
+   398	        self.relay.RELAY_FRPS_BIND = f'127.0.0.1:{self.server.server_port}'
+   399	        self.server.records['/healthz'] = _record(200, delay=0.7)
+   400	        self.assertTrue(self.relay.frps_answers())
+   401	
+   402	    def test_straighten_empties_the_row_as_read(self):
+   403	        t = self.relay.now()
+   404	        self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+   405	                                "VALUES ('acme', 5, 'c1', 'r1', 'http', 'held', ?)", (t,))
+   406	        self.relay.straighten_route('acme', (5, 'c1', 'r1', 'http', 'held', t), 'offline', t + 1)
+   407	        row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+   408	        self.assertEqual((row[0], row[1]), (5, 'empty'))
+   409	
+   410	    def test_straighten_never_clears_a_fresher_generation(self):
+   411	        # A straighten from a read taken before a newer registration landed in the same
+   412	        # second must not clear that registration: every UPDATE is guarded by the
+   413	        # generation (and state) as read, not by the second-resolution since.
+   414	        t = self.relay.now()
+   415	        self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+   416	                                "VALUES ('acme', 5, 'c1', 'r1', 'http', 'pending', ?)", (t,))
+   417	        stale = (4, 'c0', 'r0', 'http', 'held', t)
+   418	        self.relay.straighten_route('acme', stale, 'offline', t)
+   419	        row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+   420	        self.assertEqual((row[0], row[1]), (5, 'pending'))
+   421	
+   422	    def test_young_pending_reads_held_against_an_offline_record(self):
+   423	        # R1.1: frps keeps the previous registration's offline record until the new one shows,
+   424	        # so an offline record must not empty a pending row younger than PENDING_S, or two
+   425	        # racing registrations would both get through.
+   426	        t = self.relay.now()
+   427	        self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+   428	                                "VALUES ('acme', 1, 'acme-c1-link', 'r1', 'http', 'pending', ?)", (t,))
+   429	        self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'offline', 'clientID': 'acme-c0-link'})
+   430	        body = self.relay.route_of('acme')
+   431	        self.assertEqual(body['state'], 'held')
+   432	        self.assertEqual(body['generation'], 1)
+   433	        self._bind('acme', 'k')
+   434	        reason = self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c2-link'))
+   435	        self.assertEqual(reason, {'reject': True, 'reject_reason': 'router config conflict: acme is held'})
+   436	        row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+   437	        self.assertEqual((row[0], row[1]), (1, 'pending'))
+   438	
+   439	    def _refuse_in_worker(self, hold_s: float) -> tuple[list, float]:
+   440	        """Run one real NewProxy plugin call on a worker thread while this thread holds the lock
+   441	        for hold_s seconds; return (results, seconds from the call's start to its answer)."""
+   442	        lock = self.relay.route_lock('acme')
+   443	        lock.acquire()
+   444	        entered = threading.Event()
+   445	        result = []
+   446	
+   447	        def run():
+   448	            entered.set()
+   449	            result.append(self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link')))
+   450	
+   451	        worker = threading.Thread(target=run)
+   452	        worker.start()
+   453	        self.assertTrue(entered.wait(timeout=5))
+   454	        started = time.monotonic()
+   455	        timer = threading.Timer(hold_s, lock.release)
+   456	        timer.start()
+   457	        try:
+   458	            worker.join(timeout=8)
+   459	            elapsed = time.monotonic() - started
+   460	        finally:
+   461	            timer.cancel()
+   462	            _release_lock(lock)
+   463	        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+   464	        return result, elapsed
+   465	
+   466	    def test_newproxy_call_is_refused_within_one_second(self):
+   467	        # A registration waiting behind a slow route read must not wait it out (Review Focus 3):
+   468	        # one plugin call gets one 1 s budget, and a lock that cannot be taken in time refuses.
+   469	        self._bind('acme', 'k')
+   470	        result, elapsed = self._refuse_in_worker(2.0)
+   471	        self.assertLess(elapsed, 1.1, f'refusal took {elapsed:.2f} s')
+   472	        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: frps does not answer'})
+   473	
+   474	    def test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock(self):
+   475	        # After waiting for the lock, a dashboard read may use only the budget left:
+   476	        # 0.7 s waiting + a 0.3 s read cap against a 0.6 s dashboard refuses within 1 s.
+   477	        self._bind('acme', 'k')
+   478	        self.server.records['/api/proxy/http/acme'] = _record(
+   479	            200, {'status': 'offline', 'clientID': 'c0'}, delay=0.6)
+   480	        result, elapsed = self._refuse_in_worker(0.7)
+   481	        self.assertLess(elapsed, 1.1, f'refusal took {elapsed:.2f} s')
+   482	        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: frps does not answer'})
+   483	
+   484	    def test_slow_answers_still_refuse_within_one_second(self):
+   485	        # Every step would succeed given time; the dashboard's good answer just arrives after
+   486	        # the budget ran out. The call refuses within 1 s and the generation does not move.
+   487	        self._bind('acme', 'k')
+   488	        record = _record(200, {'status': 'offline', 'clientID': 'c0'}, delay=0.6)
+   489	        self.server.records['/api/proxy/http/acme'] = record
+   490	        self.server.records['/api/proxy/https/acme'] = record
+   491	        result, elapsed = self._refuse_in_worker(0.4)
+   492	        self.assertLess(elapsed, 1.1, f'refusal took {elapsed:.2f} s')
+   493	        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: frps does not answer'})
+   494	        self.assertIsNone(self.relay.db().execute("SELECT generation FROM routes WHERE name = 'acme'").fetchone())
+   495	
+   496	    def test_expired_call_does_not_register(self):
+   497	        # Every step would succeed, but the database's write lock stays taken past the call's
+   498	        # 1 s budget: the call must refuse with no generation moved, not register late.
+   499	        self._bind('acme', 'k')
+   500	        conn = self.relay.db()
+   501	        conn.execute('BEGIN')
+   502	        conn.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+   503	        try:
+   504	            result = []
+   505	            worker = threading.Thread(target=lambda: result.append(
+   506	                self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link'))))
+   507	            started = time.monotonic()
+   508	            worker.start()
+   509	            worker.join(timeout=8)
+   510	            elapsed = time.monotonic() - started
+   511	        finally:
+   512	            conn.execute('ROLLBACK')
+   513	        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+   514	        self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
+   515	        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+   516	        self.assertIsNone(self.relay.db().execute("SELECT generation FROM routes WHERE name = 'acme'").fetchone())
+   517	
+   518	    def test_write_refuses_before_executing_when_the_call_budget_is_spent(self):
+   519	        # A spent budget must not run the SQL at all: write refuses before executing, or an
+   520	        # expired upsert would move a generation after the call should have refused.
+   521	        self.relay.call_state.end = time.monotonic() - 0.1
+   522	        self.addCleanup(setattr, self.relay.call_state, 'end', None)
+   523	        with self.assertRaises(self.relay.WriteBusy):
+   524	            self.relay.write("INSERT INTO creations (ip, at) VALUES ('spent budget', 1)", ())
+   525	        self.assertIsNone(self.relay.db().execute(
+   526	            "SELECT 1 FROM creations WHERE ip = 'spent budget'").fetchone())
+   527	
+   528	    def test_login_refuses_busy_when_the_write_lock_is_held(self):
+   529	        # touch() is a write too: a Login whose last_seen update cannot land inside the call's
+   530	        # budget is refused with 'relay error: busy', not accepted late without the touch.
+   531	        self._bind('acme', 'k')
+   532	        conn = self.relay.db()
+   533	        conn.execute('BEGIN')
+   534	        conn.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+   535	        try:
+   536	            result = []
+   537	            worker = threading.Thread(target=lambda: result.append(
+   538	                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}, 'run_id': 'r1'})))
+   539	            started = time.monotonic()
+   540	            worker.start()
+   541	            worker.join(timeout=8)
+   542	            elapsed = time.monotonic() - started
+   543	        finally:
+   544	            conn.execute('ROLLBACK')
+   545	        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+   546	        self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
+   547	        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+   548	        self.assertIsNone(self.relay.db().execute(
+   549	            "SELECT last_seen FROM bindings WHERE name = 'acme'").fetchone()[0])
+   550	
+   551	    def test_trace_lines_are_atomic_under_concurrency(self):
+   552	        old = os.environ.get('RELAY_TRACE')
+   553	        os.environ['RELAY_TRACE'] = '1'
+   554	        self.addCleanup(_restore_env, 'RELAY_TRACE', old)
+   555	        count = 16
+   556	        output = _YieldingWriter()
+   557	        barrier = threading.Barrier(count)
+   558	
+   559	        def emit(i):
+   560	            barrier.wait(timeout=10)
+   561	            content = {'user': {'run_id': f'r{i}', 'metas': {'client': f'c{i}'}}}
+   562	            self.relay.trace_plugin('Ping', content, {'reject': False}, time.monotonic())
+   563	
+   564	        with contextlib.redirect_stdout(output):
+   565	            threads = [threading.Thread(target=emit, args=(i,)) for i in range(count)]
+   566	            for thread in threads:
+   567	                thread.start()
+   568	            for thread in threads:
+   569	                thread.join(timeout=10)
+   570	        self.assertTrue(all(not thread.is_alive() for thread in threads))
+   571	        lines = output.getvalue().splitlines()
+   572	        self.assertEqual(len(lines), count)
+   573	        for line in lines:
+   574	            value = json.loads(line.removeprefix('TRACE '))
+   575	            self.assertEqual(value['op'], 'Ping')
+   576	
+   577	
+   578	if __name__ == '__main__':
+   579	    unittest.main()
+
+exec
+/bin/zsh -lc "nl -ba relay/relay.py | sed -n '580,820p'; nl -ba relay/test/harness.py | sed -n '18,37p;69,122p;222,267p;325,365p'; ls -l relay/test/.bin; lsof -nP -iTCP -sTCP:LISTEN" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+   580	        return f'{name}.{DOMAIN} is blocked'
+   581	    return None
+   582	
+   583	
+   584	_seen = {}
+   585	
+   586	
+   587	def touch(name: str) -> None:
+   588	    t = now()
+   589	    if t - _seen.get(name, 0) <= 600:
+   590	        return
+   591	    write('UPDATE bindings SET last_seen = ? WHERE name = ?', (t, name))
+   592	    _seen[name] = t
+   593	
+   594	
+   595	def plugin(op: str, content: dict) -> dict:
+   596	    """One plugin call gets one 1 s budget; a spent budget refuses the op, fail closed (Review Focus 3)."""
+   597	    call_state.end = time.monotonic() + PLUGIN_CALL_S
+   598	    try:
+   599	        return plugin_decide(op, content)
+   600	    except WriteBusy:
+   601	        return {'reject': True, 'reject_reason': 'relay error: busy'}
+   602	    finally:
+   603	        call_state.end = None
+   604	
+   605	
+   606	def plugin_decide(op: str, content: dict) -> dict:
+   607	    if op == 'Login':
+   608	        metas = content.get('metas') or {}
+   609	    else:
+   610	        metas = (content.get('user') or {}).get('metas') or {}
+   611	    name, key = metas.get('name'), metas.get('key')
+   612	    reason = binding_ok(name, key)
+   613	    if reason is None and op == 'NewProxy':
+   614	        reason = proxy_check(name, content)
+   615	    if reason is not None:
+   616	        return {'reject': True, 'reject_reason': reason}
+   617	    touch(name)
+   618	    return {'reject': False, 'unchange': True}
+   619	
+   620	
+   621	class Handler(BaseHTTPRequestHandler):
+   622	    server_version = 'hornhoof-relay'
+   623	    sys_version = ''
+   624	    protocol_version = 'HTTP/1.1'
+   625	
+   626	    def log_message(self, fmt, *args):
+   627	        pass
+   628	
+   629	    def handle_one_request(self):
+   630	        """A busy store answers 503 instead of dropping the connection mid-request."""
+   631	        try:
+   632	            super().handle_one_request()
+   633	        except WriteBusy:
+   634	            self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
+   635	
+   636	    def client_ip(self) -> str:
+   637	        fwd = self.headers.get('X-Forwarded-For')
+   638	        return fwd.split(',')[0].strip() if fwd else self.client_address[0]
+   639	
+   640	    def send_json(self, status: int, body=None, headers=None) -> None:
+   641	        data = b'' if body is None else json.dumps(body).encode()
+   642	        self.send_response(status)
+   643	        if body is not None:
+   644	            self.send_header('Content-Type', 'application/json')
+   645	        self.send_header('Content-Length', str(len(data)))
+   646	        self.send_header('Cache-Control', 'no-store')
+   647	        for k, v in (headers or {}).items():
+   648	            self.send_header(k, v)
+   649	        self.end_headers()
+   650	        self.wfile.write(data)
+   651	
+   652	    def error(self, status: int, code: str, message: str, headers=None) -> None:
+   653	        self.send_json(status, {'error': code, 'message': message}, headers)
+   654	
+   655	    def read_json(self):
+   656	        length = int(self.headers.get('Content-Length') or 0)
+   657	        if length > MAX_BODY:
+   658	            raise ValueError('body too large')
+   659	        raw = self.rfile.read(length) if length else b''
+   660	        return json.loads(raw) if raw.strip() else {}
+   661	
+   662	    def path_parts(self):
+   663	        return [p for p in self.path.split('?', 1)[0].split('/') if p]
+   664	
+   665	    def bearer_key(self) -> str:
+   666	        auth = self.headers.get('Authorization') or ''
+   667	        return auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+   668	
+   669	    def wrong_key(self, ip: str):
+   670	        """The 401 for a bad key, counted like DELETE; 429 once an address passes 30 bad keys in an hour."""
+   671	        wait = bad_keys.allow(ip)
+   672	        if wait:
+   673	            return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
+   674	        return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
+   675	
+   676	    def do_GET(self):
+   677	        parts = self.path_parts()
+   678	        if parts[:3] == ['api', 'v1', 'names'] and len(parts) == 4:
+   679	            return self.name_answer(parts[3].lower())
+   680	        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'route':
+   681	            return self.route_answer(parts[3].lower())
+   682	        if parts == ['api', 'v1', 'health']:
+   683	            return self.health_answer()
+   684	        self.error(404, 'not_found', 'Not found.')
+   685	
+   686	    def name_answer(self, name: str):
+   687	        wait = name_checks.allow(self.client_ip())
+   688	        if wait:
+   689	            return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
+   690	        reason = check_name(name)
+   691	        body = {'name': name, 'free': reason is None}
+   692	        if reason:
+   693	            body['reason'] = reason
+   694	        return self.send_json(200, body)
+   695	
+   696	    def route_answer(self, name: str):
+   697	        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
+   698	        row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
+   699	        if row is None:
+   700	            return self.error(404, 'not_found', f'There is no binding {name}.')
+   701	        key = self.bearer_key()
+   702	        if not key or not hmac.compare_digest(row[0], key_hash(key)):
+   703	            return self.wrong_key(self.client_ip())
+   704	        try:
+   705	            return self.send_json(200, route_of(name))
+   706	        except (FrpsUnknown, WriteBusy):
+   707	            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+   708	
+   709	    def health_answer(self):
+   710	        """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
+   711	        if frps_ok():
+   712	            return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started()})
+   713	        return self.send_json(503, {'ok': False, 'frps': False})
+   714	
+   715	    def handle_plugin(self):
+   716	        # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
+   717	        if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
+   718	            return self.error(403, 'forbidden', 'Forbidden.')
+   719	        op, content, err = self.plugin_request()
+   720	        if err is not None:
+   721	            return self.send_json(200, {'reject': True, 'reject_reason': err})
+   722	        started = time.monotonic()
+   723	        try:
+   724	            result = plugin(op, content)
+   725	        except Exception as e:  # never let a bad plugin call through
+   726	            result = {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'}
+   727	        trace_plugin(op, content, result, started)
+   728	        return self.send_json(200, result)
+   729	
+   730	    def plugin_request(self) -> tuple[str, dict, str | None]:
+   731	        """Parse the plugin body into (op, content, error reason)."""
+   732	        try:
+   733	            req = self.read_json()
+   734	            if not isinstance(req, dict):
+   735	                raise TypeError('plugin request is not an object')
+   736	            content = req.get('content')
+   737	            if not isinstance(content, dict):
+   738	                content = {}
+   739	            return req.get('op', ''), content, None
+   740	        except Exception as e:
+   741	            return '', {}, f'relay error: {type(e).__name__}'
+   742	
+   743	    def do_POST(self):
+   744	        parts = self.path_parts()
+   745	        if parts == ['frp', 'handler']:
+   746	            return self.handle_plugin()
+   747	        if parts == ['api', 'v1', 'bindings']:
+   748	            return self.create_binding()
+   749	        self.error(404, 'not_found', 'Not found.')
+   750	
+   751	    def create_binding(self):
+   752	        if (self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json':
+   753	            return self.error(415, 'unsupported_media_type', 'Send the body as application/json.')
+   754	        try:
+   755	            body = self.read_json()
+   756	        except (ValueError, json.JSONDecodeError):
+   757	            return self.error(400, 'invalid', 'The body is not valid JSON.')
+   758	        if not isinstance(body, dict):
+   759	            return self.error(400, 'invalid', 'The body must be a JSON object.')
+   760	        name = body.get('name')
+   761	        if name is not None and (not isinstance(name, str) or name == ''):
+   762	            return self.error(400, 'invalid', 'name must be a non-empty string, or left out for a random one.')
+   763	        ip = self.client_ip()
+   764	        with create_lock:
+   765	            t = now()
+   766	            conn = db()
+   767	            write('DELETE FROM creations WHERE at < ?', (t - 3600,))
+   768	            mine = conn.execute('SELECT COUNT(*), MIN(at) FROM creations WHERE ip = ?', (ip,)).fetchone()
+   769	            total = conn.execute('SELECT COUNT(*) FROM creations').fetchone()[0]
+   770	            if mine[0] >= BIND_PER_IP_HOUR or total >= BIND_ALL_HOUR:
+   771	                wait = (mine[1] + 3600 - t) if mine[0] >= BIND_PER_IP_HOUR else 600
+   772	                return self.error(429, 'rate_limited', 'Too many new links from this address, try again later.',
+   773	                                  {'Retry-After': str(max(wait, 1))})
+   774	            if name is None:
+   775	                while True:
+   776	                    name = ''.join(secrets.choice(RANDOM_ALPHABET) for _ in range(24))
+   777	                    if check_name(name) is None:
+   778	                        break
+   779	            else:
+   780	                name = name.lower()
+   781	                reason = check_name(name)
+   782	                if reason == 'invalid':
+   783	                    return self.error(400, 'invalid', 'Use lowercase letters, digits and hyphens, 1-63 characters, '
+   784	                                                      'no hyphen at either end and none in the 3rd and 4th place.')
+   785	                if reason:
+   786	                    return self.error(409, reason, f'{name}.{DOMAIN} is {reason}.')
+   787	            key = secrets.token_urlsafe(32)
+   788	            write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+   789	                  (name, key_hash(key), t, ip))
+   790	            write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+   791	        log_line(f'bound {name} for {ip}')
+   792	        self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
+   793	                             'tunnel': tunnel_info(name, key)})
+   794	
+   795	    def do_DELETE(self):
+   796	        parts = self.path_parts()
+   797	        if not (parts[:3] == ['api', 'v1', 'bindings'] and len(parts) == 4):
+   798	            return self.error(404, 'not_found', 'Not found.')
+   799	        name = parts[3].lower()
+   800	        row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+   801	        if row is None:
+   802	            return self.error(404, 'not_found', f'There is no binding {name}.')
+   803	        key = self.bearer_key()
+   804	        if not key or not hmac.compare_digest(row[0], key_hash(key)):
+   805	            return self.wrong_key(self.client_ip())
+   806	        if row[1]:
+   807	            return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
+   808	        write('DELETE FROM bindings WHERE name = ?', (name,))
+   809	        log_line(f'released {name} for {self.client_ip()}')
+   810	        self.send_json(204)
+   811	
+   812	
+   813	def admin(args) -> int:
+   814	    init_db()
+   815	    conn = db()
+   816	    cmd = args[0] if args else 'list'
+   817	    if cmd == 'list':
+   818	        for r in conn.execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
+   819	                              'ORDER BY created_at'):
+   820	            seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
+    18	import time
+    19	
+    20	
+    21	ROOT = Path(__file__).resolve().parents[2]
+    22	BIN = Path(__file__).resolve().parent / '.bin'
+    23	
+    24	
+    25	@functools.lru_cache(maxsize=1)
+    26	def _ensure_frp():
+    27	    subprocess.run(['sh', str(BIN.parent / 'frp.sh')], cwd=ROOT, check=True, timeout=180)
+    28	
+    29	
+    30	def _request(port, method, path, body=None, headers=None):
+    31	    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+    32	    try:
+    33	        connection.request(method, path, body=body, headers=headers or {})
+    34	        response = connection.getresponse()
+    35	        return response.status, response.read()
+    36	    finally:
+    37	        connection.close()
+    69	
+    70	
+    71	class _Process:
+    72	    def __init__(self, command, log_path, *, env=None, private=()):
+    73	        self.log_path = Path(log_path)
+    74	        self.private = private
+    75	        self.output = self.log_path.open('wb')
+    76	        try:
+    77	            self.process = subprocess.Popen(
+    78	                command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+    79	                stdout=self.output, stderr=subprocess.STDOUT,
+    80	            )
+    81	        except BaseException:
+    82	            self.output.close()
+    83	            raise
+    84	
+    85	    def log(self) -> str:
+    86	        text = self.log_path.read_text(encoding='utf-8', errors='replace')
+    87	        for value in self.private:
+    88	            if value:
+    89	                text = text.replace(value, '[hidden]')
+    90	        return text
+    91	
+    92	    def resume(self):
+    93	        if self.process.poll() is None:
+    94	            self.process.send_signal(signal.SIGCONT)
+    95	
+    96	    def pause(self):
+    97	        if self.process.poll() is None:
+    98	            self.process.send_signal(signal.SIGSTOP)
+    99	
+   100	    def _finish(self, *, kill):
+   101	        try:
+   102	            if self.process.poll() is None:
+   103	                self.resume()
+   104	                if kill:
+   105	                    self.process.kill()
+   106	                else:
+   107	                    self.process.terminate()
+   108	                try:
+   109	                    self.process.wait(timeout=5)
+   110	                except subprocess.TimeoutExpired:
+   111	                    self.process.kill()
+   112	                    self.process.wait(timeout=5)
+   113	            else:
+   114	                self.process.wait()
+   115	        finally:
+   116	            self.output.close()
+   117	
+   118	    def stop(self):
+   119	        self._finish(kill=False)
+   120	
+   121	    def kill(self):
+   122	        self._finish(kill=True)
+   222	    def _start_relay(self):
+   223	        self.relay = _Process(
+   224	            [sys.executable, '-u', str(ROOT / 'relay/relay.py')], self.tmp / 'relay.log',
+   225	            env=self.env, private=self.private,
+   226	        )
+   227	        # Readiness must work before frps starts, including when health later returns 503.
+   228	        self._ready(self.relay, self.relay_port, '/api/v1/names/www')
+   229	
+   230	    def restart_relay(self):
+   231	        self.relay.stop()
+   232	        self._start_relay()
+   233	
+   234	    def start_frps(self):
+   235	        if self.frps is not None and self.frps.process.poll() is None:
+   236	            return
+   237	        replacements = {
+   238	            'bindPort': str(self.bind_port),
+   239	            'vhostHTTPPort': str(self.vhost_port),
+   240	            'webServer.port': str(self.dash_port),
+   241	            'addr': json.dumps(f'127.0.0.1:{self.relay_port}'),
+   242	        }
+   243	        lines = []
+   244	        for line in (ROOT / 'relay/frps.toml').read_text().splitlines():
+   245	            key = line.split('=', 1)[0].strip()
+   246	            if key == 'custom404Page':
+   247	                continue
+   248	            if key in replacements:
+   249	                line = f'{key} = {replacements[key]}'
+   250	            lines.append(line.replace('@WEB_PASSWORD@', self.password))
+   251	        config_path = self.tmp / 'frps.toml'
+   252	        self._write_config(config_path, '\n'.join(lines) + '\n')
+   253	        Path(self.env['RELAY_FRPS_STARTED']).write_text(str(int(time.time())))
+   254	        self.frps = _Process(
+   255	            [str(BIN / 'frps'), '-c', str(config_path)], self.tmp / 'frps.log',
+   256	            private=self.private,
+   257	        )
+   258	        self._ready(self.frps, self.dash_port, '/healthz')
+   259	
+   260	    def stop_frps(self):
+   261	        if self.frps is not None:
+   262	            self.frps.stop()
+   263	
+   264	    def restart_frps(self):
+   265	        self.stop_frps()
+   266	        self.start_frps()
+   267	
+   325	    def get(self, host: str, path: str = '/') -> int:
+   326	        status, _ = _request(self.vhost_port, 'GET', path, headers={'Host': host})
+   327	        return status
+   328	
+   329	    def api(self, method: str, path: str, body: dict | None = None,
+   330	            key: str | None = None) -> tuple[int, dict | None]:
+   331	        headers = {}
+   332	        if key is not None:
+   333	            headers['Authorization'] = f'Bearer {key}'
+   334	        payload = None
+   335	        if body is not None:
+   336	            payload = json.dumps(body).encode()
+   337	            headers['Content-Type'] = 'application/json'
+   338	        status, data = _request(self.relay_port, method, path, payload, headers)
+   339	        return status, json.loads(data) if data else None
+   340	
+   341	    def dash(self, path: str) -> tuple[int, object]:
+   342	        auth = base64.b64encode(f'admin:{self.password}'.encode()).decode()
+   343	        status, data = _request(self.dash_port, 'GET', path, headers={'Authorization': f'Basic {auth}'})
+   344	        if not data:
+   345	            return status, None
+   346	        try:
+   347	            return status, json.loads(data)
+   348	        except ValueError:
+   349	            return status, data.decode('utf-8', errors='replace')
+   350	
+   351	    def plugin_calls(self) -> list[dict]:
+   352	        calls = []
+   353	        for line in self.relay.log().splitlines():
+   354	            try:
+   355	                value = json.loads(line.removeprefix('TRACE '))
+   356	            except ValueError:
+   357	                continue
+   358	            if isinstance(value, dict) and 'op' in value:
+   359	                calls.append(value)
+   360	        return calls
+total 66320
+-rwxr-xr-x  1 0x  staff  15152338 Nov  3 09:38 frpc
+-rwxr-xr-x  1 0x  staff  18797010 Nov  3 09:38 frps
+COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python     5345   0x    3u  IPv4 0x4fa8a1d7983b689d      0t0  TCP 127.0.0.1:18940 (LISTEN)
+agy       14808   0x   10u  IPv4 0x1c7930a265890932      0t0  TCP 127.0.0.1:49279 (LISTEN)
+agy       14808   0x   11u  IPv4 0x919c9a935a2ab255      0t0  TCP 127.0.0.1:49280 (LISTEN)
+Python    41994   0x   15u  IPv4 0x4cfedf089412bfde      0t0  TCP 127.0.0.1:3007 (LISTEN)
+Python    41994   0x   20u  IPv4 0xc73c0e28cd217925      0t0  TCP 127.0.0.1:3008 (LISTEN)
+Python    42136   0x    6u  IPv4 0xf0e5427358627b5d      0t0  TCP 127.0.0.1:3006 (LISTEN)
+codex     69317   0x   38u  IPv4 0x3b2d1e2f99165e7c      0t0  TCP 127.0.0.1:64058 (LISTEN)
+com.docke 74016   0x  170u  IPv6 0x478fe5c7e61ced3c      0t0  TCP *:18080 (LISTEN)
+Python    78286   0x    3u  IPv4 0x2b9296906a9b59d6      0t0  TCP 127.0.0.1:18932 (LISTEN)
+Python    78377   0x    3u  IPv4 0x110aa60ae5c88296      0t0  TCP 127.0.0.1:50155 (LISTEN)
+Python    85195   0x    3u  IPv4 0xebbc75dc177e44c4      0t0  TCP 127.0.0.1:18931 (LISTEN)
+codex     86138   0x   37u  IPv4 0xecdf41eb3a6cba69      0t0  TCP 127.0.0.1:57356 (LISTEN)
+codex     86750   0x   37u  IPv4 0xf20017c8dd0ae78e      0t0  TCP 127.0.0.1:57846 (LISTEN)
+codex     89328   0x   40u  IPv4 0x7e95ed52891f9c59      0t0  TCP 127.0.0.1:60012 (LISTEN)
+codex     89404   0x   41u  IPv4 0xa38fd2db0e13b612      0t0  TCP 127.0.0.1:60035 (LISTEN)
+codex     89525   0x   41u  IPv4 0xd0d3bee7f665d2c8      0t0  TCP 127.0.0.1:60061 (LISTEN)
+codex     89595   0x   41u  IPv4 0x3bce9ab44200ddae      0t0  TCP 127.0.0.1:60081 (LISTEN)
+
+exec
+/bin/zsh -lc 'review_test_log=$(mktemp "$TMPDIR/relay-task4-rereview-unittest.XXXXXX")
+printf '"'Test log: %s\\n' \""'$review_test_log"
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v > "$review_test_log" 2>&1
+review_test_result=$?
+cat "$review_test_log"
+exit "$review_test_result"' in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "sed -n '205,244p' relay/test/test_route.py; sed -n '517,552p' relay/test/test_route.py; nl -ba relay/relay.py | sed -n '620,669p'; ls -d \""'$TMPDIR/relay-task4-gates-_c_6ptdc/repo"; sh -n relay/setup-relay.sh; sh -n relay/private-file.sh; sh -n relay/frps.service; sh -n relay/hornhoof-relay.service' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+        first = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+        self.assertTrue(first.started('acme'), first.log())
+        second = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
+        self.assertFalse(second.started('acme', within=2), second.log())
+        self.assertGreaterEqual(len(self.newproxy_calls()), 2)
+        for call in self.newproxy_calls():
+            self.assertLess(call['ms'], 1000, call)
+
+    def test_busy_write_answers_503_instead_of_dropping_the_connection(self):
+        # A contended API write answers 503 busy with Retry-After; it never drops the
+        # connection mid-request (R2.3: a relay error is a structured answer, not a hangup).
+        db = sqlite3.connect(str(Path(self.tmp) / 'relay.db'), timeout=10, isolation_level=None)
+        self.addCleanup(db.close)
+        db.execute('BEGIN IMMEDIATE')
+        db.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+        try:
+            for method, path, body in (('POST', '/api/v1/bindings', b'{}'),
+                                       ('DELETE', '/api/v1/bindings/acme', None)):
+                with self.subTest(method=method):
+                    connection = http.client.HTTPConnection('127.0.0.1', self.stack.relay_port,
+                                                            timeout=5)
+                    connection.request(method, path, body=body,
+                                       headers={'Content-Type': 'application/json',
+                                                'Authorization': f'Bearer {self.key}'})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 503)
+                    self.assertEqual(response.getheader('Retry-After'), '1')
+                    answer = json.loads(response.read())
+                    self.assertEqual(answer['error'], 'busy')
+                    connection.close()
+        finally:
+            db.execute('ROLLBACK')
+
+    def test_r2_1_route_body_has_no_key(self):
+        client = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
+        self.assertTrue(client.started('acme'), client.log())
+        status, raw = _request(self.stack.relay_port, 'GET', '/api/v1/links/acme/route',
+                               headers={'Authorization': f'Bearer {self.key}'})
+        self.assertEqual(status, 200)
+        text = raw.decode()
+
+    def test_write_refuses_before_executing_when_the_call_budget_is_spent(self):
+        # A spent budget must not run the SQL at all: write refuses before executing, or an
+        # expired upsert would move a generation after the call should have refused.
+        self.relay.call_state.end = time.monotonic() - 0.1
+        self.addCleanup(setattr, self.relay.call_state, 'end', None)
+        with self.assertRaises(self.relay.WriteBusy):
+            self.relay.write("INSERT INTO creations (ip, at) VALUES ('spent budget', 1)", ())
+        self.assertIsNone(self.relay.db().execute(
+            "SELECT 1 FROM creations WHERE ip = 'spent budget'").fetchone())
+
+    def test_login_refuses_busy_when_the_write_lock_is_held(self):
+        # touch() is a write too: a Login whose last_seen update cannot land inside the call's
+        # budget is refused with 'relay error: busy', not accepted late without the touch.
+        self._bind('acme', 'k')
+        conn = self.relay.db()
+        conn.execute('BEGIN')
+        conn.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+        try:
+            result = []
+            worker = threading.Thread(target=lambda: result.append(
+                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}, 'run_id': 'r1'})))
+            started = time.monotonic()
+            worker.start()
+            worker.join(timeout=8)
+            elapsed = time.monotonic() - started
+        finally:
+            conn.execute('ROLLBACK')
+        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+        self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
+        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+        self.assertIsNone(self.relay.db().execute(
+            "SELECT last_seen FROM bindings WHERE name = 'acme'").fetchone()[0])
+
+    def test_trace_lines_are_atomic_under_concurrency(self):
+        old = os.environ.get('RELAY_TRACE')
+   620	
+   621	class Handler(BaseHTTPRequestHandler):
+   622	    server_version = 'hornhoof-relay'
+   623	    sys_version = ''
+   624	    protocol_version = 'HTTP/1.1'
+   625	
+   626	    def log_message(self, fmt, *args):
+   627	        pass
+   628	
+   629	    def handle_one_request(self):
+   630	        """A busy store answers 503 instead of dropping the connection mid-request."""
+   631	        try:
+   632	            super().handle_one_request()
+   633	        except WriteBusy:
+   634	            self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
+   635	
+   636	    def client_ip(self) -> str:
+   637	        fwd = self.headers.get('X-Forwarded-For')
+   638	        return fwd.split(',')[0].strip() if fwd else self.client_address[0]
+   639	
+   640	    def send_json(self, status: int, body=None, headers=None) -> None:
+   641	        data = b'' if body is None else json.dumps(body).encode()
+   642	        self.send_response(status)
+   643	        if body is not None:
+   644	            self.send_header('Content-Type', 'application/json')
+   645	        self.send_header('Content-Length', str(len(data)))
+   646	        self.send_header('Cache-Control', 'no-store')
+   647	        for k, v in (headers or {}).items():
+   648	            self.send_header(k, v)
+   649	        self.end_headers()
+   650	        self.wfile.write(data)
+   651	
+   652	    def error(self, status: int, code: str, message: str, headers=None) -> None:
+   653	        self.send_json(status, {'error': code, 'message': message}, headers)
+   654	
+   655	    def read_json(self):
+   656	        length = int(self.headers.get('Content-Length') or 0)
+   657	        if length > MAX_BODY:
+   658	            raise ValueError('body too large')
+   659	        raw = self.rfile.read(length) if length else b''
+   660	        return json.loads(raw) if raw.strip() else {}
+   661	
+   662	    def path_parts(self):
+   663	        return [p for p in self.path.split('?', 1)[0].split('/') if p]
+   664	
+   665	    def bearer_key(self) -> str:
+   666	        auth = self.headers.get('Authorization') or ''
+   667	        return auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+   668	
+   669	    def wrong_key(self, ip: str):
+/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T//relay-task4-gates-_c_6ptdc/repo
+
+codex
+The expired-write, login-busy and watcher-timeout fixes have focused regression tests. I’ve found gaps in `write_private`: it changes caller variables and leaves an existing file’s permissions unchanged when the content matches. I’m probing those cases and the setup pipeline’s failure behavior under `set -eu`, without running setup itself.
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import os, pathlib, subprocess, tempfile
+helper = str(pathlib.Path('relay/private-file.sh').resolve())
+with tempfile.TemporaryDirectory(prefix='task4-private-review-') as d:
+    dest=pathlib.Path(d)/'config'
+    dest.write_text('review fixture\\n')
+    dest.chmod(0o644)
+    p=subprocess.run(['sh','-eu','-c','. \""'$1"; printf "review fixture'"\\\\n\" | write_private \""'$2" 640'"','review',helper,str(dest)],text=True,capture_output=True)
+    print('same content with wrong permissions:',p.returncode,p.stdout.strip(),'mode',oct(dest.stat().st_mode&0o777))
+    p=subprocess.run(['sh','-eu','-c','. \""'$1"; dest=caller_dest; mode=caller_mode; group=caller_group; tmp=caller_tmp; write_private "$2" 640 <<EOF'"\\nreview fixture\\nEOF\\n[ \""'$dest" = caller_dest ] && [ "$mode" = caller_mode ] && [ "$group" = caller_group ] && [ "$tmp" = caller_tmp ]'"','review',helper,str(dest)],text=True,capture_output=True)
+    print('caller variables preserved:',p.returncode == 0)
+    dest.chmod(0o640)
+    missing = str(pathlib.Path(d)/'missing-template')
+    p=subprocess.run(['sh','-eu','-c','. \""'$1"; status=$(sed "s/placeholder/replacement/" "$3" | write_private "$2" 640); printf "continued status=%s'"\\\\n\" \""'$status"'"','review',helper,str(dest),missing],text=True,capture_output=True)
+    print('set -eu with failed template producer:',p.returncode,p.stdout.strip(),'destination bytes:',dest.stat().st_size)
+    dest.write_text('review fixture\\n')
+    p=subprocess.run(['sh','-eu','-c','. \""'$1"; mv() { return 1; }; if write_private "$2" 640 <<EOF'"\\ndifferent fixture\\nEOF\\nthen echo accepted_failed_rename; else echo refused_failed_rename; fi','review',helper,str(dest)],text=True,capture_output=True)
+    print('conditional call after rename failure:',p.returncode,p.stdout.strip().replace('\\n','; '))
+PY" in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import pathlib, unittest
+from relay.test import test_route, harness
+old=pathlib.Path(__import__('os').environ['TMPDIR'])/'relay-task4-gates-_c_6ptdc/repo'
+assert old.exists()
+assert \"except WriteBusy:\\n        return  # the next plugin call\" in (old/'relay/relay.py').read_text()
+test_route.ROOT=old
+harness.ROOT=old
+suite=unittest.TestSuite([
+    test_route.DashboardContractTests('test_watcher_takes_a_slow_good_healthz_answer'),
+    test_route.DashboardContractTests('test_write_refuses_before_executing_when_the_call_budget_is_spent'),
+    test_route.DashboardContractTests('test_login_refuses_busy_when_the_write_lock_is_held'),
+    test_route.RouteTests('test_busy_write_answers_503_instead_of_dropping_the_connection'),
+])
+result=unittest.TextTestRunner(verbosity=2).run(suite)
+print('Old-code regression checks:',result.testsRun,'run,',len(result.failures),'failures,',len(result.errors),'errors (expected)')
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 356ms:
+same content with wrong permissions: 0 unchanged mode 0o644
+caller variables preserved: False
+set -eu with failed template producer: 0 continued status=changed destination bytes: 0
+conditional call after rename failure: 0 changed; accepted_failed_rename
+
+ succeeded in 3637ms:
+test_watcher_takes_a_slow_good_healthz_answer (relay.test.test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... FAIL
+test_write_refuses_before_executing_when_the_call_budget_is_spent (relay.test.test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... FAIL
+test_login_refuses_busy_when_the_write_lock_is_held (relay.test.test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... FAIL
+test_busy_write_answers_503_instead_of_dropping_the_connection (relay.test.test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... 
+  test_busy_write_answers_503_instead_of_dropping_the_connection (relay.test.test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) (method='POST') ... ERROR
+  test_busy_write_answers_503_instead_of_dropping_the_connection (relay.test.test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) (method='DELETE') ... ERROR
+Old-code regression checks: 4 run, 3 failures, 2 errors (expected)
+
+======================================================================
+ERROR: test_busy_write_answers_503_instead_of_dropping_the_connection (relay.test.test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) (method='POST')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 229, in test_busy_write_answers_503_instead_of_dropping_the_connection
+    response = connection.getresponse()
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 1450, in getresponse
+    response.begin()
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+http.client.RemoteDisconnected: Remote end closed connection without response
+
+======================================================================
+ERROR: test_busy_write_answers_503_instead_of_dropping_the_connection (relay.test.test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) (method='DELETE')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 229, in test_busy_write_answers_503_instead_of_dropping_the_connection
+    response = connection.getresponse()
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 1450, in getresponse
+    response.begin()
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+http.client.RemoteDisconnected: Remote end closed connection without response
+
+======================================================================
+FAIL: test_watcher_takes_a_slow_good_healthz_answer (relay.test.test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 400, in test_watcher_takes_a_slow_good_healthz_answer
+    self.assertTrue(self.relay.frps_answers())
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_write_refuses_before_executing_when_the_call_budget_is_spent (relay.test.test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 523, in test_write_refuses_before_executing_when_the_call_budget_is_spent
+    with self.assertRaises(self.relay.WriteBusy):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: WriteBusy not raised
+
+======================================================================
+FAIL: test_login_refuses_busy_when_the_write_lock_is_held (relay.test.test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/0x/Projects/hornhoof-edge/relay/test/test_route.py", line 547, in test_login_refuses_busy_when_the_write_lock_is_held
+    self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+AssertionError: {'reject': False, 'unchange': True} != {'reject': True, 'reject_reason': 'relay error: busy'}
+- {'reject': False, 'unchange': True}
++ {'reject': True, 'reject_reason': 'relay error: busy'}
+
+----------------------------------------------------------------------
+Ran 4 tests in 3.586s
+
+FAILED (failures=3, errors=2)
+
+exec
+/bin/zsh -lc 'tail -8 "$TMPDIR/relay-task4-rereview-unittest.UNQBlC"; nl -ba relay/private-file.sh; nl -ba relay/test/test_setup.py | sed -n '"'17,88p'; sed -n '1,25p' relay/test/test_route.py" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.30 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.31 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.34 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ...      1	# Writes one private file, atomically. Sourced by setup-relay.sh.
+     2	# Usage: write_private <dest> <mode> [group]   (content on stdin)
+     3	# The destination ends with <mode> (root:<group> when a group is given). Prints "changed"
+     4	# when the content replaced the destination, "unchanged" when the old file was kept.
+     5	write_private() {
+     6	  dest=$1
+     7	  mode=$2
+     8	  group=${3:-}
+     9	  tmp=$dest.new
+    10	  rm -f "$tmp"
+    11	  # The temp file is created already private, so a secret is never readable by others,
+    12	  # not even for a moment while the content arrives.
+    13	  ( umask 077 && : > "$tmp" ) || return 1
+    14	  cat > "$tmp" || return 1
+    15	  if [ -n "$group" ]; then
+    16	    chgrp "$group" "$tmp" || return 1
+    17	  fi
+    18	  chmod "$mode" "$tmp" || return 1
+    19	  if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+    20	    rm -f "$tmp"
+    21	    echo unchanged
+    22	  else
+    23	    mv -f "$tmp" "$dest"
+    24	    echo changed
+    25	  fi
+    26	}
+    17	def start_write_private(dest: Path, mode: str, group: str | None = None) -> subprocess.Popen:
+    18	    """Start write_private on a pipe the test controls; the caller writes the content."""
+    19	    command = ['sh', '-c', '. "$1"; shift; write_private "$@"', 'write_private',
+    20	               str(HELPER), str(dest), mode] + ([group] if group else [])
+    21	    return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    22	                            stderr=subprocess.PIPE, text=True)
+    23	
+    24	
+    25	def finish(process: subprocess.Popen) -> tuple[int, str, str]:
+    26	    out, err = process.stdout.read(), process.stderr.read()
+    27	    process.stdout.close()
+    28	    process.stderr.close()
+    29	    return process.wait(timeout=5), out.strip(), err
+    30	
+    31	
+    32	class WritePrivateTests(unittest.TestCase):
+    33	    def test_temp_file_is_private_while_the_content_arrives(self) -> None:
+    34	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    35	            dest = Path(tmp) / 'secret.env'
+    36	            process = start_write_private(dest, '640')
+    37	            process.stdin.write('first half\n')
+    38	            process.stdin.flush()
+    39	            tmp_file = Path(str(dest) + '.new')
+    40	            deadline = time.monotonic() + 5
+    41	            while not tmp_file.exists() and process.poll() is None and time.monotonic() < deadline:
+    42	                time.sleep(0.02)
+    43	            self.assertTrue(tmp_file.exists(),
+    44	                            'the temp file never appeared: write_private is not waiting on stdin')
+    45	            mode = stat.S_IMODE(tmp_file.stat().st_mode)
+    46	            self.assertEqual(mode & 0o077, 0, f'the temp file is readable by others: {oct(mode)}')
+    47	            process.stdin.write('second half\n')
+    48	            process.stdin.close()
+    49	            code, out, err = finish(process)
+    50	            self.assertEqual(code, 0, err)
+    51	            self.assertEqual(out, 'changed')
+    52	            self.assertEqual(dest.read_text(), 'first half\nsecond half\n')
+    53	            self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o640)
+    54	
+    55	    def test_unchanged_content_keeps_the_destination(self) -> None:
+    56	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    57	            dest = Path(tmp) / 'secret.env'
+    58	            for content, answer in (('same content\n', 'changed'), ('same content\n', 'unchanged')):
+    59	                process = start_write_private(dest, '640')
+    60	                process.stdin.write(content)
+    61	                process.stdin.close()
+    62	                code, out, err = finish(process)
+    63	                self.assertEqual(code, 0, err)
+    64	                self.assertEqual(out, answer)
+    65	            self.assertEqual(dest.read_text(), 'same content\n')
+    66	
+    67	    def test_unchanged_content_keeps_the_inode(self) -> None:
+    68	        with tempfile.TemporaryDirectory(prefix='hornhoof-private-') as tmp:
+    69	            dest = Path(tmp) / 'secret.env'
+    70	            process = start_write_private(dest, '640')
+    71	            process.stdin.write('content\n')
+    72	            process.stdin.close()
+    73	            self.assertEqual(finish(process)[0], 0)
+    74	            inode = os.stat(dest).st_ino
+    75	            process = start_write_private(dest, '640')
+    76	            process.stdin.write('content\n')
+    77	            process.stdin.close()
+    78	            code, out, _ = finish(process)
+    79	            self.assertEqual(code, 0)
+    80	            self.assertEqual(out, 'unchanged')
+    81	            self.assertEqual(os.stat(dest).st_ino, inode, 'an unchanged file was replaced')
+    82	
+    83	    def test_shell_files_parse(self) -> None:
+    84	        result = subprocess.run(['sh', '-n', str(SETUP), str(HELPER)], capture_output=True, text=True)
+    85	        self.assertEqual(result.returncode, 0, result.stderr)
+    86	
+    87	
+    88	if __name__ == '__main__':
+"""Who holds a name: R1.1, R1.2, R2.1 and R2.3 against a real frps."""
+
+import contextlib
+import importlib.util
+import io
+import http.client
+import json
+import os
+import re
+import sqlite3
+import tempfile
+import threading
+import time
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+if __package__:
+    from .harness import Stack, _request, _wait
+else:
+    from harness import Stack, _request, _wait
+
+ROOT = Path(__file__).resolve().parents[2]
+SUCCESS = re.compile(r'\[acme\]\s+start proxy success\b')
+# A refusal is one of these documented reasons; anything else in an outcome is a failure.
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import http.client, importlib.util, pathlib, socket, sqlite3, tempfile, threading
+from http.server import ThreadingHTTPServer
+spec=importlib.util.spec_from_file_location('review_http','relay/relay.py')
+r=importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
+with tempfile.TemporaryDirectory(prefix='task4-http-review-') as d:
+    r.DB_PATH=str(pathlib.Path(d)/'relay.db')
+    r.CADDYFILE=str(pathlib.Path(d)/'Caddyfile')
+    pathlib.Path(r.CADDYFILE).write_text('@reserved host www.hornhoof.org\\n')
+    r.init_db()
+    server=ThreadingHTTPServer(('127.0.0.1',0),r.Handler)
+    server.daemon_threads=True
+    worker=threading.Thread(target=server.serve_forever); worker.start()
+    locker=sqlite3.connect(r.DB_PATH,isolation_level=None)
+    connection=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=4)
+    try:
+        locker.execute('BEGIN IMMEDIATE')
+        connection.request('POST','/api/v1/bindings',body=b'{}',headers={'Content-Type':'application/json'})
+        before=connection.sock
+        response=connection.getresponse(); first=response.status; response.read()
+        locker.execute('ROLLBACK')
+        connection.request('GET','/api/v1/names/www')
+        response=connection.getresponse(); second=response.status; response.read()
+        print('Busy followed by GET on the same socket:',first,second,'same_socket:',before is connection.sock)
+        locker.execute('BEGIN IMMEDIATE')
+        with socket.create_connection(('127.0.0.1',server.server_port),timeout=4) as raw:
+            raw.settimeout(4)
+            stream=raw.makefile('rb')
+            raw.sendall(b'POST /api/v1/bindings HTTP/1.1\\r\\nHost: localhost\\r\\nExpect: 100-continue\\r\\nContent-Type: application/json\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\n')
+            interim=stream.readline().decode().strip()
+            while stream.readline()"'!=b'"'\\r\\n': pass
+            raw.sendall(b'{}')
+            final=stream.readline().decode().strip()
+            print('Expect/Continue before busy:',interim,'then',final)
+            stream.close()
+        locker.execute('ROLLBACK')
+    finally:
+        connection.close(); locker.close(); server.shutdown(); server.server_close(); worker.join(); r.db().close()
+PY" in /Users/0x/Projects/hornhoof-edge
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+from types import SimpleNamespace
+from unittest.mock import patch
+from relay.test.test_restart import RestartTests
+case=RestartTests()
+clock=[0.0]
+def late_response(*args):
+    clock[0]=2.25
+    return 503,{'ok':False,'frps':False}
+case.stack=SimpleNamespace(api=late_response)
+with patch('relay.test.test_restart.time.monotonic',side_effect=lambda: clock[0]):
+    result=case.wait_health(503,2)
+print('wait_health accepted desired status after',clock[0],'seconds against a 2-second limit:',result['frps'] is False)
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 11ms:
+wait_health accepted desired status after 2.25 seconds against a 2-second limit: True
+
+ succeeded in 1796ms:
+Busy followed by GET on the same socket: 503 200 same_socket: True
+Expect/Continue before busy: HTTP/1.1 100 Continue then HTTP/1.1 503 Service Unavailable
+
+codex
+Four focused regression checks fail against the pre-fix relay for the expected reasons. The shell probes found two failure cases: a failed template read can replace a valid destination with an empty file, and a failed rename can be reported as `changed`. The health wait also still accepts a response that arrives after its deadline.
+
+exec
+/bin/zsh -lc 'tail -12 "$TMPDIR/relay-task4-rereview-unittest.UNQBlC"; GIT_OPTIONAL_LOCKS=0 git status --short' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_unchanged_content_keeps_the_inode (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_inode) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ...  M .github/workflows/tests.yml
+ M relay/frps.service
+ M relay/hornhoof-relay.service
+ M relay/relay.py
+ M relay/setup-relay.sh
+ M relay/test/test_route.py
+?? relay/private-file.sh
+?? relay/test/test_restart.py
+?? relay/test/test_setup.py
+
+ succeeded in 321456ms:
+Test log: /var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T//relay-task4-rereview-unittest.UNQBlC
+test_r3_1_back_after_eviction (test_eviction.EvictionTests.test_r3_1_back_after_eviction) ... eviction took 20.30 s (network)
+ok
+test_r3_1_silent_network_client_goes (test_eviction.EvictionTests.test_r3_1_silent_network_client_goes) ... eviction took 20.31 s (network)
+ok
+test_r3_1_silent_today_client_goes (test_eviction.EvictionTests.test_r3_1_silent_today_client_goes) ... eviction took 20.34 s (today)
+ok
+test_r3_2_idle_clients_stay (test_eviction.EvictionTests.test_r3_2_idle_clients_stay) ... ok
+test_fact_client_id_is_unique (test_frp_facts.FrpFactsTests.test_fact_client_id_is_unique) ... client-id retry after silent client dropped: 5.87 s
+ok
+test_fact_dashboard_shows_the_route (test_frp_facts.FrpFactsTests.test_fact_dashboard_shows_the_route) ... ok
+test_fact_proxy_name_is_unique (test_frp_facts.FrpFactsTests.test_fact_proxy_name_is_unique) ... proxy-name retry after first stopped: 28.04 s
+ok
+test_english_no_em_dash (test_public.PublicTests.test_english_no_em_dash) ... ok
+test_no_ip_address (test_public.PublicTests.test_no_ip_address) ... ok
+test_no_secret (test_public.PublicTests.test_no_secret) ... ok
+test_only_known_hosts (test_public.PublicTests.test_only_known_hosts) ... ok
+test_private_words (test_public.PublicTests.test_private_words) ... ok
+test_project_files (test_public.PublicTests.test_project_files) ... ok
+test_r2_2_generation_survives_frps_restart (test_restart.RestartTests.test_r2_2_generation_survives_frps_restart) ... ok
+test_r2_2_generation_survives_relay_restart (test_restart.RestartTests.test_r2_2_generation_survives_relay_restart) ... ok
+test_r4_1_health_follows_frps (test_restart.RestartTests.test_r4_1_health_follows_frps) ... ok
+test_restart_burst (test_restart.RestartTests.test_restart_burst) ... ok
+test_absent_only_when_both_types_are_404 (test_route.DashboardContractTests.test_absent_only_when_both_types_are_404) ... ok
+test_empty_client_id_is_unknown (test_route.DashboardContractTests.test_empty_client_id_is_unknown) ... ok
+test_expired_call_does_not_register (test_route.DashboardContractTests.test_expired_call_does_not_register) ... ok
+test_login_refuses_busy_when_the_write_lock_is_held (test_route.DashboardContractTests.test_login_refuses_busy_when_the_write_lock_is_held) ... ok
+test_missing_client_id_is_unknown (test_route.DashboardContractTests.test_missing_client_id_is_unknown) ... ok
+test_newproxy_call_is_refused_within_one_second (test_route.DashboardContractTests.test_newproxy_call_is_refused_within_one_second) ... ok
+test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock (test_route.DashboardContractTests.test_newproxy_read_uses_the_time_left_after_waiting_for_the_lock) ... ok
+test_online_http_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_http_route_is_returned_with_its_type) ... ok
+test_online_https_route_is_returned_with_its_type (test_route.DashboardContractTests.test_online_https_route_is_returned_with_its_type) ... ok
+test_other_status_code_is_unknown (test_route.DashboardContractTests.test_other_status_code_is_unknown) ... ok
+test_reads_http_then_https_and_rejects_both_found (test_route.DashboardContractTests.test_reads_http_then_https_and_rejects_both_found) ... ok
+test_slow_answers_still_refuse_within_one_second (test_route.DashboardContractTests.test_slow_answers_still_refuse_within_one_second) ... ok
+test_straighten_empties_the_row_as_read (test_route.DashboardContractTests.test_straighten_empties_the_row_as_read) ... ok
+test_straighten_never_clears_a_fresher_generation (test_route.DashboardContractTests.test_straighten_never_clears_a_fresher_generation) ... ok
+test_trace_lines_are_atomic_under_concurrency (test_route.DashboardContractTests.test_trace_lines_are_atomic_under_concurrency) ... ok
+test_unknown_status_value_is_unknown (test_route.DashboardContractTests.test_unknown_status_value_is_unknown) ... ok
+test_watcher_takes_a_slow_good_healthz_answer (test_route.DashboardContractTests.test_watcher_takes_a_slow_good_healthz_answer) ... ok
+test_write_refuses_before_executing_when_the_call_budget_is_spent (test_route.DashboardContractTests.test_write_refuses_before_executing_when_the_call_budget_is_spent) ... ok
+test_young_pending_reads_held_against_an_offline_record (test_route.DashboardContractTests.test_young_pending_reads_held_against_an_offline_record) ... ok
+test_busy_write_answers_503_instead_of_dropping_the_connection (test_route.RouteTests.test_busy_write_answers_503_instead_of_dropping_the_connection) ... ok
+test_first_outcome_takes_any_refusal_reason (test_route.RouteTests.test_first_outcome_takes_any_refusal_reason) ... ok
+test_plugin_calls_stay_short (test_route.RouteTests.test_plugin_calls_stay_short) ... ok
+test_r1_1_race_after_empty (test_route.RouteTests.test_r1_1_race_after_empty) ... ok
+test_r1_1_racing_registrations (test_route.RouteTests.test_r1_1_racing_registrations) ... ok
+test_r1_1_second_registration_refused (test_route.RouteTests.test_r1_1_second_registration_refused) ... ok
+test_r1_2_shared_routes_refused (test_route.RouteTests.test_r1_2_shared_routes_refused) ... ok
+test_r2_1_held_then_empty (test_route.RouteTests.test_r2_1_held_then_empty) ... ok
+test_r2_1_route_body_has_no_key (test_route.RouteTests.test_r2_1_route_body_has_no_key) ... ok
+test_r2_3_errors_are_not_empty (test_route.RouteTests.test_r2_3_errors_are_not_empty) ... ok
+test_r2_3_online_route_without_a_row_is_unknown (test_route.RouteTests.test_r2_3_online_route_without_a_row_is_unknown) ... ok
+test_shell_files_parse (test_setup.WritePrivateTests.test_shell_files_parse) ... ok
+test_temp_file_is_private_while_the_content_arrives (test_setup.WritePrivateTests.test_temp_file_is_private_while_the_content_arrives) ... ok
+test_unchanged_content_keeps_the_destination (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_destination) ... ok
+test_unchanged_content_keeps_the_inode (test_setup.WritePrivateTests.test_unchanged_content_keeps_the_inode) ... ok
+test_binding_serves_its_name (test_today.TodayTests.test_binding_serves_its_name) ... ok
+test_second_copy_refused (test_today.TodayTests.test_second_copy_refused) ... ok
+test_tcp_proxy_refused (test_today.TodayTests.test_tcp_proxy_refused) ... ok
+test_wrong_key_refused (test_today.TodayTests.test_wrong_key_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 55 tests in 321.494s
+
+OK
+
+exec
+/bin/zsh -lc 'lsof -nP -a -c frpc -c frps; lsof -nP -iTCP -sTCP:LISTEN' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 69ms:
+COMMAND   PID USER   FD     TYPE             DEVICE SIZE/OFF                NODE NAME
+frps    89260   0x  cwd      DIR               1,14      544           141171263 /Users/0x/Projects/hornhoof-edge
+frps    89260   0x  txt      REG               1,14 18797010           141172041 /Users/0x/Projects/hornhoof-edge/relay/test/.bin/frps
+frps    89260   0x  txt      REG               1,14  4129088 1152921500312613838 /usr/lib/dyld
+frps    89260   0x    0u     CHR                3,2      0t0                 339 /dev/null
+frps    89260   0x    1w     REG               1,14    24664           141544615 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/hornhoof-eviction-f4qkzuyk/frps.log
+frps    89260   0x    2w     REG               1,14    24664           141544615 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/hornhoof-eviction-f4qkzuyk/frps.log
+frps    89260   0x    3u  KQUEUE                                                 count=0, state=0xa
+frps    89260   0x    4u    IPv4 0x289fe0e6c019d55b      0t0                 TCP 127.0.0.1:56706 (LISTEN)
+frps    89260   0x    5u    IPv4 0xb6df9ac0bcd64271      0t0                 TCP 127.0.0.1:56704 (LISTEN)
+frps    89260   0x    6u    IPv4 0xc7a865d71b253ae9      0t0                 TCP 127.0.0.1:56705 (LISTEN)
+frps    89260   0x    8u    IPv4 0x9906eb06a3b550ba      0t0                 TCP 127.0.0.1:56718->127.0.0.1:56703 (ESTABLISHED)
+frpc    89261   0x  cwd      DIR               1,14      544           141171263 /Users/0x/Projects/hornhoof-edge
+frpc    89261   0x  txt      REG               1,14 15152338           141172042 /Users/0x/Projects/hornhoof-edge/relay/test/.bin/frpc
+frpc    89261   0x  txt      REG               1,14  4129088 1152921500312613838 /usr/lib/dyld
+frpc    89261   0x    0u     CHR                3,2      0t0                 339 /dev/null
+frpc    89261   0x    1w     REG               1,14      601           141544617 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/hornhoof-eviction-f4qkzuyk/frpc-0.log
+frpc    89261   0x    2w     REG               1,14      601           141544617 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/hornhoof-eviction-f4qkzuyk/frpc-0.log
+frpc    89261   0x    3u  KQUEUE                                                 count=1, state=0x8
+frpc    89261   0x    4u    IPv4 0x9803d41273460cab      0t0                 TCP 127.0.0.1:56717->127.0.0.1:56704 (CLOSE_WAIT)
+COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python    41994   0x   15u  IPv4 0x4cfedf089412bfde      0t0  TCP 127.0.0.1:3007 (LISTEN)
+Python    41994   0x   20u  IPv4 0xc73c0e28cd217925      0t0  TCP 127.0.0.1:3008 (LISTEN)
+Python    42136   0x    6u  IPv4 0xf0e5427358627b5d      0t0  TCP 127.0.0.1:3006 (LISTEN)
+com.docke 74016   0x  170u  IPv6 0x478fe5c7e61ced3c      0t0  TCP *:18080 (LISTEN)
+Python    88318   0x    3u  IPv4 0x89f71a763bd9f5ef      0t0  TCP 127.0.0.1:56707 (LISTEN)
+Python    89259   0x    6u  IPv4 0x691129779e838ea5      0t0  TCP 127.0.0.1:56703 (LISTEN)
+frps      89260   0x    4u  IPv4 0x289fe0e6c019d55b      0t0  TCP 127.0.0.1:56706 (LISTEN)
+frps      89260   0x    5u  IPv4 0xb6df9ac0bcd64271      0t0  TCP 127.0.0.1:56704 (LISTEN)
+frps      89260   0x    6u  IPv4 0xc7a865d71b253ae9      0t0  TCP 127.0.0.1:56705 (LISTEN)
+
+exec
+/bin/zsh -lc 'lsof -nP -R -a -p 88318,89259,89260,89261 -d cwd,txt,1,2; GIT_OPTIONAL_LOCKS=0 git diff --check; tail -5 "$TMPDIR/relay-task4-rereview-unittest.UNQBlC"' in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+COMMAND   PID  PPID USER   FD   TYPE DEVICE SIZE/OFF                NODE NAME
+Python  88318 78376   0x  cwd    DIR   1,14      544           141171263 /Users/0x/Projects/hornhoof-edge
+Python  88318 78376   0x  txt    REG   1,14    51392            10208165 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python
+Python  88318 78376   0x  txt    REG   1,14  4129088 1152921500312613838 /usr/lib/dyld
+Python  88318 78376   0x  txt    REG   1,14    98160            10208193 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_hashlib.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    89424            10208169 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_blake2.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14  5984672            10208164 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/Python
+Python  88318 78376   0x  txt    REG   1,14   133376            10208189 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_datetime.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    69056            10208201 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_opcode.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   111424            10208240 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/math.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    94560            10208217 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_struct.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    88656            10208232 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/binascii.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   193136            10208191 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_decimal.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   188176            10191607 /opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.4.0.1.dylib
+Python  88318 78376   0x  txt    REG   1,14    90160            10208195 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_json.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    56880           141184757 /Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/py312/lib/python3.12/site-packages/coverage/tracer.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    70752            10208168 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_bisect.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    71616            10208206 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_random.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    89552            10208211 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_sha2.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    92512            10208246 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/select.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   132064            10208213 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_socket.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    97008            10208230 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/array.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    68352            10208225 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_uuid.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14  4846032            65691274 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+Python  88318 78376   0x  txt    REG   1,14    93680            10208253 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/zlib.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    69648            10208194 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_heapq.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   164816            10208214 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_sqlite3.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    72880            10208170 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_bz2.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    92368            10208197 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_lzma.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14  1276320            78031052 /opt/homebrew/Cellar/sqlite/3.53.4/lib/libsqlite3.3.53.4.dylib
+Python  88318 78376   0x  txt    REG   1,14   151984            10208202 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_pickle.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    70288            10208238 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/fcntl.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14    72176            10208204 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_posixsubprocess.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   184512            23709897 /opt/homebrew/Cellar/xz/5.8.3/lib/liblzma.5.dylib
+Python  88318 78376   0x  txt    REG   1,14   219024            10208215 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/_ssl.cpython-312-darwin.so
+Python  88318 78376   0x  txt    REG   1,14   884992            65691275 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+Python  88318 78376   0x  txt    REG   1,14  1174448            10208249 /opt/homebrew/Cellar/python@3.12/3.12.13/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload/unicodedata.cpython-312-darwin.so
+Python  88318 78376   0x    1w   REG   1,14       97           141544047 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/relay-cov.Cf6K1z/tests.log
+Python  88318 78376   0x    2w   REG   1,14       97           141544047 /private/var/folders/kk/_yqtl97120d_mtq6p5nnx5pr0000gn/T/relay-cov.Cf6K1z/tests.log
+
+----------------------------------------------------------------------
+Ran 55 tests in 321.494s
+
+OK
+
+codex
+The full suite passed: 55 tests, no failures. The central 503 handler also passed same-socket keep-alive and `100 Continue` probes. In the current handlers, all writes that can raise `WriteBusy` occur before final response headers are sent.
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import unittest
+from relay.test.test_restart import RestartTests
+original=RestartTests.sample_traffic
+observed=[]
+def observe(self,binding,stop,answers,started):
+    try:
+        original(self,binding,stop,answers,started)
+    finally:
+        observed.append(len(answers))
+RestartTests.sample_traffic=observe
+result=unittest.TextTestRunner(verbosity=1).run(unittest.TestSuite([RestartTests('test_r2_2_generation_survives_relay_restart')]))
+print('Company traffic sample counts:',observed)
+raise SystemExit(not result.wasSuccessful())
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 710ms:
+.
+----------------------------------------------------------------------
+Company traffic sample counts: [1]
+Ran 1 test in 0.741s
+
+OK
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.12 - <<'PY'
+import pathlib, tempfile, subprocess
+helper=str(pathlib.Path('relay/private-file.sh').resolve())
+with tempfile.TemporaryDirectory(prefix='task4-errexit-review-') as d:
+    dest=pathlib.Path(d)/'config'
+    dest.write_text('old fixture\\n')
+    command='. \""'$1"; mv() { return 1; }; result=$(printf "new fixture'"\\\\n\" | write_private \""'$2" 640); echo continued'"'
+    p=subprocess.run(['sh','-eu','-c',command,'review',helper,str(dest)],capture_output=True,text=True)
+    print('Actual set -eu assignment caller on rename failure: exit',p.returncode,'continued:',bool(p.stdout))
+PY" in /Users/0x/Projects/hornhoof-edge
+ succeeded in 0ms:
+Actual set -eu assignment caller on rename failure: exit 1 continued: False
+
+codex
+- **Critical** [relay/private-file.sh:19](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:19): Unchanged content skips permission and ownership correction. Reproduced a successful rerun leaving the secret `0644`. Enforce metadata in place while preserving the inode; add a regression test.
+
+- **Important** [relay/setup-relay.sh:34](/Users/0x/Projects/hornhoof-edge/relay/setup-relay.sh:34): `set -eu` misses an upstream `sed` failure. Reproduced a missing template replacing valid content with an empty file and reporting success. Check producer success before installing; test that failures preserve the destination.
+
+- **Important** [relay/private-file.sh:6](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:6): The function overwrites caller variables `dest`, `mode`, `group`, and `tmp`. Isolate its variables, preferably with a subshell function body, and test a direct call.
+
+- **Important** [relay/private-file.sh:23](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:23): A failed rename can still print `changed` and return success when called conditionally, where `errexit` is suppressed. Explicitly propagate failures and test this case.
+
+- **Important** [relay/test/test_restart.py:133](/Users/0x/Projects/hornhoof-edge/relay/test/test_restart.py:133): Traffic sampling stops immediately after startup. A repeated run passed with exactly **one pre-restart traffic sample**. Require observations while the relay is down and after recovery.
+
+- **Important** [relay/test/test_restart.py:39](/Users/0x/Projects/hornhoof-edge/relay/test/test_restart.py:39): The desired status returns before checking elapsed time. A controlled probe accepted 503 at **2.25 seconds** against the 2-second limit. Check the deadline before accepting success.
+
+- **Minor** [relay/test/test_setup.py:84](/Users/0x/Projects/hornhoof-edge/relay/test/test_setup.py:84): `sh -n setup helper` parses only `setup`; `helper` becomes an argument. Check each script separately.
+
+Original findings **2–5 and 7 are fixed**; four functional regression checks failed against the pre-fix code as expected. Findings **1, 6 and 8 are not fully closed**.
+
+The 503 override is sound for current handlers: writes precede final headers. Same-socket `503 → 200` and `100 Continue → 503` probes passed.
+
+Ran the requested command **once**, with bytecode writes disabled:
+
+`/opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v`
+
+**55 passed, 0 failed.** No repository files were edited.
+tokens used
+174,327
+- **Critical** [relay/private-file.sh:19](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:19): Unchanged content skips permission and ownership correction. Reproduced a successful rerun leaving the secret `0644`. Enforce metadata in place while preserving the inode; add a regression test.
+
+- **Important** [relay/setup-relay.sh:34](/Users/0x/Projects/hornhoof-edge/relay/setup-relay.sh:34): `set -eu` misses an upstream `sed` failure. Reproduced a missing template replacing valid content with an empty file and reporting success. Check producer success before installing; test that failures preserve the destination.
+
+- **Important** [relay/private-file.sh:6](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:6): The function overwrites caller variables `dest`, `mode`, `group`, and `tmp`. Isolate its variables, preferably with a subshell function body, and test a direct call.
+
+- **Important** [relay/private-file.sh:23](/Users/0x/Projects/hornhoof-edge/relay/private-file.sh:23): A failed rename can still print `changed` and return success when called conditionally, where `errexit` is suppressed. Explicitly propagate failures and test this case.
+
+- **Important** [relay/test/test_restart.py:133](/Users/0x/Projects/hornhoof-edge/relay/test/test_restart.py:133): Traffic sampling stops immediately after startup. A repeated run passed with exactly **one pre-restart traffic sample**. Require observations while the relay is down and after recovery.
+
+- **Important** [relay/test/test_restart.py:39](/Users/0x/Projects/hornhoof-edge/relay/test/test_restart.py:39): The desired status returns before checking elapsed time. A controlled probe accepted 503 at **2.25 seconds** against the 2-second limit. Check the deadline before accepting success.
+
+- **Minor** [relay/test/test_setup.py:84](/Users/0x/Projects/hornhoof-edge/relay/test/test_setup.py:84): `sh -n setup helper` parses only `setup`; `helper` becomes an argument. Check each script separately.
+
+Original findings **2–5 and 7 are fixed**; four functional regression checks failed against the pre-fix code as expected. Findings **1, 6 and 8 are not fully closed**.
+
+The 503 override is sound for current handlers: writes precede final headers. Same-socket `503 → 200` and `100 Continue → 503` probes passed.
+
+Ran the requested command **once**, with bytecode writes disabled:
+
+`/opt/homebrew/bin/python3.12 -m unittest discover -s relay/test -v`
+
+**55 passed, 0 failed.** No repository files were edited.

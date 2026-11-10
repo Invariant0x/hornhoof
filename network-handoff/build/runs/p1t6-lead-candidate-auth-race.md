@@ -1,0 +1,5 @@
+# Candidate to verify after the writer's final diff, not an accepted finding yet
+
+Current fix1 do_DELETE authenticates a bindings row, then calls release_binding(name) without passing the authorizing key hash. An old DELETE paused after auth could overlap another DELETE and rebind, then release the new owner's binding. This auth gap existed before Task6, but release_binding is now touched by the C2 lifecycle work. Do not make an unproven claim or expand the task on speculation.
+
+After fix2 report, inspect whether it still exists. A safe local in-process HTTP probe could pause the first release_binding call after auth (once only), issue a second HTTP DELETE and POST rebind, resume the first request, then check whether the new binding survives. Use temporary SQLite and ThreadingHTTPServer, events, captured keys never printed, bounded cleanup. If reproduced, judge the actual user impact and scope before the final review. If accepted, update the SAME combined fix2 brief and ask the same writer to finish it with a first-failing test before round3; do not count an extra review. No source change by the lead.

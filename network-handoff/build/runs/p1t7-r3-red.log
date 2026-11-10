@@ -1,0 +1,230 @@
+new link key for acme
+Fnew link key for acme
+Fnew link key for acme
+FFnew visitor key for acme
+Fnew visitor key for acme
+Fnew visitor key for acme
+FFnew link key for acme
+bound wed3usuwzzftkitqjghh4wb4 for 198.51.100.99
+Fbound 7mjmqclrs20y8ags9efavkv1 for 198.51.100.99
+Fbound f2erfkehryphvy2kddeiuptg for 198.51.100.99
+FF
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/key', label='no bytes')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/key', label='only whitespace')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/key', label='a whole value')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/key', label='part of a value')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 702, in assert_answered_once_and_closed
+    self.assertTrue(exchange.says_close, 'the answer must say Connection: close, so that Caddy does not reuse it')
+AssertionError: False is not true : the answer must say Connection: close, so that Caddy does not reuse it
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/visitor-key', label='no bytes')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/visitor-key', label='only whitespace')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/visitor-key', label='a whole value')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [200] != [400]
+
+First differing element 0:
+200
+400
+
+- [200]
+?  ^
+
++ [400]
+?  ^
+ : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_key_is_not_changed_by_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_key_is_not_changed_by_a_body_cut_short) (path='/api/v1/links/acme/visitor-key', label='part of a value')
+A client that drops mid-request must not cost a company the key it knows.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 818, in test_a_key_is_not_changed_by_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 702, in assert_answered_once_and_closed
+    self.assertTrue(exchange.says_close, 'the answer must say Connection: close, so that Caddy does not reuse it')
+AssertionError: False is not true : the answer must say Connection: close, so that Caddy does not reuse it
+
+======================================================================
+FAIL: test_a_binding_is_not_made_from_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_binding_is_not_made_from_a_body_cut_short) (label='no bytes')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 829, in test_a_binding_is_not_made_from_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201] != [400]
+
+First differing element 0:
+201
+400
+
+- [201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_binding_is_not_made_from_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_binding_is_not_made_from_a_body_cut_short) (label='only whitespace')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 829, in test_a_binding_is_not_made_from_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201] != [400]
+
+First differing element 0:
+201
+400
+
+- [201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_binding_is_not_made_from_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_binding_is_not_made_from_a_body_cut_short) (label='a whole value')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 829, in test_a_binding_is_not_made_from_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 700, in assert_answered_once_and_closed
+    self.assertEqual(exchange.statuses, [status], 'exactly one answer: the unread bytes must not run')
+AssertionError: Lists differ: [201] != [400]
+
+First differing element 0:
+201
+400
+
+- [201]
++ [400] : exactly one answer: the unread bytes must not run
+
+======================================================================
+FAIL: test_a_binding_is_not_made_from_a_body_cut_short (relay.test.test_keys.ConnectionTests.test_a_binding_is_not_made_from_a_body_cut_short) (label='part of a value')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 829, in test_a_binding_is_not_made_from_a_body_cut_short
+    self.assert_answered_once_and_closed(self.exchange(request, hang_up=True), 400)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 702, in assert_answered_once_and_closed
+    self.assertTrue(exchange.says_close, 'the answer must say Connection: close, so that Caddy does not reuse it')
+AssertionError: False is not true : the answer must say Connection: close, so that Caddy does not reuse it
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.070s
+
+FAILED (failures=12)

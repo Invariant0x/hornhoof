@@ -1,0 +1,8 @@
+issuance status diagnostic failures: 1 errors: 0 credential leaked: True
+lifecycle hash diagnostic failures: 1 errors: 0 credential leaked: True
+Source/test stable during probe: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-extra-diagnostics-probe.py", line 49, in <module>
+    assert all(results),'known key-bearing assertion diagnostics exposed generated credentials'
+           ^^^^^^^^^^^^
+AssertionError: known key-bearing assertion diagnostics exposed generated credentials

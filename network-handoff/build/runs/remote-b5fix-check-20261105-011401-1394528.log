@@ -1,0 +1,21 @@
+== changed files
+Caddyfile
+README.md
+relay/edge-frpc.service
+relay/frps.toml
+relay/relay.py
+relay/test/harness.py
+relay/test/test_edge_today.py
+relay/test/test_sni.py
+== tests under coverage
+.......
+----------------------------------------------------------------------
+Ran 101 tests in 125.573s
+
+OK
+== crapper
+worst changed CRAP: 8.1866
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at c6bf136

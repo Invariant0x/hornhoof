@@ -1,0 +1,108 @@
+#!/bin/bash
+# A small Docker for the tests: it logs every call and runs a container's command as a local process. Its listings also
+# return other people's things, whatever the filter says, so that the tests prove host.sh never acts on them.
+state=$FAKE_STATE
+mkdir -p "$state/containers" "$state/images" "$state/volumes" "$state/networks"
+printf 'docker %s\n' "$*" >> "$state/calls.log"
+
+mount_of() {
+  local want=":/home/altera/hornhoof-network/$1" arg
+  for arg in "${run_args[@]}"; do
+    case "$arg" in *"$want") printf '%s' "${arg%"$want"}"; return ;; esac
+  done
+}
+
+is_image() { case "$1" in hnb-build:1|hnb-dind:*|node:*) return 0 ;; esac; return 1; }
+
+split_run_args() {
+  run_args=("$@"); run_name=""; run_cmd=(); run_detached=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name) run_name=$2; shift 2; continue ;;
+      --detach) run_detached=1 ;;
+    esac
+    if is_image "$1"; then shift; run_cmd=("$@"); return; fi
+    shift
+  done
+}
+
+run_detached_container() {
+  local dir=$state/containers/$run_name snap
+  mkdir -p "$dir"
+  snap=$(mount_of hornhoof); SNAP=$(dirname "${snap:-/nonexistent/x}"); export SNAP
+  if [ "${run_cmd[0]}" = dockerd ]; then run_cmd=(sleep 600); fi
+  ( setsid bash -c 'echo $$ > "$0/pid"; "${@:1}" > "$0/log" 2>&1; echo $? > "$0/rc.tmp"; mv "$0/rc.tmp" "$0/rc"' "$dir" "${run_cmd[@]}" ) > /dev/null 2>&1 &
+  for _ in $(seq 100); do [ -s "$dir/pid" ] && break; sleep 0.05; done
+  echo "fake-id-$run_name"
+}
+
+run_foreground_container() {
+  local tree
+  if [[ "${run_cmd[*]}" == *provision.sh* ]] && [ -e "$state/provision-rc" ]; then
+    return "$(cat "$state/provision-rc")"
+  fi
+  tree=$(mount_of hornhoof)
+  if [ -n "$tree" ]; then
+    mkdir -p "$tree/node_modules/pkg" "$tree/packages/protocol/dist"
+    echo module > "$tree/node_modules/pkg/index.js"
+    [ -e "$tree/packages/protocol/dist/index.js" ] || echo built > "$tree/packages/protocol/dist/index.js"
+  fi
+  return "$(cat "$state/foreground-rc" 2>/dev/null || echo 0)"
+}
+
+remove_container() {
+  local dir=$state/containers/$1 pid
+  [ -d "$dir" ] || return 1
+  pid=$(cat "$dir/pid" 2>/dev/null || true)
+  [ -z "$pid" ] || kill -KILL -- "-$pid" 2>/dev/null
+  rm -rf "$dir"
+}
+
+list_with_foreign() {
+  ls "$state/$1" 2>/dev/null
+  printf '%s\n' hornhoof-machine-1 k3d-tools-0
+}
+
+follow_logs() {
+  local name=${*: -1} dir pid
+  dir=$state/containers/$name
+  [ -d "$dir" ] || return 1
+  pid=$(cat "$dir/pid")
+  tail -n +1 -f --pid="$pid" "$dir/log" 2>/dev/null
+}
+
+wait_container() {
+  local dir=$state/containers/$1
+  while [ -d "$dir" ] && [ ! -e "$dir/rc" ]; do sleep 0.05; done
+  [ -e "$dir/rc" ] || return 1
+  cat "$dir/rc"
+}
+
+image_file() { printf '%s' "$state/images/$(printf '%s' "$1" | tr '/:@' '___')"; }
+
+case "$1" in
+  run)
+    shift; split_run_args "$@"
+    if [ "$run_detached" = 1 ]; then run_detached_container; else run_foreground_container; fi ;;
+  rm) shift; while [ "${1#-}" != "$1" ]; do shift; done; for n in "$@"; do remove_container "$n"; done ;;
+  ps) list_with_foreign containers ;;
+  logs) shift; follow_logs "$@" ;;
+  wait) wait_container "$2" ;;
+  exec|version|info|commit|save) ;;
+  images) if [ -e "$(image_file "${3:-}")" ]; then echo fakeid; fi ;;
+  image) [ -e "$(image_file "$3")" ] ;;
+  pull|tag)
+    touch "$(image_file "${3:-$2}")"; touch "$(image_file "$2")" ;;
+  load)
+    [ -e "$3" ] || exit 1
+    case "$3" in *hnb-build.tar) touch "$(image_file hnb-build:1)" ;; *hnb-dind.tar) touch "$(image_file hnb-dind:29.7.1)" ;; esac ;;
+  rmi) shift; [ "${1#-}" = "$1" ] || shift; [ -e "$(image_file "$1")" ] || exit 1; rm -f "$(image_file "$1")" ;;
+  volume|network)
+    kind=${1}s
+    case "$2" in
+      create) mkdir -p "$state/$kind/$3"; echo "$3" ;;
+      rm) rmdir "$state/$kind/$3" ;;
+      ls) list_with_foreign "$kind" ;;
+    esac ;;
+  *) echo "fake docker does not know: $*" >> "$state/forbidden.log"; exit 1 ;;
+esac

@@ -1,0 +1,102 @@
+F{"name": "globex\n", "key": "<generated key, masked>"}
+bound globex for 203.0.113.7
+.bound 88tyi84646pa6w3ef4ies7iw for 203.0.113.7
+.bound yszap01astpyd6xp6quhy37m for 203.0.113.7
+...bound osyur6ulbsvxnt6g3zugzbyv for 203.0.113.7
+bound urpip0acfr6ol6uya3yerffg for 203.0.113.8
+...FFFbound 97rcbxeh9fpm6zaq1is9sght for 203.0.113.7
+.bound puhz98matacd1j9jxrpdlpqd for 198.51.100.2
+bound 3vzvcysicuek9xxf0yypk8a1 for 198.51.100.0
+bound wfdhr9i5f838pgfbtnlt527f for 198.51.100.14
+.new link key for acme
+new link key for acme
+new visitor key for acme
+Fbound 2jcu0iyhkr9sxfiu0i9lhseg for 127.0.0.1
+bound wuzhse320kzpojrp596sg2xe for 127.0.0.1
+bound z71qkn00q8p4by8kbo46dbhn for 127.0.0.1
+bound j5g44wonixeqt5pqco8ekmpe for 127.0.0.1
+bound nt9vbmqrznqczpq1y8prucyt for 127.0.0.1
+..bound wbk07rof9uz75g4rl3jcljed for 127.0.0.1
+.new link key for acme
+.....new link key for acme
+new link key for acme
+new link key for acme
+.new link key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+.new link key for acme
+new link key for acme
+new visitor key for acme
+released acme for 127.0.0.1
+F
+======================================================================
+FAIL: test_admin_add_refuses_a_name_with_a_trailing_newline (relay.test.test_keys.BindingRequestTests.test_admin_add_refuses_a_name_with_a_trailing_newline)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 561, in test_admin_add_refuses_a_name_with_a_trailing_newline
+    self.assertEqual(self.relay.admin(['add', 'globex\n']), 1)
+AssertionError: 0 != 1
+
+======================================================================
+FAIL: test_binding_refuses_a_name_it_may_not_give (relay.test.test_keys.BindingRequestTests.test_binding_refuses_a_name_it_may_not_give) (name='globex\n')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 556, in test_binding_refuses_a_name_it_may_not_give
+    self.assert_refused(self.post_name(name), status, code, message)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 519, in assert_refused
+    self.assertEqual(answer[0], status)
+AssertionError: 503 != 400
+
+======================================================================
+FAIL: test_binding_refuses_a_name_it_may_not_give (relay.test.test_keys.BindingRequestTests.test_binding_refuses_a_name_it_may_not_give) (name='www\n')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 556, in test_binding_refuses_a_name_it_may_not_give
+    self.assert_refused(self.post_name(name), status, code, message)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 519, in assert_refused
+    self.assertEqual(answer[0], status)
+AssertionError: 503 != 400
+
+======================================================================
+FAIL: test_binding_refuses_a_name_it_may_not_give (relay.test.test_keys.BindingRequestTests.test_binding_refuses_a_name_it_may_not_give) (name='acme\n')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 556, in test_binding_refuses_a_name_it_may_not_give
+    self.assert_refused(self.post_name(name), status, code, message)
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 519, in assert_refused
+    self.assertEqual(answer[0], status)
+AssertionError: 503 != 400
+
+======================================================================
+FAIL: test_admin_release_takes_what_belongs_to_the_binding (relay.test.test_keys.KeyAuthorizationTests.test_admin_release_takes_what_belongs_to_the_binding)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 462, in test_admin_release_takes_what_belongs_to_the_binding
+    self.assertEqual(self.lifetime_rows(), {'visitor_keys': 0, 'ping_keys': 0, 'sync': 0})
+AssertionError: {'visitor_keys': 0, 'ping_keys': 2, 'sync': 1} != {'visitor_keys': 0, 'ping_keys': 0, 'sync': 0}
+- {'ping_keys': 2, 'sync': 1, 'visitor_keys': 0}
+?               ^          ^
+
++ {'ping_keys': 0, 'sync': 0, 'visitor_keys': 0}
+?               ^          ^
+
+
+======================================================================
+FAIL: test_release_takes_what_belongs_to_the_binding (relay.test.test_keys.KeyAuthorizationTests.test_release_takes_what_belongs_to_the_binding)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 457, in test_release_takes_what_belongs_to_the_binding
+    self.assertEqual(self.lifetime_rows(), {'visitor_keys': 0, 'ping_keys': 0, 'sync': 0})
+AssertionError: {'visitor_keys': 0, 'ping_keys': 2, 'sync': 1} != {'visitor_keys': 0, 'ping_keys': 0, 'sync': 0}
+- {'ping_keys': 2, 'sync': 1, 'visitor_keys': 0}
+?               ^          ^
+
++ {'ping_keys': 0, 'sync': 0, 'visitor_keys': 0}
+?               ^          ^
+
+
+----------------------------------------------------------------------
+Ran 25 tests in 13.666s
+
+FAILED (failures=6)

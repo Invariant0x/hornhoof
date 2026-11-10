@@ -1,0 +1,8 @@
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.front.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.proxy.edn
+KILLED    apps/server/src/net/front.ts:16 || -> &&
+Function   Namespace  Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------
+startFront net.front       1         0          0      1 100.0%
+----------------------------------------------------------------
+Total                      1         0          0      1  100.0%

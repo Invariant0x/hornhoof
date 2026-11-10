@@ -1,0 +1,68 @@
+c2d0ce6e Take a turn's late stop for no part of the next turn
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Start at [22m 02:45:59
+[2m   Duration [22m 407.13s[2m (tests 99%, transform 1%)[22m
+
+ROUND 70 kept stale=true contexts=[0.25,0.5]
+  1687 hook start session=a2e14e aSession=null ending=false busy=true took=false
+  1730 wire metadata aSession=a2e14e ending=false busy=true took=false
+  1748 hook prompt session=a2e14e aSession=a2e14e ending=false busy=true took=false
+  1764 wire turn.prompt aSession=a2e14e ending=false busy=true took=true
+  1764 wire context.append_loop_event aSession=a2e14e ending=false busy=true took=true
+  1764 wire token_counting.measured aSession=a2e14e ending=false busy=true took=true
+  1764 wire turn.ended aSession=a2e14e ending=false busy=true took=true
+  1764 first answered ok=true result="echo: hello" session=a2e14e
+  1793 hook stop session=a2e14e aSession=null ending=false busy=false took=true
+  3740 hook start session=1bdcea aSession=null ending=false busy=true took=false
+  3780 wire metadata aSession=1bdcea ending=false busy=true took=false
+  3810 hook prompt session=1bdcea aSession=1bdcea ending=false busy=true took=false
+  3832 hook stop session=1bdcea aSession=1bdcea ending=false busy=true took=true
+  3832 wire turn.prompt aSession=1bdcea ending=false busy=true took=true
+  3832 wire context.append_loop_event aSession=1bdcea ending=false busy=true took=true
+  3832 wire config.update aSession=1bdcea ending=false busy=true took=true
+  3832 wire token_counting.measured aSession=1bdcea ending=false busy=true took=true
+  3832 wire turn.ended aSession=1bdcea ending=false busy=true took=true
+  3907 second answered ok=true result="echo: SWITCH" error=null session=1bdcea
+ROUND 87 kept stale=true contexts=[0.25,0.5]
+  1767 hook start session=b11aaf aSession=null ending=false busy=true took=false
+  1808 wire metadata aSession=b11aaf ending=false busy=true took=false
+  1817 hook prompt session=b11aaf aSession=b11aaf ending=false busy=true took=false
+  1834 wire turn.prompt aSession=b11aaf ending=false busy=true took=true
+  1834 wire context.append_loop_event aSession=b11aaf ending=false busy=true took=true
+  1834 wire token_counting.measured aSession=b11aaf ending=false busy=true took=true
+  1834 wire turn.ended aSession=b11aaf ending=false busy=true took=true
+  1834 first answered ok=true result="echo: hello" session=b11aaf
+  1861 hook stop session=b11aaf aSession=null ending=false busy=false took=true
+  3636 hook start session=e2ed6f aSession=null ending=false busy=true took=false
+  3664 wire metadata aSession=e2ed6f ending=false busy=true took=false
+  3673 hook prompt session=e2ed6f aSession=e2ed6f ending=false busy=true took=false
+  3685 hook stop session=e2ed6f aSession=e2ed6f ending=false busy=true took=true
+  3686 wire turn.prompt aSession=e2ed6f ending=false busy=true took=true
+  3686 wire context.append_loop_event aSession=e2ed6f ending=false busy=true took=true
+  3686 wire config.update aSession=e2ed6f ending=false busy=true took=true
+  3686 wire token_counting.measured aSession=e2ed6f ending=false busy=true took=true
+  3686 wire turn.ended aSession=e2ed6f ending=false busy=true took=true
+  3696 second answered ok=true result="echo: SWITCH" error=null session=e2ed6f
+ROUND 97 kept stale=true contexts=[0.25,0.5]
+  1742 hook start session=f5307e aSession=null ending=false busy=true took=false
+  1751 wire metadata aSession=f5307e ending=false busy=true took=false
+  1762 hook prompt session=f5307e aSession=f5307e ending=false busy=true took=false
+  1786 wire turn.prompt aSession=f5307e ending=false busy=true took=true
+  1786 wire context.append_loop_event aSession=f5307e ending=false busy=true took=true
+  1786 wire token_counting.measured aSession=f5307e ending=false busy=true took=true
+  1786 wire turn.ended aSession=f5307e ending=false busy=true took=true
+  1786 first answered ok=true result="echo: hello" session=f5307e
+  1798 hook stop session=f5307e aSession=null ending=false busy=false took=true
+  3405 hook start session=216be8 aSession=null ending=false busy=true took=false
+  3440 hook prompt session=216be8 aSession=216be8 ending=false busy=true took=false
+  3449 hook stop session=216be8 aSession=216be8 ending=false busy=true took=true
+  3450 wire metadata aSession=216be8 ending=false busy=true took=true
+  3450 wire turn.prompt aSession=216be8 ending=false busy=true took=true
+  3451 wire context.append_loop_event aSession=216be8 ending=false busy=true took=true
+  3451 wire config.update aSession=216be8 ending=false busy=true took=true
+  3451 wire token_counting.measured aSession=216be8 ending=false busy=true took=true
+  3451 wire turn.ended aSession=216be8 ending=false busy=true took=true
+  3505 second answered ok=true result="echo: SWITCH" error=null session=216be8
+SUMMARY rounds=103 lost=0 staleStops=3 wireFirst=10 seconds=403

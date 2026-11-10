@@ -1,0 +1,8 @@
+#!/bin/bash
+# Only `sudo -n docker` is allowed on home-api, so anything else fails the test loudly.
+if [ "$1" = -n ] && [ "$2" = docker ]; then
+  shift 2
+  exec "$(dirname "$0")/fake-docker" "$@"
+fi
+echo "sudo other than docker: $*" >> "$FAKE_STATE/forbidden.log"
+exit 1

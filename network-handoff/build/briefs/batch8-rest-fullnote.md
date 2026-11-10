@@ -1,0 +1,7 @@
+# This batch
+
+Batch 8 holds Plan 1b Tasks 8 and 9, Plan 2 Tasks 5, 6 and 7, and two bug fixes. It ends Plan 1b's code and Plan 2. Read in `/home/altera/hornhoof-network/hornhoof` on the branch `batch-8`, read only. The lead settled conflicts between these tasks and batch 6's fixes while assembling: `modules/link/client.ts` (`configFor`'s own-key check, now on `local`), `modules/link/link.ts` (`writeTunnelSettings(db, config, log?)`, `settingsWith`), and `modules/tls/store.ts` (`passes`, `readLinkMode`, `linkMode`). Read those on the branch and say if the join lost anything.
+
+Writers' rulings and their open items are in the ledger, `network-build/progress.md`: the lines naming Plan 1b Task 8, Plan 1b Task 9, Plan 2 Task 5, Plan 2 Task 6, Plan 2 Task 7, and the carries beside them. Claims to check, not to trust.
+
+This slice is Plan 1b Task 9 (what people see and read about the link's encryption: server shape `TlsView`, `GET /api/link`, `POST /api/setup`, en and ru, guide, `SECURITY.md`, `README.md`) and two bug fixes: `apps/node/src/terminal/host.ts` (a turn's late stop no longer falls on the next turn), and the web tests' wait limit. Look hardest at: a fact in the docs or the UI that is not true at this commit (who can read a visitor's traffic, when), a Russian string with "ё" or an English word left in it, and for `host.ts`: a real turn's stop lost, a hook of a different kind (Kimi's stop hook, an interrupt) with the same gap. The ledger's `Bug, terminal context test` lines hold two open items: say how they stand.

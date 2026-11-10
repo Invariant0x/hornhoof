@@ -1,0 +1,7 @@
+Source/test stable during probe: True
+Induced failures: 1 errors: 0 generated visitor key present in captured output: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-http-output-probe.py", line 42, in <module>
+    assert not leaked,'unittest HTTP race diagnostics exposed the generated visitor key'
+           ^^^^^^^^^^
+AssertionError: unittest HTTP race diagnostics exposed the generated visitor key

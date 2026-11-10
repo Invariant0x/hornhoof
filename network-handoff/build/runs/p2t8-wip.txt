@@ -1,0 +1,31 @@
+Plan 2 Tasks 8 and 9, lane /home/altera/hornhoof-network/wt/p2t8. Stopped at a green point, with no run of mine pending.
+
+DONE
+- Task 8 (start order, machine id, handover): committed by the lead as 6948b28c.
+- Task 9 (host-wide port registry): committed by the lead as 83c5da6e.
+- The two seams from 2 T1, the helper's two inputs and the installer never returning 0 under an older updater: written, tested and
+  checked, and committed by the lead as 930c7071. The lane's working tree is clean, so there is nothing of mine to commit as WIP.
+
+WHERE I STOPPED
+All work the lead gave me is finished. The seam report is the addendum at the end of network-build/runs/p2t8-report.md.
+
+WHAT COMES NEXT
+- The whole suite runs at landing. It is the lead's run, and I did not run it.
+- Nothing else is owed by a writer in this lane unless the lead's review of 930c7071 asks for it.
+- Still open, from the report: no test runs the real installer with the real take_over until both are on one branch; the default
+  wait of 300 s is not pinned by a test; a helper slower than 300 s can race go_back, and T1's note is the way out; nothing ran on
+  bash 3.2 or against real Docker; the rulings in the report (an empty HORNHOOF_PORT= in a new .env, PUBLIC_URL for any new .env)
+  still wait for the lead's word.
+
+LAST TEST OUTPUT
+Log: network-build/runs/remote-p2t8-seam-20261104-223516-1032986.log, on the code of 930c7071 as I wrote it.
+bash-n-ok
+shellcheck-rc=0
+tsc-rc=0
+typecheck-rc=0
+lint-rc=0
+ Test Files  4 passed (4)
+      Tests  147 passed (147)
+== files:
+== no source files of apps/server in this task
+The four files were install-script, compose, pins and updater.

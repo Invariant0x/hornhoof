@@ -1,0 +1,859 @@
+# Review package: batch 7, slice delta
+
+## 4b1122a Keep a freed name from its next owner while its old route may live, and refuse an old owner's tunnel under a new binding
+
+Batch 7's fix round, Critical. A freed name read as free while its old route was in the 10 s pending window, a registration
+landed after a release or a ban had passed its login check, and a new connection was judged by the name alone. So company B
+could be handed acme.hornhoof.org while its visitors reached company A's machine.
+
+- name_live now counts a route the plugin let through and frps does not show yet, by the same window as R2.1, so that
+  GET /names says taken and POST /bindings answers 409 (R1.5).
+- A route's row lands only while the binding that authorized it stands, in one statement: a release, a key change or a ban
+  since the login check refuses the NewProxy and moves no generation (R1.1).
+- NewUserConn also asks whether the proxy's owner logged in with this binding's key, current or retired in this lifetime, so
+  that an old owner's tunnel is refused under a new binding at once (R7.4). A tunnel of a changed key stays (R6.1).
+
+Minors. `ban --cut acme` no longer blocks the word --cut and leaves acme live: the option goes first and the name must be
+able to be one. RelayServer closes a connection's SQLite connection when its thread ends. The help line of ban says what a ban
+does; the README says frps also asks about the edge's connections and that the relay reads what a tunnel logged in with.
+
+Lock order: unchanged. create_lock and route_lock(name) never nest, each may wait on the writer queue last, and whoever holds
+the writer takes neither.
+
+Ruling: name_live takes no route_lock and create_binding holds none across its check and store, against the review's suggested fix - why: the statement's own guard closes the race, also against relay.py admin, another process no lock reaches; a public GET then writes nothing and cannot grow _route_locks by any name asked; after check_name finds no binding no registration can land - cost if wrong: a name goes to a new owner while a registration is in flight, which NewUserConn still refuses for https and stcp.
+Ruling: NewUserConn reads the owner's key where Plan 1 Task 10 lets the name alone decide - why: a tunnel can still find its name bound again: admin add does not ask frps, and frps may show a route after the window; the read stays one SELECT by the primary key, plus one on ping_keys only for a tunnel of a changed key - cost if wrong: a real tunnel with no key in its login metas is refused as freed, and every real-frps test here would show it.
+Ruling: a pending row holds a freed name for the rest of its 10 s even when frps shows the route gone - why: this is R2.1's own rule, since frps keeps an old offline record until the new one shows - cost if wrong: an owner who frees and rebinds within 10 s of a registration sees 409 taken for those seconds.
+Ruling: left open, http-mode routes - why: frps calls NewUserConn only for proxies with their own listeners, so an http route under a new binding is stopped only by R1.5, which admin add skips (hornhoof-relay runs it without the dashboard's password) and which a route shown after the window escapes - cost if wrong: an operator's add over a live http tunnel, or an frps stalled over 10 s, sends the new owner's visitors to the old owner until that tunnel goes.
+
+---
+ README.md                        |   2 +-
+ relay/hornhoof-relay             |   6 +-
+ relay/relay.py                   | 138 ++++++++++++++++++++++++++++++---------
+ relay/test/test_block_by_name.py | 115 +++++++++++++++++++++++++++++---
+ relay/test/test_keys.py          | 138 +++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 354 insertions(+), 45 deletions(-)
+
+diff --git a/README.md b/README.md
+index 99d1419..f0a3c0b 100644
+--- a/README.md
++++ b/README.md
+@@ -42,17 +42,17 @@ For each link, the relay keeps:
+ - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+ - the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat. Nothing but a heartbeat can use them;
+ - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+-frps asks the relay about every new connection to a company's https proxy or stcp service, with the visitor's address among what it sends. The relay reads only the name, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
++frps asks the relay about every new connection to a company's https proxy or stcp service, and to hornhoof.org, the API and the tunnels' way in, with the visitor's address among what it sends. The relay reads only the name and what the tunnel logged in with, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
+ 
+ The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
+ 
+ ## Run the tests
+ 
+ You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
+ 
+ From this folder:
+diff --git a/relay/hornhoof-relay b/relay/hornhoof-relay
+index 72cb1c7..822ea1d 100755
+--- a/relay/hornhoof-relay
++++ b/relay/hornhoof-relay
+@@ -1,15 +1,15 @@
+ #!/bin/sh
+ # Operator commands for the Hornhoof relay. Run as root on the droplet.
+ #   hornhoof-relay list                       every binding, when it was made and last seen
+ #   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret
+-#   hornhoof-relay ban <name> [reason] [--cut]  answer 410 at once; a ban refuses new connections at once, and its tunnel can
+-#                                             never log in or register again. Connections already open stay;
+-#                                             --cut also drops open ones, with every link, by restarting frps
++#   hornhoof-relay ban <name> [reason] [--cut]  a ban refuses new connections at once, and its tunnel can never log in or
++#                                             register again. Visitors get the 410 page once that tunnel is gone. Connections
++#                                             already open stay; --cut also drops open ones, with every link, by restarting frps
+ #   hornhoof-relay unban <name>
+ #   hornhoof-relay release <name>             free a name once its old tunnel is gone
+ set -eu
+ relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+ said=$(relay "$@")
+ printf '%s\n' "$said"
+ case "${1:-}" in
+   ban | unban)
+diff --git a/relay/relay.py b/relay/relay.py
+index dea750c..753c848 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -108,16 +108,24 @@ def db() -> sqlite3.Connection:
+         conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+         conn.execute('PRAGMA journal_mode=WAL')
+         conn.execute('PRAGMA synchronous=FULL')
+         conn.execute('PRAGMA busy_timeout=10000')
+         _local.conn = conn
+     return conn
+ 
+ 
++def close_db() -> None:
++    """Close this thread's connection, which db() would leave open for the garbage collector once the thread ends."""
++    conn = getattr(_local, 'conn', None)
++    if conn is not None:
++        conn.close()
++        _local.conn = None
++
++
+ # Every object of the schema, by the name sqlite_master knows it by.
+ SCHEMA = {
+     'bindings': '''CREATE TABLE IF NOT EXISTS bindings (
+             name TEXT PRIMARY KEY,
+             key_hash TEXT NOT NULL,
+             created_at INTEGER NOT NULL,
+             created_ip TEXT,
+             last_seen INTEGER,
+@@ -191,19 +199,23 @@ def declared_body_length(headers) -> int | None:
+     values = headers.get_all('Content-Length', [])
+     if not values:
+         return 0
+     if len(values) > 1 or not CONTENT_LENGTH.fullmatch(values[0]):
+         return None
+     return int(values[0])
+ 
+ 
++def label_valid(name: str) -> bool:
++    return LABEL.fullmatch(name) is not None and name[2:4] != '--'
++
++
+ def check_name(name: str):
+     """None when the name can be bound, else 'invalid', 'reserved' or 'taken'. A banned name counts as reserved."""
+-    if not LABEL.fullmatch(name) or name[2:4] == '--':
++    if not label_valid(name):
+         return 'invalid'
+     if name in reserved_names():
+         return 'reserved'
+     row = db().execute('SELECT banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+     if row is None:
+         return None
+     return 'reserved' if row[0] else 'taken'
+ 
+@@ -436,19 +448,37 @@ def frps_route(name: str) -> tuple[str, str | None, str | None]:
+     if http is not None and https is not None:
+         raise FrpsUnknown(f'dashboard shows both http and https routes for {name}')
+     for proxy_type, answer in (('http', http), ('https', https)):
+         if answer is not None:
+             return answer[0], answer[1], proxy_type
+     return 'absent', None, None
+ 
+ 
++def pending_lapsed(since: int, t: int) -> bool:
++    """A registration frps has not shown by now is taken never to come (R2.1)."""
++    return t - since > PENDING_S
++
++
++def route_pending(name: str) -> bool:
++    """Whether the plugin let a registration of this name through that frps has not shown yet. Only the relay's row knows
++    of it: frps asks the plugin before it makes the proxy, and its dashboard says nothing until then."""
++    row = db().execute('SELECT state, since FROM routes WHERE name = ?', (name,)).fetchone()
++    return row is not None and row[0] == 'pending' and not pending_lapsed(row[1], now())
++
++
+ def name_live(name: str) -> bool:
+-    """R1.5: a freed name waits for its old route; an unknown dashboard raises."""
+-    return frps_route(name)[0] == 'online'
++    """R1.5: a freed name waits for its old route, shown by frps or only registered so far; an unknown dashboard raises.
++
++    The row goes first: it leaves pending only once frps shows the route, so the later look at frps sees what the row no
++    longer says. These are reads alone, so that a public question moves no row and takes no lock: no registration can land
++    after them, since this name has no binding by now and a row needs one (store_route).
++    """
++    pending = route_pending(name)
++    return frps_route(name)[0] == 'online' or pending
+ 
+ 
+ def requested_name_reason(name: str) -> str | None:
+     """Check local restrictions first, then whether frps still serves a freed name."""
+     reason = check_name(name)
+     if reason is None and name_live(name):
+         return 'taken'
+     return reason
+@@ -700,17 +730,17 @@ def straighten_route(name: str, row, status: str, t: int) -> None:
+     """
+     state, generation = row[4], row[0]
+     if status == 'online':
+         write("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
+               "AND state IN ('pending', 'empty')", (name, generation))
+     elif state == 'held':
+         write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+               "AND state = 'held'", (t, name, generation))
+-    elif state == 'pending' and t - row[5] > PENDING_S:
++    elif state == 'pending' and pending_lapsed(row[5], t):
+         write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+               "AND state = 'pending'", (t, name, generation))
+ 
+ 
+ def route_body(name: str, row) -> dict:
+     """The R2.1 answer from a routes row; a name with no row is empty at generation 0."""
+     if row is None:
+         binding = db().execute('SELECT created_at FROM bindings WHERE name = ?', (name,)).fetchone()
+@@ -860,33 +890,46 @@ def register_locked(name: str, content: dict, user: dict) -> str | None:
+         return 'relay error: frps does not answer'
+     except WriteBusy:
+         return 'relay error: busy'
+     if held:
+         return f'router config conflict: {name} is held'
+     return upsert_route(name, content, user)
+ 
+ 
+-def upsert_route(name: str, content: dict, user: dict) -> str | None:
+-    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
++def route_columns(name: str, content: dict, user: dict) -> tuple:
++    """A let-through registration's row: the next generation, its maker, and pending since now."""
+     row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
+     generation = (row[0] if row else 0) + 1
+-    metas = user.get('metas') or {}
++    client = (user.get('metas') or {}).get('client') or 'legacy'
++    return (name, generation, client, user.get('run_id') or '', content.get('proxy_type') or 'http', 'pending', now())
++
++
++def store_route(columns: tuple, name: str, link_hash: str) -> bool:
++    """Commit the row only while the binding that authorized it still stands, in the one statement, so that a release, a
++    key change or a ban since its login check refuses it. A lock could not: `relay.py admin` is another process."""
++    return write(
++        'INSERT INTO routes (name, generation, client, run_id, type, state, since) SELECT ?, ?, ?, ?, ?, ?, ? '
++        'WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL) '
++        'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
++        'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
++        (*columns, name, link_hash)) == 1
++
++
++def upsert_route(name: str, content: dict, user: dict) -> str | None:
++    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
++    metas = user['metas']
+     try:
+-        write(
+-            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
+-            'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
+-            'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
+-            (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
+-             content.get('proxy_type') or 'http', 'pending', now()))
++        if store_route(route_columns(name, content, user), name, key_hash(metas['key'])):
++            return None
+     except WriteBusy:
+         return 'relay error: busy'
+     except sqlite3.Error:
+         return 'relay error: frps does not answer'
+-    return None
++    return authenticate(metas)[2] or f'no binding {name} with this key'
+ 
+ 
+ def shared_route_fields(content: dict) -> str | None:
+     """R1.2: a name is one company's one route, never shared or split across locations or users."""
+     for field in ('locations', 'route_by_http_user', 'group'):
+         if content.get(field):
+             return f'{field} is not allowed'
+     return None
+@@ -1287,20 +1330,24 @@ def binding_state(name: str):
+     row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+     if row is None:
+         return f'no binding {name} with this key'
+     if row[1]:
+         return f'{name}.{DOMAIN} is blocked'
+     return row
+ 
+ 
++def link_key_matches(stored_hash: str, key: object) -> bool:
++    return isinstance(key, str) and bool(key) and hmac.compare_digest(stored_hash, key_hash(key))
++
++
+ def key_kind(name: str, metas: dict, row: tuple) -> str | None:
+     """'link' when the link key matches, 'visitor' when only the visitor key does."""
+     key = metas.get('key')
+-    if isinstance(key, str) and key and hmac.compare_digest(row[0], key_hash(key)):
++    if link_key_matches(row[0], key):
+         return 'link'
+     visitor = metas.get('visitor')
+     if key is None and isinstance(visitor, str) and visitor and visitor_hash_matches(name, visitor):
+         return 'visitor'
+     return None
+ 
+ 
+ def authenticate(metas: dict) -> tuple[str | None, str | None, str | None]:
+@@ -1400,33 +1447,40 @@ def connection_link(proxy_name: object, proxy_type: object) -> str | None:
+     """The link a new connection is for; None for anything that is neither a company's https proxy nor a service."""
+     if not isinstance(proxy_name, str):
+         return None
+     if proxy_type == 'https':
+         return proxy_name
+     return peer_service_link(proxy_name) if proxy_type == 'stcp' else None
+ 
+ 
+-def link_refusal(link: str) -> str | None:
++def link_refusal(link: str, key: object) -> str | None:
+     """R7.4: why this link takes no new connection. frps holds each new connection on this answer, so that a crowd can
+-    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write."""
+-    row = db().execute('SELECT banned_at FROM bindings WHERE name = ?', (link,)).fetchone()
++    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write. A
++    tunnel of a changed key adds one more such read (R6.1).
++
++    The name alone would not do: the proxy may have outlived its binding, and under a new one its visitors would reach the
++    old owner's machine. frps sends the key its owner logged in with, and that binding is gone, so this reads as freed.
++    """
++    row = db().execute('SELECT banned_at, key_hash FROM bindings WHERE name = ?', (link,)).fetchone()
+     if row is None:
+         return 'freed'
+-    return 'blocked' if row[0] else None
++    if row[0]:
++        return 'blocked'
++    return None if link_key_matches(row[1], key) or ping_key_matches(link, key) else 'freed'
+ 
+ 
+ def new_user_conn_reason(content: dict, metas: dict) -> str | None:
+-    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound and not blocked. The name
+-    decides and the owner's key does not, since a live tunnel keeps logging its old key after a key change (R6.1)."""
++    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound, not blocked, and bound
++    when its owner logged in."""
+     proxy_name = content.get('proxy_name')
+     if proxy_name == EDGE_CLIENT:
+         return None if edge_token_matches(metas.get('edge')) else EDGE_REFUSED
+     link = connection_link(proxy_name, content.get('proxy_type'))
+-    return 'not a link' if link is None else link_refusal(link)
++    return 'not a link' if link is None else link_refusal(link, metas.get('key'))
+ 
+ 
+ def plugin_answer(reason: str | None) -> dict:
+     return {'reject': False, 'unchange': True} if reason is None else {'reject': True, 'reject_reason': reason}
+ 
+ 
+ def plugin_decide(op: str, content: dict) -> dict:
+     """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes and is marked seen.
+@@ -1450,16 +1504,23 @@ def plugin_decide(op: str, content: dict) -> dict:
+     return plugin_answer(reason)
+ 
+ 
+ class RelayServer(ThreadingHTTPServer):
+     # frps keeps two connections to the relay and opens one more for each plugin call beyond those, so that a crowd of
+     # visitors is as many new connections at once. Past this queue the kernel drops one, and the visitor waits for its retry.
+     request_queue_size = 1024
+ 
++    def process_request_thread(self, request, client_address) -> None:
++        """A connection is a thread and has a SQLite connection of its own, which ends with it."""
++        try:
++            super().process_request_thread(request, client_address)
++        finally:
++            close_db()
++
+ 
+ class Handler(BaseHTTPRequestHandler):
+     server_version = 'hornhoof-relay'
+     sys_version = ''
+     protocol_version = 'HTTP/1.1'
+     # An answer is two writes, its headers and its body. Under Nagle's rule the body would wait for the ACK of the headers,
+     # which the receiver delays by 40 ms, and frps holds a visitor's new connection on this answer.
+     disable_nagle_algorithm = True
+@@ -1783,22 +1844,37 @@ def admin_add(name: str) -> int:
+ def store_ban(name: str, reason: str) -> None:
+     if db().execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
+         write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+     else:  # block a name nobody holds, so nobody can take it
+         write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+               'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+ 
+ 
+-def admin_ban(name: str, words: list[str]) -> int:
+-    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart."""
+-    reason = [word for word in words if word != CUT]
+-    store_ban(name, ' '.join(reason) or 'blocked by the relay operator')
++def admin_usage() -> int:
++    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
++          file=sys.stderr)
++    return 2
++
++
++def admin_ban(args: list[str]) -> int:
++    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart.
++
++    The option may stand anywhere, so it goes before the name is read, and what is read must be able to be a name: a slip
++    must not block a word and leave the name it meant live."""
++    words = [word for word in args if word != CUT]
++    if not words:
++        return admin_usage()
++    name = words[0].lower()
++    if not label_valid(name):
++        print(f'{name}: invalid', file=sys.stderr)
++        return 1
++    store_ban(name, ' '.join(words[1:]) or 'blocked by the relay operator')
+     print(f'ban {name}: done')
+-    if len(reason) != len(words):
++    if len(words) != len(args):
+         print(RESTART_FRPS)
+     return 0
+ 
+ 
+ def admin_unban(name: str, _words: list[str]) -> int:
+     unban_binding(name)
+     print(f'unban {name}: done')
+     return 0
+@@ -1806,31 +1882,31 @@ def admin_unban(name: str, _words: list[str]) -> int:
+ 
+ def admin_release(name: str, _words: list[str]) -> int:
+     release_binding(name)
+     print(f'release {name}: done')
+     return 0
+ 
+ 
+ ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
+-ADMIN_CHANGES = {'ban': admin_ban, 'unban': admin_unban, 'release': admin_release}
++ADMIN_CHANGES = {'unban': admin_unban, 'release': admin_release}
+ 
+ 
+ def admin(args) -> int:
+     init_db()
+     cmd = args[0] if args else 'list'
+     if cmd in ADMIN_REPORTS:
+         return ADMIN_REPORTS[cmd]()
+     if cmd == 'add' and len(args) == 2:
+         return admin_add(args[1].lower())
++    if cmd == 'ban':
++        return admin_ban(args[1:])
+     if cmd in ADMIN_CHANGES and len(args) >= 2:
+         return ADMIN_CHANGES[cmd](args[1].lower(), args[2:])
+-    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
+-          file=sys.stderr)
+-    return 2
++    return admin_usage()
+ 
+ 
+ def run_admin(args) -> int:
+     """`relay.py admin`: a store busy past a write's budget is one plain line and a failure, which stops hornhoof-relay
+     before its next step."""
+     try:
+         return admin(args)
+     except WriteBusy:
+diff --git a/relay/test/test_block_by_name.py b/relay/test/test_block_by_name.py
+index d57455f..e4894b0 100644
+--- a/relay/test/test_block_by_name.py
++++ b/relay/test/test_block_by_name.py
+@@ -23,34 +23,36 @@ if __package__:
+ else:
+     import test_peers
+     from harness import ROOT, Answer, Stack, _wait, load_relay_module, render_caddyfile
+     from test_sni import PASSED, PassthroughCase
+ 
+ 
+ M8 = test_peers.M8
+ TOKEN = 'the edge token of this test'
++OWNERS_KEY = 'k'
+ BLOCKED = {'reject': True, 'reject_reason': 'blocked'}
+ FREED = {'reject': True, 'reject_reason': 'freed'}
+ CROWD = 200
+ CROWD_SECONDS = 2
+ # Review Focus 5. What keeps a connection waiting is pinned without a clock in NoWaitTests.
+ WAIT_LIMIT_MS = 50
+ STALLED_CALLS_ALLOWED = CROWD // 20
+ 
+ 
+ def peer_helpers() -> type[unittest.TestCase]:
+     """Task 6's helpers, which ask nothing of self but a TestCase's own. A name for the class at the top of this module
+     would make unittest run all of its tests here too."""
+     return test_peers.PeerTests
+ 
+ 
+ def new_user_conn(proxy_name: object, proxy_type: object, metas: object = None) -> dict:
+-    """A NewUserConn's content as frps sends it: user is the proxy owner's, remote_addr the visitor's."""
+-    return {'user': {'user': '', 'metas': {} if metas is None else metas, 'run_id': 'a run'},
++    """A NewUserConn's content as frps sends it: user is the proxy owner's, with what it logged in with, remote_addr the
++    visitor's. By default the owner is the one with the key of RelayRuleCase's bindings."""
++    return {'user': {'user': '', 'metas': {'key': OWNERS_KEY} if metas is None else metas, 'run_id': 'a run'},
+             'proxy_name': proxy_name, 'proxy_type': proxy_type, 'remote_addr': '203.0.113.9:40000'}
+ 
+ 
+ class BlockByNameTests(PassthroughCase):
+     def assert_refused_at_once(self, host: str) -> None:
+         started = time.monotonic()
+         refused = self.stack.https(host)
+         elapsed = time.monotonic() - started
+@@ -107,16 +109,24 @@ class BlockByNameTests(PassthroughCase):
+     def test_r6_1_a_key_change_leaves_new_connections_open(self) -> None:
+         # frps sends the metas of the tunnel's login, with the key it logged in with, for as long as that tunnel lives.
+         _, key = self.holder('acme')
+         status, _ = self.stack.api('POST', '/api/v1/links/acme/key', key=key)
+         self.assertEqual(status, 200, 'changing the key must answer 200')
+         answer = self.stack.https('acme.hornhoof.org')
+         self.assertEqual(answer.status, 200, answer.error)
+ 
++    def test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel(self) -> None:
++        # An operator's add does not ask frps, so it is a way for a live tunnel to find its name bound again.
++        _, key = self.holder('acme')
++        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
++        self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=key)[0], 204)
++        self.stack.admin('add', 'acme')
++        self.assert_refused_at_once('acme.hornhoof.org')
++
+     def crowd(self, host: str, seconds: float) -> list[Answer]:
+         """CROWD connections, one request each, spread evenly over these seconds."""
+         answers: list[Answer | None] = [None] * CROWD
+ 
+         def visit(index: int) -> None:
+             answers[index] = self.stack.https(host)
+ 
+         visitors = [threading.Thread(target=visit, args=(index,), daemon=True) for index in range(CROWD)]
+@@ -174,17 +184,17 @@ class RelayRuleCase(unittest.TestCase):
+         self.addCleanup(self.relay.db().close)
+         self.bind('acme')
+         self.bind('my-co')
+         self.bind('data-app')
+         self.bind('globex', banned_at=1)
+ 
+     def bind(self, name: str, banned_at: int | None = None) -> None:
+         self.relay.write('INSERT INTO bindings (name, key_hash, created_at, banned_at) VALUES (?, ?, 0, ?)',
+-                         (name, self.relay.key_hash('k'), banned_at))
++                         (name, self.relay.key_hash(OWNERS_KEY), banned_at))
+ 
+     def decide(self, content: dict) -> dict:
+         return self.relay.plugin('NewUserConn', content)
+ 
+ 
+ class ConnectionRuleTests(RelayRuleCase):
+     """R7.4's rule on relay.py itself, for what a real frps would never send."""
+ 
+@@ -224,20 +234,35 @@ class ConnectionRuleTests(RelayRuleCase):
+         self.relay.EDGE_TOKEN = ''
+         for token in ('', TOKEN):
+             with self.subTest(token_is_empty=not token):
+                 self.assertIs(self.decide(new_user_conn('edge', 'https', {'edge': token}))['reject'], True)
+ 
+     def test_the_edge_token_opens_only_the_edge(self) -> None:
+         self.assertEqual(self.decide(new_user_conn('globex', 'https', {'edge': TOKEN})), BLOCKED)
+ 
+-    def test_a_key_in_the_metas_changes_nothing(self) -> None:
+-        # The tunnel of a changed key still sends its old key, and a live tunnel stays (R6.1).
+-        metas = {'name': 'acme', 'key': 'an old key'}
+-        self.assertEqual(self.decide(new_user_conn('acme', 'https', metas)), PASSED)
++    def test_a_tunnel_of_a_changed_key_stays(self) -> None:
++        # The tunnel of a changed key still sends the key it logged in with, and a live tunnel stays (R6.1).
++        self.assertTrue(self.relay.store_link_key('acme', self.relay.key_hash('new'), self.relay.key_hash(OWNERS_KEY)))
++        self.assertTrue(self.relay.store_link_key('acme', self.relay.key_hash('newer'), self.relay.key_hash('new')))
++        for key in (OWNERS_KEY, 'new', 'newer'):
++            with self.subTest(key_of_the_tunnel=key):
++                self.assertEqual(self.decide(new_user_conn('acme', 'https', {'key': key})), PASSED)
++
++    def test_a_tunnel_of_an_earlier_owner_opens_nothing_under_a_new_binding(self) -> None:
++        # frps sends its owner's login as it was. A binding it never logged in with is another company's.
++        for proxy_name, proxy_type in (('acme', 'https'), ('acme-3f2a9c1b-app', 'stcp')):
++            with self.subTest(proxy_type=proxy_type):
++                metas = {'name': 'acme', 'key': 'the key of the earlier owner'}
++                self.assertEqual(self.decide(new_user_conn(proxy_name, proxy_type, metas)), FREED)
++
++    def test_a_tunnel_with_no_usable_key_opens_nothing(self) -> None:
++        for metas in ({}, {'key': ''}, {'key': 7}, {'key': None}, 'not an object'):
++            with self.subTest(metas=metas):
++                self.assertEqual(self.decide(new_user_conn('acme', 'https', metas)), FREED)
+ 
+ 
+ class NoWaitTests(RelayRuleCase):
+     """Review Focus 5 without a clock: every thing that could make a crowd wait on relay.py, shown not to."""
+ 
+     def test_an_answer_is_one_select_by_the_binding_name(self) -> None:
+         statements: list[str] = []
+         connection = self.relay.db()
+@@ -274,23 +299,54 @@ class NoWaitTests(RelayRuleCase):
+         with self.relay.route_lock('acme'):
+             thread = threading.Thread(target=answer_on_a_new_connection, daemon=True)
+             thread.start()
+             thread.join(5)
+         self.assertFalse(thread.is_alive(), 'the connection waited')
+         self.assertEqual(answers, [PASSED])
+ 
+ 
++class ThreadConnectionTests(RelayRuleCase):
++    def test_a_finished_connection_leaves_no_sqlite_connection_open(self) -> None:
++        # Each connection from frps is a thread, and a crowd is that many threads, each with a connection of its own that
++        # only the garbage collector would close.
++        opened = []
++        relay = self.relay
++
++        class Watched(relay.Handler):
++            def do_GET(self) -> None:
++                opened.append(relay.db())
++                super().do_GET()
++
++        def closed(connection: sqlite3.Connection) -> bool:
++            # A closed connection refuses this from any thread, and an open one answers it from any thread.
++            try:
++                connection.total_changes
++            except sqlite3.ProgrammingError:
++                return True
++            return False
++
++        with relay.RelayServer(('127.0.0.1', 0), Watched) as server:
++            threading.Thread(target=server.handle_request, daemon=True).start()
++            client = http.client.HTTPConnection(*server.server_address, timeout=10)
++            self.addCleanup(client.close)
++            client.request('GET', '/nowhere')
++            self.assertEqual(client.getresponse().status, 404)
++            client.close()
++            self.assertTrue(_wait(lambda: closed(opened[0]), 3), 'the thread ended and its connection stayed open')
++
++
+ class WaitsNoTraceLineShowsTests(RelayRuleCase):
+     """A trace line's ms starts once the request is read and ends before its answer goes out. frps waits for the rest too,
+     and neither wait is a matter of how loaded the machine is, so these tests hold no clock."""
+ 
+     def test_an_answer_leaves_at_once_on_a_kept_connection(self) -> None:
+         # An answer is two writes, its headers and its body. Under Nagle's rule the body waits for the ACK of the headers,
+-        # which the receiver delays by 40 ms: measured 44 ms per answer, on the connections frps keeps.
++        # which the receiver delays by 40 ms: measured 44 ms per answer, on the connections frps keeps. The socket option
++        # stands in for that measurement, which would need a clock on a shared machine.
+         no_delay = []
+ 
+         class Watched(self.relay.Handler):
+             def do_GET(self) -> None:
+                 no_delay.append(self.connection.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
+                 super().do_GET()
+ 
+         with self.relay.RelayServer(('127.0.0.1', 0), Watched) as server:
+@@ -315,35 +371,61 @@ class WaitsNoTraceLineShowsTests(RelayRuleCase):
+ class AdminCase(unittest.TestCase):
+     def setUp(self) -> None:
+         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-ban-')))
+         self.env = dict(os.environ, RELAY_DB=str(self.tmp / 'relay.db'), RELAY_CADDYFILE=str(self.tmp / 'Caddyfile'))
+         (self.tmp / 'Caddyfile').write_text('')
+ 
+ 
+ class BanCommandTests(AdminCase):
++    def run_admin(self, *args: str) -> subprocess.CompletedProcess:
++        return subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args], env=self.env,
++                              capture_output=True, text=True, timeout=30)
++
+     def admin(self, *args: str) -> list[str]:
+-        finished = subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args], env=self.env,
+-                                  check=True, capture_output=True, text=True, timeout=30)
++        finished = self.run_admin(*args)
++        self.assertEqual(finished.returncode, 0, finished.stderr)
+         return finished.stdout.splitlines()
+ 
++    def banned_names(self) -> list[str]:
++        with sqlite3.connect(self.env['RELAY_DB']) as connection:
++            return [row[0] for row in connection.execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
++
+     def ban_reason(self, name: str) -> str:
+         with sqlite3.connect(self.env['RELAY_DB']) as connection:
+             return connection.execute('SELECT ban_reason FROM bindings WHERE name = ?', (name,)).fetchone()[0]
+ 
+     def test_ban_cut_prints_restart(self) -> None:
+         self.assertEqual(self.admin('ban', 'acme', '--cut')[-1], 'restart frps')
+         self.assertNotIn('restart frps', self.admin('ban', 'globex'))
+ 
+     def test_cut_is_no_part_of_the_reason(self) -> None:
+         self.admin('ban', 'acme', 'stolen', 'machine', '--cut')
+         self.assertEqual(self.ban_reason('acme'), 'stolen machine')
+         self.admin('ban', 'globex', '--cut')
+         self.assertEqual(self.ban_reason('globex'), 'blocked by the relay operator')
+ 
++    def test_cut_may_come_before_the_name(self) -> None:
++        self.assertEqual(self.admin('ban', '--cut', 'acme', 'stolen')[-1], 'restart frps')
++        self.assertEqual(self.banned_names(), ['acme'])
++        self.assertEqual(self.ban_reason('acme'), 'stolen')
++
++    def test_a_ban_takes_only_what_can_be_a_name(self) -> None:
++        for name in ('--cat', 'not_a_name', 'ab--cd'):
++            with self.subTest(name=name):
++                refused = self.run_admin('ban', name, 'acme')
++                self.assertEqual(refused.returncode, 1, refused.stdout)
++                self.assertEqual(self.banned_names(), [])
++
++    def test_a_ban_with_no_name_says_how_to_use_it(self) -> None:
++        refused = self.run_admin('ban', '--cut')
++        self.assertEqual(refused.returncode, 2, refused.stdout)
++        self.assertNotIn('restart frps', refused.stdout)
++        self.assertIn('usage', refused.stderr)
++
+ 
+ class OperatorCommandTests(AdminCase):
+     """hornhoof-relay itself, its own text, with stand-ins for what only the droplet has."""
+ 
+     def setUp(self) -> None:
+         super().setUp()
+         self.calls = self.tmp / 'systemctl-calls'
+         stand_ins = self.tmp / 'bin'
+@@ -368,16 +450,29 @@ class OperatorCommandTests(AdminCase):
+         return self.calls.read_text().splitlines() if self.calls.exists() else []
+ 
+     def test_a_ban_with_cut_restarts_frps_after_caddys_list(self) -> None:
+         done = self.operator('ban', 'acme', '--cut')
+         self.assertEqual(done.returncode, 0, done.stderr)
+         self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
+         self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
+ 
++    def test_a_ban_with_cut_first_blocks_the_name_it_was_given(self) -> None:
++        done = self.operator('ban', '--cut', 'acme')
++        self.assertEqual(done.returncode, 0, done.stderr)
++        self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
++        self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
++
++    def test_the_help_promises_what_a_ban_does(self) -> None:
++        # A live https tunnel's visitors get a closed connection: the 410 page comes only once that tunnel is gone.
++        help_text = ' '.join(line.lstrip('# ') for line in (ROOT / 'relay/hornhoof-relay').read_text().splitlines()
++                             if line.startswith('#'))
++        self.assertNotIn('answer 410 at once', help_text)
++        self.assertIn('refuses new connections at once', help_text)
++
+     def test_a_ban_without_cut_restarts_nothing(self) -> None:
+         done = self.operator('ban', 'acme', 'restart', 'frps')
+         self.assertEqual(done.returncode, 0, done.stderr)
+         self.assertEqual(self.systemctl_calls(), ['reload caddy'])
+ 
+     def test_the_operator_still_reads_what_the_relay_says(self) -> None:
+         self.assertIn('ban acme: done', self.operator('ban', 'acme').stdout)
+         self.assertIn('acme  created', self.operator('list').stdout)
+diff --git a/relay/test/test_keys.py b/relay/test/test_keys.py
+index c5afb68..83016df 100644
+--- a/relay/test/test_keys.py
++++ b/relay/test/test_keys.py
+@@ -847,10 +847,148 @@ class ConnectionTests(RelayInProcess):
+                 ('a body read in full', raw_request('POST', '/api/v1/bindings', b'{}', (JSON_BODY,)), [201])):
+             with self.subTest(label=label):
+                 exchange = self.exchange(request, within=0.5)
+                 self.assertEqual(exchange.statuses, statuses)
+                 self.assertFalse(exchange.closed, 'a clean request must keep its connection')
+                 self.assertFalse(exchange.says_close, 'a clean answer must not say Connection: close')
+ 
+ 
++def frps_shows_nothing(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
++    return 404, b'{}'
++
++
++def frps_shows_acme_online(path: str, cap: float = 0.5) -> tuple[int, bytes]:
++    if '/https/' in path:
++        return 200, b'{"status":"online","clientID":"acme-aaaaaaaa-link"}'
++    return 404, b'{}'
++
++
++class FreedNameTests(RelayInProcess):
++    """A name's change of owner, at the plugin and the API, with a stand-in for frps's dashboard, so that each step lands
++    exactly where a real frps could put it and no test waits for a moment to come. frps asks the plugin before it makes a
++    proxy, so that between that answer and its dashboard showing the proxy, only the relay's row knows of the route."""
++
++    NOW = 1_900_000_000
++
++    def registration(self, key: str = 'old') -> dict:
++        metas = {'name': 'acme', 'key': key, 'client': 'acme-aaaaaaaa-link'}
++        return {'user': {'user': '', 'metas': metas, 'run_id': 'r1'},
++                'proxy_name': 'acme', 'proxy_type': 'https', 'subdomain': 'acme'}
++
++    def new_connection(self, key: str) -> dict:
++        return {'user': {'user': '', 'metas': {'name': 'acme', 'key': key}, 'run_id': 'r1'},
++                'proxy_name': 'acme', 'proxy_type': 'https', 'remote_addr': '203.0.113.9:40000'}
++
++    def at(self, seconds_later: int = 0):
++        return patch.object(self.relay, 'now', return_value=self.NOW + seconds_later)
++
++    def assert_passed(self, op: str, content: dict) -> None:
++        answer = self.relay.plugin(op, content)
++        self.assertIs(answer['reject'], False, answer.get('reject_reason'))
++
++    def assert_taken(self) -> None:
++        self.assertEqual(self.api('GET', '/api/v1/names/acme'),
++                         (200, {'name': 'acme', 'free': False, 'reason': 'taken'}))
++        status, body = self.api('POST', '/api/v1/bindings', body={'name': 'acme'})
++        self.assertEqual(status, 409, 'the name must not go to a new owner')
++        self.assertTrue(body.get('error') == 'taken', 'the refusal must say taken')
++        self.assertEqual(self.counts(), (0, 0), 'a refused binding stores nothing')
++
++    def bind_acme_for_the_next_owner(self) -> str:
++        status, body = self.api('POST', '/api/v1/bindings', body={'name': 'acme'})
++        self.assertEqual(status, 201, 'the name is free for its next owner')
++        return body['key']
++
++    def test_r1_5_a_freed_name_waits_for_a_route_frps_has_not_shown_yet(self) -> None:
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            self.assert_passed('NewProxy', self.registration())
++            self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
++            self.assert_taken()
++        with patch.object(self.relay, '_dash_get', frps_shows_acme_online):
++            self.assert_taken()
++
++    def test_r1_5_a_route_frps_never_showed_frees_the_name_after_its_window(self) -> None:
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            with self.at():
++                self.assert_passed('NewProxy', self.registration())
++                self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
++            with self.at(self.relay.PENDING_S):
++                self.assert_taken()
++            with self.at(self.relay.PENDING_S + 1):
++                self.assertEqual(self.api('GET', '/api/v1/names/acme'), (200, {'name': 'acme', 'free': True}))
++                self.bind_acme_for_the_next_owner()
++
++
++    def while_frps_is_first_read(self, happening: Callable[[], None]):
++        """frps's dashboard shows nothing, and this happens at its first read. In a NewProxy, that read comes after the
++        call's login check and before its row lands, which is the moment a release or a ban could come in."""
++        waiting = [happening]
++
++        def dashboard(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
++            if waiting:
++                waiting.pop()()
++            return 404, b'{}'
++
++        return patch.object(self.relay, '_dash_get', dashboard)
++
++    def test_r1_5_a_route_shown_while_the_name_is_checked_still_counts(self) -> None:
++        # A route read of the old owner, begun before its release, may turn the row held after frps was read for the name.
++        def the_row_turns_held() -> None:
++            self.relay.write("UPDATE routes SET state = 'held' WHERE name = 'acme'", ())
++
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            self.assert_passed('NewProxy', self.registration())
++            self.free_acme()
++        with self.while_frps_is_first_read(the_row_turns_held):
++            self.assertEqual(self.api('GET', '/api/v1/names/acme'),
++                             (200, {'name': 'acme', 'free': False, 'reason': 'taken'}))
++
++    def route_rows(self) -> list[tuple]:
++        return self.relay.db().execute('SELECT name, generation FROM routes').fetchall()
++
++    def assert_registration_refused(self, meanwhile: Callable[[], None], reason: str) -> None:
++        with self.while_frps_is_first_read(meanwhile):
++            answer = self.relay.plugin('NewProxy', self.registration())
++        self.assertEqual(answer, {'reject': True, 'reject_reason': reason})
++        self.assertEqual(self.route_rows(), [], 'a refused registration moves no generation')
++
++    def free_acme(self) -> None:
++        self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
++
++    def test_r1_1_a_registration_racing_a_release_is_refused(self) -> None:
++        self.assert_registration_refused(self.free_acme, 'no binding acme with this key')
++
++    def test_r1_1_a_registration_racing_a_ban_is_refused(self) -> None:
++        self.assert_registration_refused(lambda: self.relay.store_ban('acme', 'a test'), 'acme.hornhoof.org is blocked')
++
++    def test_r6_1_a_registration_racing_a_key_change_is_refused(self) -> None:
++        def change_the_key() -> None:
++            self.assertEqual(self.api('POST', KEY_PATH, 'old')[0], 200)
++
++        self.assert_registration_refused(change_the_key, 'no binding acme with this key')
++
++    def test_r1_1_a_registration_racing_a_new_owner_never_reaches_it(self) -> None:
++        next_owner = []
++
++        def freed_and_bound_again() -> None:
++            self.free_acme()
++            next_owner.append(self.bind_acme_for_the_next_owner())
++
++        self.assert_registration_refused(freed_and_bound_again, 'no binding acme with this key')
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            status, route = self.api('GET', ROUTE_PATH, next_owner[0])
++        self.assertEqual((status, route['state'], route['generation']), (200, 'empty', 0))
++
++    def test_r7_4_an_old_owners_route_is_refused_under_a_new_binding(self) -> None:
++        # frps shows the route later than the window allows for, when the name already has its next owner.
++        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
++            with self.at():
++                self.assert_passed('NewProxy', self.registration())
++                self.free_acme()
++            with self.at(self.relay.PENDING_S + 1):
++                next_key = self.bind_acme_for_the_next_owner()
++        self.assertEqual(self.relay.plugin('NewUserConn', self.new_connection('old')),
++                         {'reject': True, 'reject_reason': 'freed'})
++        self.assert_passed('NewUserConn', self.new_connection(next_key))
++
+ if __name__ == '__main__':
+     unittest.main()
+

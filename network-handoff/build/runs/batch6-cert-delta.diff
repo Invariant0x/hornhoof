@@ -1,0 +1,381 @@
+# Review package: batch 6, slice cert-delta
+
+## ed08a4da Keep the link on http when the listener could not load its chain, and say why in the log
+
+The fix round of batch 6's certificate slice. Each behaviour change starts from a test that failed for it.
+
+mayRunHttps read only a chain's first block, while LinkListener.use loads the whole chain with createSecureContext. A
+leaf with a broken or cut off second block gave https, and the link then stopped working in browsers. It now makes the
+listener's own call as well, and keeps checkPrivateKey, because createSecureContext takes a key of another algorithm.
+
+A date that cannot be read gave NaN, which passed the time check, so the check now asks for time left and NaN answers no.
+
+linkMode swallowed every throw, so an operator whose link stayed on http had no trace of why. It now writes a warning
+through loggable, which keeps no value an error was given. A test checks with booleans that no key reaches the line.
+
+configFor took names every object inherits, such as toString, as a mode and wrote a proxy with no port. It now throws
+unless the mode is the table's own name.
+
+The fake relay kept a name's sync across its binding's delete, while the real relay drops sync with the binding
+(BINDING_LIFETIME_TABLES). A name freed and bound again now starts with no sync record, in the fake as in the relay. Two
+comments are corrected: the sync record's rule on the copy, and where the racing sign-in tries now run.
+
+Ruling: linkMode takes an optional third argument log, writeTunnelSettings passes it on, PublicLinks.sync gives ctx.log, and the CLI and Task 8's status call give none - why: plan 1b's Interfaces and Task 8's manager call linkMode with two arguments, and a status read should not write a line per poll - cost if wrong: a broken row's reason reaches the log only from a sync, which runs at every lead start and link change
+Ruling: the sync record's comment says a sync that is on names its copy and one that is off may name one or none - why: the brief's wording (a copy unless the state is off) does not match the refine, which lets a copy through in any state and agrees with relay.py's sync_copy - cost if wrong: a comment only
+
+---
+ apps/server/src/modules/link/client.ts |  2 ++
+ apps/server/src/modules/link/link.ts   |  6 +++---
+ apps/server/src/modules/tls/store.ts   | 26 +++++++++++++++++++++-----
+ apps/server/test/client.test.ts        |  7 +++++++
+ apps/server/test/fake-relay.test.ts    | 14 ++++++++++++++
+ apps/server/test/fake-relay.ts         |  4 +++-
+ apps/server/test/link.test.ts          | 20 +++++++++++++++++++-
+ apps/server/test/sign-in-limit.test.ts |  3 ++-
+ 8 files changed, 71 insertions(+), 11 deletions(-)
+
+diff --git a/apps/server/src/modules/link/client.ts b/apps/server/src/modules/link/client.ts
+index 968e058d..fe726143 100644
+--- a/apps/server/src/modules/link/client.ts
++++ b/apps/server/src/modules/link/client.ts
+@@ -24,16 +24,18 @@ const PROXY: Record<TunnelSettings['mode'], { localPort: number; lastLine: strin
+ const quoted = (text: string) => JSON.stringify(text);
+ 
+ /* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
+    link's traffic to the app and to nothing else on the company's network, whatever the relay says. */
+ function configFor(settings: TunnelSettings): string {
+   const server = Server.parse(settings.tunnel);
+   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
+   if (!settings.key) throw new Error('the link has no key');
++  /* The table's own names only: an object also answers to the names it inherits, such as toString. */
++  if (!Object.hasOwn(PROXY, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
+   const proxy = PROXY[settings.mode];
+   return `serverAddr = ${quoted(server.serverAddr)}
+ serverPort = ${server.serverPort}
+ loginFailExit = false
+ log.to = "console"
+ log.level = "info"
+ log.disablePrintColor = true
+ transport.protocol = "wss"
+diff --git a/apps/server/src/modules/link/link.ts b/apps/server/src/modules/link/link.ts
+index 04a2a29d..e376e1d1 100644
+--- a/apps/server/src/modules/link/link.ts
++++ b/apps/server/src/modules/link/link.ts
+@@ -30,21 +30,21 @@ export async function publicUrl(db: Db, config: Config): Promise<string> {
+ /* Keeps a link the relay just gave, in place of the one before. */
+ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, bound: Bound): Promise<void> {
+   const row = { name: bound.name, url: bound.url, keyEnc: encryptSecret(bound.key, config.secret), tunnelEnc: encryptSecret(JSON.stringify(bound.tunnel), config.secret) };
+   await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, createdAt: new Date() } });
+ }
+ 
+ /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
+    the tunnel never reads half a file. The link's key in them is for the tunnel container alone. */
+-export async function writeTunnelSettings(db: Db, config: Config): Promise<void> {
++export async function writeTunnelSettings(db: Db, config: Config, log?: FastifyBaseLogger): Promise<void> {
+   const file = join(config.controlDir, TUNNEL_FILE);
+   const [row] = await db.select().from(publicLinks).limit(1);
+   if (!row) return rmSync(file, { force: true });
+-  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config) };
++  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config, log) };
+   rmSync(`${file}.new`, { force: true });
+   writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
+   renameSync(`${file}.new`, file);
+ }
+ 
+ /* The company's link at hornhoof.org: asking the relay for it, changing and removing it, and the tunnel settings that
+    follow it. Changes go one at a time, so two people renaming at once do not leave a link nobody keeps. */
+ export class PublicLinks {
+@@ -104,14 +104,14 @@ export class PublicLinks {
+   async letGo(name: string, key: string): Promise<void> {
+     await this.relay.unbind(name, key).catch(err => this.ctx.log.warn({ error: loggable(err), name }, 'Could not let the old public link go at the relay.'));
+   }
+ 
+   /* The tunnel's settings for the link the database holds. A control folder that cannot be written, as when Hornhoof
+      runs outside compose, goes to the log: the link works once the tunnel reads the settings. */
+   async sync(): Promise<void> {
+     try {
+-      await writeTunnelSettings(this.ctx.db, this.ctx.config);
++      await writeTunnelSettings(this.ctx.db, this.ctx.config, this.ctx.log);
+     } catch (err) {
+       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
+     }
+   }
+ }
+diff --git a/apps/server/src/modules/tls/store.ts b/apps/server/src/modules/tls/store.ts
+index c18bb34a..1cd609d6 100644
+--- a/apps/server/src/modules/tls/store.ts
++++ b/apps/server/src/modules/tls/store.ts
+@@ -1,14 +1,17 @@
+ import { createPrivateKey, X509Certificate } from 'node:crypto';
++import { createSecureContext } from 'node:tls';
+ import { eq } from 'drizzle-orm';
++import type { FastifyBaseLogger } from 'fastify';
+ import type { Config } from '../../config.js';
+ import { decryptSecret } from '../../crypto/secrets.js';
+ import type { Db } from '../../db/client.js';
+ import { linkTls, publicLinks } from '../../db/schema.js';
++import { loggable } from '../../errors.js';
+ import type { LinkView } from '../link/link.js';
+ import { certInfo } from './x509.js';
+ 
+ export type TlsRow = typeof linkTls.$inferSelect;
+ type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
+ 
+ /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
+ const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
+@@ -27,33 +30,46 @@ export async function saveTls(db: Db, companyId: string, set: TlsFields & Pick<T
+ /* Changes a row that exists. A change that finds none would lose what the manager just decided, so it throws. */
+ export async function updateTls(db: Db, companyId: string, set: TlsFields): Promise<void> {
+   const changed = await db.update(linkTls).set({ ...set, updatedAt: new Date() }).where(eq(linkTls.companyId, companyId)).returning({ companyId: linkTls.companyId });
+   if (changed.length === 0) throw new Error('The link has no certificate row to change.');
+ }
+ 
+ const isKeyOf = (certPem: string, keyPem: string) => new X509Certificate(certPem).checkPrivateKey(createPrivateKey(keyPem));
+ 
++/* Whether the listener could serve this chain with this key. X509Certificate reads only a chain's first block, while
++   createSecureContext, the listener's own call, reads them all and throws on a broken one. It takes a key of another
++   algorithm without a word, so the key's own check stays. */
++function listenerCanServe(certPem: string, keyPem: string): boolean {
++  createSecureContext({ cert: certPem, key: keyPem });
++  return isKeyOf(certPem, keyPem);
++}
++
++/* NaN compares false, so a date that cannot be read counts as no time left. */
++const hasTimeLeft = (notAfter: Date, now: Date) => notAfter.getTime() - now.getTime() > LEAST_LEFT_MS;
++
+ /* Whether this row may carry this link over https now: the manager chose https, for this very name, and what the
+    listener would serve is a certificate of the link's host with time left and its own key. A certificate or a key that
+    cannot be read throws, which linkMode takes as no. */
+ export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'certKeyEnc'>, link: LinkView, secret: Buffer, now: Date): boolean {
+   if (row.mode !== 'https' || row.name !== link.name || !row.certPem || !row.certKeyEnc) return false;
+   const info = certInfo(row.certPem);
+   if (!info.names.includes(new URL(link.url).hostname)) return false;
+-  if (info.notAfter.getTime() - now.getTime() <= LEAST_LEFT_MS) return false;
+-  return isKeyOf(row.certPem, decryptSecret(row.certKeyEnc, secret));
++  if (!hasTimeLeft(info.notAfter, now)) return false;
++  return listenerCanServe(row.certPem, decryptSecret(row.certKeyEnc, secret));
+ }
+ 
+ /* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
+    relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
+-   app are the way back whatever the row says. */
+-export async function linkMode(db: Db, config: Config): Promise<'http' | 'https'> {
++   app are the way back whatever the row says. A log, when the caller has one, says why an operator's link stays on http;
++   loggable keeps no value the error was given, so no key reaches it. */
++export async function linkMode(db: Db, config: Config, log?: FastifyBaseLogger): Promise<'http' | 'https'> {
+   if (config.acmeDirectory === null) return 'http';
+   try {
+     const [link] = await db.select().from(publicLinks).limit(1);
+     if (!link) return 'http';
+     const row = await tlsOf(db, link.companyId);
+     return row && mayRunHttps(row, link, config.secret, new Date()) ? 'https' : 'http';
+-  } catch {
++  } catch (err) {
++    log?.warn({ error: loggable(err) }, 'The link stays on http: its certificate could not be checked.');
+     return 'http';
+   }
+ }
+diff --git a/apps/server/test/client.test.ts b/apps/server/test/client.test.ts
+index c37b675f..540cc5fe 100644
+--- a/apps/server/test/client.test.ts
++++ b/apps/server/test/client.test.ts
+@@ -70,16 +70,23 @@ describe('the tunnel client', () => {
+   it('reads settings with no mode as http', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     /* What an app from before this mode wrote: the file stays as it is until the app writes it again. */
+     const today = { url: 'https://acme.hornhoof.org', name: 'acme', key: KEY, tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss' } };
+     clientFor(Settings.parse(JSON.parse(JSON.stringify(today))), dir);
+     expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(CONFIG);
+   });
+ 
++  it('refuses a mode that is only a name every object inherits', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
++    for (const mode of ['toString', 'constructor', '__proto__']) {
++      expect(() => clientFor(settings({}, { mode: mode as TunnelSettings['mode'] }), dir), mode).toThrow(`${mode} is not a tunnel mode`);
++    }
++  });
++
+   it('writes the key so that no character of it can break out of its line', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+     clientFor(settings({}, { key: 'abc"\nlocalIP = "db' }), dir);
+     expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toContain('metadatas.key = "abc\\"\\nlocalIP = \\"db"\n');
+   });
+ 
+   it('refuses tunnel settings it cannot use', () => {
+     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+diff --git a/apps/server/test/fake-relay.test.ts b/apps/server/test/fake-relay.test.ts
+index fc69bf09..e102539c 100644
+--- a/apps/server/test/fake-relay.test.ts
++++ b/apps/server/test/fake-relay.test.ts
+@@ -170,16 +170,30 @@ describe('the fake relay keeps the contract', () => {
+     const emptied = await route(relay, 'acme');
+     expect(emptied.body).toMatchObject({ state: 'empty', client: null, generation: 1, sync: { state: 'on', epoch: 5, generation: 1 } });
+     relay.register('acme', 'acme-aaaaaaaa-link');
+     const next = { ...record, generation: 2 };
+     expect(await sync(relay, 'acme', { ...next, epoch: 5 })).toEqual({ status: 409, body: { error: 'stale_epoch' } });
+     expect((await sync(relay, 'acme', { ...next, epoch: 6 })).status).toBe(200);
+   });
+ 
++  it('R2.4 drops the sync record with the binding, so a name freed and bound again starts with none', async () => {
++    const relay = await relayWithBinding();
++    relay.register('acme', 'acme-aaaaaaaa-link');
++    const record = { client: 'acme-aaaaaaaa-link', generation: 1, state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 5 };
++    await sync(relay, 'acme', record);
++    await call(relay, 'DELETE', '/bindings/acme', { key: 'k' });
++    relay.drop('acme');
++    const { key } = (await call(relay, 'POST', '/bindings', { body: { name: 'acme' } })).body;
++    expect((await route(relay, 'acme', key)).body.sync).toEqual(NO_SYNC);
++    relay.register('acme', 'globex-aaaaaaaa-link');
++    const next = { ...record, client: 'globex-aaaaaaaa-link', generation: 2, epoch: 1 };
++    expect((await sync(relay, 'acme', next, key)).status).toBe(200);
++  });
++
+   it('R3.1 empties the route when the holder is dropped', async () => {
+     const relay = await relayWithBinding();
+     relay.register('acme', 'acme-aaaaaaaa-link');
+     relay.drop('acme');
+     expect((await route(relay, 'acme')).body).toMatchObject({ state: 'empty', client: null, generation: 1 });
+     expect(relay.register('acme', 'acme-bbbbbbbb-link')).toEqual({ ok: true, generation: 2 });
+   });
+ 
+diff --git a/apps/server/test/fake-relay.ts b/apps/server/test/fake-relay.ts
+index 1951930a..dca081d6 100644
+--- a/apps/server/test/fake-relay.ts
++++ b/apps/server/test/fake-relay.ts
+@@ -42,17 +42,18 @@ export type FakeRelay = {
+ 
+ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+ 
+ const nowSeconds = () => Math.floor(Date.now() / 1000);
+ const newKey = () => randomBytes(24).toString('base64url');
+ const NO_SYNC: FakeSync = { state: 'off', copy: null, epoch: 0, generation: 0, at: null };
+ const UNKNOWN = { error: 'unknown', message: 'The relay cannot tell whether the route is live.' };
+ 
+-/* The sync record R2.4 takes: exactly these fields, a copy only when the sync is on. */
++/* The sync record R2.4 takes: exactly these fields, and a sync that is on names its copy. One that is off may name one
++   or none, as relay.py's sync_copy reads it. */
+ const text = z.string().min(1).max(100);
+ const SyncRecord = z
+   .strictObject({ client: text, generation: z.int().min(1), state: z.enum(['on', 'off']), copy: text.nullable(), epoch: z.int().min(1) })
+   .refine(record => record.copy !== null || record.state === 'off');
+ type SyncRecord = z.infer<typeof SyncRecord>;
+ 
+ const holds = (routes: Map<string, FakeRoute>, name: string) => routes.get(name)?.state === 'held';
+ 
+@@ -174,16 +175,17 @@ export async function fakeRelay(): Promise<FakeRelay> {
+     const key = newKey();
+     relay.bindings.set(name, { key });
+     if (!relay.routes.has(name)) relay.routes.set(name, { state: 'empty', client: null, since: nowSeconds(), generation: 0 });
+     return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: tunnelFor(name, key) });
+   });
+   app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', { preHandler: authorize }, async (req, reply) => {
+     relay.bindings.delete(req.params.name);
+     relay.visitorKeys.delete(req.params.name);
++    relay.syncs.delete(req.params.name);
+     return reply.code(204).send();
+   });
+   app.get<{ Params: { name: string } }>('/api/v1/links/:name/route', { preHandler: authorize }, async (req, reply) => {
+     if (relay.frpsDown) return reply.code(503).send(UNKNOWN);
+     if (relay.routeAnswer === 'hang') return reply.hijack();
+     return reply.type('application/json').send(spoiled(relay.routeAnswer, routeBody(relay, req.params.name)));
+   });
+   app.post<{ Params: { name: string }; Body: unknown }>('/api/v1/links/:name/sync', { preHandler: authorize }, async (req, reply) => {
+diff --git a/apps/server/test/link.test.ts b/apps/server/test/link.test.ts
+index ea75d45b..3500ba60 100644
+--- a/apps/server/test/link.test.ts
++++ b/apps/server/test/link.test.ts
+@@ -1,16 +1,16 @@
+ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ import { runCli } from '../src/cli.js';
+ import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
+ import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
+-import { writeTunnelSettings } from '../src/modules/link/link.js';
++import { PublicLinks, writeTunnelSettings } from '../src/modules/link/link.js';
+ import { newAccountKey } from '../src/modules/tls/acme.js';
+ import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
+ import { selfSigned } from '../src/modules/tls/x509.js';
+ import { fakeRelay } from './fake-relay.js';
+ import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+ 
+ /* A company with its own control folder, asking the fake relay for links. */
+ async function company(env: NodeJS.ProcessEnv = {}) {
+@@ -94,16 +94,18 @@ describe("the tunnel's mode", () => {
+       ['no certificate', { certPem: null }],
+       ['no key', { certKeyEnc: null }],
+       ['a certificate with 23 h left', { certPem: shortLived.certPem, certKeyEnc: sealed(shortLived.keyPem) }],
+       ['a certificate of another host', { certPem: otherHost.certPem, certKeyEnc: sealed(otherHost.keyPem) }],
+       ["another certificate's key", { certKeyEnc: sealed(another.keyPem) }],
+       ['a key that does not decrypt', { certKeyEnc: encryptSecret(pair.keyPem, Buffer.alloc(32, 9)) }],
+       ['a key that is no key', { certKeyEnc: sealed('no key') }],
+       ['text that is no certificate', { certPem: 'not a certificate' }],
++      ['a chain whose second block is broken', { certPem: `${pair.certPem}-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n` }],
++      ['a chain whose second block is cut off', { certPem: `${pair.certPem}${another.certPem.slice(0, 200)}` }],
+       ['a row in http mode', { mode: 'http' }],
+     ];
+     for (const [what, change] of cases) {
+       expect(await modeWith({ ...good, ...change }), what).toBe('http');
+     }
+   });
+ 
+   it('keeps every private key out of the tunnel settings', async () => {
+@@ -132,16 +134,32 @@ describe("the tunnel's mode", () => {
+     const pair = await selfSigned(LINK_HOST, { days: 3, now: notBefore });
+     const other = await selfSigned('intermediate.hornhoof.test');
+     const row = { mode: 'https' as const, name: 'acme', certPem: `${pair.certPem}${other.certPem}`, certKeyEnc: encryptSecret(pair.keyPem, secret) };
+     const link = { name: 'acme', url: `https://${LINK_HOST}` };
+     const DAY_MS = 24 * 60 * 60 * 1000;
+     const leaving = (leftMs: number) => new Date(notBefore.getTime() + 3 * DAY_MS - leftMs);
+     expect(mayRunHttps(row, link, secret, leaving(DAY_MS + 1000))).toBe(true);
+     expect(mayRunHttps(row, link, secret, leaving(DAY_MS))).toBe(false);
++    expect(mayRunHttps(row, link, secret, new Date(Number.NaN)), 'a date that cannot be read').toBe(false);
++  });
++
++  it('says in the log why a certificate that cannot be checked leaves the link on http, with no key in the line', async () => {
++    const { db, config, companyId, good, written } = await companyWithCertificate(CERTIFICATES_ON);
++    const certKeyEnc = encryptSecret('-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----\n', config.secret);
++    await saveTls(db, companyId, { ...good, certKeyEnc });
++    const warned: unknown[][] = [];
++    const log = { warn: (...line: unknown[]) => warned.push(line) };
++    await new PublicLinks({ db, config, log: log as never }).sync();
++    expect((JSON.parse(written()) as { mode: unknown }).mode).toBe('http');
++    expect(warned.map(line => line[1])).toEqual(['The link stays on http: its certificate could not be checked.']);
++    /* Booleans only: a failure here must not print a key. */
++    const text = JSON.stringify(warned);
++    expect(text.includes('PRIVATE KEY')).toBe(false);
++    expect(text.includes(certKeyEnc)).toBe(false);
+   });
+ });
+ 
+ describe("the certificate's row", () => {
+   it('is made once, keeps what a later save does not name, and may not be changed before it exists', async () => {
+     const { db } = await company();
+     const [acme] = await db.select().from(companies);
+     expect(await tlsOf(db, acme!.id)).toBeNull();
+diff --git a/apps/server/test/sign-in-limit.test.ts b/apps/server/test/sign-in-limit.test.ts
+index bd7b0747..36d12842 100644
+--- a/apps/server/test/sign-in-limit.test.ts
++++ b/apps/server/test/sign-in-limit.test.ts
+@@ -159,17 +159,18 @@ describe('POST /api/auth/login limits in the database', () => {
+   it('lets 30 of 100 wrong sign-ins at once from one address reach the password check', async () => {
+     const { app } = await testApp();
+     await setUpCompany(app);
+     const seen = statements();
+     const answers = await Promise.all(Array.from({ length: 100 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
+     expect(answers.filter(a => a.statusCode === 401)).toHaveLength(30);
+     expect(answers.filter(a => a.statusCode === 429)).toHaveLength(70);
+     /* PGlite has one connection, so this shows the order of the lock and the insert, and the next test their one
+-       transaction; tries really racing on a pool of connections wait for plan 3's Postgres harness. */
++       transaction; tries really racing on a pool of connections need real Postgres, which plan 3 Task 1's harness
++       brings (test/real/auth-locks.test.ts). */
+     const inserts = seen.flatMap((s, at) => (s.sql.includes('INSERT INTO sign_in_attempts') ? [at] : []));
+     expect(inserts).toHaveLength(100);
+     for (const at of inserts) {
+       expect(seen[at - 1]?.sql).toContain('pg_advisory_xact_lock');
+       expect(seen[at - 1]?.params).toEqual([SIGN_IN_LOCK]);
+     }
+   });
+ 
+

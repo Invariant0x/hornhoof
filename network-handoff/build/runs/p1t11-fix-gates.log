@@ -1,0 +1,43 @@
+remote: snapshot p1t11-fix-gates-20261104-183327-327538 ready after 9 s, waiting for a slot
+remote: started after 521 s, log /home/altera/hornhoof-network/network-build/runs/remote-p1t11-fix-gates-20261104-183327-327538.log
+== files: apps/server/test/fake-relay.ts
+     [33m[2m✓[22m[39m counts a turn an employee woke as the CEO's once the CEO's message goes into it[33m 1258[2mms[22m[39m
+     [33m[2m✓[22m[39m lets only the CEO switch on a skill that shows the whole company, or move the orchestrator to another subscription[33m 1019[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[32m110 passed[39m[22m[90m (110)[39m
+[2m   Start at [22m 18:42:10
+[2m   Duration [22m 93.88s[2m (tests 93%, import 4%, transform 3%)[22m
+
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                             Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------------
+POST /api/v1/bindings                apps.server.test.fake-relay            9  91.7%      9.0
+nameRules                            apps.server.test.fake-relay            9 100.0%      9.0
+acceptSync                           apps.server.test.fake-relay            7 100.0%      7.0
+register                             apps.server.test.fake-relay            6 100.0%      6.0
+fakeRelay                            apps.server.test.fake-relay            4  96.9%      4.0
+POST /api/v1/links/:name/sync        apps.server.test.fake-relay            4 100.0%      4.0
+spoiled                              apps.server.test.fake-relay            4 100.0%      4.0
+GET /api/v1/links/:name/route        apps.server.test.fake-relay            3 100.0%      3.0
+drop                                 apps.server.test.fake-relay            3 100.0%      3.0
+routeBody                            apps.server.test.fake-relay            3 100.0%      3.0
+GET /api/v1/health                   apps.server.test.fake-relay            2 100.0%      2.0
+GET /api/v1/names/:name              apps.server.test.fake-relay            2 100.0%      2.0
+holds                                apps.server.test.fake-relay            2 100.0%      2.0
+DELETE /api/v1/bindings/:name        apps.server.test.fake-relay            1 100.0%      1.0
+POST /api/v1/links/:name/key         apps.server.test.fake-relay            1 100.0%      1.0
+POST /api/v1/links/:name/visitor-key apps.server.test.fake-relay            1 100.0%      1.0
+newKey                               apps.server.test.fake-relay            1 100.0%      1.0
+newRelay                             apps.server.test.fake-relay            1 100.0%      1.0
+nowSeconds                           apps.server.test.fake-relay            1 100.0%      1.0
+tunnelFor                            apps.server.test.fake-relay            1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+remote: command exited 0 after 622 s

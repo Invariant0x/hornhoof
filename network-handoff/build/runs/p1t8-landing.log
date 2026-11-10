@@ -1,0 +1,172 @@
+remote: snapshot p1t8-landing-20261104-221001-876063 ready after 9 s, waiting for a slot
+remote: started after 10 s, log /home/altera/hornhoof-network/network-build/runs/remote-p1t8-landing-20261104-221001-876063.log
+EEEEE....private-words: none here, skipped
+..EE.........EE
+======================================================================
+ERROR: test_edge_today (unittest.loader._FailedTest.test_edge_today)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_edge_today
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_edge_today.py", line 20, in <module>
+    from harness import BIN, Client, ROOT, Stack, _Process, _dns_names, _ensure_binaries, render_caddyfile
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_eviction (unittest.loader._FailedTest.test_eviction)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_eviction
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_eviction.py", line 12, in <module>
+    from harness import Client, Stack
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_frp_facts (unittest.loader._FailedTest.test_frp_facts)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_frp_facts
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_frp_facts.py", line 11, in <module>
+    from harness import Stack, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_keys (unittest.loader._FailedTest.test_keys)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_keys
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_keys.py", line 27, in <module>
+    from harness import ROOT, Client, Stack, _request, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_peers (unittest.loader._FailedTest.test_peers)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_peers
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_peers.py", line 26, in <module>
+    from harness import Stack, _request, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_restart (unittest.loader._FailedTest.test_restart)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_restart
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_restart.py", line 14, in <module>
+    from harness import Stack, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_route (unittest.loader._FailedTest.test_route)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_route
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_route.py", line 21, in <module>
+    from harness import Stack, _request, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_sync (unittest.loader._FailedTest.test_sync)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_sync
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_sync.py", line 15, in <module>
+    from harness import Client, Stack, _request, _wait
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+======================================================================
+ERROR: test_today (unittest.loader._FailedTest.test_today)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_today
+Traceback (most recent call last):
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 433, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/home/altera/hornhoof-network/quality/python/cpython-3.14.7-linux-x86_64-gnu/lib/python3.14/unittest/loader.py", line 374, in _get_module_from_name
+    __import__(name)
+    ~~~~~~~~~~^^^^^^
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/test_today.py", line 9, in <module>
+    from harness import Stack
+  File "/home/altera/hornhoof-network/hornhoof-edge/relay/test/harness.py", line 26
+    <<<<<<< ours
+    ^^
+SyntaxError: invalid syntax
+
+
+----------------------------------------------------------------------
+Ran 24 tests in 0.147s
+
+FAILED (errors=9)
+remote: command exited 1 after 16 s
+exit 1

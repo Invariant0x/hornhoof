@@ -1,0 +1,11 @@
+remote: snapshot p2t4-mut-front-20261104-181617-276891 ready after 19 s, waiting for a slot
+remote: started after 316 s, log /home/altera/hornhoof-network/network-build/runs/remote-p2t4-mut-front-20261104-181617-276891.log
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.front.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.proxy.edn
+KILLED    apps/server/src/net/front.ts:16 || -> &&
+Function   Namespace  Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------
+startFront net.front       1         0          0      1 100.0%
+----------------------------------------------------------------
+Total                      1         0          0      1  100.0%
+remote: command exited 0 after 357 s

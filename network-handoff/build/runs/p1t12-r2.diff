@@ -1,0 +1,438 @@
+# Review package: lane p1t12
+
+ apps/server/src/modules/link/relay.ts |  105 ++++++++++++-
+ apps/server/test/relay-client.test.ts |  272 +++++++++++++++++++++++++++++++++
+ 2 files changed, 373 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/apps/server/src/modules/link/relay.ts b/apps/server/src/modules/link/relay.ts
+index 66b20b66..fcd4e358 100644
+--- a/apps/server/src/modules/link/relay.ts
++++ b/apps/server/src/modules/link/relay.ts
+@@ -14,47 +14,144 @@ const Check = z.object({ name: z.string(), free: z.boolean(), reason: z.enum(['t
+ const Bound = z
+   .object({
+     name: z.string().refine(isLinkName),
+     url: z.url({ protocol: /^https$/ }).transform(url => url.replace(/\/+$/, '')),
+     key: z.string().min(16).max(1000),
+     tunnel: z.record(z.string(), z.unknown()),
+   })
+   .refine(b => new URL(b.url).hostname.startsWith(`${b.name}.`) && new URL(b.url).pathname === '/');
+ export type Bound = z.infer<typeof Bound>;
+ 
++const Count = z.number().int().nonnegative();
++const SyncRecord = z.object({ state: z.enum(['on', 'off']), copy: z.string().nullable(), epoch: Count, generation: Count, at: Count.nullable() });
++export type SyncRecord = z.infer<typeof SyncRecord>;
++
++/* The route answer may grow fields (R2), so extra ones are let through; every field read here must be right. */
++const RouteBody = z.object({
++  state: z.enum(['held', 'empty']),
++  client: z.string().nullable(),
++  since: Count,
++  generation: Count,
++  relayStarted: Count,
++  evictionBound: Count,
++  sync: SyncRecord,
++});
++export type Route = ({ known: true } & z.infer<typeof RouteBody>) | { known: false; why: 'unreachable' | 'slow' | 'refused' | 'malformed' };
++
++export type SyncPost = { client: string; generation: number; state: 'on' | 'off'; copy: string | null; epoch: number };
++export type SyncResult = { stored: true; sync: SyncRecord } | { stored: false; why: 'not_holder' | 'stale_epoch' | 'unknown' };
++
++/* A relay from before passthrough has no such field, and that reads as not passing through. */
++const Health = z.object({ ok: z.literal(true), frps: z.literal(true), relayStarted: Count, passthrough: z.boolean().default(false) });
++export type Health = { up: boolean; relayStarted: number | null; passthrough: boolean };
++const DOWN: Health = { up: false, relayStarted: null, passthrough: false };
++
++const KeyAnswer = z.object({ key: z.string().min(16).max(1000) });
++const VisitorKeyAnswer = z.object({ visitorKey: z.string().min(16).max(1000) });
++
++/* How long a read of the relay's route or sync answer waits when the caller does not say. */
++const READ_MS = 2000;
++
++type Reply = { res: Response } | { failed: 'slow' | 'unreachable' };
++
+ const unreachable = () => new ApiError(503, 'unavailable', 'hornhoof.org does not answer now. Try again in a few minutes.', 'relay_unreachable');
+ const invalid = () => new ApiError(400, 'validation', 'A link name takes 1 to 63 lowercase Latin letters, digits and hyphens, with no hyphen at either end.', 'link_invalid');
+ const busy = () => new ApiError(429, 'too_many', 'hornhoof.org got too many requests from here. Wait a little and try again.');
+ 
+ /* The relay's word on a name it refused, as it gives it. */
+ async function reasonOf(res: Response): Promise<string> {
+   const body = (await res.json().catch(() => null)) as { error?: unknown; reason?: unknown } | null;
+   const said = body?.reason ?? body?.error;
+   return typeof said === 'string' ? said : typeof (said as { reason?: unknown })?.reason === 'string' ? (said as { reason: string }).reason : '';
+ }
+ 
++/* The relay's 409 on a sync post names why; any other word reads as unknown. */
++async function conflictOf(res: Response): Promise<'not_holder' | 'stale_epoch' | 'unknown'> {
++  const said = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error;
++  return said === 'not_holder' || said === 'stale_epoch' ? said : 'unknown';
++}
++
++/* The stored record carries the post's own fields and nothing else changed them. */
++const echoes = (stored: SyncRecord, post: SyncPost): boolean =>
++  stored.state === post.state && stored.copy === post.copy && stored.epoch === post.epoch && stored.generation === post.generation;
++
+ /* The relay hands out public links like acme.hornhoof.org and carries their traffic to this server through the
+    tunnel. Only the server talks to it: the browser asks Hornhoof, never the relay. */
+ export class Relay {
+   constructor(private readonly base: string) {}
+ 
+-  private async call(method: string, path: string, opts: { body?: object; key?: string } = {}): Promise<Response> {
++  /* Never throws: a call that got no answer says whether it was too slow or could not connect. */
++  private async attempt(method: string, path: string, opts: { body?: object; key?: string }, timeoutMs: number): Promise<Reply> {
+     const headers: Record<string, string> = { accept: 'application/json' };
+     if (opts.body) headers['content-type'] = 'application/json';
+     if (opts.key) headers.authorization = `Bearer ${opts.key}`;
+     try {
+-      return await fetch(`${this.base}/api/v1${path}`, { method, headers, body: opts.body && JSON.stringify(opts.body), redirect: 'error', signal: AbortSignal.timeout(WAIT_MS) });
+-    } catch {
+-      throw unreachable();
++      const res = await fetch(`${this.base}/api/v1${path}`, { method, headers, body: opts.body && JSON.stringify(opts.body), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
++      /* The body is read here, on a clone, so a stall in it counts as slow and a cut as unreachable. */
++      await res.clone().text();
++      return { res };
++    } catch (error) {
++      return { failed: (error as Error).name === 'TimeoutError' ? 'slow' : 'unreachable' };
+     }
+   }
+ 
++  private async call(method: string, path: string, opts: { body?: object; key?: string } = {}): Promise<Response> {
++    const reply = await this.attempt(method, path, opts, WAIT_MS);
++    if ('failed' in reply) throw unreachable();
++    return reply.res;
++  }
++
++  /* Who holds the link's route. Anything but a clean answer reads as unknown, never as empty (R2). */
++  async route(name: string, key: string, timeoutMs = READ_MS): Promise<Route> {
++    const reply = await this.attempt('GET', `/links/${encodeURIComponent(name)}/route`, { key }, timeoutMs);
++    if ('failed' in reply) return { known: false, why: reply.failed };
++    if (reply.res.status !== 200) return { known: false, why: 'refused' };
++    const body = RouteBody.safeParse(await reply.res.json().catch(() => null));
++    return body.success ? { known: true, ...body.data } : { known: false, why: 'malformed' };
++  }
++
++  /* Posts the sync record. It counts as stored only when the relay answers with exactly what was posted. */
++  async setSync(name: string, key: string, post: SyncPost, timeoutMs = READ_MS): Promise<SyncResult> {
++    const reply = await this.attempt('POST', `/links/${encodeURIComponent(name)}/sync`, { key, body: post }, timeoutMs);
++    if ('failed' in reply) return { stored: false, why: 'unknown' };
++    if (reply.res.status === 409) return { stored: false, why: await conflictOf(reply.res) };
++    if (reply.res.status !== 200) return { stored: false, why: 'unknown' };
++    const answer = z.object({ sync: SyncRecord }).safeParse(await reply.res.json().catch(() => null));
++    return answer.success && echoes(answer.data.sync, post) ? { stored: true, sync: answer.data.sync } : { stored: false, why: 'unknown' };
++  }
++
++  /* Whether frps takes logins, since when the relay runs, and whether it routes by TLS server name. */
++  async health(timeoutMs = READ_MS): Promise<Health> {
++    const reply = await this.attempt('GET', '/health', {}, timeoutMs);
++    if ('failed' in reply || reply.res.status !== 200) return DOWN;
++    const body = Health.safeParse(await reply.res.json().catch(() => null));
++    return body.success ? { up: true, relayStarted: body.data.relayStarted, passthrough: body.data.passthrough } : DOWN;
++  }
++
++  /* A new link key; the old one stops working at once. */
++  async changeKey(name: string, key: string): Promise<string> {
++    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/key`, key, KeyAnswer)).key;
++  }
++
++  /* A new visitor key for the link, replacing the one before. */
++  async visitorKey(name: string, key: string): Promise<string> {
++    return (await this.secretFrom(`/links/${encodeURIComponent(name)}/visitor-key`, key, VisitorKeyAnswer)).visitorKey;
++  }
++
++  private async secretFrom<T>(path: string, key: string, answer: z.ZodType<T>): Promise<T> {
++    const res = await this.call('POST', path, { key });
++    if (res.status === 429) throw busy();
++    const parsed = res.ok ? answer.safeParse(await res.json().catch(() => null)) : null;
++    if (!parsed?.success) throw unreachable();
++    return parsed.data;
++  }
++
+   /* A name no link can have is answered here, without asking. */
+   async check(name: string): Promise<NameCheck> {
+     if (!isLinkName(name)) return { name, free: false, reason: 'invalid' };
+     const res = await this.call('GET', `/names/${name}`);
+     if (res.status === 429) throw busy();
+     const checked = res.ok ? Check.safeParse(await res.json().catch(() => null)) : null;
+     if (!checked?.success) throw unreachable();
+     return checked.data;
+   }
+ 
+diff --git a/apps/server/test/relay-client.test.ts b/apps/server/test/relay-client.test.ts
+new file mode 100644
+index 00000000..21260acd
+--- /dev/null
++++ b/apps/server/test/relay-client.test.ts
+@@ -0,0 +1,272 @@
++import { describe, expect, it } from 'vitest';
++import { ApiError } from '../src/errors.js';
++import { Relay, type SyncPost } from '../src/modules/link/relay.js';
++import { fakeRelay } from './fake-relay.js';
++
++const CLIENT = 'acme-aaaaaaaa-link';
++
++/* A fake relay with a binding for acme, and a client of Hornhoof's that talks to it with that binding's key. */
++async function acme() {
++  const fake = await fakeRelay();
++  const relay = new Relay(fake.url);
++  const bound = await relay.bind('acme');
++  return { fake, relay, key: bound.key };
++}
++
++const post = (over: Partial<SyncPost> = {}): SyncPost => ({ client: CLIENT, generation: 1, state: 'on', copy: 'copy-1', epoch: 1, ...over });
++
++const failure = async (call: Promise<unknown>) => call.then(() => null, (error: unknown) => error);
++
++describe('reading a route', () => {
++  it('reads a held route and an empty one', async () => {
++    const { fake, relay, key } = await acme();
++    fake.register('acme', CLIENT);
++    expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'held', client: CLIENT, generation: 1 });
++    fake.drop('acme');
++    expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'empty', client: null, generation: 1 });
++  });
++
++  it('reads anything else as unknown, never as empty', async () => {
++    const { fake, relay, key } = await acme();
++    fake.frpsDown = true;
++    expect(await relay.route('acme', key)).toEqual({ known: false, why: 'refused' });
++    fake.frpsDown = false;
++    expect(await relay.route('acme', 'a-wrong-key-of-some-length')).toEqual({ known: false, why: 'refused' });
++    fake.routeAnswer = 'garbage';
++    expect(await relay.route('acme', key)).toEqual({ known: false, why: 'malformed' });
++    fake.routeAnswer = 'badstate';
++    expect(await relay.route('acme', key)).toEqual({ known: false, why: 'malformed' });
++    fake.routeAnswer = 'hang';
++    const started = Date.now();
++    expect(await relay.route('acme', key, 200)).toEqual({ known: false, why: 'slow' });
++    expect(Date.now() - started).toBeLessThan(400);
++    expect(await new Relay('http://127.0.0.1:1').route('acme', key)).toEqual({ known: false, why: 'unreachable' });
++  });
++
++  it('takes an extra field in a route answer', async () => {
++    const { fake, relay, key } = await acme();
++    fake.routeAnswer = 'extra';
++    expect(await relay.route('acme', key)).toMatchObject({ known: true });
++  });
++});
++
++describe('posting the sync record', () => {
++  it('posts the sync record as the holder', async () => {
++    const { fake, relay, key } = await acme();
++    fake.register('acme', CLIENT);
++    const result = await relay.setSync('acme', key, post());
++    expect(result).toMatchObject({ stored: true, sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1 } });
++    const route = await relay.route('acme', key);
++    expect(route.known && route.sync).toEqual(result.stored && result.sync);
++    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'stale_epoch' });
++    expect(await relay.setSync('acme', key, post({ client: 'acme-bbbbbbbb-link', epoch: 2 }))).toEqual({ stored: false, why: 'not_holder' });
++    fake.frpsDown = true;
++    expect(await relay.setSync('acme', key, post({ epoch: 3 }))).toEqual({ stored: false, why: 'unknown' });
++  });
++
++  it('fails closed inside its time budget when the relay is slow', async () => {
++    const relay = new Relay(await oneAnswer({ sync: { state: 'on', copy: 'copy-1', epoch: 1, generation: 1, at: 100 } }, 1000));
++    const started = Date.now();
++    expect(await relay.setSync('acme', 'k'.repeat(20), post(), 100)).toEqual({ stored: false, why: 'unknown' });
++    expect(Date.now() - started).toBeLessThan(250);
++  });
++
++  it('reads a slow or unreachable relay as unknown', async () => {
++    const { fake, relay, key } = await acme();
++    fake.down = true;
++    expect(await relay.setSync('acme', key, post())).toEqual({ stored: false, why: 'unknown' });
++    expect(await new Relay('http://127.0.0.1:1').setSync('acme', key, post())).toEqual({ stored: false, why: 'unknown' });
++  });
++});
++
++describe('reading a sync answer that is not what was posted', () => {
++  const stored = { state: 'on', copy: 'copy-1', epoch: 1, generation: 1, at: 100 };
++
++  it('stores nothing when one field of the answer differs from the post', async () => {
++    const changes = [{ state: 'off' }, { copy: 'copy-2' }, { epoch: 2 }, { generation: 2 }];
++    for (const change of changes) {
++      const relay = new Relay(await oneAnswer({ sync: { ...stored, ...change } }));
++      expect(await relay.setSync('acme', 'k'.repeat(20), post()), JSON.stringify(change)).toEqual({ stored: false, why: 'unknown' });
++    }
++    expect(await new Relay(await oneAnswer({ sync: stored })).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: true, sync: stored });
++  });
++
++  it('stores nothing from a 200 that is not a sync record', async () => {
++    for (const body of [{}, { sync: { state: 'on' } }, { sync: { ...stored, at: -1 } }]) {
++      expect(await new Relay(await oneAnswer(body)).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: false, why: 'unknown' });
++    }
++  });
++
++  it('reads a 409 that names nothing known, or has no body, as unknown', async () => {
++    for (const body of [{ error: 'something_else' }, 'not json']) {
++      expect(await new Relay(await oneAnswer(body, 0, 409)).setSync('acme', 'k'.repeat(20), post())).toEqual({ stored: false, why: 'unknown' });
++    }
++  });
++});
++
++describe('an answer whose body breaks', () => {
++  it('reads a body that stalls as slow and one that is cut off as unreachable', async () => {
++    const key = 'k'.repeat(20);
++    expect(await new Relay(await brokenBody('stall')).route('acme', key, 200)).toEqual({ known: false, why: 'slow' });
++    expect(await new Relay(await brokenBody('cut')).route('acme', key)).toEqual({ known: false, why: 'unreachable' });
++  });
++});
++
++describe('the route fields', () => {
++  const answer = { state: 'held', client: CLIENT, since: 100, generation: 3, relayStarted: 90, evictionBound: 30, sync: { state: 'off', copy: null, epoch: 0, generation: 0, at: null } };
++
++  it('reads every field of the answer as it came', async () => {
++    expect(await new Relay(await oneAnswer(answer)).route('acme', 'k'.repeat(20))).toEqual({ known: true, ...answer });
++  });
++
++  it('reads a bad value in any field as malformed', async () => {
++    const spoiled: object[] = [
++      { since: -1 }, { since: 'x' }, { since: null }, { generation: 1.5 }, { relayStarted: -3 }, { evictionBound: '30' }, { client: 7 },
++      { sync: undefined }, { sync: { ...answer.sync, state: 'maybe' } }, { sync: { ...answer.sync, epoch: -1 } }, { sync: { ...answer.sync, copy: 5 } },
++    ];
++    for (const change of spoiled) {
++      const relay = new Relay(await oneAnswer({ ...answer, ...change }));
++      expect(await relay.route('acme', 'k'.repeat(20)), JSON.stringify(change)).toEqual({ known: false, why: 'malformed' });
++    }
++  });
++
++  it('reads a binding nobody registered yet as empty at generation 0', async () => {
++    const { relay, key } = await acme();
++    expect(await relay.route('acme', key)).toMatchObject({ known: true, state: 'empty', client: null, generation: 0 });
++  });
++});
++
++describe('health', () => {
++  it('tells relay health', async () => {
++    const { fake, relay } = await acme();
++    fake.passthrough = true;
++    expect(await relay.health()).toEqual({ up: true, relayStarted: fake.relayStarted, passthrough: true });
++    fake.passthrough = false;
++    expect(await relay.health()).toEqual({ up: true, relayStarted: fake.relayStarted, passthrough: false });
++    fake.frpsDown = true;
++    expect(await relay.health()).toEqual({ up: false, relayStarted: null, passthrough: false });
++    fake.frpsDown = false;
++    fake.down = true;
++    expect(await relay.health()).toEqual({ up: false, relayStarted: null, passthrough: false });
++  });
++
++  it('reads a relay from before Task 9, with no passthrough field, as not passing through', async () => {
++    const old = new Relay(await oneAnswer({ ok: true, frps: true, relayStarted: 5 }));
++    expect(await old.health()).toEqual({ up: true, relayStarted: 5, passthrough: false });
++  });
++
++  it('reads a malformed or slow health answer as down', async () => {
++    expect(await new Relay(await oneAnswer({ ok: true, frps: true, relayStarted: 'now' })).health()).toEqual({ up: false, relayStarted: null, passthrough: false });
++    expect(await new Relay(await oneAnswer({ ok: true, frps: true, relayStarted: 5 }, 300)).health(100)).toEqual({ up: false, relayStarted: null, passthrough: false });
++  });
++});
++
++describe('changing keys', () => {
++  it('changes the key and gets a visitor key', async () => {
++    const { fake, relay, key } = await acme();
++    const fresh = await relay.changeKey('acme', key);
++    expect(fresh === fake.bindings.get('acme')?.key, 'the fresh key is the one the relay holds').toBe(true);
++    expect(fresh !== key, 'the key changed').toBe(true);
++    expect(await relay.route('acme', key)).toEqual({ known: false, why: 'refused' });
++    expect((await relay.route('acme', fresh)).known, 'the fresh key reads a route').toBe(true);
++    expect((await relay.visitorKey('acme', fresh)) === fake.visitorKeys.get('acme'), 'the visitor key is the one the relay holds').toBe(true);
++    fake.down = true;
++    for (const call of [() => relay.changeKey('acme', fresh), () => relay.visitorKey('acme', fresh)]) {
++      const error = await failure(call());
++      expect(error).toBeInstanceOf(ApiError);
++      expect((error as ApiError).reason).toBe('relay_unreachable');
++    }
++  });
++
++  it('refuses a key answer that is not a key', async () => {
++    const error = await failure(new Relay(await oneAnswer({ key: 5 })).changeKey('acme', 'k'.repeat(20)));
++    expect((error as ApiError).reason).toBe('relay_unreachable');
++  });
++});
++
++describe('key calls that fail', () => {
++  const key = 'k'.repeat(20);
++  const reasonOf = async (call: Promise<unknown>) => ((await failure(call)) as ApiError).reason;
++
++  it('tells a busy relay from an unreachable one', async () => {
++    const busy = new Relay(await oneAnswer({}, 0, 429));
++    for (const call of [() => busy.changeKey('acme', key), () => busy.visitorKey('acme', key)]) {
++      const error = (await failure(call())) as ApiError;
++      expect([error.status, error.code]).toEqual([429, 'too_many']);
++    }
++  });
++
++  it('keeps a refused key and an unknown name as relay_unreachable, as bind does', async () => {
++    for (const status of [401, 404, 500]) {
++      const relay = new Relay(await oneAnswer({ error: 'no' }, 0, status));
++      expect(await reasonOf(relay.changeKey('acme', key)), String(status)).toBe('relay_unreachable');
++      expect(await reasonOf(relay.visitorKey('acme', key)), String(status)).toBe('relay_unreachable');
++    }
++  });
++
++  it('refuses a visitor key answer that is missing, short or not text', async () => {
++    for (const body of [{}, { visitorKey: 'short' }, { visitorKey: 5 }, { key: 'k'.repeat(20) }]) {
++      expect(await reasonOf(new Relay(await oneAnswer(body)).visitorKey('acme', key)), JSON.stringify(body)).toBe('relay_unreachable');
++    }
++  });
++
++  it('refuses a key answer that is short', async () => {
++    expect(await reasonOf(new Relay(await oneAnswer({ key: 'short' })).changeKey('acme', key))).toBe('relay_unreachable');
++  });
++});
++
++describe('the key stays out of results and errors', () => {
++  it('never puts the key in a result or an error', async () => {
++    const { fake, relay, key } = await acme();
++    fake.register('acme', CLIENT);
++    const shown = (value: unknown) => JSON.stringify(value instanceof Error ? { ...value, message: value.message } : value);
++    const results: unknown[] = [await relay.route('acme', key), await relay.setSync('acme', key, post()), await relay.setSync('acme', key, post())];
++    fake.routeAnswer = 'garbage';
++    results.push(await relay.route('acme', key));
++    fake.routeAnswer = 'contract';
++    results.push(await relay.visitorKey('acme', key));
++    fake.frpsDown = true;
++    results.push(await relay.route('acme', key), await relay.setSync('acme', key, post({ epoch: 9 })));
++    fake.frpsDown = false;
++    fake.down = true;
++    results.push(await failure(relay.visitorKey('acme', key)), await failure(relay.changeKey('acme', key)));
++    fake.down = false;
++    fake.routeAnswer = 'hang';
++    results.push(await relay.route('acme', key, 100));
++    const closed = new Relay('http://127.0.0.1:1');
++    results.push(await closed.route('acme', key), await closed.setSync('acme', key, post()), await failure(closed.changeKey('acme', key)));
++    results.push(await relay.changeKey('acme', key));
++    expect(results.every(result => !shown(result).includes(key))).toBe(true);
++  });
++});
++
++/* A relay that gives one fixed answer to every call, after a pause. */
++async function oneAnswer(body: object | string, pauseMs = 0, status = 200): Promise<string> {
++  const { createServer } = await import('node:http');
++  const { onTestFinished } = await import('vitest');
++  const server = createServer((_req, res) => {
++    setTimeout(() => res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body)), pauseMs);
++  });
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  onTestFinished(() => void server.close());
++  const address = server.address();
++  return `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
++}
++
++/* A relay that sends a 200 and then stalls in the middle of its body, or cuts the connection there. */
++async function brokenBody(mode: 'stall' | 'cut'): Promise<string> {
++  const { createServer } = await import('node:http');
++  const { onTestFinished } = await import('vitest');
++  const server = createServer((req, res) => {
++    res.writeHead(200, { 'content-type': 'application/json' });
++    res.write('{"state":');
++    if (mode === 'cut') setTimeout(() => req.socket.destroy(), 20);
++  });
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  onTestFinished(() => {
++    server.closeAllConnections();
++    server.close();
++  });
++  const address = server.address();
++  return `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
++}

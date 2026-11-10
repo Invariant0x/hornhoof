@@ -1,0 +1,9 @@
+rotation-status failures: 1 errors: 0 credential leaked: True
+rotation-reuse failures: 1 errors: 0 credential leaked: True
+binding-reuse failures: 1 errors: 0 credential leaked: True
+Source/test stable during probe: True
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-rotation-diagnostics-probe.py", line 57, in <module>
+    assert all(results), 'rotation/rebind assertion diagnostics exposed generated credentials'
+           ^^^^^^^^^^^^
+AssertionError: rotation/rebind assertion diagnostics exposed generated credentials

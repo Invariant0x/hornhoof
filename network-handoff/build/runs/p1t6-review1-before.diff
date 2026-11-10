@@ -1,0 +1,336 @@
+diff --git a/README.md b/README.md
+index b451e1b..e500dac 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,8 @@ It gives each company a link like `https://acme.hornhoof.org`. The company's own
+ 
+ The relay hands out names, checks each tunnel's key, and sends each request to the company named in its address.
+ 
++A company on several machines gives each one its own client id, so two companies can run side by side on one machine and no two machines log in as one. A company's machines also reach each other's services through the relay: a `-peer` machine offers two stcp services, `-data` and `-app`, and another machine of the same link visits them with the link's visitor key and the service's own secret. The relay lets those machines reach each other through it and passes their bytes on as they come; [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) says how the machines encrypt them.
++
+ ## What it sees
+ 
+ At present, the browser's https connection ends at hornhoof.org. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes.
+@@ -31,7 +33,8 @@ For each link, the relay keeps:
+ - when its tunnel was last seen;
+ - whether it is blocked, when it was blocked, and why;
+ - which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
+-- its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts.
++- its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
++- a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
+ 
+ For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
+ 
+diff --git a/relay/relay.py b/relay/relay.py
+index 67fd5a4..d5e7e06 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -7,6 +7,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
++  POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+ Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
+@@ -27,7 +28,7 @@ import sys
+ import threading
+ import time
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+-from urllib.parse import urlsplit
++from urllib.parse import quote, urlsplit
+ 
+ DOMAIN = 'hornhoof.org'
+ DB_PATH = os.environ.get('RELAY_DB', '/var/lib/hornhoof-relay/relay.db')
+@@ -61,6 +62,10 @@ PLUGIN_CALL_S = 1.0
+ 
+ LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+ RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
++# A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
++CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
++# The two stcp services a -peer client may offer, named <link>-<m8>-<service> (R5.1).
++PEER_SERVICES = ('data', 'app')
+ 
+ 
+ def now() -> int:
+@@ -122,6 +127,11 @@ def init_db() -> None:
+             generation INTEGER NOT NULL,
+             at INTEGER NOT NULL
+         )''', ())
++    write('''CREATE TABLE IF NOT EXISTS visitor_keys (
++            name TEXT PRIMARY KEY,
++            key_hash TEXT NOT NULL,
++            created_at INTEGER NOT NULL
++        )''', ())
+ 
+ 
+ _reserved = {'mtime': None, 'names': frozenset()}
+@@ -267,6 +277,46 @@ def dash_answer(name: str, proxy_type: str) -> tuple[str, str] | None:
+     return route_status, client_id
+ 
+ 
++def dash_client_records(body: bytes) -> list[dict]:
++    """The parsed clients answer: a list of records with a clientID string and a boolean
++    online. Anything else is FrpsUnknown, never an empty guess."""
++    try:
++        answer = json.loads(body)
++    except ValueError:
++        raise FrpsUnknown('dashboard clients answer is not JSON') from None
++    if not isinstance(answer, list):
++        raise FrpsUnknown('dashboard clients answer is not a list')
++    for entry in answer:
++        if (not isinstance(entry, dict) or not isinstance(entry.get('clientID'), str)
++                or type(entry.get('online')) is not bool):
++            raise FrpsUnknown('dashboard clients answer has no client record')
++    return answer
++
++
++def dash_clients(run_id: str) -> list[dict]:
++    """The /api/clients?runId= answer on the plugin call's budget; a dashboard error is
++    FrpsUnknown, never an empty guess."""
++    status, body = _dash_get(f'/api/clients?runId={quote(run_id, safe="")}')
++    if status != 200:
++        raise FrpsUnknown(f'dashboard answered {status} for clients runId {run_id}')
++    return dash_client_records(body)
++
++
++def run_id_conflict(run_id: str, client_id: str) -> str | None:
++    """R1.3: a live session with this run id is taken over only by its own client id.
++
++    A dashboard error refuses the login: the relay cannot tell whose the run id is.
++    """
++    try:
++        clients = dash_clients(run_id)
++    except FrpsUnknown:
++        return 'relay error: frps does not answer'
++    for entry in clients:
++        if entry['online'] and entry['clientID'] != client_id:
++            return 'this run id belongs to another client'
++    return None
++
++
+ def frps_route(name: str) -> tuple[str, str | None, str | None]:
+     """frps's own view of a name's route: ('online'|'offline', clientID, type), or ('absent', None, None).
+ 
+@@ -541,6 +591,67 @@ def proxy_check(name: str, content: dict) -> str | None:
+     return register_route(name, content)
+ 
+ 
++def client_id_reason(name: str, kind: str, client_id: str, meta_client) -> str | None:
++    """R1.3, R5.1: a client id names this link and matches its session's key kind.
++
++    An empty client id is a today's tunnel: only a link-key session without metas.client.
++    """
++    if not client_id:
++        if kind == 'link' and not meta_client:
++            return None
++        return f'this client id is not for {name}'
++    match = CLIENT.match(client_id)
++    if (match is None or match.group('link') != name or meta_client != client_id
++            or (match.group('kind') == 'visit') != (kind == 'visitor')):
++        return f'this client id is not for {name}'
++    return None
++
++
++def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
++    """R1.3: the client id fits the session; a live run id is this client's own."""
++    client_id = content.get('client_id')
++    client_id = client_id if isinstance(client_id, str) else ''
++    reason = client_id_reason(name, kind, client_id, metas.get('client'))
++    if reason is not None:
++        return reason
++    run_id = content.get('run_id')
++    if client_id and isinstance(run_id, str) and run_id:
++        return run_id_conflict(run_id, client_id)
++    return None
++
++
++def offer_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
++    """R5.1: a visitor offers nothing; a peer offers only its two stcp services; the rest
++    is the http proxy of today (Task 2). stcp services get no route row and no generation."""
++    if kind == 'visitor':
++        return 'visitors may not offer services'
++    client_id = metas.get('client')
++    client_id = client_id if isinstance(client_id, str) else ''
++    reason = client_id_reason(name, kind, client_id, client_id)
++    if reason is not None:
++        return reason
++    if client_id:
++        match = CLIENT.match(client_id)
++        if match is not None and match.group('kind') == 'peer':
++            return peer_proxy_reason(name, match.group('m8'), content)
++    return proxy_check(name, content)
++
++
++def peer_proxy_reason(name: str, m8: str, content: dict) -> str | None:
++    """R5.1: a peer offers only <name>-<m8>-data and <name>-<m8>-app, stcp with a real
++    secret and open to every visitor of the service."""
++    proxy_name = content.get('proxy_name')
++    label = proxy_name if isinstance(proxy_name, str) else ''
++    allowed = {f'{name}-{m8}-{service}' for service in PEER_SERVICES}
++    sk = content.get('sk')
++    allow_users = content.get('allow_users')
++    if (content.get('proxy_type') != 'stcp' or label not in allowed
++            or not isinstance(sk, str) or len(sk) < 32
++            or allow_users not in (None, [], ['*'])):
++        return f'this client may not offer {label}'
++    return None
++
++
+ def trace_run_id(op: str, content: dict) -> str:
+     user = content.get('user') or {}
+     run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
+@@ -642,18 +753,51 @@ def tunnel_info(name: str, key: str) -> dict:
+     }
+ 
+ 
+-def binding_ok(name: str, key: str):
+-    """None if the name exists, is not banned and the key matches, else a reason."""
+-    if not isinstance(name, str) or not isinstance(key, str) or not name or not key:
+-        return 'this tunnel has no Hornhoof relay binding (metadatas.name and metadatas.key)'
++def visitor_hash_matches(name: str, visitor: str) -> bool:
++    """R6.2: the visitor key matches only while it is the one stored, compared in constant time."""
++    row = db().execute('SELECT key_hash FROM visitor_keys WHERE name = ?', (name,)).fetchone()
++    return row is not None and hmac.compare_digest(row[0], key_hash(visitor))
++
++
++def binding_state(name: str):
++    """The bindings row for name, or the refusal: no binding, or blocked."""
+     row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
+-    if row is None or not hmac.compare_digest(row[0], key_hash(key)):
++    if row is None:
+         return f'no binding {name} with this key'
+     if row[1]:
+         return f'{name}.{DOMAIN} is blocked'
++    return row
++
++
++def key_kind(name: str, metas: dict, row: tuple) -> str | None:
++    """'link' when the link key matches, 'visitor' when only the visitor key does."""
++    key = metas.get('key')
++    if isinstance(key, str) and key and hmac.compare_digest(row[0], key_hash(key)):
++        return 'link'
++    visitor = metas.get('visitor')
++    if key is None and isinstance(visitor, str) and visitor and visitor_hash_matches(name, visitor):
++        return 'visitor'
+     return None
+ 
+ 
++def authenticate(metas: dict) -> tuple[str | None, str | None, str | None]:
++    """(name, kind, refusal): kind is 'link' with the link key, 'visitor' with the visitor key.
++
++    The binding check is as before; a login with no metas.key may match the stored
++    visitor key instead (R6.2).
++    """
++    name = metas.get('name')
++    if not isinstance(name, str) or not name:
++        return None, None, 'this tunnel has no Hornhoof relay binding (metadatas.name and metadatas.key)'
++    state = binding_state(name)
++    if isinstance(state, str):
++        return name, None, state
++    kind = key_kind(name, metas, state)
++    if kind is None:
++        return name, None, f'no binding {name} with this key'
++    return name, kind, None
++
++
+ _seen = {}
+ 
+ 
+@@ -676,15 +820,23 @@ def plugin(op: str, content: dict) -> dict:
+         call_state.end = None
+ 
+ 
+-def plugin_decide(op: str, content: dict) -> dict:
++def call_metas(op: str, content: dict) -> dict:
++    """The login metas of a plugin call: top level for Login, under user otherwise."""
+     if op == 'Login':
+-        metas = content.get('metas') or {}
++        metas = content.get('metas')
+     else:
+-        metas = (content.get('user') or {}).get('metas') or {}
+-    name, key = metas.get('name'), metas.get('key')
+-    reason = binding_ok(name, key)
+-    if reason is None and op == 'NewProxy':
+-        reason = proxy_check(name, content)
++        metas = (content.get('user') or {}).get('metas')
++    return metas if isinstance(metas, dict) else {}
++
++
++def plugin_decide(op: str, content: dict) -> dict:
++    """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes."""
++    metas = call_metas(op, content)
++    name, kind, reason = authenticate(metas)
++    if reason is None and op == 'Login':
++        reason = login_reason(name, kind, content, metas)
++    elif reason is None and op == 'NewProxy':
++        reason = offer_reason(name, kind, content, metas)
+     if reason is not None:
+         return {'reject': True, 'reject_reason': reason}
+     touch(name)
+@@ -807,6 +959,18 @@ class Handler(BaseHTTPRequestHandler):
+             return self.send_json(409, {'error': conflict})
+         return self.send_json(200, {'sync': record})
+ 
++    def visitor_key_answer(self, name: str) -> None:
++        """R6.2: hand out a new visitor key, replacing the one before; the relay stores its
++        hash only and never logs or answers with the key again."""
++        if not self.authorize_link(name):
++            return
++        visitor_key = secrets.token_urlsafe(32)
++        write('INSERT INTO visitor_keys (name, key_hash, created_at) VALUES (?, ?, ?) '
++              'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
++              'created_at = excluded.created_at', (name, key_hash(visitor_key), now()))
++        log_line(f'new visitor key for {name}')
++        self.send_json(200, {'visitorKey': visitor_key})
++
+     def health_answer(self):
+         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
+         if frps_ok():
+@@ -849,6 +1013,8 @@ class Handler(BaseHTTPRequestHandler):
+             return self.create_binding()
+         if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'sync':
+             return self.sync_answer(parts[3].lower())
++        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'visitor-key':
++            return self.visitor_key_answer(parts[3].lower())
+         self.error(404, 'not_found', 'Not found.')
+ 
+     def create_binding(self):
+diff --git a/relay/test/test_route.py b/relay/test/test_route.py
+index 16ae6c9..b3d26b3 100644
+--- a/relay/test/test_route.py
++++ b/relay/test/test_route.py
+@@ -425,13 +425,13 @@ class DashboardContractTests(unittest.TestCase):
+         # racing registrations would both get through.
+         t = self.relay.now()
+         self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
+-                                "VALUES ('acme', 1, 'acme-c1-link', 'r1', 'http', 'pending', ?)", (t,))
++                                "VALUES ('acme', 1, 'acme-a1b2c3d4-link', 'r1', 'http', 'pending', ?)", (t,))
+         self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'offline', 'clientID': 'acme-c0-link'})
+         body = self.relay.route_of('acme')
+         self.assertEqual(body['state'], 'held')
+         self.assertEqual(body['generation'], 1)
+         self._bind('acme', 'k')
+-        reason = self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c2-link'))
++        reason = self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-d4c3b2a1-link'))
+         self.assertEqual(reason, {'reject': True, 'reject_reason': 'router config conflict: acme is held'})
+         row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
+         self.assertEqual((row[0], row[1]), (1, 'pending'))
+@@ -446,7 +446,7 @@ class DashboardContractTests(unittest.TestCase):
+ 
+         def run():
+             entered.set()
+-            result.append(self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link')))
++            result.append(self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-a1b2c3d4-link')))
+ 
+         worker = threading.Thread(target=run)
+         worker.start()
+@@ -503,7 +503,7 @@ class DashboardContractTests(unittest.TestCase):
+         try:
+             result = []
+             worker = threading.Thread(target=lambda: result.append(
+-                self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link'))))
++                self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-a1b2c3d4-link'))))
+             started = time.monotonic()
+             worker.start()
+             worker.join(timeout=8)

@@ -1,0 +1,74 @@
+== files: pages/build.py relay/relay.py relay/test/harness.py
+== coverage run (whole relay suite)
+Ran 13 tests in 87.512s
+
+OK
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: python
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+admin                          relay.relay                           17   2.4%    285.4
+do_DELETE                      relay.relay.Handler                   10   4.8%     96.4
+create_binding                 relay.relay.Handler                   16  65.8%     26.2
+plugin_calls                   relay.test.harness.Stack               5  10.0%     23.2
+plugin                         relay.relay                           15  81.8%     16.4
+main                           pages.build                            3   0.0%     12.0
+binding_ok                     relay.relay                            8  77.8%      8.7
+do_POST                        relay.relay.Handler                    7  69.2%      8.4
+client                         relay.test.harness.Stack               7  88.0%      7.1
+close                          relay.test.harness.Stack               7 100.0%      7.0
+do_GET                         relay.relay.Handler                    6  73.3%      6.7
+allow                          relay.relay.Window                     6  75.0%      6.6
+check_name                     relay.relay                            6  77.8%      6.4
+reserved_names                 relay.relay                            6  85.7%      6.1
+start_frps                     relay.test.harness.Stack               6  94.1%      6.0
+read_json                      relay.relay.Handler                    5  83.3%      5.1
+send_json                      relay.relay.Handler                    5  90.9%      5.0
+_finish                        relay.test.harness._Process            4  71.4%      4.4
+_ready                         relay.test.harness.Stack               4  81.8%      4.1
+bind                           relay.test.harness.Stack               4  83.3%      4.1
+api                            relay.test.harness.Stack               4  90.0%      4.0
+_wait                          relay.test.harness                     4 100.0%      4.0
+dash                           relay.test.harness.Stack               3  66.7%      3.3
+stop_frps                      relay.test.harness.Stack               2  33.3%      3.2
+_free_port                     relay.test.harness.Stack               3 100.0%      3.0
+log                            relay.test.harness._Process            3 100.0%      3.0
+__init__                       relay.test.harness._Process            2  66.7%      2.1
+main                           relay.relay                            2  77.8%      2.0
+__enter__                      relay.test.harness.Stack               2  80.0%      2.0
+font                           pages.build                            1   0.0%      2.0
+db                             relay.relay                            2 100.0%      2.0
+touch                          relay.relay                            2 100.0%      2.0
+client_ip                      relay.relay.Handler                    2 100.0%      2.0
+path_parts                     relay.relay.Handler                    2 100.0%      2.0
+_request                       relay.test.harness                     2 100.0%      2.0
+started                        relay.test.harness.Client              2 100.0%      2.0
+__init__                       relay.test.harness.Stack               2 100.0%      2.0
+pause                          relay.test.harness._Process            2 100.0%      2.0
+resume                         relay.test.harness._Process            2 100.0%      2.0
+restart_frps                   relay.test.harness.Stack               1  33.3%      1.3
+restart_relay                  relay.test.harness.Stack               1  33.3%      1.3
+error                          relay.relay.Handler                    1  50.0%      1.1
+kill                           relay.test.harness._Process            1  50.0%      1.1
+frpc_config                    relay.relay                            1 100.0%      1.0
+init_db                        relay.relay                            1 100.0%      1.0
+key_hash                       relay.relay                            1 100.0%      1.0
+now                            relay.relay                            1 100.0%      1.0
+tunnel_info                    relay.relay                            1 100.0%      1.0
+log_message                    relay.relay.Handler                    1 100.0%      1.0
+__init__                       relay.relay.Window                     1 100.0%      1.0
+_ensure_frp                    relay.test.harness                     1 100.0%      1.0
+__exit__                       relay.test.harness.Stack               1 100.0%      1.0
+_start_relay                   relay.test.harness.Stack               1 100.0%      1.0
+_write_config                  relay.test.harness.Stack               1 100.0%      1.0
+get                            relay.test.harness.Stack               1 100.0%      1.0
+do_GET                         relay.test.harness._Echo               1 100.0%      1.0
+log_message                    relay.test.harness._Echo               1 100.0%      1.0
+stop                           relay.test.harness._Process            1 100.0%      1.0
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.

@@ -1,0 +1,627 @@
+
+> hornhoof@0.6.0 test
+> node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present --testTimeout=90000
+
+Release checks passed for 0.6.0 (local).
+
+> hornhoof@0.6.0 test:release
+> node --test scripts/test/*.test.mjs
+
+TAP version 13
+# Subtest: the first release may equal origin/main when its tag does not exist
+ok 1 - the first release may equal origin/main when its tag does not exist
+  ---
+  duration_ms: 128.495138
+  type: 'test'
+  ...
+# Subtest: rejects a workspace version that differs from the root
+ok 2 - rejects a workspace version that differs from the root
+  ---
+  duration_ms: 137.195299
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\# Changelog\\n"
+ok 3 - rejects missing, mismatched or empty release notes: "\# Changelog\\n"
+  ---
+  duration_ms: 118.339362
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\#\# [0.4.0] - 2026-11-04\\nOlder notes.\\n"
+ok 4 - rejects missing, mismatched or empty release notes: "\#\# [0.4.0] - 2026-11-04\\nOlder notes.\\n"
+  ---
+  duration_ms: 119.920337
+  type: 'test'
+  ...
+# Subtest: rejects missing, mismatched or empty release notes: "\#\# [0.5.0] - 2026-11-04\\n\#\#\# Fixed\\n"
+ok 5 - rejects missing, mismatched or empty release notes: "\#\# [0.5.0] - 2026-11-04\\n\#\#\# Fixed\\n"
+  ---
+  duration_ms: 100.963856
+  type: 'test'
+  ...
+# Subtest: rejects an existing tag even when origin/main still has the same version
+ok 6 - rejects an existing tag even when origin/main still has the same version
+  ---
+  duration_ms: 108.444985
+  type: 'test'
+  ...
+# Subtest: compares numeric components rather than strings
+ok 7 - compares numeric components rather than strings
+  ---
+  duration_ms: 196.314249
+  type: 'test'
+  ...
+# Subtest: a numerically newer turn release passes
+ok 8 - a numerically newer turn release passes
+  ---
+  duration_ms: 213.033669
+  type: 'test'
+  ...
+# Subtest: a lower first digit is older even when its turn is higher
+ok 9 - a lower first digit is older even when its turn is higher
+  ---
+  duration_ms: 181.416524
+  type: 'test'
+  ...
+# Subtest: a turn release must match its branch or explicit turn number
+ok 10 - a turn release must match its branch or explicit turn number
+  ---
+  duration_ms: 211.15304
+  type: 'test'
+  ...
+# Subtest: an explicit turn supports feature branches; fixes do not need a turn
+ok 11 - an explicit turn supports feature branches; fixes do not need a turn
+  ---
+  duration_ms: 412.969079
+  type: 'test'
+  ...
+# Subtest: local checks permit Unreleased and skip release-only git checks
+ok 12 - local checks permit Unreleased and skip release-only git checks
+  ---
+  duration_ms: 187.004414
+  type: 'test'
+  ...
+# Subtest: local checks explain a missing changelog section
+ok 13 - local checks explain a missing changelog section
+  ---
+  duration_ms: 132.043583
+  type: 'test'
+  ...
+# Subtest: a missing origin/main is an actionable failure in full mode
+ok 14 - a missing origin/main is an actionable failure in full mode
+  ---
+  duration_ms: 163.934788
+  type: 'test'
+  ...
+# Subtest: a malformed newer heading cannot hide the actual top release
+ok 15 - a malformed newer heading cannot hide the actual top release
+  ---
+  duration_ms: 101.62756
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--other"]
+ok 16 - rejects check-release arguments ["--other"]
+  ---
+  duration_ms: 109.809108
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--other","5"]
+ok 17 - rejects check-release arguments ["--other","5"]
+  ---
+  duration_ms: 114.185004
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn"]
+ok 18 - rejects check-release arguments ["--turn"]
+  ---
+  duration_ms: 129.457564
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn","05"]
+ok 19 - rejects check-release arguments ["--turn","05"]
+  ---
+  duration_ms: 134.200667
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--turn","5","extra"]
+ok 20 - rejects check-release arguments ["--turn","5","extra"]
+  ---
+  duration_ms: 133.767801
+  type: 'test'
+  ...
+# Subtest: rejects check-release arguments ["--local","--turn","5"]
+ok 21 - rejects check-release arguments ["--local","--turn","5"]
+  ---
+  duration_ms: 120.156986
+  type: 'test'
+  ...
+# Subtest: ESLint rejects an unused variable in a server test instead of ignoring the file
+ok 22 - ESLint rejects an unused variable in a server test instead of ignoring the file
+  ---
+  duration_ms: 13735.790735
+  type: 'test'
+  ...
+# Subtest: tests and TypeScript configs keep every rule in server, node and protocol
+ok 23 - tests and TypeScript configs keep every rule in server, node and protocol
+  ---
+  duration_ms: 15091.34423
+  type: 'test'
+  ...
+# Subtest: extracts exactly the requested release, including its summary and subsections
+ok 24 - extracts exactly the requested release, including its summary and subsections
+  ---
+  duration_ms: 137.363287
+  type: 'test'
+  ...
+# Subtest: defaults to the root version
+ok 25 - defaults to the root version
+  ---
+  duration_ms: 154.186769
+  type: 'test'
+  ...
+# Subtest: a malformed older heading cannot fill empty notes with another release
+ok 26 - a malformed older heading cannot fill empty notes with another release
+  ---
+  duration_ms: 122.969163
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\# Changelog\\n"
+ok 27 - rejects absent or empty dated notes: "\# Changelog\\n"
+  ---
+  duration_ms: 105.079822
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\#\# [0.5.0] - 2026-11-04\\n\\n\#\#\# Fixed\\n"
+ok 28 - rejects absent or empty dated notes: "\#\# [0.5.0] - 2026-11-04\\n\\n\#\#\# Fixed\\n"
+  ---
+  duration_ms: 92.515962
+  type: 'test'
+  ...
+# Subtest: rejects absent or empty dated notes: "\#\# [0.5.0]\\nMissing date.\\n"
+ok 29 - rejects absent or empty dated notes: "\#\# [0.5.0]\\nMissing date.\\n"
+  ---
+  duration_ms: 99.046506
+  type: 'test'
+  ...
+# Subtest: turn writes 0.5.0 to every manifest and workspace lock entry
+ok 30 - turn writes 0.5.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 116.623452
+  type: 'test'
+  ...
+# Subtest: turn 7 writes 0.7.0 to every manifest and workspace lock entry
+ok 31 - turn 7 writes 0.7.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 95.360058
+  type: 'test'
+  ...
+# Subtest: fix writes 0.5.1 to every manifest and workspace lock entry
+ok 32 - fix writes 0.5.1 to every manifest and workspace lock entry
+  ---
+  duration_ms: 94.614874
+  type: 'test'
+  ...
+# Subtest: major writes 1.150.0 to every manifest and workspace lock entry
+ok 33 - major writes 1.150.0 to every manifest and workspace lock entry
+  ---
+  duration_ms: 107.765724
+  type: 'test'
+  ...
+# Subtest: turn normalizes a workspace still at the old independent web version
+ok 34 - turn normalizes a workspace still at the old independent web version
+  ---
+  duration_ms: 136.050751
+  type: 'test'
+  ...
+# Subtest: rejects [] before changing any version
+ok 35 - rejects [] before changing any version
+  ---
+  duration_ms: 131.935009
+  type: 'test'
+  ...
+# Subtest: rejects ["other"] before changing any version
+ok 36 - rejects ["other"] before changing any version
+  ---
+  duration_ms: 95.721901
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","-1"] before changing any version
+ok 37 - rejects ["turn","-1"] before changing any version
+  ---
+  duration_ms: 139.130611
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","7.5"] before changing any version
+ok 38 - rejects ["turn","7.5"] before changing any version
+  ---
+  duration_ms: 157.105198
+  type: 'test'
+  ...
+# Subtest: rejects ["turn","07"] before changing any version
+ok 39 - rejects ["turn","07"] before changing any version
+  ---
+  duration_ms: 142.284758
+  type: 'test'
+  ...
+# Subtest: rejects ["fix","7"] before changing any version
+ok 40 - rejects ["fix","7"] before changing any version
+  ---
+  duration_ms: 106.45332
+  type: 'test'
+  ...
+# Subtest: turn needs an explicit number outside a turn branch
+ok 41 - turn needs an explicit number outside a turn branch
+  ---
+  duration_ms: 104.844691
+  type: 'test'
+  ...
+# Subtest: a malformed lock fails before any manifest is rewritten
+ok 42 - a malformed lock fails before any manifest is rewritten
+  ---
+  duration_ms: 118.880672
+  type: 'test'
+  ...
+# Subtest: a missing lock entry . fails before any manifest is rewritten
+ok 43 - a missing lock entry . fails before any manifest is rewritten
+  ---
+  duration_ms: 98.659325
+  type: 'test'
+  ...
+# Subtest: a missing lock entry apps/web fails before any manifest is rewritten
+ok 44 - a missing lock entry apps/web fails before any manifest is rewritten
+  ---
+  duration_ms: 94.359367
+  type: 'test'
+  ...
+1..44
+# tests 44
+# suites 0
+# pass 44
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 28965.436352
+
+> hornhoof@0.6.0 typecheck:tests
+> npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/protocol@0.6.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/packages/protocol[39m
+
+ [32m✓[39m test/map.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m test/program-info.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 65[2mms[22m[39m
+ [32m✓[39m test/protocol.test.ts [2m([22m[2m83 tests[22m[2m)[22m[33m 301[2mms[22m[39m
+ [32m✓[39m test/link.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m test/node-exit.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m127 passed[39m[22m[90m (127)[39m
+[2m   Start at [22m 16:00:43
+[2m   Duration [22m 1.50s[2m (transform 40%, import 38%, tests 20%, worker 2%)[22m
+
+
+> @hornhoof/node@0.6.0 pretest
+> npm run build -w @hornhoof/protocol
+
+
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+
+> @hornhoof/node@0.6.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/node[39m
+
+[90mstdout[2m | test/terminal-host-receipts.test.ts[2m > [22m[2mprogram receipts for live words[2m > [22m[2mends a running Claude turn as stopped by a person on clear
+[22m[39mAgent receipt (claude): turn end channels disagree. The first end was kept.
+
+[90mstdout[2m | test/terminal-host-receipts.test.ts[2m > [22m[2mprogram receipts for live words[2m > [22m[2mends Claude as crashed when prompt_input_exit accompanies a process exit
+[22m[39mAgent receipt (claude): turn end channels disagree. The first end was kept.
+
+ [32m✓[39m test/main.test.ts [2m([22m[2m40 tests[22m[2m)[22m[33m 16418[2mms[22m[39m
+   [32m✓[39m reporting the node lifecycle [2m(4)[22m
+     [33m[2m✓[22m[39m reports a real SIGKILL as an unclean exit with the previous process log after startup[33m 3341[2mms[22m[39m
+     [33m[2m✓[22m[39m sends the current log on a socket reconnect without claiming that the process ended[33m 1036[2mms[22m[39m
+   [32m✓[39m reporting managed programs [2m(4)[22m
+     [33m[2m✓[22m[39m does not replay a delivered live event when its connection comes back[33m 1056[2mms[22m[39m
+     [33m[2m✓[22m[39m replays current snapshots after hello and reconnect instead of older queued update states[33m 1031[2mms[22m[39m
+   [32m✓[39m a node that runs agents in terminals [2m(12)[22m
+     [33m[2m✓[22m[39m says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were[33m 1330[2mms[22m[39m
+     [33m[2m✓[22m[39m hides on a screen a program's token from after the node started, with no Hornhoof turn since[33m 1369[2mms[22m[39m
+   [32m✓[39m runNode [2m(20)[22m
+     [33m[2m✓[22m[39m sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does[33m 2210[2mms[22m[39m
+     [33m[2m✓[22m[39m says in hello how it came up: the same after a dropped connection, anew once it starts again[33m 1056[2mms[22m[39m
+     [33m[2m✓[22m[39m runs a part of a test run, counts it in its load, sends its end until Hornhoof confirms it, and stops a part when asked[33m 2411[2mms[22m[39m
+ [32m✓[39m test/terminal-programs.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 155[2mms[22m[39m
+ [32m✓[39m test/providers.test.ts [2m([22m[2m103 tests[22m[2m)[22m[33m 20184[2mms[22m[39m
+   [32m✓[39m Kimi Code [2m(8)[22m
+     [33m[2m✓[22m[39m stops at the timeout[33m 2215[2mms[22m[39m
+   [32m✓[39m Antigravity CLI [2m(6)[22m
+     [33m[2m✓[22m[39m counts as signed in once agy lists its models, and lists them by model with the levels each takes[33m 546[2mms[22m[39m
+     [33m[2m✓[22m[39m stops at the timeout[33m 2215[2mms[22m[39m
+   [32m✓[39m calling a job off [2m(4)[22m
+     [33m[2m✓[22m[39m stops the whole process group of claude[33m 2097[2mms[22m[39m
+     [33m[2m✓[22m[39m stops the whole process group of codex[33m 2094[2mms[22m[39m
+     [33m[2m✓[22m[39m stops the whole process group of kimi[33m 2131[2mms[22m[39m
+     [33m[2m✓[22m[39m stops the whole process group of antigravity[33m 2100[2mms[22m[39m
+ [32m✓[39m test/credentials.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1826[2mms[22m[39m
+   [32m✓[39m a sign-in its program refused [2m(1)[22m
+     [33m[2m✓[22m[39m keeps the node signed out until the sign-in changes, so turns do not go round on it[33m 366[2mms[22m[39m
+   [32m✓[39m a Codex plan's lease on a node [2m(5)[22m
+     [33m[2m✓[22m[39m seals a sign-in Codex renewed between turns when it looks again[33m 377[2mms[22m[39m
+     [33m[2m✓[22m[39m as a spare machine stays signed out though a Codex still running there writes its file back[33m 349[2mms[22m[39m
+ [32m✓[39m test/tests-run.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 5565[2mms[22m[39m
+   [32m✓[39m a part of a test run on a node [2m(8)[22m
+     [33m[2m✓[22m[39m stops at its time limit together with every program the command started[33m 1578[2mms[22m[39m
+     [33m[2m✓[22m[39m stops when Hornhoof calls it off[33m 1584[2mms[22m[39m
+   [32m✓[39m a part of other work on a node [2m(11)[22m
+     [33m[2m✓[22m[39m stops waiting for a task's file when the part is stopped or its time is up, and removes its folder[33m 405[2mms[22m[39m
+     [33m[2m✓[22m[39m stops putting what it made on the task when the part is stopped meanwhile[33m 508[2mms[22m[39m
+   [32m✓[39m a part's files through Hornhoof [2m(2)[22m
+     [33m[2m✓[22m[39m gives up on a file Hornhoof is slow to answer or to send once the part's signal ends[33m 312[2mms[22m[39m
+ [32m✓[39m test/terminal-host-branches.test.ts [2m([22m[2m52 tests[22m[2m)[22m[33m 425[2mms[22m[39m
+ [32m✓[39m test/terminal-transcripts.test.ts [2m([22m[2m36 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m test/runner.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 1677[2mms[22m[39m
+   [32m✓[39m runJob [2m(20)[22m
+     [33m[2m✓[22m[39m lets a turn in a live program run past its time, until the program ends it[33m 302[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the session of a turn that ran out of time as its program ends it, so the next turn goes on in it[33m 1028[2mms[22m[39m
+ [32m✓[39m test/login.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 9419[2mms[22m[39m
+   [32m✓[39m a plan sign-in in a terminal on the node [2m(11)[22m
+     [33m[2m✓[22m[39m takes the code the owner types, keeps the long token and never shows it, wrapped or not[33m 735[2mms[22m[39m
+     [33m[2m✓[22m[39m that fails says so in plain words and keeps nothing[33m 571[2mms[22m[39m
+     [33m[2m✓[22m[39m stopped half way ends only the sign-in: agents keep their sessions and nothing is kept[33m 530[2mms[22m[39m
+     [33m[2m✓[22m[39m started again begins anew, without a word about the one it replaced[33m 683[2mms[22m[39m
+     [33m[2m✓[22m[39m does not outlive the node: a stop ends it, and a start clears what a crash left[33m 553[2mms[22m[39m
+     [33m[2m✓[22m[39m for Codex runs apart from the plan, so a failed sign-in keeps the one it had[33m 539[2mms[22m[39m
+     [33m[2m✓[22m[39m for Codex keeps the new sign-in and holds the plan on this machine[33m 686[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the sign-in at least 80 columns wide, so a narrow view never splits the token's start[33m 963[2mms[22m[39m
+     [33m[2m✓[22m[39m stopped while it checks the new sign-in keeps nothing of it[33m 3896[2mms[22m[39m
+ [32m✓[39m test/terminal-host-watch.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 20037[2mms[22m[39m
+   [32m✓[39m agents in live terminals [2m(17)[22m
+     [33m[2m✓[22m[39m lets Hornhoof stop a turn a person typed, and counts it as running until then[33m 1348[2mms[22m[39m
+     [33m[2m✓[22m[39m ends a typed turn it is asked to stop when its terminal is gone[33m 808[2mms[22m[39m
+     [33m[2m✓[22m[39m sends the answer of a typed turn before its end, though the program logs it late[33m 1435[2mms[22m[39m
+     [33m[2m✓[22m[39m ends every view when asked, as after the connection to Hornhoof came back[33m 2131[2mms[22m[39m
+     [33m[2m✓[22m[39m shows people the live screen without secrets, and lets one who may type start a turn[33m 2138[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a watcher who may not type from typing[33m 1757[2mms[22m[39m
+     [33m[2m✓[22m[39m gives everyone watching one session the size of the smallest window, so no one gets filler dots or a size that jumps[33m 3066[2mms[22m[39m
+     [33m[2m✓[22m[39m ends a view Hornhoof closed while it was opening beside another, and leaves the other its size[33m 683[2mms[22m[39m
+     [33m[2m✓[22m[39m shows a waiting screen for an agent that has not started yet, and ends the view when asked[33m 2115[2mms[22m[39m
+     [33m[2m✓[22m[39m tells a view while the agent's program is starting, and once it is up[33m 373[2mms[22m[39m
+     [33m[2m✓[22m[39m shows the last screen of a program that ended, which says why, instead of the loader[33m 1685[2mms[22m[39m
+     [33m[2m✓[22m[39m asks Hornhoof to start an agent that does not run when someone who may type opens it[33m 991[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the program for a turn with nothing to type, and the next turn goes on in it[33m 793[2mms[22m[39m
+ [32m✓[39m test/commands.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1563[2mms[22m[39m
+   [32m✓[39m run --builtin [2m(2)[22m
+     [33m[2m✓[22m[39m runs each API key job with its own home and key, and ignores remove[33m 400[2mms[22m[39m
+ [32m✓[39m test/workspace.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 262[2mms[22m[39m
+ [32m✓[39m test/terminal-host-receipts.test.ts [2m([22m[2m53 tests[22m[2m)[22m[33m 56030[2mms[22m[39m
+   [32m✓[39m program receipts for live words [2m(53)[22m
+     [33m[2m✓[22m[39m keeps statusLine from refreshing signs of life or postponing a restart[33m 395[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Claude up after an idle clear and delivers the next live words once[33m 982[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Claude up after an idle logout and delivers the next live words once[33m 965[2mms[22m[39m
+     [33m[2m✓[22m[39m starts Claude receipts empty after clear and absorbs only the new session words[33m 1024[2mms[22m[39m
+     [33m[2m✓[22m[39m settles old Claude words at clear before absorbing identical new words[33m 973[2mms[22m[39m
+     [33m[2m✓[22m[39m settles old Claude words at session change before absorbing identical new words[33m 960[2mms[22m[39m
+     [33m[2m✓[22m[39m reports claude unheard words on time with no watcher, log line or Enter[33m 664[2mms[22m[39m
+     [33m[2m✓[22m[39m reports codex unheard words on time with no watcher, log line or Enter[33m 1175[2mms[22m[39m
+     [33m[2m✓[22m[39m does not report live words unheard from the program display flag[33m 616[2mms[22m[39m
+     [33m[2m✓[22m[39m ends a running Claude turn as stopped by a person on clear[33m 364[2mms[22m[39m
+     [33m[2m✓[22m[39m ends Claude as crashed when prompt_input_exit accompanies a process exit[33m 355[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a Claude queued receipt and waits for absorption[33m 617[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a Claude hook receipt and waits for absorption[33m 655[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a delayed Claude absorption receipt after Stop, typed: false[33m 664[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a delayed Claude absorption receipt after Stop, typed: true[33m 708[2mms[22m[39m
+     [33m[2m✓[22m[39m reads the old Claude absorption receipt before expiry while a human turn runs[33m 716[2mms[22m[39m
+     [33m[2m✓[22m[39m reads the whole Claude receipt batch at expiry when a human turn ends first[33m 659[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a delayed Claude receipt once, leaving later words: Words for the human turn.[33m 962[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a delayed Claude receipt once, leaving later words: From Hornhoof:
+
+Keep these exact words.[33m 967[2mms[22m[39m
+     [33m[2m✓[22m[39m opens Claude dequeued words from the log as a typed turn and hears its second Stop[33m 615[2mms[22m[39m
+     [33m[2m✓[22m[39m takes Claude words it records as pasted content, and never hands them out again[33m 609[2mms[22m[39m
+     [33m[2m✓[22m[39m opens Claude's own turn on pasted words with their job and Hornhoof's words[33m 658[2mms[22m[39m
+     [33m[2m✓[22m[39m retries Claude silent words once, says false and erases input[33m 723[2mms[22m[39m
+     [33m[2m✓[22m[39m retries Claude lost words once, says false and erases input[33m 679[2mms[22m[39m
+     [33m[2m✓[22m[39m takes a Codex UserMessage only in the running turn[33m 1114[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps silent Codex words held until its own next turn takes them[33m 1185[2mms[22m[39m
+     [33m[2m✓[22m[39m opens held words after a typed Codex turn ended, with their old job[33m 1177[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps one successful completion when typed claude exits after its end, including while its log settles[33m 3710[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps one successful completion when typed codex exits after its end, including while its log settles[33m 1197[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps one crash completion when typed claude exits before its end record[33m 665[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps one crash completion when typed codex exits before its end record[33m 1181[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the successful completion when typed claude exits after its end[33m 814[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the successful completion when typed codex exits after its end[33m 1175[2mms[22m[39m
+     [33m[2m✓[22m[39m reports claude waiting words once after 15 seconds without a next turn[33m 714[2mms[22m[39m
+     [33m[2m✓[22m[39m reports codex waiting words once after 15 seconds without a next turn[33m 1228[2mms[22m[39m
+     [33m[2m✓[22m[39m reports kimi waiting words once after 15 seconds without a next turn[33m 1211[2mms[22m[39m
+     [33m[2m✓[22m[39m completes the old claude job before opening queued words 300 ms later[33m 911[2mms[22m[39m
+     [33m[2m✓[22m[39m completes the old codex job before opening queued words 300 ms later[33m 1489[2mms[22m[39m
+     [33m[2m✓[22m[39m completes a claude job without the flag when there are no queued words[33m 311[2mms[22m[39m
+     [33m[2m✓[22m[39m completes a codex job without the flag when there are no queued words[33m 858[2mms[22m[39m
+     [33m[2m✓[22m[39m opens unrelated human words right after claude Stop without queuedFrom or a word wait, typed: false[33m 3685[2mms[22m[39m
+     [33m[2m✓[22m[39m opens unrelated human words right after claude Stop without queuedFrom or a word wait, typed: true[33m 3776[2mms[22m[39m
+     [33m[2m✓[22m[39m opens unrelated human words right after codex Stop without queuedFrom or a word wait, typed: false[33m 1180[2mms[22m[39m
+     [33m[2m✓[22m[39m opens unrelated human words right after codex Stop without queuedFrom or a word wait, typed: true[33m 1186[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a typed Claude answer with its job when human words precede the last log lines[33m 792[2mms[22m[39m
+     [33m[2m✓[22m[39m reports queued words on shutdown after the old job completed[33m 662[2mms[22m[39m
+     [33m[2m✓[22m[39m bounds the Kimi Stop wait when its wire end is missing[33m 3831[2mms[22m[39m
+     [33m[2m✓[22m[39m sends Kimi Ctrl-S and accepts its queued hook then turn.steer[33m 1114[2mms[22m[39m
+     [33m[2m✓[22m[39m receives hh-hook queued through the bridge without a wire receipt[33m 1321[2mms[22m[39m
+     [33m[2m✓[22m[39m reports waiting words when the program is gone[33m 1174[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the old failure when Claude dequeues the next turn in the same log read[33m 658[2mms[22m[39m
+ [32m✓[39m test/terminal-recording.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 8280[2mms[22m[39m
+   [32m✓[39m terminal output recording lifecycle [2m(12)[22m
+     [33m[2m✓[22m[39m keeps a live stderr failure after the program erases its screen[33m 327[2mms[22m[39m
+     [33m[2m✓[22m[39m reads only bytes after a cursor even when its old output rolls out of the tail[33m 352[2mms[22m[39m
+     [33m[2m✓[22m[39m waits for a delayed recorder before returning and caching the final output[33m 337[2mms[22m[39m
+     [33m[2m✓[22m[39m bounds the wait for a stopped recorder and retries an incomplete snapshot[33m 316[2mms[22m[39m
+     [33m[2m✓[22m[39m marks incomplete job.done output after limiting 4096 tail bytes and its 400-character preview[33m 5231[2mms[22m[39m
+ [32m✓[39m test/terminal-host-say.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 29751[2mms[22m[39m
+   [32m✓[39m words typed into a running turn [2m(27)[22m
+     [33m[2m✓[22m[39m does not press Enter if the turn ends after the paste, and clears the words[33m 1175[2mms[22m[39m
+     [33m[2m✓[22m[39m checks the same turn again after waiting for the program to be alive[33m 824[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Codex words held if the turn ends while Enter is sent[33m 1124[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps silent Codex input held after two keys: Use the new schema.[33m 1337[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps silent Codex input held after two keys: 
+Use the new schema.[33m 1338[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps silent Codex input held after two keys: First line.
+Second line.[33m 1333[2mms[22m[39m
+     [33m[2m✓[22m[39m pastes and presses Enter on an unknown screen, and logs the fallback once for the agent[33m 1442[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves a person's unfinished input alone[33m 842[2mms[22m[39m
+     [33m[2m✓[22m[39m falls back on the visible screen without reading an old empty prompt from history[33m 1123[2mms[22m[39m
+     [33m[2m✓[22m[39m reads a styled capture so a busy Codex placeholder counts as empty[33m 1142[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves typed placeholder words alone[33m 819[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the receipt if the input disappears after Enter[33m 1118[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the fallback answer when the turn ends as Enter goes in[33m 1112[2mms[22m[39m
+     [33m[2m✓[22m[39m checks the turn after reading the input before typing[33m 830[2mms[22m[39m
+     [33m[2m✓[22m[39m clears words left by a paste that failed halfway through[33m 845[2mms[22m[39m
+     [33m[2m✓[22m[39m says yes when the input clears and the same turn still runs, even with the words in its history[33m 1122[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the program receipt even if the screen still shows the words[33m 1126[2mms[22m[39m
+     [33m[2m✓[22m[39m starts its budget on a node whose clock differs by -15000 ms[33m 1130[2mms[22m[39m
+     [33m[2m✓[22m[39m starts its budget on a node whose clock differs by 15000 ms[33m 1136[2mms[22m[39m
+     [33m[2m✓[22m[39m does not paste words with no time left[33m 815[2mms[22m[39m
+     [33m[2m✓[22m[39m checks the deadline again after waiting for the program to be alive[33m 937[2mms[22m[39m
+     [33m[2m✓[22m[39m stops waiting for Hornhoof's prompt when the deadline passes[33m 868[2mms[22m[39m
+     [33m[2m✓[22m[39m does not press Enter if the deadline passes during the paste delay[33m 1111[2mms[22m[39m
+     [33m[2m✓[22m[39m does not begin a paste that cannot finish before its deadline[33m 813[2mms[22m[39m
+     [33m[2m✓[22m[39m drops words whose deadline passes behind another delivery[33m 1120[2mms[22m[39m
+     [33m[2m✓[22m[39m does not carry queued words into a later turn[33m 1177[2mms[22m[39m
+     [33m[2m✓[22m[39m clears a failed delivery before the next turn pastes its prompt[33m 1985[2mms[22m[39m
+ [32m✓[39m test/isolation.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 169[2mms[22m[39m
+ [32m✓[39m test/lifecycle.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 194[2mms[22m[39m
+ [32m✓[39m test/terminal-bridge.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 896[2mms[22m[39m
+   [32m✓[39m the node's bridge to Hornhoof's tools [2m(8)[22m
+     [33m[2m✓[22m[39m hands on a task's files both ways, with their names and up to 50 MB, and nothing else under the picture address[33m 326[2mms[22m[39m
+ [32m✓[39m test/skills.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 373[2mms[22m[39m
+ [32m✓[39m test/terminal-host-cancel-boundary.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 16812[2mms[22m[39m
+   [32m✓[39m a stopped turn followed by a queued letter [2m(6)[22m
+     [33m[2m✓[22m[39m keeps the queued reply out of the stopped turn while Escape is still pending[33m 6604[2mms[22m[39m
+     [33m[2m✓[22m[39m does not type a cancelled prompt that waited behind the previous turn[33m 1327[2mms[22m[39m
+     [33m[2m✓[22m[39m closes a typed turn to new words and events before its Escape finishes[33m 1164[2mms[22m[39m
+     [33m[2m✓[22m[39m cancels a queued prompt while the person's typed turn continues[33m 1090[2mms[22m[39m
+     [33m[2m✓[22m[39m waits for the old Escape before typing a new prompt even if the old stop hook arrives first[33m 2252[2mms[22m[39m
+     [33m[2m✓[22m[39m waits for cancellation requested while the next prompt already awaits the old log[33m 4371[2mms[22m[39m
+ [32m✓[39m test/hook-bridge.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 769[2mms[22m[39m
+ [32m✓[39m test/terminal-host-lifecycle.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 42898[2mms[22m[39m
+   [32m✓[39m turn ends and signs from the program [2m(13)[22m
+     [33m[2m✓[22m[39m claude ends once in either channel order with its answer[33m 1582[2mms[22m[39m
+     [33m[2m✓[22m[39m codex ends once in either channel order with its answer[33m 1866[2mms[22m[39m
+     [33m[2m✓[22m[39m kimi ends once in either channel order with its answer[33m 1958[2mms[22m[39m
+     [33m[2m✓[22m[39m uses Claude turn_duration when the end hook is lost, failed=false[33m 772[2mms[22m[39m
+     [33m[2m✓[22m[39m uses Claude turn_duration when the end hook is lost, failed=true[33m 907[2mms[22m[39m
+     [33m[2m✓[22m[39m fails a typed Claude auth turn from its failure hook[33m 971[2mms[22m[39m
+     [33m[2m✓[22m[39m codex carries APIFAIL_503 failure to job.done[33m 1112[2mms[22m[39m
+     [33m[2m✓[22m[39m kimi carries APIFAIL_AUTH failure to job.done[33m 1320[2mms[22m[39m
+     [33m[2m✓[22m[39m claude carries APIFAIL_REAL failure to job.done[33m 832[2mms[22m[39m
+     [33m[2m✓[22m[39m codex carries CRASH failure to job.done[33m 1401[2mms[22m[39m
+     [33m[2m✓[22m[39m shows a Codex hook tool before its only rollout item_completed[33m 4265[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps signs tied to hooks and log lines, and clears Kimi retry at its next step[33m 2069[2mms[22m[39m
+     [33m[2m✓[22m[39m drops mismatched Codex ends and logs a contradictory second end once[33m 1255[2mms[22m[39m
+   [32m✓[39m Antigravity turn evidence [2m(6)[22m
+     [33m[2m✓[22m[39m carries the AGY_ERROR retryable flag after a failed tool[33m 2092[2mms[22m[39m
+     [33m[2m✓[22m[39m ends once from a fresh AGY_ERROR when the failed Stop is lost[33m 1673[2mms[22m[39m
+     [33m[2m✓[22m[39m classifies one fresh failure after the recording rolls over with Stop[33m 1881[2mms[22m[39m
+     [33m[2m✓[22m[39m classifies one fresh failure after the recording rolls over with lost Stop[33m 1682[2mms[22m[39m
+     [33m[2m✓[22m[39m does not reuse an older AGY_ERROR with the same reason[33m 2120[2mms[22m[39m
+     [33m[2m✓[22m[39m reports a permission request without an id as asking until its tool ends[33m 6509[2mms[22m[39m
+   [32m✓[39m turn identity on a typed Codex prompt [2m(2)[22m
+     [33m[2m✓[22m[39m keeps the task_started turn id when UserMessage opens the typed job[33m 1379[2mms[22m[39m
+     [33m[2m✓[22m[39m calls an early program exit a crash[33m 303[2mms[22m[39m
+   [32m✓[39m Antigravity end channels [2m(2)[22m
+     [33m[2m✓[22m[39m keeps one answer with hook first[33m 2547[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps one answer with log first[33m 2394[2mms[22m[39m
+ [32m✓[39m test/terminal-host-agy.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 50204[2mms[22m[39m
+   [32m✓[39m Antigravity's own terminal [2m(13)[22m
+     [33m[2m✓[22m[39m takes a Hornhoof turn through invocation 0, follows its session, and reads the feed and answer from its transcript[33m 4593[2mms[22m[39m
+     [33m[2m✓[22m[39m gives agy the start of long instructions and keeps the whole text in a private file[33m 2061[2mms[22m[39m
+     [33m[2m✓[22m[39m takes long multiline input whole, like Codex, without printing a prompt-hook notice[33m 2518[2mms[22m[39m
+     [33m[2m✓[22m[39m opens a typed turn and its queued turn while settling WORK[33m 5297[2mms[22m[39m
+     [33m[2m✓[22m[39m opens a typed turn and its queued turn while settling WORK LAG_TEXT[33m 6074[2mms[22m[39m
+     [33m[2m✓[22m[39m opens a queued message as its own typed turn after a Hornhoof turn[33m 5311[2mms[22m[39m
+     [33m[2m✓[22m[39m sees Escape end a hornhoof turn without a stop hook or sending any key itself[33m 1678[2mms[22m[39m
+     [33m[2m✓[22m[39m sees Escape end a typed turn without a stop hook or sending any key itself[33m 1541[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a lost Stop open beyond the former idle timeout until a person stops it[33m 7304[2mms[22m[39m
+     [33m[2m✓[22m[39m drains the transcript when stop arrives before its answer is readable[33m 2902[2mms[22m[39m
+     [33m[2m✓[22m[39m settles the final answer after intermediate text when stop precedes the last transcript write[33m 2622[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps an older interruption in the screen history from cancelling a later turn[33m 4738[2mms[22m[39m
+     [33m[2m✓[22m[39m fails a stop with an error and leaves agy ready for the next turn[33m 3553[2mms[22m[39m
+ [32m✓[39m test/terminal-host-start.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 13097[2mms[22m[39m
+   [32m✓[39m agents in live terminals [2m(9)[22m
+     [33m[2m✓[22m[39m keeps the turn that starts a program going until the program has its tools[33m 1379[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a person who types while their program starts a turn of their own, once the program has its tools[33m 1202[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a person who types into Codex while it starts a turn of their own[33m 1558[2mms[22m[39m
+     [33m[2m✓[22m[39m remembers the session a person started by typing into a program started for them[33m 618[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a program started fresh the conversation from before, without counting it as new instructions[33m 977[2mms[22m[39m
+     [33m[2m✓[22m[39m gives a Claude session it resumes the conversation from before that the session was started with[33m 1769[2mms[22m[39m
+     [33m[2m✓[22m[39m tells Hornhoof of turns typed while the program starts one by one, in order, each after the last one ended[33m 1904[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the program in place of the waiting screen shown after its session was gone[33m 1578[2mms[22m[39m
+     [33m[2m✓[22m[39m resumes the session for a turn with nothing to type[33m 2105[2mms[22m[39m
+ [32m✓[39m test/program-updates.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 179[2mms[22m[39m
+ [32m✓[39m test/terminal-host-turns.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 21358[2mms[22m[39m
+   [32m✓[39m agents in live terminals [2m(11)[22m
+     [33m[2m✓[22m[39m runs a turn in the agent session: pastes the prompt, shows what it does and ends with its answer and limits[33m 1054[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the agent's program as the agents' user on a root node, and writes what it needs through their file helper[33m 988[2mms[22m[39m
+     [33m[2m✓[22m[39m hands Claude Code the plugins the node has, such as superpowers[33m 971[2mms[22m[39m
+     [33m[2m✓[22m[39m presses Enter again when the program did not take the prompt, as Claude Code that just started can miss it[33m 1281[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a turn's answer with its turn when the program logs it after saying the turn ended[33m 1710[2mms[22m[39m
+     [33m[2m✓[22m[39m goes on in the same live program for the next turn, and resumes the session once the program ended[33m 3139[2mms[22m[39m
+     [33m[2m✓[22m[39m takes the next turn at once when the program ended the last one before its Enter came back, as on a busy machine[33m 2425[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the program again in the same session when the agent was set to think harder[33m 1868[2mms[22m[39m
+     [33m[2m✓[22m[39m starts the program again in the same session once its plan was signed in to another account[33m 2302[2mms[22m[39m
+     [33m[2m✓[22m[39m starts a new session when Hornhoof asks for one[33m 1749[2mms[22m[39m
+     [33m[2m✓[22m[39m stops a turn Hornhoof calls off[33m 3857[2mms[22m[39m
+ [32m✓[39m test/terminal-host-exits.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 22522[2mms[22m[39m
+   [32m✓[39m agents in live terminals [2m(17)[22m
+     [32m✓[39m exit diagnostics [2m(17)[22m
+       [33m[2m✓[22m[39m claude retains alternate-screen output and the exit code when startup fails[33m 666[2mms[22m[39m
+       [33m[2m✓[22m[39m codex retains alternate-screen output and the exit code when startup fails[33m 398[2mms[22m[39m
+       [33m[2m✓[22m[39m kimi retains alternate-screen output and the exit code when startup fails[33m 545[2mms[22m[39m
+       [33m[2m✓[22m[39m uses the observation time when tmux has no pane_dead_time format[33m 467[2mms[22m[39m
+       [33m[2m✓[22m[39m claude retains stderr, UTC time and redacted secrets when the program exits during a turn[33m 1088[2mms[22m[39m
+       [33m[2m✓[22m[39m codex retains stderr, UTC time and redacted secrets when the program exits during a turn[33m 1601[2mms[22m[39m
+       [33m[2m✓[22m[39m kimi retains stderr, UTC time and redacted secrets when the program exits during a turn[33m 1545[2mms[22m[39m
+       [33m[2m✓[22m[39m claude reports the native KILL signal after the running program is killed[33m 2562[2mms[22m[39m
+       [33m[2m✓[22m[39m codex reports the native KILL signal after the running program is killed[33m 2504[2mms[22m[39m
+       [33m[2m✓[22m[39m kimi reports the native KILL signal after the running program is killed[33m 3013[2mms[22m[39m
+       [33m[2m✓[22m[39m claude keeps typed-turn exit output until Hornhoof acknowledges the turn[33m 1258[2mms[22m[39m
+       [33m[2m✓[22m[39m codex keeps typed-turn exit output until Hornhoof acknowledges the turn[33m 1494[2mms[22m[39m
+       [33m[2m✓[22m[39m kimi keeps typed-turn exit output until Hornhoof acknowledges the turn[33m 1944[2mms[22m[39m
+       [33m[2m✓[22m[39m claude retains exit details when the failed startup says to sign in[33m 517[2mms[22m[39m
+       [33m[2m✓[22m[39m codex retains exit details when the failed startup says to sign in[33m 437[2mms[22m[39m
+       [33m[2m✓[22m[39m kimi retains exit details when the failed startup says to sign in[33m 374[2mms[22m[39m
+       [33m[2m✓[22m[39m bounds private output files and removes them with their session[33m 2102[2mms[22m[39m
+ [32m✓[39m test/program-state.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 56[2mms[22m[39m
+ [32m✓[39m test/terminal-mouse.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 2820[2mms[22m[39m
+   [32m✓[39m terminal wheel bindings [2m(9)[22m
+     [33m[2m✓[22m[39m keeps alternate screen input with the application when its mouse mode is off[33m 406[2mms[22m[39m
+     [33m[2m✓[22m[39m scrolls an existing copy mode without forwarding to the normal application[33m 475[2mms[22m[39m
+     [33m[2m✓[22m[39m scrolls an existing copy mode without forwarding to the application mouse application[33m 323[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps input in copy mode on the alternate screen without scrollback[33m 314[2mms[22m[39m
+ [32m✓[39m test/terminal-host-typed-program.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 10477[2mms[22m[39m
+   [32m✓[39m observing turns people type in a terminal [2m(7)[22m
+     [33m[2m✓[22m[39m keeps lost claude end channels open until a person cancels it, without touching the program[33m 1116[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps lost antigravity end channels open until a person cancels it, without touching the program[33m 2287[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a typed Claude turn with the current spinner thinking beyond three former lost-end windows until its Stop hook[33m 3637[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps an unconfirmed typed turn open when both end channels are lost, then reports it under its confirmed job id[33m 1256[2mms[22m[39m
+     [33m[2m✓[22m[39m reports gone with a masked screen before completion (ack first: true)[33m 801[2mms[22m[39m
+     [33m[2m✓[22m[39m reports gone with a masked screen before completion (ack first: false)[33m 773[2mms[22m[39m
+     [33m[2m✓[22m[39m reports gone without inventing an exit code when the entire session disappeared[33m 600[2mms[22m[39m
+ [32m✓[39m test/attach.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 2610[2mms[22m[39m
+   [32m✓[39m hh-attach [2m(3)[22m
+     [33m[2m✓[22m[39m sends each file with the turn token and prints the id to pass on[33m 306[2mms[22m[39m
+     [33m[2m✓[22m[39m says what went wrong: no turn, no file, or Hornhoof's refusal[33m 567[2mms[22m[39m
+     [33m[2m✓[22m[39m puts files of any kind on a task under their own names[33m 515[2mms[22m[39m
+   [32m✓[39m hh-fetch [2m(3)[22m
+     [33m[2m✓[22m[39m saves it where it is told, into a folder or as a file[33m 501[2mms[22m[39m
+     [33m[2m✓[22m[39m says what went wrong: no turn, no task and file, or Hornhoof's refusal[33m 447[2mms

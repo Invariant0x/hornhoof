@@ -1,0 +1,106 @@
+remote: snapshot p2t4-mut-final-20261104-172005-153641 ready after 13 s, waiting for a slot
+remote: started after 2036 s, log /home/altera/hornhoof-network/network-build/runs/remote-p2t4-mut-final-20261104-172005-153641.log
+== files: apps/server/src/front.ts apps/server/src/net/front.ts apps/server/src/net/proxy.ts
+[2m   Start at [22m 17:54:03
+[2m   Duration [22m 36.15s[2m (tests 99%, import 1%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: typescript
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+framingOf                      net.proxy                              3 100.0%      3.0
+hopByHop                       net.proxy                              3 100.0%      3.0
+openTarget                     net.proxy                              3 100.0%      3.0
+pass                           net.proxy                              3 100.0%      3.0
+passedHeaders                  net.proxy                              3 100.0%      3.0
+startFront                     net.front                              2 100.0%      2.0
+askerOfUpgrade                 net.proxy                              2 100.0%      2.0
+firstForwarded                 net.proxy                              2 100.0%      2.0
+pairsOf                        net.proxy                              2 100.0%      2.0
+socketAddress                  net.proxy                              2 100.0%      2.0
+startingAnswer                 net.proxy                              2 100.0%      2.0
+answerHeaders                  net.proxy                              1 100.0%      1.0
+askerOfRequest                 net.proxy                              1 100.0%      1.0
+closeAfterFlush                net.proxy                              1 100.0%      1.0
+headOf                         net.proxy                              1 100.0%      1.0
+ignore                         net.proxy                              1 100.0%      1.0
+lengthOf                       net.proxy                              1 100.0%      1.0
+limitConnect                   net.proxy                              1 100.0%      1.0
+passThrough                    net.proxy                              1 100.0%      1.0
+serve                          net.proxy                              1 100.0%      1.0
+spliceSockets                  net.proxy                              1 100.0%      1.0
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+== mutator apps/server/src/net/proxy.ts
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.proxy.edn
+KILLED    apps/server/src/net/proxy.ts:39 === -> !==
+KILLED    apps/server/src/net/proxy.ts:39 0 -> 1
+KILLED    apps/server/src/net/proxy.ts:39 + -> -
+KILLED    apps/server/src/net/proxy.ts:39 1 -> 0
+KILLED    apps/server/src/net/proxy.ts:44 || -> &&
+KILLED    apps/server/src/net/proxy.ts:45 || -> &&
+KILLED    apps/server/src/net/proxy.ts:60 delete !
+KILLED    apps/server/src/net/proxy.ts:60 && -> ||
+KILLED    apps/server/src/net/proxy.ts:60 delete !
+KILLED    apps/server/src/net/proxy.ts:60 && -> ||
+KILLED    apps/server/src/net/proxy.ts:60 delete !
+KILLED    apps/server/src/net/proxy.ts:68 delete !
+KILLED    apps/server/src/net/proxy.ts:84 false -> true
+KILLED    apps/server/src/net/proxy.ts:85 ?? -> ||
+KILLED    apps/server/src/net/proxy.ts:144 || -> &&
+KILLED    apps/server/src/net/proxy.ts:148 + -> -
+KILLED    apps/server/src/net/proxy.ts:173 delete !
+KILLED    apps/server/src/net/proxy.ts:191 || -> &&
+KILLED    apps/server/src/net/proxy.ts:195 || -> &&
+KILLED    apps/server/src/net/proxy.ts:195 0 -> 1
+KILLED    apps/server/src/net/proxy.ts:207 0 -> 1
+Function        Namespace  Killed  Survived  Uncovered  Sites   Score
+---------------------------------------------------------------------
+askerOfRequest  net.proxy       0         0          0      0    n/a
+closeAfterFlush net.proxy       0         0          0      0    n/a
+framingOf       net.proxy       0         0          0      0    n/a
+headOf          net.proxy       0         0          0      0    n/a
+ignore          net.proxy       0         0          0      0    n/a
+lengthOf        net.proxy       0         0          0      0    n/a
+limitConnect    net.proxy       0         0          0      0    n/a
+passThrough     net.proxy       0         0          0      0    n/a
+spliceSockets   net.proxy       0         0          0      0    n/a
+startingAnswer  net.proxy       0         0          0      0    n/a
+answerHeaders   net.proxy       1         0          0      1 100.0%
+askerOfUpgrade  net.proxy       2         0          0      2 100.0%
+firstForwarded  net.proxy       2         0          0      2 100.0%
+hopByHop        net.proxy       2         0          0      2 100.0%
+openTarget      net.proxy       2         0          0      2 100.0%
+pairsOf         net.proxy       4         0          0      4 100.0%
+pass            net.proxy       1         0          0      1 100.0%
+passedHeaders   net.proxy       5         0          0      5 100.0%
+serve           net.proxy       1         0          0      1 100.0%
+socketAddress   net.proxy       1         0          0      1 100.0%
+---------------------------------------------------------------------
+Total                          21         0          0     21  100.0%
+== exit 0
+== mutator apps/server/src/net/front.ts
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.front.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.proxy.edn
+SURVIVED  apps/server/src/net/front.ts:16 ?? -> ||
+Function   Namespace  Killed  Survived  Uncovered  Sites   Score
+----------------------------------------------------------------
+startFront net.front       0         1          0      1   0.0%
+----------------------------------------------------------------
+Total                      0         1          0      1    0.0%
+== exit 3
+== mutator apps/server/src/front.ts
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.front.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/net.proxy.edn
+== exit 0
+remote: command exited 0 after 2658 s

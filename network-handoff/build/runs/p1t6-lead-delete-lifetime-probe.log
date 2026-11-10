@@ -1,0 +1,11 @@
+Source hash: 9933e035c2cf
+bound acme for 127.0.0.1
+released acme for 127.0.0.1
+bound acme for 127.0.0.1
+released acme for 127.0.0.1
+Stale DELETE status: 204 new owner binding survives: False
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-delete-lifetime-probe.py", line 91, in <module>
+    assert survives, 'a DELETE authorized for the old lifetime removed the new owner binding'
+           ^^^^^^^^
+AssertionError: a DELETE authorized for the old lifetime removed the new owner binding

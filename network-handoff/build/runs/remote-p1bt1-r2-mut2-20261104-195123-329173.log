@@ -1,0 +1,11 @@
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/app.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.session.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/auth.tunnel.edn
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/mutate/modules.events.stream.edn
+Function           Namespace              Killed  Survived  Uncovered  Sites   Score
+------------------------------------------------------------------------------------
+GET /api/stream    modules.events.stream       0         0          0     10    n/a
+eventStreamHeaders modules.events.stream       0         0          0      0    n/a
+streamRoutes       modules.events.stream       0         0          0      0    n/a
+------------------------------------------------------------------------------------
+Total                                          0         0          0     10     n/a

@@ -1,0 +1,68 @@
+== files: relay/relay.py
+== coverage run (whole relay suite)
+Ran 37 tests in 108.220s
+
+OK
+== crapper (every function the task added or changed must be under 10)
+CRAP Report
+===========
+Languages: python
+
+Function                       Namespace                             CC    Cov%     CRAP
+----------------------------------------------------------------------------------------
+admin                          relay.relay                           17   2.4%    285.4
+do_DELETE                      relay.relay.Handler                    7   6.2%     47.4
+create_binding                 relay.relay.Handler                   16  65.8%     26.2
+proxy_check                    relay.relay                            8  73.3%      9.2
+do_GET                         relay.relay.Handler                    7  66.7%      8.8
+binding_ok                     relay.relay                            8  77.8%      8.7
+plugin_decide                  relay.relay                            8 100.0%      8.0
+dash_answer                    relay.relay                            7 100.0%      7.0
+allow                          relay.relay.Window                     6  75.0%      6.6
+check_name                     relay.relay                            6  77.8%      6.4
+reserved_names                 relay.relay                            6  85.7%      6.1
+_dash_get                      relay.relay                            6 100.0%      6.0
+check_route_holder             relay.relay                            6 100.0%      6.0
+trace_client                   relay.relay                            6 100.0%      6.0
+upsert_route                   relay.relay                            6 100.0%      6.0
+handle_plugin                  relay.relay.Handler                    5  69.2%      5.7
+read_json                      relay.relay.Handler                    5  83.3%      5.1
+straighten_route               relay.relay                            5  87.5%      5.0
+send_json                      relay.relay.Handler                    5  90.9%      5.0
+frps_route                     relay.relay                            5 100.0%      5.0
+route_body                     relay.relay                            5 100.0%      5.0
+route_answer                   relay.relay.Handler                    5 100.0%      5.0
+plugin_request                 relay.relay.Handler                    4  63.6%      4.8
+trace_run_id                   relay.relay                            4 100.0%      4.0
+hold_route_lock                relay.relay                            3  71.4%      3.2
+trace_plugin                   relay.relay                            3  80.0%      3.1
+do_POST                        relay.relay.Handler                    3  85.7%      3.0
+name_answer                    relay.relay.Handler                    3  88.9%      3.0
+register_locked                relay.relay                            3 100.0%      3.0
+register_route                 relay.relay                            3 100.0%      3.0
+shared_route_fields            relay.relay                            3 100.0%      3.0
+bearer_key                     relay.relay.Handler                    3 100.0%      3.0
+main                           relay.relay                            2  77.8%      2.0
+wrong_key                      relay.relay.Handler                    2  80.0%      2.0
+call_deadline                  relay.relay                            2 100.0%      2.0
+db                             relay.relay                            2 100.0%      2.0
+locked_route_of                relay.relay                            2 100.0%      2.0
+route_lock                     relay.relay                            2 100.0%      2.0
+touch                          relay.relay                            2 100.0%      2.0
+client_ip                      relay.relay.Handler                    2 100.0%      2.0
+path_parts                     relay.relay.Handler                    2 100.0%      2.0
+frpc_config                    relay.relay                            1 100.0%      1.0
+init_db                        relay.relay                            1 100.0%      1.0
+key_hash                       relay.relay                            1 100.0%      1.0
+log_line                       relay.relay                            1 100.0%      1.0
+now                            relay.relay                            1 100.0%      1.0
+plugin                         relay.relay                            1 100.0%      1.0
+route_of                       relay.relay                            1 100.0%      1.0
+tunnel_info                    relay.relay                            1 100.0%      1.0
+error                          relay.relay.Handler                    1 100.0%      1.0
+log_message                    relay.relay.Handler                    1 100.0%      1.0
+__init__                       relay.relay.Window                     1 100.0%      1.0
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/crap.edn
+== dryer --threshold 0.8
+Wrote /Users/0x/Projects/hornhoof-edge/.metrics/dry.edn
+No duplicate candidates found.

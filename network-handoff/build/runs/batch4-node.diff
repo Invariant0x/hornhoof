@@ -1,0 +1,1576 @@
+# Review package: batch 4, slice node
+
+## 767f2701 Number the node messages that change data, in the protocol
+
+A node will keep each message that changes the company's data until the server confirms it, so the protocol gains the
+numbers and the confirmation. NUMBERED lists the messages a node numbers, each gains an optional n (an integer from 1),
+hello gains an optional stream (a uuid), and a server message ack { upto } confirms every number up to upto. ACKS_HEADER
+names the header a server sends on its upgrade answer to say it confirms. Every addition is optional or a message an
+older side drops, so builds one version apart still talk.
+
+The node's main.ts ignores ack for now so the node still compiles; the outbox commit that follows handles it.
+
+Ruling: job.program, agent.hook_rejected and agent.unheard are in NUMBERED, agent.restarted and node.stopping are not - why: map ruling 5, taken by the lead - cost if wrong: a message numbered by mistake waits in the outbox, a message left out is lost in a restart.
+Ruling: the server part of Task 4 (hub, messages, socket, app, FakeNode) is not in this commit - why: the brief gives only the protocol part to this lane - cost if wrong: none here, the server lane lands it after.
+Ruling: main.ts of the node drops ack in this commit - why: the new server message must compile in the node's switch - cost if wrong: none, the next commit replaces the line.
+
+Proved with packages/protocol test/protocol.test.ts and tsc on protocol, server, node and web.
+
+---
+ apps/node/src/main.ts                   |  2 ++
+ packages/protocol/src/index.ts          | 38 +++++++++++++++++++-----
+ packages/protocol/test/protocol.test.ts | 52 +++++++++++++++++++++++++++++++++
+ 3 files changed, 85 insertions(+), 7 deletions(-)
+
+diff --git a/apps/node/src/main.ts b/apps/node/src/main.ts
+index 82e20453..5e9f3a08 100644
+--- a/apps/node/src/main.ts
++++ b/apps/node/src/main.ts
+@@ -271,16 +271,18 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+       await login?.shutdown();
+       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
+       markRemoved(dir);
+       emit({ type: 'removed' });
+       log('This node was removed in Hornhoof.');
+       stop();
+       return;
+     }
++    /* The node does not number its messages yet, so a confirmation has nothing to drop. */
++    if (m.type === 'ack') return;
+     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
+     if (m.type === 'programs.update') return programs.update(tellStatus);
+     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
+     if (m.type === 'tests.run') {
+       if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
+       const controller = new AbortController();
+       const done = testOne(m, controller.signal);
+       testing.set(m.partId, { stop: controller, done });
+diff --git a/packages/protocol/src/index.ts b/packages/protocol/src/index.ts
+index 4361f25e..eb41b9f5 100644
+--- a/packages/protocol/src/index.ts
++++ b/packages/protocol/src/index.ts
+@@ -340,16 +340,26 @@ export const Boot = z.object({ startedAt: z.iso.datetime(), machineUpAt: z.iso.d
+ export type Boot = z.infer<typeof Boot>;
+ /* A node build: the commit, in full, of the last change to the files of the node's image. */
+ export const NodeBuild = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
+ 
+ /* How an agent's program ended: its exit code, or the signal that ended it, by name, such as SIGTERM. */
+ export const ProgramExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() });
+ export type ProgramExit = z.infer<typeof ProgramExit>;
+ 
++/* The node messages that change the company's data. A node numbers them from 1 within a stream and keeps each until the
++   server confirms it, so a restart on either side loses none and applies none twice. The rest are snapshots or live
++   answers that are worth nothing late: hello, load, status, the terminal's screens, turn.open, agent.start, agent.said,
++   agent.restarted and node.stopping. */
++export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard'] as const;
++/* Optional, so a build that does not number still talks to one that does. */
++const MessageNumber = z.number().int().min(1).optional();
++/* The header of the upgrade answer of a server that sends ack. */
++export const ACKS_HEADER = 'hornhoof-acks';
++
+ const NodeMessage = z.discriminatedUnion('type', [
+   /* terminals: the node runs agents in sessions people can watch and type into. */
+   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
+   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
+      the instructions. */
+   z.object({
+     type: z.literal('hello'),
+     version: z.string().max(40),
+@@ -369,57 +379,62 @@ const NodeMessage = z.discriminatedUnion('type', [
+     account: Account.nullable().optional(),
+     boot: Boot.optional(),
+     programs: Programs.optional(),
+     /* The node build CI wrote into the node's image, the last commit that changed its files; none from a node built by
+        hand or from before. One that is not a commit is left out rather than the hello refused. */
+     build: NodeBuild.optional().catch(undefined),
+     restart: NodeExit.optional(),
+     nodeLog: NodeLog.optional(),
++    /* The outbox the node numbers its messages in: a uuid made with its file, so a wiped volume never reuses a number. */
++    stream: z.uuid().optional(),
+   }),
+   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
+   z.object({ type: z.literal('load'), ...Load.shape }),
+-  z.object({ type: z.literal('tests.started'), partId: z.string() }),
++  z.object({ type: z.literal('tests.started'), partId: z.string(), n: MessageNumber }),
+   /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */
+   z.object({
+     type: z.literal('tests.done'),
+     partId: z.string(),
+     ok: z.boolean(),
+     exitCode: z.number().int().nullable(),
+     error: z.enum(TEST_ERRORS).nullable(),
+     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+     log: z.string().max(TEST_LOG_BYTES + 1024),
++    n: MessageNumber,
+   }),
+   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), account: Account.nullable().optional(), programs: Programs.optional() }),
+   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
+   z.object({
+     type: z.literal('cred.sealed'),
+     kind: CredKind,
+     version: z.number().int().min(1),
+     envelopes: z.array(z.object({ nodeId: Id, sealed: Sealed })).max(MAX_ENVELOPES),
++    n: MessageNumber,
+   }),
+   /* How the sign-in Hornhoof started on this node ended. */
+-  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable() }),
+-  z.object({ type: z.literal('job.started'), jobId: z.string() }),
++  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable(), n: MessageNumber }),
++  z.object({ type: z.literal('job.started'), jobId: z.string(), n: MessageNumber }),
+   z.object({
+     type: z.literal('job.done'),
+     jobId: z.string(),
+     ok: z.boolean(),
+     sessionId: z.string().nullable(),
+     result: z.string(),
+     tail: z.string(),
+     error: z.enum(JOB_ERRORS).nullable(),
+     /* The ended turn's words are still queued or held by the program; older nodes send none. */
+     wordsWaiting: z.boolean().optional(),
+     /* Set on a failed turn whose program said why; older nodes send none. */
+     failure: Failure.optional(),
+     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
+     exit: ProgramExit.optional(),
++    n: MessageNumber,
+   }),
+-  z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
++  z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent, n: MessageNumber }),
+   /* What the turn's program does now: sent at each change of its state or tool, and while the turn runs at least once a
+      minute, so Hornhoof knows the node is there. since: when the state began; tool: the tool it runs; signAt: when the
+      program last gave any sign of life, a hook call or a line in its log; retry: its own retry while retrying. Older
+      nodes send neither signAt nor retry. screenAt: when its screen last changed, now only for people to see. Times are
+      the node's, in milliseconds since 1970. A program that is gone says how it ended, its exit code or the signal that
+      ended it, null both when its session went whole, and its last screen. */
+   z.object({
+     type: z.literal('job.program'),
+@@ -428,46 +443,52 @@ const NodeMessage = z.discriminatedUnion('type', [
+     since: z.number().int().nonnegative(),
+     tool: z.string().max(100).optional(),
+     screenAt: z.number().int().nonnegative(),
+     signAt: z.number().int().nonnegative().optional(),
+     retry: z.object({ attempt: z.number().int().min(1), max: z.number().int().min(1).nullable(), nextAt: z.number().int().nonnegative().nullable() }).optional(),
+     exitCode: ProgramExit.shape.code.optional(),
+     signal: ProgramExit.shape.signal.optional(),
+     screen: z.string().max(PROGRAM_SCREEN_MAX).optional(),
++    n: MessageNumber,
+   }),
+-  z.object({ type: z.literal('removed') }),
++  z.object({ type: z.literal('removed'), n: MessageNumber }),
+   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
+   z.object({ type: z.literal('term.exit'), termId: TermId }),
+   /* Whether the agent's program runs in the view's session yet: while it starts, the window shows a loader. */
+   z.object({ type: z.literal('term.program'), termId: TermId, running: z.boolean() }),
+   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
+      typed turn, and Hornhoof's answer carries it back. */
+   z.object({ type: z.literal('turn.open'), queuedFrom: Id.optional(), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
+   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
+      types nothing. */
+   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
+   /* A hook refusal is diagnostic, not an answer or a change to the turn's state. */
+   z.object({
+     type: z.literal('agent.hook_rejected'),
+     agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+     event: z.string().regex(/^[a-z]{1,20}$/),
+     reason: z.string().min(1).max(300),
++    n: MessageNumber,
+   }),
+   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
+-  z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
++  z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1), n: MessageNumber }),
+   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
+   /* Said ok means the program recorded the words, or Codex holds them. Unheard follows if they never entered a turn. */
+   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
+-  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
++  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000), n: MessageNumber }),
+   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
+   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
+ ]);
+ export type NodeMessage = z.infer<typeof NodeMessage>;
+ 
++const NUMBERED_TYPES: ReadonlySet<string> = new Set(NUMBERED);
++/* Whether a node numbers this message, whether or not this one carries a number. */
++export const isNumbered = (m: NodeMessage): boolean => NUMBERED_TYPES.has(m.type);
++
+ /* A git repository over https and a branch name git takes as a plain name, never as an option. The token has its own
+    field: an address with a name or password in it would put them on command lines and into the clone's settings. The
+    address is read as a URL at the door, so what is saved is what the server and the node can read later. */
+ const isHttps = (u: string) => URL.canParse(u) && new URL(u).protocol === 'https:' && new URL(u).hostname !== '';
+ export const Branch = z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.');
+ export const Repo = z.object({
+   url: z
+     .string()
+@@ -523,16 +544,19 @@ const ServerMessage = z.discriminatedUnion('type', [
+     guidance: z.string().max(16 * 1024).nullable().optional(),
+     /* The agent's own folder on the node and the repository it works in; a test job has none. */
+     workspace: Workspace.nullable().optional(),
+     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
+     skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
+   }),
+   z.object({ type: z.literal('programs.update') }),
+   z.object({ type: z.literal('job.cancel'), jobId: Id }),
++  /* Hornhoof has every numbered message of the node's stream up to this number, applied or failed for good; the node
++     drops them. */
++  z.object({ type: z.literal('ack'), upto: z.number().int().min(0) }),
+   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
+   z.object({ type: z.literal('job.ack'), jobId: Id }),
+   z.object({ type: z.literal('remove') }),
+   /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
+   z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),
+   z.object({ type: z.literal('cred.drop'), kind: CredKind }),
+   /* Seal the sign-in this node holds for these nodes of the same plan and send it back as cred.sealed under version. */
+   z.object({ type: z.literal('cred.seal'), kind: CredKind, version: z.number().int().min(1), recipients: z.array(z.object({ nodeId: Id, publicKey: AgeRecipient })).max(MAX_ENVELOPES) }),
+diff --git a/packages/protocol/test/protocol.test.ts b/packages/protocol/test/protocol.test.ts
+index 93b26567..b67267b1 100644
+--- a/packages/protocol/test/protocol.test.ts
++++ b/packages/protocol/test/protocol.test.ts
+@@ -624,8 +624,60 @@ describe('plans on any machine', () => {
+     expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: [{ nodeId: 'node-2', publicKey: 'nope' }] }))).toBeNull();
+     expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: Array.from({ length: 21 }, (_, i) => ({ nodeId: `n-${i}`, publicKey: KEY })) }))).toBeNull();
+   });
+ 
+   it('name the four kinds of sign-in a plan can carry', () => {
+     expect(CRED_KINDS).toEqual(['claude_token', 'codex_auth', 'kimi_key', 'glm_key']);
+   });
+ });
++
++describe('numbered node messages', () => {
++  const event = { type: 'job.event', jobId: 'job-1', seq: 0, event: { kind: 'text', text: 'hi' } };
++  const nodeMessage = (m: object) => parseNodeMessage(JSON.stringify(m));
++
++  it('numbers what changes data and stays readable', () => {
++    expect(nodeMessage({ ...event, n: 3 })).toMatchObject({ type: 'job.event', n: 3 });
++    expect(nodeMessage(event)).toMatchObject({ type: 'job.event' });
++    expect(nodeMessage({ type: 'hello', version: '1', loggedIn: true, running: [], stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' })).toMatchObject({ stream: '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11' });
++    expect(parseServerMessage('{"type":"ack","upto":4}')).toEqual({ type: 'ack', upto: 4 });
++    expect(parseServerMessage('{"type":"ack","upto":0}')).toEqual({ type: 'ack', upto: 0 });
++    expect(nodeMessage({ ...event, n: 0 })).toBeNull();
++    expect(nodeMessage({ ...event, n: 1.5 })).toBeNull();
++    expect(nodeMessage({ ...event, n: 3, extra: 'x' })).not.toHaveProperty('extra');
++  });
++
++  it('refuses an ack that is negative or not whole', () => {
++    expect(parseServerMessage('{"type":"ack","upto":-1}')).toBeNull();
++    expect(parseServerMessage('{"type":"ack","upto":2.5}')).toBeNull();
++  });
++
++  it('lets every message in NUMBERED carry n, and no other', () => {
++    const samples: Record<string, object> = {
++      'job.started': { type: 'job.started', jobId: 'j' },
++      'job.event': event,
++      'job.done': { type: 'job.done', jobId: 'j', ok: true, sessionId: null, result: '', tail: '', error: null },
++      'tests.started': { type: 'tests.started', partId: 'p' },
++      'tests.done': { type: 'tests.done', partId: 'p', ok: true, exitCode: 0, error: null, commit: null, log: '' },
++      'cred.sealed': { type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [] },
++      'login.done': { type: 'login.done', ok: true, error: null },
++      'agent.context': { type: 'agent.context', agentKey: 'a', used: 0.5 },
++      removed: { type: 'removed' },
++      'job.program': { type: 'job.program', jobId: 'j', state: 'thinking', since: 1, screenAt: 1 },
++      'agent.hook_rejected': { type: 'agent.hook_rejected', agentKey: 'a', event: 'stop', reason: 'no' },
++      'agent.unheard': { type: 'agent.unheard', agentKey: 'a', jobId: null, text: 'hi' },
++      'agent.said': { type: 'agent.said', ref: 'r', ok: true },
++      'agent.restarted': { type: 'agent.restarted', agentKey: 'a', jobId: 'j', ok: true, reason: null },
++      'node.stopping': { type: 'node.stopping', startedAt: '2026-11-04T10:00:00.000Z', exit: { kind: 'planned', reason: 'stopped', startedAt: null, at: null, log: '' } },
++    };
++    expect([...protocol.NUMBERED]).toEqual(['job.started', 'job.event', 'job.done', 'tests.started', 'tests.done', 'cred.sealed', 'login.done', 'agent.context', 'removed', 'job.program', 'agent.hook_rejected', 'agent.unheard']);
++    for (const [type, sample] of Object.entries(samples)) {
++      const parsed = nodeMessage({ ...sample, n: 7 });
++      expect(parsed, type).not.toBeNull();
++      expect('n' in parsed!, type).toBe(protocol.NUMBERED.includes(type as never));
++      expect(protocol.isNumbered(nodeMessage(sample)!), type).toBe(protocol.NUMBERED.includes(type as never));
++    }
++  });
++
++  it('names the header a server sends to say it confirms', () => {
++    expect(protocol.ACKS_HEADER).toBe('hornhoof-acks');
++  });
++});
+
+## 416eab72 Keep the node's messages in its volume until the server confirms them
+
+A node used to keep at most 50 unconfirmed job ends in memory and lost every other message when it restarted or the
+server did. Now every message in NUMBERED goes through an outbox file (outbox.jsonl in the data folder, mode 0600, root
+owned by secureNode). Each gets the next number of a stream made with the file and stays until ack { upto }, or, for a
+job's or a part's end, until job.ack or tests.ack too. A job's end is held from the moment the job leaves running and is
+numbered when its turn comes. Past 20,000 entries the oldest job.event goes first and an end is never dropped. A last
+line cut short is cut off on open, and the next number stays above everything the file held.
+
+The hello carries the stream, lists the jobs and parts whose ends wait, and every pending entry is sent in order after
+it. With the Hornhoof-Acks header on the upgrade answer, ack drops what it confirms; without it (a server of the build
+before) what was sent is dropped at once but for the ends, as before. The terminal host already sends through emit, so
+its numbered messages (job.program, agent.unheard, agent.hook_rejected, agent.context) are covered with no change to it.
+
+The connection waits at most 10 s between tries, 60 s after a refusal, and gives up a handshake after 20 s. Its onOpen
+tells whether the server confirms.
+
+Ruling: host.ts is not changed - why: its sends already go through emit, which numbers by type - cost if wrong: a numbered message of the host sent outside emit would go unnumbered.
+Ruling: the first end held for an id stays, a second is ignored - why: Hornhoof finishes a job once, and the old map replaced the end only to the same effect - cost if wrong: a later, different end of the same job is never sent.
+Ruling: the file is a stream line, hold lines and add lines, and drops are written by the rewrite after flushMs, not by a line each - why: the plan's own words - cost if wrong: a crash within a second of an ack sends a confirmed message again, which the server lists and skips.
+Ruling: one old assertion in main.test.ts (toContainEqual of a job.event) became objectContaining - why: the message now carries n - cost if wrong: none, it still checks every other field.
+Ruling: the test of the older server waits for the node to see its socket gone before the program talks - why: a message sent into a dead socket is given up by design with a server that confirms nothing - cost if wrong: none.
+
+Proved with the node's outbox, main, connection, isolation and commands tests, tsc and eslint on the node.
+
+---
+ apps/node/src/connection.ts       |  33 ++++--
+ apps/node/src/isolation.ts        |   3 +-
+ apps/node/src/main.ts             |  87 +++++++-------
+ apps/node/src/outbox.ts           | 236 ++++++++++++++++++++++++++++++++++++++
+ apps/node/test/connection.test.ts |  96 +++++++++++++++-
+ apps/node/test/isolation.test.ts  |  13 +++
+ apps/node/test/main.test.ts       | 144 ++++++++++++++++++++++-
+ apps/node/test/outbox.test.ts     | 218 +++++++++++++++++++++++++++++++++++
+ 8 files changed, 775 insertions(+), 55 deletions(-)
+
+diff --git a/apps/node/src/connection.ts b/apps/node/src/connection.ts
+index 818a2c67..a2c405da 100644
+--- a/apps/node/src/connection.ts
++++ b/apps/node/src/connection.ts
+@@ -1,65 +1,82 @@
+-import { parseServerMessage, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
++import { ACKS_HEADER, parseServerMessage, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+ import WebSocket from 'ws';
+ 
++type Backoff = {
++  firstMs: number;
++  /* The longest pause between tries; a node on a machine that stays away for long still comes back soon after the app. */
++  maxMs: number;
++  /* The pause after the server refused the key. */
++  refusedMs: number;
++  /* How long a handshake that gets no answer may take. */
++  handshakeMs: number;
++};
++
+ type Options = {
+   url: string;
+   key: string;
+   log?(line: string): void;
+-  onOpen(send: (m: NodeMessage) => boolean): void;
++  /* acks: the server says in its upgrade answer that it confirms numbered messages. */
++  onOpen(send: (m: NodeMessage) => boolean, acks: boolean): void;
+   onMessage(m: ServerMessage): void;
+   /* Hornhoof does not know this key any more: the machine was disconnected there. */
+   onRefused?(): void;
+-  backoff?: { firstMs: number; maxMs: number };
++  backoff?: Partial<Backoff>;
+ };
+ 
++const DEFAULT_BACKOFF: Backoff = { firstMs: 1000, maxMs: 10_000, refusedMs: 60_000, handshakeMs: 20_000 };
++
+ const note = (opts: Options, text: string): void => opts.log?.(text);
+ 
+ /* Keeps one socket to Hornhoof open, reconnecting with growing pauses. send() returns false while offline. */
+ export function connect(opts: Options): { close(): void } {
+-  const { firstMs, maxMs } = opts.backoff ?? { firstMs: 1000, maxMs: 60_000 };
++  const { firstMs, maxMs, refusedMs, handshakeMs } = { ...DEFAULT_BACKOFF, ...opts.backoff };
+   let delay = firstMs;
+   let stopped = false;
+   let socket: WebSocket | null = null;
+   let timer: NodeJS.Timeout | undefined;
+ 
+   const retry = () => {
+     if (stopped) return;
+     timer = setTimeout(open, delay);
+     delay = Math.min(delay * 2, maxMs);
+   };
+ 
+   function open() {
+-    const ws = new WebSocket(opts.url, { headers: { authorization: `Bearer ${opts.key}` } });
++    const ws = new WebSocket(opts.url, { headers: { authorization: `Bearer ${opts.key}` }, handshakeTimeout: handshakeMs });
+     socket = ws;
++    let acks = false;
++    ws.on('upgrade', res => {
++      acks = res.headers[ACKS_HEADER] === '1';
++    });
+     ws.on('open', () => {
+       note(opts, 'Connected to Hornhoof.');
+       delay = firstMs;
+       opts.onOpen(m => {
+         if (ws.readyState !== WebSocket.OPEN) return false;
+         ws.send(JSON.stringify(m));
+         return true;
+-      });
++      }, acks);
+     });
+     ws.on('message', data => {
+       const msg = parseServerMessage(String(data));
+       if (msg) opts.onMessage(msg);
+     });
+     ws.on('error', err => {
+       note(opts, `Connection error: ${err.message}`);
+       if (/\b401\b/.test(err.message)) {
+-        delay = maxMs;
++        delay = refusedMs;
+         opts.onRefused?.();
+       }
+     });
+     ws.on('close', code => {
+       note(opts, `Connection closed with code ${code}.`);
+       if (code === 4001) {
+-        delay = maxMs;
++        delay = refusedMs;
+         opts.onRefused?.();
+       }
+       retry();
+     });
+   }
+ 
+   open();
+   return {
+diff --git a/apps/node/src/isolation.ts b/apps/node/src/isolation.ts
+index 966b742c..8ae8182b 100644
+--- a/apps/node/src/isolation.ts
++++ b/apps/node/src/isolation.ts
+@@ -1,13 +1,14 @@
+ import { appendFileSync, chmodSync, existsSync, lchownSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+ import { join } from 'node:path';
+ import type { ServerMessage } from '@hornhoof/protocol';
+ import { adapterFor } from './providers/index.js';
+ import type { ProviderAdapter } from './runner.js';
++import { OUTBOX_FILE } from './outbox.js';
+ 
+ /* The built-in node runs every company key's jobs under a Linux user of its own, so one key's agent never reads another's folders or the node's env. */
+ 
+ export type JobUser = { uid: number; gid: number };
+ export const FIRST_UID = 20000;
+ 
+ type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+ 
+@@ -95,17 +96,17 @@ export function agentUser({ status = '/proc/self/status', passwd = '/etc/passwd'
+ export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', `--reuid=${user.uid}`, `--regid=${user.gid}`, '--init-groups', '--', ...argv];
+ 
+ /* A personal node that runs as root keeps its key, its records and the agent programs to itself: no agent can change
+    where the node connects, read its key or swap a program another agent starts. The agents get their homes and work
+    folders. */
+ export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
+   if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
+   ops.chmod(dir, 0o755);
+-  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed']) {
++  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', OUTBOX_FILE]) {
+     const path = join(dir, file);
+     if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
+   }
+   for (const tree of ['tools', '.hh-recordings']) {
+     const path = join(dir, tree);
+     if (ops.exists(path) && ops.owner(path) !== 0) ops.chownTree(path, 0, 0);
+   }
+   for (const sub of ['home', 'work']) prepareFolder(join(dir, sub), user, ops);
+diff --git a/apps/node/src/main.ts b/apps/node/src/main.ts
+index 5e9f3a08..746773cc 100644
+--- a/apps/node/src/main.ts
++++ b/apps/node/src/main.ts
+@@ -1,22 +1,23 @@
+ #!/usr/bin/env node
+ import { execFileSync } from 'node:child_process';
+ import { createHash } from 'node:crypto';
+ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+ import { hostname, uptime } from 'node:os';
+ import { join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+-import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
++import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+ import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
+ import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
+ import { bootFacts } from './boot.js';
+ import { connect } from './connection.js';
+ import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
+ import { machineLoad } from './load.js';
++import { endId, isEnd, Outbox, type Entry } from './outbox.js';
+ import { adapterFor, programFor } from './providers/index.js';
+ import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
+ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
+ import { nodeIdentity, seal, unseal } from './keys.js';
+ import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
+ import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+ import { partFiles, runTests } from './tests.js';
+ import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
+@@ -43,17 +44,16 @@ const LOGIN_CHECK_MS = 10_000;
+ const LEASE_CHECK_MS = 60_000;
+ /* How often a node with terminals reads its program's tokens again: a program signs in again or renews them between turns. */
+ const LEARN_MS = 60_000;
+ /* How often a personal node asks its program for the plan's limits between turns: work on other machines moves them too. */
+ const LIMITS_MS = 5 * 60_000;
+ /* How long a removal waits for called-off jobs to stop before it deletes their folders. */
+ const STOP_WAIT_MS = 5_000;
+ /* How many unconfirmed job ends a node keeps for a server that does not confirm them. */
+-const MAX_UNCONFIRMED = 50;
+ 
+ type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+ type Recipient = { nodeId: string; publicKey: string };
+ 
+ const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+ /* The sign-in Hornhoof hands each kind of plan. */
+ const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
+ type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
+@@ -131,22 +131,23 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+   const files = partFiles(state.server, state.key);
+   /* The built-in node serves API keys, which need no sign-in. */
+   const single = typeof adapter === 'function' ? null : adapter;
+   const pick = typeof adapter === 'function' ? adapter : () => adapter;
+ 
+   /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
+   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
+   const testing = new Map<string, { stop: AbortController; done: Promise<void> }>();
+-  /* Messages that could not be sent while offline. They go out right after the next hello. */
+-  const outbox: NodeMessage[] = [];
+-  /* Ends of jobs Hornhoof has not confirmed: a socket can drop with one on its way. They count as running and go again
+-     after each hello. A server that never confirms keeps only the last few. */
+-  const unconfirmed = new Map<string, NodeMessage>();
+-  const unconfirmedTests = new Map<string, NodeMessage>();
++  /* The messages that change the company's data, numbered and kept in the volume until Hornhoof confirms them, so a
++     restart of the node or of Hornhoof loses none. A job's end counts as running until then. */
++  const outbox = new Outbox(dir, { onError: err => writeLog(`The outbox could not be written: ${message(err)}`) });
++  /* Messages that cannot be sent while offline and are worth nothing late wait here, and go out right after the next hello. */
++  const waiting: NodeMessage[] = [];
++  /* Whether Hornhoof confirms numbered messages: with the server that does not, what was sent is dropped at once. */
++  let confirmed = false;
+   let send: ((m: NodeMessage) => boolean) | null = null;
+   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
+      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
+   const planProvider = builtin ? null : (state as NodeState).provider;
+   const credKind: CredKind | null = single && !builtin && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
+   let refused: string | null = null;
+   const signedInHere = async (): Promise<boolean> => {
+     if (!single) return true;
+@@ -159,28 +160,29 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+     }
+     return single.loggedIn();
+   };
+   let loggedIn = await signedInHere();
+   let limits: Limits | null = null;
+   let stopped = false;
+ 
+   const emit = (m: NodeMessage) => {
+-    if (m.type === 'job.done') keep(m.jobId, m);
+-    if (m.type === 'tests.done') keepTest(m.partId, m);
+     const current = withPrograms(m, programs);
+-    if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
++    if (isNumbered(current)) return void sendNumbered(current);
++    if (!send?.(current)) waiting.push(current);
+   };
+-  const keep = (jobId: string, m: NodeMessage) => {
+-    unconfirmed.set(jobId, m);
+-    if (unconfirmed.size > MAX_UNCONFIRMED) unconfirmed.delete(unconfirmed.keys().next().value!);
++  /* An end is numbered when its turn comes, after the messages of its job; the rest are numbered as they are made. */
++  const sendNumbered = (m: NodeMessage) => {
++    if (isEnd(m)) outbox.hold(m);
++    const entry = isEnd(m) ? outbox.number(endId(m)) : outbox.add(m);
++    if (entry) deliver(entry);
+   };
+-  const keepTest = (partId: string, m: NodeMessage) => {
+-    unconfirmedTests.set(partId, m);
+-    if (unconfirmedTests.size > MAX_UNCONFIRMED) unconfirmedTests.delete(unconfirmedTests.keys().next().value!);
++  /* A message that cannot go out now stays numbered in the outbox and goes after the next hello. */
++  const deliver = (entry: Entry) => {
++    if (send?.(entry.msg) && !confirmed && !isEnd(entry.msg)) outbox.dropSent(entry.n);
+   };
+   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
+   const learn = async (more: (string | null | undefined)[] = []) => {
+     for (const s of more) if (s) known.add(s);
+     for (const s of await (single?.secrets() ?? Promise.resolve([])).catch(() => [])) known.add(s);
+   };
+   await learn();
+   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
+@@ -235,34 +237,43 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+ 
+   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
+   const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
+ 
+   const conn = connect({
+     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
+     key: state.key,
+     log,
+-    onOpen(next) {
++    onOpen(next, acks) {
+       send = next;
++      confirmed = acks;
+       host?.closeViews();
+       login?.closeViews();
+       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
+       const typed = host?.typedJobs() ?? [];
+-      const tests = [...testing.keys(), ...unconfirmedTests.keys()];
+-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+-      for (const m of outbox.splice(0)) emit(m);
+-      for (const m of unconfirmed.values()) next(m);
+-      for (const m of unconfirmedTests.values()) next(m);
++      const tests = [...testing.keys(), ...outbox.doneParts()];
++      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: [...running.keys(), ...typed, ...outbox.doneJobs()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
++      for (const m of waiting.splice(0)) emit(m);
++      sendPending(next);
+     },
+     /* One message that fails is logged; it never ends the node with all its runs. */
+     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
+     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
+   });
+   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+ 
++  /* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included. A server that
++     confirms nothing gets it once. */
++  function sendPending(next: (m: NodeMessage) => boolean) {
++    for (const id of outbox.held()) outbox.number(id);
++    const pending = outbox.pending();
++    for (const entry of pending) next(entry.msg);
++    if (!confirmed && pending.length) outbox.dropSent(pending[pending.length - 1]!.n);
++  }
++
+   async function handle(m: ServerMessage) {
+     if (m.type === 'remove') {
+       /* Only personal subscriptions are removed this way; the built-in node stays. */
+       if (builtin || stopped) return;
+       stopped = true;
+       /* The agents stop first, so nothing writes into the folders while they go. */
+       const jobs = [...running.values(), ...testing.values()];
+       for (const job of jobs) job.stop.abort();
+@@ -271,23 +282,21 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+       await login?.shutdown();
+       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
+       markRemoved(dir);
+       emit({ type: 'removed' });
+       log('This node was removed in Hornhoof.');
+       stop();
+       return;
+     }
+-    /* The node does not number its messages yet, so a confirmation has nothing to drop. */
+-    if (m.type === 'ack') return;
+-    if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
++    if (acknowledged(m, outbox)) return;
+     if (m.type === 'programs.update') return programs.update(tellStatus);
+     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
+     if (m.type === 'tests.run') {
+-      if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
++      if (stopped || testing.has(m.partId) || outbox.doneParts().includes(m.partId)) return;
+       const controller = new AbortController();
+       const done = testOne(m, controller.signal);
+       testing.set(m.partId, { stop: controller, done });
+       return done;
+     }
+     if (m.type === 'job.cancel') {
+       running.get(m.jobId)?.stop.abort();
+       await host?.cancel(m.jobId);
+@@ -413,23 +422,23 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+     account = await readAccount();
+     await status();
+   }
+ 
+   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
+   async function testOne(m: TestRun, signal: AbortSignal) {
+     if (!testUser) {
+       const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
+-      keepTest(m.partId, refused);
++      outbox.hold(refused);
+       testing.delete(m.partId);
+       return emit(refused);
+     }
+     emit({ type: 'tests.started', partId: m.partId });
+     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
+-    keepTest(m.partId, done);
++    outbox.hold(done);
+     testing.delete(m.partId);
+     emit(done);
+   }
+ 
+   async function runOne(m: JobRun, signal: AbortSignal) {
+     emit({ type: 'job.started', jobId: m.jobId });
+     let done: Awaited<ReturnType<typeof runJob>>;
+     try {
+@@ -457,17 +466,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+       };
+       let seq = 0;
+       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
+       done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key) });
+     } catch (err) {
+       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
+     }
+     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
+-    keep(m.jobId, done);
++    outbox.hold(done);
+     running.delete(m.jobId);
+     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
+     await status();
+     emit(done);
+     await renewedCodex().catch(() => {});
+     if (done.error === 'not_logged_in') {
+       loggedIn = false;
+       const held = credKind ? heldCredential(credHome, credKind) : null;
+@@ -512,16 +521,17 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
+     stopped = true;
+     clearInterval(timer);
+     if (learning) clearInterval(learning);
+     clearInterval(asking);
+     clearInterval(reporting);
+     clearInterval(renewing);
+     void host?.stop();
+     void login?.shutdown();
++    outbox.close();
+     /* Let the last message leave before the socket closes. */
+     setTimeout(() => conn.close(), 50);
+   }
+   return { stop };
+ }
+ 
+ export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
+ 
+@@ -541,26 +551,23 @@ const machineOnly: ProviderAdapter = {
+ 
+ const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+ 
+ /* Replayed status messages describe the current installation, never an earlier queued phase. */
+ function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessage {
+   return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
+ }
+ 
+-function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
+-  if (message.type === 'job.ack') {
+-    jobs.delete(message.jobId);
+-    return true;
+-  }
+-  if (message.type === 'tests.ack') {
+-    tests.delete(message.partId);
+-    return true;
+-  }
+-  return false;
++/* What Hornhoof confirms goes out of the outbox: numbers up to one, or a job's or a part's end. */
++function acknowledged(message: ServerMessage, outbox: Outbox): message is Extract<ServerMessage, { type: 'ack' | 'job.ack' | 'tests.ack' }> {
++  if (message.type === 'ack') outbox.ack(message.upto);
++  else if (message.type === 'job.ack') outbox.ackJob(message.jobId);
++  else if (message.type === 'tests.ack') outbox.ackPart(message.partId);
++  else return false;
++  return true;
+ }
+ 
+ function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
+   if (input.signal?.aborted) return Promise.resolve({ ok: false, sessionId: input.sessionId, result: 'Stopped.', output: 'Stopped.', error: 'cancelled', limits: null });
+   return run();
+ }
+ 
+ /* The agent program for a personal node lives in /data/tools, its sign-in in /data/home. On a node that runs as root the
+diff --git a/apps/node/src/outbox.ts b/apps/node/src/outbox.ts
+new file mode 100644
+index 00000000..0e3d020b
+--- /dev/null
++++ b/apps/node/src/outbox.ts
+@@ -0,0 +1,236 @@
++import { randomUUID } from 'node:crypto';
++import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, truncateSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { parseNodeMessage, type NodeMessage } from '@hornhoof/protocol';
++import { z } from 'zod';
++
++export const OUTBOX_FILE = 'outbox.jsonl';
++export const OUTBOX_MAX = 20_000;
++const FLUSH_MS = 1000;
++
++export type End = Extract<NodeMessage, { type: 'job.done' | 'tests.done' }>;
++export type Entry = { n: number; msg: NodeMessage };
++
++/* One line of the file. A stream line opens it and keeps the next number across a rewrite; a hold line is an end that
++   has no number yet; an add line is a numbered message. */
++type Line = { k: 'stream'; stream: string; next: number } | { k: 'hold'; msg: End } | { k: 'add'; n: number; msg: NodeMessage };
++
++export const isEnd = (m: NodeMessage): m is End => m.type === 'job.done' || m.type === 'tests.done';
++export const endId = (m: End): string => (m.type === 'job.done' ? m.jobId : m.partId);
++
++const StreamLine = z.object({ k: z.literal('stream'), stream: z.uuid(), next: z.number().int().min(1) });
++const NumberedLine = z.object({ k: z.literal('add'), n: z.number().int().min(1), msg: z.unknown() });
++const HoldLine = z.object({ k: z.literal('hold'), msg: z.unknown() });
++
++const asMessage = (value: unknown): NodeMessage | null => parseNodeMessage(JSON.stringify(value));
++
++/* A line of the file, or null when it is cut short or is not one this node wrote. */
++export function parseLine(text: string): Line | null {
++  let data: unknown;
++  try {
++    data = JSON.parse(text);
++  } catch {
++    return null;
++  }
++  const stream = StreamLine.safeParse(data);
++  if (stream.success) return stream.data;
++  const add = NumberedLine.safeParse(data);
++  const added = add.success ? asMessage(add.data.msg) : null;
++  if (add.success && added) return { k: 'add', n: add.data.n, msg: added };
++  const hold = HoldLine.safeParse(data);
++  const held = hold.success ? asMessage(hold.data.msg) : null;
++  return held && isEnd(held) ? { k: 'hold', msg: held } : null;
++}
++
++/* The oldest message the cap may drop: a job.event first, else any that is not an end; none when only ends are left. */
++function evictable(entries: Entry[]): number {
++  const event = entries.findIndex(e => e.msg.type === 'job.event');
++  return event >= 0 ? event : entries.findIndex(e => !isEnd(e.msg));
++}
++
++type OutboxOptions = { max?: number; flushMs?: number; onError?: (err: unknown) => void };
++
++/* The messages a node has not had confirmed, in its volume. Each message that changes the company's data gets the next
++   number of the stream and stays until the server confirms it, so a restart of the node or of the server loses none.
++   The file is appended a line per change, and rewritten when something was dropped, at most once per flushMs. */
++export class Outbox {
++  readonly stream: string;
++  private entries: Entry[] = [];
++  private readonly held_ = new Map<string, End>();
++  private next = 1;
++  /* Dropped entries whose lines are still in the file. */
++  private stale = 0;
++  private timer: NodeJS.Timeout | null = null;
++  private readonly path: string;
++  private readonly max: number;
++  private readonly flushMs: number;
++  private readonly onError: (err: unknown) => void;
++
++  constructor(dir: string, opts: OutboxOptions = {}) {
++    mkdirSync(dir, { recursive: true });
++    this.path = join(dir, OUTBOX_FILE);
++    this.max = opts.max ?? OUTBOX_MAX;
++    this.flushMs = opts.flushMs ?? FLUSH_MS;
++    this.onError = opts.onError ?? (() => {});
++    const found = this.load();
++    this.stream = found ?? randomUUID();
++    if (!found) this.rewrite();
++  }
++
++  /* The next number goes on the message, and the message is kept. */
++  add(msg: NodeMessage): Entry {
++    const entry = { n: this.next, msg: { ...msg, n: this.next } as NodeMessage };
++    this.insert(entry);
++    this.append({ k: 'add', n: entry.n, msg: entry.msg });
++    return entry;
++  }
++
++  /* A job's or a part's end from the moment it leaves running, before its turn to be sent. The first end of an id stays. */
++  hold(end: End): void {
++    const id = endId(end);
++    if (this.held_.has(id) || this.ends().some(e => endId(e) === id)) return;
++    this.held_.set(id, end);
++    this.append({ k: 'hold', msg: end });
++  }
++
++  number(id: string): Entry | null {
++    const end = this.held_.get(id);
++    return end ? this.add(end) : null;
++  }
++
++  held(): string[] {
++    return [...this.held_.keys()];
++  }
++
++  pending(): Entry[] {
++    return [...this.entries];
++  }
++
++  ack(upto: number): void {
++    this.entries = this.entries.filter(e => e.n > upto);
++    this.dirty();
++  }
++
++  ackJob(jobId: string): void {
++    this.dropEnd('job.done', jobId);
++  }
++
++  ackPart(partId: string): void {
++    this.dropEnd('tests.done', partId);
++  }
++
++  /* An older server confirms nothing: what was sent is gone, but for the ends, which wait for their own ack. */
++  dropSent(upto: number): void {
++    this.entries = this.entries.filter(e => e.n > upto || isEnd(e.msg));
++    this.dirty();
++  }
++
++  doneJobs(): string[] {
++    return this.ends().flatMap(e => (e.type === 'job.done' ? [e.jobId] : []));
++  }
++
++  doneParts(): string[] {
++    return this.ends().flatMap(e => (e.type === 'tests.done' ? [e.partId] : []));
++  }
++
++  /* Writes what waits for its rewrite. */
++  close(): void {
++    if (!this.timer) return;
++    clearTimeout(this.timer);
++    this.timer = null;
++    this.rewrite();
++  }
++
++  private ends(): End[] {
++    return [...this.held_.values(), ...this.entries.map(e => e.msg).filter(isEnd)];
++  }
++
++  private dropEnd(type: End['type'], id: string): void {
++    const is = (m: NodeMessage) => m.type === type && endId(m as End) === id;
++    if (this.held_.get(id)?.type === type) this.held_.delete(id);
++    this.entries = this.entries.filter(e => !is(e.msg));
++    this.dirty();
++  }
++
++  private insert(entry: Entry): void {
++    this.entries.push(entry);
++    this.next = Math.max(this.next, entry.n + 1);
++    if (isEnd(entry.msg)) this.held_.delete(endId(entry.msg));
++    this.cap();
++  }
++
++  private cap(): void {
++    for (let at = evictable(this.entries); this.entries.length > this.max && at >= 0; at = evictable(this.entries)) {
++      this.entries.splice(at, 1);
++      this.stale++;
++    }
++    if (this.stale >= this.max) this.dirty();
++  }
++
++  /* Reads the file, cuts off a last line that was left half written, and gives the stream it names. */
++  private load(): string | null {
++    if (!existsSync(this.path)) return null;
++    const raw = readFileSync(this.path);
++    let stream: string | null = null;
++    let good = 0;
++    for (let start = 0, end = raw.indexOf(10); end >= 0; start = end + 1, end = raw.indexOf(10, start)) {
++      const line = parseLine(raw.toString('utf8', start, end));
++      if (!line) continue;
++      stream = this.replay(line, stream);
++      good = end + 1;
++    }
++    if (raw.length > good) truncateSync(this.path, good);
++    if (!stream) this.forget();
++    return stream;
++  }
++
++  private replay(line: Line, stream: string | null): string | null {
++    if (line.k === 'stream') this.next = Math.max(this.next, line.next);
++    if (line.k === 'hold') this.held_.set(endId(line.msg), line.msg);
++    if (line.k === 'add') this.insert({ n: line.n, msg: line.msg });
++    return line.k === 'stream' ? (stream ?? line.stream) : stream;
++  }
++
++  /* A file with no stream line is not one this node can trust: it starts over. */
++  private forget(): void {
++    this.entries = [];
++    this.held_.clear();
++    this.next = 1;
++  }
++
++  private dirty(): void {
++    if (this.timer) return;
++    this.timer = setTimeout(() => this.flush(), this.flushMs);
++    this.timer.unref();
++  }
++
++  private flush(): void {
++    this.timer = null;
++    this.rewrite();
++  }
++
++  private append(line: Line): void {
++    try {
++      appendFileSync(this.path, `${JSON.stringify(line)}\n`, { mode: 0o600 });
++    } catch (err) {
++      this.onError(err);
++    }
++  }
++
++  /* To a temporary file, then a rename, so a crash leaves the old file or the new one whole. */
++  private rewrite(): void {
++    const lines: Line[] = [
++      { k: 'stream', stream: this.stream, next: this.next },
++      ...[...this.held_.values()].map((msg): Line => ({ k: 'hold', msg })),
++      ...this.entries.map((e): Line => ({ k: 'add', n: e.n, msg: e.msg })),
++    ];
++    const temp = `${this.path}.tmp`;
++    try {
++      writeFileSync(temp, lines.map(l => `${JSON.stringify(l)}\n`).join(''), { mode: 0o600 });
++      renameSync(temp, this.path);
++      this.stale = 0;
++    } catch (err) {
++      this.onError(err);
++    }
++  }
++}
+diff --git a/apps/node/test/connection.test.ts b/apps/node/test/connection.test.ts
+index 9c60b3c7..503a3f91 100644
+--- a/apps/node/test/connection.test.ts
++++ b/apps/node/test/connection.test.ts
+@@ -1,10 +1,11 @@
+-import type { AddressInfo } from 'node:net';
+-import { describe, expect, it, onTestFinished } from 'vitest';
++import { createServer as createHttpServer } from 'node:http';
++import { createServer as createTcpServer, type AddressInfo } from 'node:net';
++import { describe, expect, it, onTestFinished, vi } from 'vitest';
+ import { WebSocketServer } from 'ws';
+ import { connect } from '../src/connection.js';
+ 
+ describe('connect', () => {
+   it('reconnects after the server drops it and says hello on every open', async () => {
+     const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+     onTestFinished(() => server.close());
+     await new Promise(r => server.once('listening', r));
+@@ -27,8 +28,99 @@ describe('connect', () => {
+     });
+     onTestFinished(() => conn.close());
+     const end = Date.now() + 3000;
+     while (hellos.length < 2 && Date.now() < end) await new Promise(r => setTimeout(r, 10));
+     expect(hellos).toEqual(['hello', 'hello']);
+     expect(keys).toEqual(['Bearer node-key-1234567890', 'Bearer node-key-1234567890']);
+   });
+ });
++
++/* A port nothing listens on: the connection is refused at once. */
++async function closedPort(): Promise<number> {
++  const probe = createTcpServer();
++  await new Promise<void>(r => probe.listen(0, '127.0.0.1', r));
++  const { port } = probe.address() as AddressInfo;
++  await new Promise(r => probe.close(r));
++  return port;
++}
++
++/* Runs a connection against a server that refuses it and gives the pauses it waited between tries, with the clock under
++   the test's hand. Only setTimeout is faked, so the sockets still run on real time. */
++async function waitsOf(url: string, tries: number): Promise<number[]> {
++  const realImmediate = setImmediate;
++  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
++  onTestFinished(() => void vi.useRealTimers());
++  const waits: number[] = [];
++  const timeout = globalThis.setTimeout;
++  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
++    /* The connection's own pause is the one that reopens the socket; ws keeps timers of its own. */
++    if (ms !== undefined && fn.name === 'open') waits.push(ms);
++    return timeout(fn, ms);
++  }) as typeof setTimeout);
++  const conn = connect({ url, key: 'node-key-1234567890', onOpen: () => {}, onMessage: () => {} });
++  onTestFinished(() => conn.close());
++  for (let seen = 0; seen < tries; seen++) {
++    while (waits.length <= seen) await new Promise(r => realImmediate(r));
++    await vi.advanceTimersByTimeAsync(waits[seen]!);
++  }
++  return waits;
++}
++
++describe('connect backoff', () => {
++  it('waits at most 10 s between tries', async () => {
++    const waits = await waitsOf(`ws://127.0.0.1:${await closedPort()}`, 6);
++    expect(waits.slice(0, 6)).toEqual([1000, 2000, 4000, 8000, 10_000, 10_000]);
++  });
++
++  it('waits 60 s after the server refused the key', async () => {
++    const refusing = createHttpServer();
++    refusing.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n'));
++    await new Promise<void>(r => refusing.listen(0, '127.0.0.1', r));
++    onTestFinished(() => void refusing.close());
++    const waits = await waitsOf(`ws://127.0.0.1:${(refusing.address() as AddressInfo).port}`, 1);
++    expect(waits[0]).toBe(60_000);
++  });
++
++  it('waits 60 s after a close with 4001', async () => {
++    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
++    onTestFinished(() => server.close());
++    await new Promise(r => server.once('listening', r));
++    server.on('connection', socket => socket.close(4001, 'Disconnected.'));
++    const waits = await waitsOf(`ws://127.0.0.1:${(server.address() as AddressInfo).port}`, 1);
++    expect(waits[0]).toBe(60_000);
++  });
++
++  it('gives up a handshake that gets no answer', async () => {
++    const silent = createTcpServer();
++    let connections = 0;
++    silent.on('connection', socket => {
++      connections++;
++      socket.on('error', () => {});
++    });
++    await new Promise<void>(r => silent.listen(0, '127.0.0.1', r));
++    onTestFinished(() => void silent.close());
++    const conn = connect({ url: `ws://127.0.0.1:${(silent.address() as AddressInfo).port}`, key: 'node-key-1234567890', backoff: { firstMs: 10, handshakeMs: 300 }, onOpen: () => {}, onMessage: () => {} });
++    onTestFinished(() => conn.close());
++    const end = Date.now() + 3000;
++    while (connections < 2 && Date.now() < end) await new Promise(r => setTimeout(r, 10));
++    expect(connections).toBeGreaterThanOrEqual(2);
++  });
++});
++
++describe('connect acks', () => {
++  async function openedWith(confirms: boolean): Promise<boolean> {
++    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
++    onTestFinished(() => server.close());
++    await new Promise(r => server.once('listening', r));
++    if (confirms) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
++    const opened = new Promise<boolean>(resolve => {
++      const conn = connect({ url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, key: 'node-key-1234567890', onOpen: (_send, acks) => resolve(acks), onMessage: () => {} });
++      onTestFinished(() => conn.close());
++    });
++    return opened;
++  }
++
++  it('knows a server that confirms', async () => {
++    expect(await openedWith(true)).toBe(true);
++    expect(await openedWith(false)).toBe(false);
++  });
++});
+diff --git a/apps/node/test/isolation.test.ts b/apps/node/test/isolation.test.ts
+index 4edf26cc..be185b6d 100644
+--- a/apps/node/test/isolation.test.ts
++++ b/apps/node/test/isolation.test.ts
+@@ -77,16 +77,29 @@ describe('secureNode', () => {
+       'chmod /data/home 700',
+       'mkdir /data/work',
+       'chown /data/work 1000:1000',
+       'chmod /data/work 700',
+     ]);
+   });
+ });
+ 
++describe('secureNode and the outbox', () => {
++  it('makes outbox.jsonl root-owned when it exists, and leaves it alone when it does not', () => {
++    const user = { uid: 1000, gid: 1000 };
++    const missing = ['/data/node.json', '/data/sessions.json', '/data/users.json', '/data/login-url', '/data/removed', '/data/tools', '/data/.hh-recordings'];
++    const owned = fakeOps({ '/data/outbox.jsonl': 1000 }, missing);
++    secureNode('/data', user, owned.ops);
++    expect(owned.calls).toContain('chown1 /data/outbox.jsonl 0:0');
++    const absent = fakeOps({}, [...missing, '/data/outbox.jsonl']);
++    secureNode('/data', user, absent.ops);
++    expect(absent.calls.join('\n')).not.toContain('outbox.jsonl');
++  });
++});
++
+ describe('prepareFolder', () => {
+   it('hands the folder to the user and closes it to everyone else', () => {
+     const { ops, calls } = fakeOps();
+     expect(prepareFolder('/data/subs/a', { uid: 20000, gid: 20000 }, ops)).toBe('/data/subs/a');
+     expect(calls).toEqual(['mkdir /data/subs/a', 'chown /data/subs/a 20000:20000', 'chmod /data/subs/a 700']);
+   });
+ 
+   it('skips the walk over a folder the user already owns', () => {
+diff --git a/apps/node/test/main.test.ts b/apps/node/test/main.test.ts
+index 7d5bacc3..3c9a42ab 100644
+--- a/apps/node/test/main.test.ts
++++ b/apps/node/test/main.test.ts
+@@ -19,32 +19,42 @@ import type { runTests } from '../src/tests.js';
+ const adapter: ProviderAdapter = {
+   install: async () => {},
+   loggedIn: async () => true,
+   login: async () => {},
+   secrets: async () => [],
+   run: async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: { status: 'allowed', windows: [] } }),
+ };
+ 
+-async function fakeServer() {
+-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
++/* acks: it says in its upgrade answer that it confirms numbered messages, as a server of this build does. port: the one
++   a server of the same node listened on before. */
++async function fakeServer({ acks = false, port = 0 }: { acks?: boolean; port?: number } = {}) {
++  const server = new WebSocketServer({ port, host: '127.0.0.1' });
+   onTestFinished(() => server.close());
++  if (acks) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
+   await new Promise(r => server.once('listening', r));
+   const received: { type: string; [k: string]: unknown }[] = [];
+   let socket: WebSocket | null = null;
+   server.on('connection', s => {
+     socket = s;
+     s.on('message', data => received.push(JSON.parse(String(data))));
+   });
+   const wait = async (check: () => boolean, ms = 3000) => {
+     const end = Date.now() + ms;
+     while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
+     expect(check()).toBe(true);
+   };
+-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
++  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait,
++    port: (server.address() as AddressInfo).port,
++    /* The server goes away, as an app that is restarting does. */
++    stop: () => {
++      for (const client of server.clients) client.terminate();
++      return new Promise<void>(done => server.close(() => done()));
++    },
++  };
+ }
+ 
+ function nodeDir(server: string) {
+   const dir = mkdtempSync(join(tmpdir(), 'hh-data-'));
+   writeState(dir, { server, subscriptionId: 's1', provider: 'claude', key: 'node-key-1234567890' });
+   for (const sub of ['home', 'work']) {
+     mkdirSync(join(dir, sub), { recursive: true });
+     writeFileSync(join(dir, sub, 'file'), 'x');
+@@ -278,17 +288,17 @@ describe('a node that runs agents in terminals', () => {
+     onTestFinished(() => node.stop());
+     await server.wait(() => server.received.some(m => m.type === 'hello'));
+     expect(server.received[0]).toMatchObject({ type: 'hello', terminals: true });
+ 
+     const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1' };
+     server.send({ ...run, jobId: 'j1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
+     await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
+     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: true, result: 'echo: hi' });
+-    expect(server.received).toContainEqual({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } });
++    expect(server.received).toContainEqual(expect.objectContaining({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } }));
+ 
+     server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: false });
+     await server.wait(() => server.received.some(m => m.type === 'term.data' && String(m.data).includes('echo: hi')), 8000);
+ 
+     server.send({ ...run, jobId: 'j2', prompt: 'test', toolToken: null });
+     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
+   });
+@@ -770,16 +780,142 @@ describe('runNode', () => {
+ 
+     server.send({ ...part, partId: 'p2', command: 'slow' });
+     await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p2'));
+     server.send({ type: 'tests.cancel', partId: 'p2' });
+     await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p2'));
+     expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p2')).toMatchObject({ ok: false, error: 'cancelled' });
+   });
+ 
++  describe('numbered messages', () => {
++    const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null };
++    const numbered = (server: Awaited<ReturnType<typeof fakeServer>>, from = 0) => server.received.slice(from).filter(m => typeof m.n === 'number');
++    const helloCount = (server: Awaited<ReturnType<typeof fakeServer>>) => server.received.filter(m => m.type === 'hello').length;
++
++    /* A program that says two things and then, once the test lets it, ends. */
++    function gated() {
++      let open!: () => void;
++      const gate = new Promise<void>(r => (open = r));
++      const talking: ProviderAdapter = {
++        ...adapter,
++        run: async input => {
++          input.onEvent?.({ kind: 'text', text: 'first' });
++          await gate;
++          input.onEvent?.({ kind: 'text', text: 'second' });
++          return adapter.run(input);
++        },
++      };
++      return { adapter: talking, open };
++    }
++
++    it('sends numbered messages again until the server confirms them', async () => {
++      const server = await fakeServer({ acks: true });
++      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => (input.onEvent?.({ kind: 'text', text: 'a' }), input.onEvent?.({ kind: 'text', text: 'b' }), adapter.run(input)) }, log: () => {} });
++      onTestFinished(() => node.stop());
++      await server.wait(() => server.received.some(m => m.type === 'hello'));
++      server.send(run);
++      await server.wait(() => server.received.some(m => m.type === 'job.done'));
++      const first = numbered(server);
++      expect(first.map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
++
++      const seen = server.received.length;
++      server.drop();
++      await server.wait(() => helloCount(server) === 2, 5000);
++      await server.wait(() => numbered(server, seen).length === 4);
++      expect(numbered(server, seen)).toEqual(first);
++      expect(server.received[seen]).toMatchObject({ type: 'hello', stream: expect.any(String) });
++      expect(server.received[0]).toMatchObject({ stream: server.received[seen]!.stream });
++
++      server.send({ type: 'ack', upto: 4 });
++      await new Promise(r => setTimeout(r, 50));
++      const before = server.received.length;
++      server.drop();
++      await server.wait(() => helloCount(server) === 3, 5000);
++      await new Promise(r => setTimeout(r, 150));
++      expect(numbered(server, before)).toEqual([]);
++      expect(server.received[before]).toMatchObject({ type: 'hello', running: [] });
++    });
++
++    it('keeps its messages through its own restart', async () => {
++      const first = await fakeServer({ acks: true });
++      const dir = nodeDir(first.url);
++      const talking = gated();
++      const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
++      onTestFinished(() => node.stop());
++      await first.wait(() => first.received.some(m => m.type === 'hello'));
++      first.send(run);
++      await first.wait(() => first.received.some(m => m.type === 'job.event'));
++      const stream = String(first.received[0]!.stream);
++      await first.stop();
++      talking.open();
++      await vi.waitFor(() => expect(readFileSync(join(dir, 'outbox.jsonl'), 'utf8')).toContain('"second"'), { timeout: 3000 });
++      node.stop();
++
++      const second = await fakeServer({ acks: true, port: first.port });
++      const again = await runNode({ dir, adapter, log: () => {} });
++      onTestFinished(() => again.stop());
++      await second.wait(() => second.received.some(m => m.type === 'job.done'));
++      expect(second.received[0]).toMatchObject({ type: 'hello', stream });
++      expect(numbered(second).map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
++      expect(numbered(second)[2]).toMatchObject({ event: { text: 'second' } });
++    });
++
++    it('talks to a server of the build before', async () => {
++      const first = await fakeServer();
++      const talking = gated();
++      const node = await runNode({ dir: nodeDir(first.url), adapter: talking.adapter, log: () => {} });
++      onTestFinished(() => node.stop());
++      await first.wait(() => first.received.some(m => m.type === 'hello'));
++      first.send(run);
++      await first.wait(() => first.received.some(m => m.type === 'job.event'));
++      expect(first.received[0]).toMatchObject({ type: 'hello' });
++      await first.stop();
++      /* The node must see its socket gone first: what a server that confirms nothing was sent is given up. */
++      await new Promise(r => setTimeout(r, 200));
++      talking.open();
++      await new Promise(r => setTimeout(r, 200));
++
++      const second = await fakeServer({ port: first.port });
++      await second.wait(() => second.received.some(m => m.type === 'job.done'), 6000);
++      expect(numbered(second).map(m => m.type)).toEqual(['job.event', 'job.done']);
++      expect(second.received[0]).toMatchObject({ type: 'hello', running: ['j1'] });
++
++      const before = second.received.length;
++      second.drop();
++      await second.wait(() => helloCount(second) === 2, 6000);
++      await second.wait(() => numbered(second, before).length > 0);
++      await new Promise(r => setTimeout(r, 100));
++      expect(numbered(second, before).map(m => m.type)).toEqual(['job.done']);
++
++      second.send({ type: 'job.ack', jobId: 'j1' });
++      await new Promise(r => setTimeout(r, 50));
++      const last = second.received.length;
++      second.drop();
++      await second.wait(() => helloCount(second) === 3, 6000);
++      await new Promise(r => setTimeout(r, 150));
++      expect(numbered(second, last)).toEqual([]);
++    });
++
++    it('does not run a part again whose end waits for its ack', async () => {
++      const server = await fakeServer({ acks: true });
++      const ran: string[] = [];
++      const runPart: typeof runTests = async m => (ran.push(m.partId), { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
++      const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
++      onTestFinished(() => node.stop());
++      await server.wait(() => server.received.some(m => m.type === 'hello'));
++      const part = { type: 'tests.run', partId: 'p1', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 };
++      server.send(part);
++      await server.wait(() => server.received.some(m => m.type === 'tests.done'));
++      server.send(part);
++      await new Promise(r => setTimeout(r, 150));
++      expect(ran).toEqual(['p1']);
++      expect(server.received.filter(m => m.type === 'tests.started')).toHaveLength(1);
++    });
++  });
++
+   it('stays idle once removed', async () => {
+     const lines: string[] = [];
+     const dir = nodeDir('http://127.0.0.1:9');
+     writeFileSync(join(dir, 'removed'), '');
+     const node = await runNode({ dir, adapter, log: l => lines.push(l) });
+     node.stop();
+     expect(lines).toEqual(['This node was removed in Hornhoof.']);
+   });
+diff --git a/apps/node/test/outbox.test.ts b/apps/node/test/outbox.test.ts
+new file mode 100644
+index 00000000..00b4ad10
+--- /dev/null
++++ b/apps/node/test/outbox.test.ts
+@@ -0,0 +1,218 @@
++import { appendFileSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import type { NodeMessage } from '@hornhoof/protocol';
++import { describe, expect, it } from 'vitest';
++import { endId, isEnd, Outbox, OUTBOX_FILE, parseLine, type End } from '../src/outbox.js';
++
++const folder = () => mkdtempSync(join(tmpdir(), 'hh-outbox-'));
++const event = (seq: number): NodeMessage => ({ type: 'job.event', jobId: 'job-1', seq, event: { kind: 'text', text: `line ${seq}` } });
++const jobEnd = (jobId: string): End => ({ type: 'job.done', jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
++const testEnd = (partId: string): End => ({ type: 'tests.done', partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
++const numbers = (box: Outbox) => box.pending().map(e => e.n);
++
++describe('Outbox', () => {
++  it('numbers messages and keeps them across a restart', () => {
++    const dir = folder();
++    const first = new Outbox(dir);
++    for (let seq = 0; seq < 3; seq++) first.add(event(seq));
++    const second = new Outbox(dir);
++    expect(second.stream).toBe(first.stream);
++    expect(numbers(second)).toEqual([1, 2, 3]);
++    expect(second.pending()[2]!.msg).toMatchObject({ type: 'job.event', seq: 2, n: 3 });
++    expect(second.add(event(3)).n).toBe(4);
++  });
++
++  it('starts a new stream with a new file', () => {
++    expect(new Outbox(folder()).stream).not.toBe(new Outbox(folder()).stream);
++  });
++
++  it('drops what the server confirmed', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    for (let seq = 0; seq < 3; seq++) box.add(event(seq));
++    box.ack(2);
++    expect(numbers(box)).toEqual([3]);
++    box.close();
++    expect(numbers(new Outbox(dir))).toEqual([3]);
++  });
++
++  it('never reuses a number once every entry was confirmed', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    box.add(event(0));
++    box.add(event(1));
++    box.ack(2);
++    box.close();
++    const again = new Outbox(dir);
++    expect(again.pending()).toEqual([]);
++    expect(again.add(event(2)).n).toBe(3);
++  });
++
++  it('numbers a held end when its turn comes', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    box.hold(jobEnd('job-9'));
++    expect(box.doneJobs()).toEqual(['job-9']);
++    expect(box.add(event(0)).n).toBe(1);
++    expect(numbers(new Outbox(dir))).toEqual([1]);
++    expect(new Outbox(dir).held()).toEqual(['job-9']);
++    const numbered = box.number('job-9');
++    expect(numbered).toMatchObject({ n: 2, msg: { type: 'job.done', jobId: 'job-9', n: 2 } });
++    expect(box.held()).toEqual([]);
++    expect(box.doneJobs()).toEqual(['job-9']);
++    expect(box.number('job-9')).toBeNull();
++    const reopened = new Outbox(dir);
++    expect(numbers(reopened)).toEqual([1, 2]);
++    expect(reopened.held()).toEqual([]);
++  });
++
++  it('holds the first end of a job and ignores a second one', () => {
++    const box = new Outbox(folder());
++    box.hold(jobEnd('job-1'));
++    box.hold({ ...jobEnd('job-1'), ok: false });
++    expect(box.number('job-1')!.msg).toMatchObject({ ok: true });
++    box.hold(jobEnd('job-1'));
++    expect(box.held()).toEqual([]);
++  });
++
++  it("keeps a job's end until either ack", () => {
++    const box = new Outbox(folder());
++    box.add(event(0));
++    const job = box.number(endOf(box, jobEnd('job-1')))!;
++    const part = box.number(endOf(box, testEnd('part-1')))!;
++    box.ack(job.n - 1);
++    expect(numbers(box)).toEqual([job.n, part.n]);
++    box.ackJob('job-1');
++    expect(numbers(box)).toEqual([part.n]);
++    box.ackJob('part-1');
++    expect(numbers(box)).toEqual([part.n]);
++    box.ackPart('part-1');
++    expect(numbers(box)).toEqual([]);
++  });
++
++  it('drops a held end on its own ack', () => {
++    const box = new Outbox(folder());
++    box.hold(jobEnd('job-1'));
++    box.hold(testEnd('part-1'));
++    box.ackJob('job-1');
++    box.ackPart('part-1');
++    expect(box.held()).toEqual([]);
++    expect(box.doneJobs()).toEqual([]);
++    expect(box.doneParts()).toEqual([]);
++  });
++
++  it('lists the jobs and the parts whose ends it holds or numbered', () => {
++    const box = new Outbox(folder());
++    box.hold(jobEnd('job-1'));
++    box.hold(testEnd('part-1'));
++    box.number('part-1');
++    expect(box.doneJobs()).toEqual(['job-1']);
++    expect(box.doneParts()).toEqual(['part-1']);
++  });
++
++  it('drops live messages when it talks to an older server', () => {
++    const box = new Outbox(folder());
++    box.add(event(0));
++    const end = box.number(endOf(box, jobEnd('job-1')))!;
++    box.add(event(1));
++    box.add(event(2));
++    box.add(event(3));
++    box.dropSent(3);
++    expect(numbers(box)).toEqual([end.n, 4, 5]);
++  });
++
++  it('writes the file for its owner only', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    box.add(event(0));
++    box.ack(1);
++    box.close();
++    expect(statSync(join(dir, OUTBOX_FILE)).mode & 0o777).toBe(0o600);
++  });
++
++  it('caps the outbox by its oldest events, never an end', () => {
++    const box = new Outbox(folder(), { max: 10 });
++    for (let i = 0; i < 5; i++) box.number(endOf(box, jobEnd(`job-${i}`)));
++    for (let seq = 0; seq < 15; seq++) box.add(event(seq));
++    const kept = box.pending();
++    expect(kept.filter(e => isEnd(e.msg))).toHaveLength(5);
++    expect(kept.filter(e => e.msg.type === 'job.event').map(e => (e.msg as { seq: number }).seq)).toEqual([10, 11, 12, 13, 14]);
++  });
++
++  it('keeps every end even when the ends alone are past the cap', () => {
++    const box = new Outbox(folder(), { max: 10 });
++    for (let seq = 0; seq < 15; seq++) box.add(event(seq));
++    for (let i = 0; i < 60; i++) box.number(endOf(box, i % 2 ? jobEnd(`job-${i}`) : testEnd(`part-${i}`)));
++    expect(box.pending()).toHaveLength(60);
++    expect(box.pending().every(e => isEnd(e.msg))).toBe(true);
++  });
++
++  it('drops other numbered messages when no event is left to drop', () => {
++    const box = new Outbox(folder(), { max: 2 });
++    box.add({ type: 'job.started', jobId: 'a' });
++    box.add({ type: 'job.started', jobId: 'b' });
++    box.add({ type: 'job.started', jobId: 'c' });
++    expect(box.pending().map(e => (e.msg as { jobId: string }).jobId)).toEqual(['b', 'c']);
++  });
++
++  it('keeps the file small while the cap drops events', () => {
++    const dir = folder();
++    const box = new Outbox(dir, { max: 5, flushMs: 0 });
++    for (let seq = 0; seq < 40; seq++) box.add(event(seq));
++    box.close();
++    expect(readFileSync(join(dir, OUTBOX_FILE), 'utf8').trim().split('\n').length).toBeLessThanOrEqual(1 + 5 + 5);
++  });
++
++  it('recovers from a line cut short', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    for (let seq = 0; seq < 3; seq++) box.add(event(seq));
++    appendFileSync(join(dir, OUTBOX_FILE), '{"k":"add","n":4,"msg":{"type":"job.ev');
++    const second = new Outbox(dir);
++    expect(numbers(second)).toEqual([1, 2, 3]);
++    expect(second.add(event(3)).n).toBe(4);
++    const third = new Outbox(dir);
++    expect(numbers(third)).toEqual([1, 2, 3, 4]);
++    expect(third.pending()[3]!.msg).toMatchObject({ seq: 3 });
++  });
++
++  it('cuts off a last line that is not JSON even with its newline', () => {
++    const dir = folder();
++    const box = new Outbox(dir);
++    box.add(event(0));
++    appendFileSync(join(dir, OUTBOX_FILE), 'not json\n');
++    expect(numbers(new Outbox(dir))).toEqual([1]);
++    box.add(event(1));
++    expect(numbers(new Outbox(dir))).toEqual([1, 2]);
++  });
++});
++
++describe('parseLine', () => {
++  it('reads each kind of line and refuses the rest', () => {
++    const stream = '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11';
++    expect(parseLine(JSON.stringify({ k: 'stream', stream, next: 4 }))).toEqual({ k: 'stream', stream, next: 4 });
++    expect(parseLine(JSON.stringify({ k: 'hold', msg: jobEnd('j') }))).toMatchObject({ k: 'hold' });
++    expect(parseLine(JSON.stringify({ k: 'add', n: 2, msg: event(0) }))).toMatchObject({ k: 'add', n: 2 });
++    expect(parseLine('{"k":"add"')).toBeNull();
++    expect(parseLine(JSON.stringify({ k: 'add', n: 0, msg: event(0) }))).toBeNull();
++    expect(parseLine(JSON.stringify({ k: 'add', n: 1, msg: { type: 'nope' } }))).toBeNull();
++    expect(parseLine(JSON.stringify({ k: 'hold', msg: event(0) }))).toBeNull();
++    expect(parseLine(JSON.stringify({ k: 'stream', stream: 'x', next: 1 }))).toBeNull();
++  });
++});
++
++describe('ends', () => {
++  it('know their id and tell themselves from other messages', () => {
++    expect(endId(jobEnd('j'))).toBe('j');
++    expect(endId(testEnd('p'))).toBe('p');
++    expect(isEnd(jobEnd('j'))).toBe(true);
++    expect(isEnd(event(0))).toBe(false);
++  });
++});
++
++/* Holds an end and gives back its id, so a test can number it when it likes. */
++function endOf(box: Outbox, end: End): string {
++  box.hold(end);
++  return endId(end);
++}
+

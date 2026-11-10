@@ -1,0 +1,13 @@
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+TSC-OK
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+apps/server/test/sign-in-limit.test.ts(91,12): error TS2571: Object is of type 'unknown'.
+apps/server/test/sign-in-limit.test.ts(98,18): error TS2571: Object is of type 'unknown'.
+TT-OK
+LINT-OK

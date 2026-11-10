@@ -1,0 +1,203 @@
+diff --git a/relay/hornhoof-relay b/relay/hornhoof-relay
+index 6b5f64e..b77cf34 100755
+--- a/relay/hornhoof-relay
++++ b/relay/hornhoof-relay
+@@ -2,9 +2,9 @@
+ # Operator commands for the Hornhoof relay. Run as root on the droplet.
+ #   hornhoof-relay list                 every binding, when it was made and last seen
+ #   hornhoof-relay add <name>           a binding made by us (no rate limit); prints {name, key} once, keep it secret
+-#   hornhoof-relay ban <name> [reason]  block a name now: 410 at once, its tunnel dropped within 90 s, nobody can take it
++#   hornhoof-relay ban <name> [reason]  answer 410 at once; its tunnel can never log in or register again
+ #   hornhoof-relay unban <name>
+-#   hornhoof-relay release <name>       free a name (its tunnel is dropped within 90 s)
++#   hornhoof-relay release <name>       free a name once its old tunnel is gone
+ set -eu
+ relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
+ relay "$@"
+diff --git a/relay/relay.py b/relay/relay.py
+index 939e4c5..47a1054 100755
+--- a/relay/relay.py
++++ b/relay/relay.py
+@@ -2,11 +2,12 @@
+ """Hornhoof relay: hands out <name>.hornhoof.org links and checks every tunnel that frps lets in.
+ 
+ Public API (Caddy sends https://hornhoof.org/api/* here):
+-  GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}
+-  POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
++  GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}, 503 if unknown
++  POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}, 409 taken, 503 if unknown
+   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
+   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
++  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
+   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
+   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
+ frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+@@ -133,6 +134,12 @@ def init_db() -> None:
+             key_hash TEXT NOT NULL,
+             created_at INTEGER NOT NULL
+         )''', ())
++    write('''CREATE TABLE IF NOT EXISTS ping_keys (
++            name TEXT NOT NULL,
++            key_hash TEXT NOT NULL,
++            link_hash TEXT NOT NULL,
++            PRIMARY KEY (name, key_hash)
++        )''', ())
+ 
+ 
+ _reserved = {'mtime': None, 'names': frozenset()}
+@@ -373,6 +380,19 @@ def frps_route(name: str) -> tuple[str, str | None, str | None]:
+     return 'absent', None, None
+ 
+ 
++def name_live(name: str) -> bool:
++    """R1.5: a freed name waits for its old route; an unknown dashboard raises."""
++    return frps_route(name)[0] == 'online'
++
++
++def requested_name_reason(name: str) -> str | None:
++    """Check local restrictions first, then whether frps still serves a freed name."""
++    reason = check_name(name)
++    if reason is None and name_live(name):
++        return 'taken'
++    return reason
++
++
+ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy_type: str | None) -> None:
+     """An online route must match the relay's own record, else the answer is unknown, never empty (R2.3).
+ 
+@@ -911,6 +931,47 @@ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
+     return db().execute('SELECT changes()').fetchone()[0] == 1
+ 
+ 
++def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
++    """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
++
++    The hash comparison prevents an in-flight request from changing a later owner's
++    key or overwriting another rotation. Retired hashes authorize only Ping from
++    frps's already authenticated sessions, tied to this binding's current hash.
++    Release/rebind invalidates them without changing the route or visitor guards.
++    """
++    with transaction():
++        write('UPDATE bindings SET key_hash = ? WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
++              (new_hash, name, link_hash))
++        if db().execute('SELECT changes()').fetchone()[0] != 1:
++            return False
++        retain_ping_keys(name, new_hash, link_hash)
++        return True
++
++
++def retain_ping_keys(name: str, new_hash: str, link_hash: str) -> None:
++    """Keep prior login hashes usable only for heartbeats in this binding lifetime.
++
++    Both statements run in the key rotation's transaction. No retired credential
++    becomes a public API credential or authorizes a Login or registration.
++    """
++    write('UPDATE ping_keys SET link_hash = ? WHERE name = ? AND link_hash = ?',
++          (new_hash, name, link_hash))
++    write('INSERT INTO ping_keys (name, key_hash, link_hash) VALUES (?, ?, ?) '
++          'ON CONFLICT(name, key_hash) DO UPDATE SET link_hash = excluded.link_hash',
++          (name, link_hash, new_hash))
++
++
++def ping_key_matches(name: str | None, key: object) -> bool:
++    """A retired link hash serves only this still-bound, unblocked lifetime's Ping."""
++    if not isinstance(key, str) or not key:
++        return False
++    row = db().execute('SELECT 1 FROM ping_keys AS p JOIN bindings AS b '
++                       'ON b.name = p.name AND b.key_hash = p.link_hash '
++                       'WHERE p.name = ? AND p.key_hash = ? AND b.banned_at IS NULL',
++                       (name, key_hash(key))).fetchone()
++    return row is not None
++
++
+ def visitor_hash_matches(name: str, visitor: str) -> bool:
+     """R6.2: the visitor key matches only while it is the one stored, compared in constant time."""
+     row = db().execute('SELECT key_hash FROM visitor_keys WHERE name = ?', (name,)).fetchone()
+@@ -992,10 +1053,18 @@ def call_metas(op: str, content: dict) -> dict:
+     return metas if isinstance(metas, dict) else {}
+ 
+ 
++def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str | None]:
++    """Live sessions retain their heartbeat after rotation; all other ops need the current key."""
++    name, kind, reason = authenticate(metas)
++    if op == 'Ping' and reason is not None and ping_key_matches(name, metas.get('key')):
++        return name, 'link', None
++    return name, kind, reason
++
++
+ def plugin_decide(op: str, content: dict) -> dict:
+     """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes."""
+     metas = call_metas(op, content)
+-    name, kind, reason = authenticate(metas)
++    name, kind, reason = authenticate_call(op, metas)
+     if reason is None and op == 'Login':
+         reason = login_reason(name, kind, content, metas)
+     elif reason is None and op == 'NewProxy':
+@@ -1020,6 +1089,8 @@ class Handler(BaseHTTPRequestHandler):
+             super().handle_one_request()
+         except WriteBusy:
+             self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
++        except FrpsUnknown:
++            self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+ 
+     def client_ip(self) -> str:
+         fwd = self.headers.get('X-Forwarded-For')
+@@ -1075,7 +1146,7 @@ class Handler(BaseHTTPRequestHandler):
+         wait = name_checks.allow(self.client_ip())
+         if wait:
+             return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
+-        reason = check_name(name)
++        reason = requested_name_reason(name)
+         body = {'name': name, 'free': reason is None}
+         if reason:
+             body['reason'] = reason
+@@ -1126,13 +1197,19 @@ class Handler(BaseHTTPRequestHandler):
+         """R6.2: hand out a new visitor key, replacing the one before; the relay stores its
+         hash only and never logs or answers with the key again. The store lands only while
+         the binding with the authorizing key still exists (C2)."""
++        self.key_answer(name, visitor=True)
++
++    def key_answer(self, name: str, visitor: bool = False) -> None:
++        """R6.1, R6.2: hand out a fresh key once, committing its hash before answering."""
+         if not self.authorize_link(name):
+             return
+-        visitor_key = secrets.token_urlsafe(32)
+-        if not store_visitor_key(name, key_hash(visitor_key), key_hash(self.bearer_key())):
++        field, store, label = (('visitorKey', store_visitor_key, 'visitor') if visitor
++                               else ('key', store_link_key, 'link'))
++        new_key = secrets.token_urlsafe(32)
++        if not store(name, key_hash(new_key), key_hash(self.bearer_key())):
+             return self.error(404, 'not_found', f'There is no binding {name}.')
+-        log_line(f'new visitor key for {name}')
+-        self.send_json(200, {'visitorKey': visitor_key})
++        log_line(f'new {label} key for {name}')
++        self.send_json(200, {field: new_key})
+ 
+     def health_answer(self):
+         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
+@@ -1174,10 +1251,11 @@ class Handler(BaseHTTPRequestHandler):
+             return self.handle_plugin()
+         if parts == ['api', 'v1', 'bindings']:
+             return self.create_binding()
+-        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'sync':
+-            return self.sync_answer(parts[3].lower())
+-        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'visitor-key':
+-            return self.visitor_key_answer(parts[3].lower())
++        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5:
++            answer = {'sync': self.sync_answer, 'visitor-key': self.visitor_key_answer,
++                      'key': self.key_answer}.get(parts[4])
++            if answer is not None:
++                return answer(parts[3].lower())
+         self.error(404, 'not_found', 'Not found.')
+ 
+     def create_binding(self):
+@@ -1210,7 +1288,7 @@ class Handler(BaseHTTPRequestHandler):
+                         break
+             else:
+                 name = name.lower()
+-                reason = check_name(name)
++                reason = requested_name_reason(name)
+                 if reason == 'invalid':
+                     return self.error(400, 'invalid', 'Use lowercase letters, digits and hyphens, 1-63 characters, '
+                                                       'no hyphen at either end and none in the 3rd and 4th place.')

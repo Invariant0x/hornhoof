@@ -1,0 +1,21 @@
+Baseline failed for apps/server/src/app.ts: cd apps/server && npx vitest run test/auth.test.ts test/people.test.ts test/origin.test.ts test/migrations.test.ts --maxWorkers=1
+    [90m 72|[39m
+    [90m 73|[39m describe('migration 0049', () => {
+    [90m 74|[39m   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %…
+    [90m   |[39m                                [31m^[39m
+    [90m 75|[39m     const source = new PGlite();
+    [90m 76|[39m     onTestFinished(() => source.close());
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m83 passed[39m[22m[90m (85)[39m
+[2m   Start at [22m 16:19:04
+[2m   Duration [22m 269.45s[2m (tests 94%, import 3%, transform 2%)[22m
+
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

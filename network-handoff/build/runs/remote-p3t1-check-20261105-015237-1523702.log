@@ -1,0 +1,34 @@
+== changed files
+CONTRIBUTING.md
+apps/server/test/compose.test.ts
+apps/server/test/real/auth-locks.test.ts
+apps/server/test/real/pg.ts
+apps/server/test/real/postgres.test.ts
+apps/server/test/real/run.sh
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/home/altera/hornhoof-network/hornhoof/apps/server[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m test/compose.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Affected [22m 1 of 123 test files [2m(related to 4 files)[22m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 01:58:38
+[2m   Duration [22m 6.35s[2m (import 69%, worker 22%, tests 7%, transform 2%)[22m
+
+== crapper
+worst changed CRAP: 6.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+No duplicate candidates found.
+AUTHOR CHECK OK at 125ce3f1

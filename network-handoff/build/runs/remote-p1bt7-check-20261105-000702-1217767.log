@@ -1,0 +1,53 @@
+== changed files
+apps/server/drizzle/0055_link_tls.sql
+apps/server/drizzle/meta/0055_snapshot.json
+apps/server/drizzle/meta/_journal.json
+apps/server/src/config.ts
+apps/server/src/db/agent-sql.ts
+apps/server/src/db/schema.ts
+apps/server/src/modules/link/client.ts
+apps/server/src/modules/link/link.ts
+apps/server/src/modules/link/tunnel.ts
+apps/server/src/modules/tls/store.ts
+apps/server/test/client.test.ts
+apps/server/test/compose.test.ts
+apps/server/test/config.test.ts
+apps/server/test/helpers.ts
+apps/server/test/link.test.ts
+apps/server/test/migration-metadata.test.ts
+apps/server/test/orchestrator-control.test.ts
+compose.yaml
+== types
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+== lint
+> @hornhoof/protocol@0.6.0 build
+> tsc -p tsconfig.json
+
+== apps/server tests
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m122 passed[39m[22m[90m (123)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m2192 passed[39m[22m[2m | [22m[90m1 todo[39m[90m (2195)[39m
+[2m   Start at [22m 00:23:51
+[2m   Duration [22m 1660.19s[2m (tests 94%, import 6%)[22m
+
+[2m    Isolate [22m [33m123 workers spawned[39m[2m · ~340ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~13.61s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
+== crapper
+OVER 10: apps/server/src/config.ts:91 acmeDirectoryOf CRAP 12.0
+OVER 10: apps/server/src/config.ts:95 loadConfig CRAP 552.0
+OVER 10: apps/server/src/modules/link/client.ts:28 configFor CRAP 12.0
+OVER 10: apps/server/src/modules/tls/store.ts:38 mayRunHttps CRAP 56.0
+OVER 10: apps/server/src/modules/tls/store.ts:49 linkMode CRAP 42.0
+worst changed CRAP: 552.0
+== dryer
+Wrote /home/altera/hornhoof-network/hornhoof/.metrics/dry.edn
+DUPLICATE score=1.00
+  apps/server/src/db/agent-sql.ts:79-100
+  apps/server/src/db/agent-sql.ts:104-112
+AUTHOR CHECK RED at 08bcc20b

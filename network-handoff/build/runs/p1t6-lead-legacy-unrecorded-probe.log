@@ -1,0 +1,6 @@
+Unrecorded foreign legacy Login rejected: False
+Traceback (most recent call last):
+  File "/Users/0x/Projects/Hornhoof-archive/.claude/worktrees/network/.superpowers/network-build/runs/p1t6-lead-legacy-unrecorded-probe.py", line 32, in <module>
+    assert answer.get('reject') is True, 'foreign unrecorded legacy session can be taken over'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: foreign unrecorded legacy session can be taken over
