@@ -186,3 +186,17 @@ export function keeperSql(url: string, opts: { timeoutMs?: number } = {}): Sql &
     },
   };
 }
+
+/* The name a lease is held under on a machine that was given no id. */
+export const UNNAMED_MACHINE = 'unnamed';
+
+/* The lease is held in this machine's database, so without one there is none to hold. A machine without an id, as a
+   company started from the compose file by hand is, still leads: under a name of its own, alone, and in no network. */
+export function leaseOfMachine(config: { databaseUrl?: string | null; machineId: string | null }, log: (line: string) => void, open: (url: string) => Sql & { close?(): Promise<void> } = keeperSql): LeaseStore | null {
+  if (!config.databaseUrl) {
+    log('The keeper takes no lease: DATABASE_URL is not set.');
+    return null;
+  }
+  if (!config.machineId) log('HORNHOOF_MACHINE_ID is not set, so this machine leads under a name of its own and joins no network. Run the install command to give it one.');
+  return leaseStore(open(config.databaseUrl), { machineId: config.machineId ?? UNNAMED_MACHINE });
+}

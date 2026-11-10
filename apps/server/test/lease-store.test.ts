@@ -4,7 +4,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, PUBLIC_REVOKES, readerRole } from '../src/db/agent-sql.js';
 import { isLeaseRefused } from '../src/db/net.js';
 import { companies } from '../src/db/schema.js';
-import { keeperSql, leaseStore } from '../src/modules/keeper/lease-store.js';
+import { keeperSql, leaseOfMachine, leaseStore, UNNAMED_MACHINE } from '../src/modules/keeper/lease-store.js';
 import { createTestSql, ownDatabases, until } from './helpers.js';
 
 /* These tests take and end leases, switch triggers off and change roles, which a truncate does not undo. */
@@ -206,5 +206,34 @@ describe("the keeper's connection", () => {
     expect((await rest).map(answer => answer.status)).toEqual(['rejected', 'rejected']);
     expect(silent.opened()).toBe(3);
     await until(() => silent.openNow() === 0);
+  });
+});
+
+describe('the lease of a machine as its keeper starts', () => {
+  const said = (config: { databaseUrl: string | null; machineId: string | null }) => {
+    const lines: string[] = [];
+    const lease = leaseOfMachine(config, line => lines.push(line));
+    onTestFinished(() => lease?.close());
+    return { lease, lines };
+  };
+
+  it('is none without a database, and says so', () => {
+    expect(said({ databaseUrl: null, machineId: 'a1b2c3d4'.repeat(4) })).toEqual({ lease: null, lines: ['The keeper takes no lease: DATABASE_URL is not set.'] });
+  });
+
+  /* A company started from the compose file by hand has no machine id in its .env. It must lead all the same. */
+  it('is held under a name of its own by a machine that was given no id, which leads alone and joins no network', async () => {
+    const { db, sql: run } = await createTestSql();
+    const lines: string[] = [];
+    const lease = leaseOfMachine({ databaseUrl: 'postgres://nowhere.invalid/x', machineId: null }, line => lines.push(line), () => run);
+    expect(lines).toEqual(['HORNHOOF_MACHINE_ID is not set, so this machine leads under a name of its own and joins no network. Run the install command to give it one.']);
+    expect(await lease!.take('normal', FAR)).toMatchObject({ machine: UNNAMED_MACHINE });
+    await expect(db.insert(companies).values({ name: 'Acme' })).resolves.toBeDefined();
+  });
+
+  it('is held under the id of a machine that has one, without a word', () => {
+    const { lease, lines } = said({ databaseUrl: 'postgres://nowhere.invalid/x', machineId: 'a1b2c3d4'.repeat(4) });
+    expect(lease).not.toBeNull();
+    expect(lines).toEqual([]);
   });
 });
