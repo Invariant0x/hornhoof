@@ -5,6 +5,48 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.1] - 2026-11-10
+
+Less in the way of a turn before turn 19. Code nothing reached is gone with its tables, a quiet program is shown to
+someone who sees its screen sooner, three loops that woke agents without end stop, a turnkey turn can close, and the
+report of a turn counts its agent turns and the share that went to coordination.
+
+### Before you update
+
+- Migration 0095 drops the staging and task workspace tables and the columns `jobs.assignment_epoch`,
+  `jobs.workspace_id`, `jobs.workspace_spec_version` and `tasks.assignment_epoch`. Migration 0096 drops the external
+  recovery tables, `computer_access_intents`, `program_operator_actions`, `program_operator_cases.snapshot` and
+  `turns.closed_by`. No code read or wrote any of them; take a backup first if you keep rows there.
+- Nothing a node and a server send each other changed, so a node of 0.18.0 keeps working with this server.
+
+### Added
+
+- The report of a turn has a section of agent turns: all of them on the turn's tasks and outside them while it ran,
+  those of the orchestrator, heads and Operations, turns per task, and the share that went to coordination. They compare
+  with the previous and the baseline turn, and a department's part counts the turns on its tasks.
+
+### Changed
+
+- A thinking, retrying or idle program with no sign of life raises an alarm after 10 minutes, and a running tool after
+  30, where they were 30 minutes and 2 hours. The call goes to a free program operator, else the head of Operations,
+  else an operator at work, who reads the screen and acts on it, and comes again each time the quiet doubles.
+- Outbound messages and their model checks are reached through one file of their module, and a lint rule holds the
+  server to it.
+- Comments that stood above the wrong declaration or described what the code no longer does are moved or rewritten.
+- Code nothing reached is removed: the staging and task workspace store, the node's external git, task folders and
+  workspace retiring, the test planning history, the hook answer encoder, the teammate message and the protocol shapes
+  no side sent, about 3,000 lines of code and 5,000 of their tests.
+
+### Fixed
+
+- A head could not close the task that finished turnkey work was made under, so a turnkey turn could not end.
+- Words a program did not record went again every 10 minutes for as long as it stayed stuck. The wait now doubles up
+  to four hours.
+- An agent whose turns on a task kept failing later than three minutes after they started was woken again without end.
+  Five such turns in a row block the task for whoever gave it out.
+- One task that waited for a person kept the task watchdog waking every 10 minutes. A task that waits on purpose no
+  longer counts as work to look at.
+
 ## [0.18.0] - 2026-11-10
 
 Turn 18 and what it showed. A turn now runs in one of two modes: through the echelons, which only go forward, or turnkey,
