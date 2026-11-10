@@ -701,3 +701,79 @@ describe('Machines', () => {
     });
   });
 });
+
+describe("each machine's place in the company's network", () => {
+  const SERVER_BOX = { ...MACHINES[1]!, id: 'm3', hostname: 'debian', owner: { id: 'p1', name: 'Ivan' }, online: true };
+  const WORKER = { ...MACHINES[0]!, core: { webPort: 8081, path: 'relay' as const }, needsCore: false };
+  const OLD = { ...MACHINES[1]!, owner: { id: 'p1', name: 'Ivan' }, core: null, needsCore: true };
+  const server: BuiltinView = { ...BUILTIN, machine: { id: 'm3', hostname: 'debian' }, webPort: 8080, refusedBy: ['ivan-mbp'] };
+  const show = (extra: Parameters<typeof mockApi>[0] = {}, machines = [WORKER, OLD, SERVER_BOX]) => {
+    const calls = lists({ 'GET /api/machines': [200, { machines, builtin: server }], ...extra });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    return calls;
+  };
+
+  it.each([
+    ['en', 'Company server here', 'Open here', 'debian does not take connections from ivan-mbp. If debian is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.'],
+    ['ru', 'Здесь сервер компании', 'Открыть здесь', 'debian не принимает подключения от ivan-mbp. Если на машине debian стоит macOS с включенным файрволом, разрешите на ней входящие подключения для Docker (com.docker.backend) или, если там Colima, для ssh.'],
+  ])('shows in %s where the company opens on each machine, and whom the server could not take', async (language, badge, openHere, refusal) => {
+    localStorage.setItem('hh-lang', language);
+    show();
+    const debian = await openCard('debian');
+    expect(within(debian).getByText(badge)).toBeInTheDocument();
+    expect(fact(debian, openHere)).toBe('localhost:8080');
+    expect(within(debian).getByText(refusal)).toBeInTheDocument();
+    const mac = card('ivan-mbp');
+    expect(fact(mac, openHere)).toBe('localhost:8081');
+    expect(within(mac).queryByText(refusal)).not.toBeInTheDocument();
+    /* A machine with no core has no address of its own for the company. */
+    expect(within(card('build-box')).queryByText(openHere)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Make build-box a full machine of the company', "Run this in a terminal on build-box. It adds the company's core there: the company opens on its localhost, and updates come by themselves."],
+    ['ru', 'Сделать build-box полной машиной компании', 'Выполните это в терминале на build-box. Команда добавит туда ядро компании: компания откроется на localhost этой машины, а обновления будут приходить сами.'],
+  ])('offers the core in %s to a machine joined before machines had one, and shows its command', async (language, action, run) => {
+    localStorage.setItem('hh-lang', language);
+    const id = '7'.repeat(64);
+    const calls = show({ 'POST /api/machines/m2/core': [201, { id, command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() }] });
+    const box = await openCard('build-box');
+    /* Only a machine that needs it is offered it. */
+    expect(within(card('ivan-mbp')).queryByRole('button', { name: /full machine|полной машиной/ })).not.toBeInTheDocument();
+    await userEvent.setup().click(within(box).getByRole('button', { name: action }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/m2/core', body: undefined });
+    expect(await within(box).findByText(withKey(`${COMMAND}-CORE`))).toBeInTheDocument();
+    expect(within(box).getByText(run)).toBeInTheDocument();
+    expect(within(box).queryByRole('button', { name: action })).not.toBeInTheDocument();
+  });
+
+  it('keeps a command for the core across a reload, as what it is', async () => {
+    const shown = { id: '8'.repeat(64), kind: 'core' as const, plans: [], machineId: 'm2', machine: 'build-box', command: `${COMMAND}-CORE`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+    show({ 'GET /api/nodes/commands': [200, { commands: [shown] }] });
+    const box = await screen.findByRole('article', { name: 'build-box' });
+    expect(await within(box).findByText(withKey(shown.command))).toBeInTheDocument();
+    expect(within(box).getByText(/^Run this in a terminal on build-box\. It adds the company's core there/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Disconnect', 'If it was stolen, its owner should also revoke its Claude sign-in at claude.ai, which stays valid for a year.'],
+    ['ru', 'Отключить', 'Если ее украли, владельцу нужно еще отозвать вход Claude на claude.ai: он действует год.'],
+  ])('says in %s what a Disconnect cannot end, for a machine that ran Claude alone', async (language, disconnect, claude) => {
+    localStorage.setItem('hh-lang', language);
+    show();
+    const user = userEvent.setup();
+    const mac = await openCard('ivan-mbp');
+    await user.click(within(mac).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
+    expect(within(mac).getByText(new RegExp(claude.replaceAll('.', '\\.')))).toBeInTheDocument();
+    const box = card('build-box');
+    await user.click(within(box).getByRole('button', { name: new RegExp(`^${disconnect}`) }));
+    expect(within(box).queryByText(new RegExp(claude.replaceAll('.', '\\.')))).not.toBeInTheDocument();
+  });
+
+  it('says before a machine joins what a Mac that runs the server may ask', async () => {
+    lists({ 'POST /api/machines/command': [201, { id: '9'.repeat(64), command: COMMAND, expiresAt: new Date(Date.now() + 3600_000).toISOString() }] });
+    render(<Machines me={ME} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect a machine' }));
+    expect(await screen.findByText(/^If the company server runs on a Mac with its firewall on, the Mac may ask once whether Docker/)).toBeInTheDocument();
+  });
+});

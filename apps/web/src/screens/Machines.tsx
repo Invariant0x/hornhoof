@@ -212,6 +212,9 @@ function BrowserNote({ row }: { row: MachineRow }) {
 type MachineControls = {
   picking: string | null;
   addCommands: Record<string, ActiveCommand>;
+  coreCommands: Record<string, ActiveCommand>;
+  makeCore: (machine: MachineView) => unknown;
+  cancelCore: (machineId: string, id: string) => unknown;
   confirm: string | null;
   setPicking: (machineId: string | null) => void;
   setConfirm: (id: string | null) => void;
@@ -253,15 +256,41 @@ function PlanPicker({ machine, addable, shown, picking, controls }: { machine: M
   );
 }
 
+/* The command that brings the company's core to a machine joined before machines had one. */
+function CoreCommand({ machine, shown, controls }: { machine: MachineView; shown: ActiveCommand; controls: MachineControls }) {
+  const t = useT();
+  return (
+    <div className="add-plan">
+      <p className="muted">{t.machines.coreRun(machine.hostname)}</p>
+      <CommandBox command={shown.command} trust={t.machines.trust} />
+      <CommandLifetime expiresAt={shown.expiresAt} />
+      <div className="actions"><button className="btn small ghost" type="button" onClick={() => controls.cancelCore(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
+    </div>
+  );
+}
+
+/* A machine that ran Claude keeps a sign-in of Claude's own, which a Disconnect here cannot end. */
+const disconnectQuestion = (t: Messages, m: MachineView): string =>
+  m.plans.some(plan => plan.provider === 'claude') ? `${t.machines.disconnectAsk(m.hostname)} ${t.machines.disconnectClaude}` : t.machines.disconnectAsk(m.hostname);
+
 function MachineSettings({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return <>
     <LendSetting machine={m} editable={editable} onChange={value => controls.lend(m, value)} />
     <div className="machine-actions">
       {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
+      {m.needsCore && !busy && <button className="act" type="button" onClick={() => controls.makeCore(m)}>{t.machines.makeCore(m.hostname)}</button>}
       {editable && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
     </div>
-    {controls.confirm === m.id && <Ask text={t.machines.disconnectAsk(m.hostname)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
+    {controls.confirm === m.id && <Ask text={disconnectQuestion(t, m)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
+  </>;
+}
+
+/* Where the company opens on the machine itself, and on the server's card whom the server could not take. */
+function NetworkPlace({ row }: { row: MachineRow }) {
+  const t = useT();
+  return <>
+    {row.refusedBy.map(name => <p key={name} className="machine-note">{t.machines.refuses(row.hostname, name)}</p>)}
   </>;
 }
 
@@ -273,11 +302,13 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const editable = me.person.scopeKind === 'company' || mine;
   const addable = addablePlans(m, subs, me.person.id);
   const shown = liveCommand(controls.addCommands[row.id], now);
+  const core = liveCommand(controls.coreCommands[row.id], now);
   const picking = controls.picking === row.id;
+  const openHere: [string, string][] = row.openAt ? [[t.machines.openHere, `localhost:${row.openAt}`]] : [];
   return (
     <CardFrame label={row.hostname} accent={row.server}
       head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
-      extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
+      extra={m && (core ? <CoreCommand machine={m} shown={core} controls={controls} /> : <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />)}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
         <Part title={t.cards.resources}>
@@ -285,8 +316,10 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
           {row.server && <p className="machine-note">{m ? t.machines.builtinHere : t.machines.builtinAbout}</p>}
           <BuildNote row={row} />
           <BrowserNote row={row} />
+          <NetworkPlace row={row} />
         </Part>
-        {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
+        {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`], ...openHere]} /></Part>}
+        {!m && openHere.length > 0 && <Part title={t.cards.ownerSystem}><Facts items={openHere} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
@@ -294,7 +327,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
       <section className="blk blk-side">
         <h4>{t.cards.plansOn}</h4>
         <PlansOnMachine row={row} subs={subs} />
-        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
+        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking || core)} controls={controls} />}
       </section>
       {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
@@ -311,6 +344,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
+  const [coreCommands, setCoreCommands] = useState<Record<string, ActiveCommand>>({});
   const [confirm, setConfirm] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -328,7 +362,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       const [hosts, list] = await Promise.all([
         api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines'),
         api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
-        loadMachineCommands(live, setCommand, setAddCommands),
+        loadMachineCommands(live, setCommand, setAddCommands, setCoreCommands),
       ]);
       if (!live.current) return;
       setMachines(hosts.machines);
@@ -374,6 +408,23 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
     });
 
+  /* The owner puts the company's core on a machine of theirs that joined before machines had one. */
+  const makeCore = (m: MachineView) =>
+    run(async () => {
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/core`);
+      setCoreCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
+    });
+
+  const cancelCore = (machineId: string, id: string) =>
+    run(async () => {
+      await hideShownCommand(id);
+      setCoreCommands(all => {
+        const next = { ...all };
+        delete next[machineId];
+        return next;
+      });
+    });
+
   const cancelAdd = (machineId: string, id: string) =>
     run(async () => {
       await hideShownCommand(id);
@@ -399,7 +450,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
 
   const pool = machinePool(machines ?? [], builtin);
   const activeCommand = liveCommand(command, now);
-  const openIds = openCommandIds(addCommands, now);
+  const openIds = openCommandIds({ ...addCommands, ...coreCommands }, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
   if (unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
@@ -421,6 +472,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
         <ActiveCommandPanel
           heading={t.machines.connectHeading}
           run={t.machines.runThis}
+          note={t.machines.firewallNote}
           trust={t.machines.trust}
           shown={activeCommand}
           onCancel={() => void cancelMachine(activeCommand.id)}
@@ -443,7 +495,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
-            picking, addCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, lend, disconnect, refresh: load,
+            picking, addCommands, coreCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, makeCore, cancelCore, lend, disconnect, refresh: load,
           }} />}
         />
       )}

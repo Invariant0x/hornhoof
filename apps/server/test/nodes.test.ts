@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, companies, jobs, nodeCodes, nodeConnections, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agents, departments, companies, jobs, machines, nodeCodes, nodeConnections, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
@@ -591,5 +591,55 @@ describe('active commands for the person who made them', () => {
       if (made !== planCmd) expect(attempt.json().error.reason).toBe('code_used');
     }
     expect(await commandsOf(ceo)).toEqual([]);
+  });
+});
+
+describe("each machine's place in the company's network", () => {
+  const HOST_KEY = 'host-0000-abcd';
+  const HOST_ID = hashToken(`hornhoof-host:${HOST_KEY}`);
+  const DAY = 86_400_000;
+  type Shown = { id: string; hostname: string; core: { webPort: number | null; path: string | null } | null; needsCore: boolean };
+  type Listed = { machines: Shown[]; builtin: { machine: { id: string; hostname: string } | null; webPort: number | null; refusedBy: string[] } };
+  const listed = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json() as Listed;
+  const machineCommand = async (app: FastifyInstance, token: string) => codeOf((await app.inject({ method: 'POST', url: '/api/machines/command', ...as(token) })).json().command);
+
+  it("shows each machine's core and the server's, and who still needs one", async () => {
+    const { app, db } = await testApp({ HORNHOOF_MACHINE_ID: HOST_ID });
+    const ceo = await setUpCompany(app);
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    const [acme] = await db.select().from(companies);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const mac = (await join(app, await machineCommand(app, ceo))).json().machine.id as string;
+    const laptop = (await join(app, await machineCommand(app, ceo), { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' })).json().machine.id as string;
+    /* The Mac became a worker and reported through the relay, a while ago; the laptop has its node and no core. */
+    await db.update(machines).set({ networkId: hashToken('mac'), role: 'worker', webPort: 8081, path: 'relay', directFails: true, reportAt: new Date(Date.now() - 2 * DAY) }).where(eq(machines.id, mac));
+    await db.update(nodes).set({ lastSeenAt: new Date(Date.now() - 3_600_000) }).where(eq(nodes.machineId, laptop));
+    /* The server's own row, as its keeper reported it. */
+    await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: `server:${HOST_ID}`, networkId: HOST_ID, role: 'data', webPort: 8080 });
+
+    const mine = await listed(app, ceo);
+    const byId = (list: Listed, id: string) => list.machines.find(machine => machine.id === id)!;
+    expect(byId(mine, mac)).toMatchObject({ core: { webPort: 8081, path: 'relay' }, needsCore: false });
+    expect(byId(mine, laptop)).toMatchObject({ core: null, needsCore: true });
+    expect(mine.builtin).toMatchObject({ webPort: 8080, refusedBy: ['ivan-mac'] });
+    /* Only the machine's owner is offered the core for it. */
+    expect(byId(await listed(app, maria), laptop)).toMatchObject({ core: null, needsCore: false });
+    /* A machine whose nodes were last seen days ago is not asked to do anything. */
+    await db.update(nodes).set({ lastSeenAt: new Date(Date.now() - 2 * DAY) }).where(eq(nodes.machineId, laptop));
+    expect(byId(await listed(app, ceo), laptop).needsCore).toBe(false);
+    /* A worker that was disconnected refuses nobody any more. */
+    await db.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, mac));
+    expect((await listed(app, ceo)).builtin.refusedBy).toEqual([]);
+  });
+
+  it("knows the server's own computer by the machine id as well, and offers it no core", async () => {
+    const { app, db } = await testApp({ HORNHOOF_MACHINE_ID: HOST_ID });
+    const ceo = await setUpCompany(app);
+    const host = (await join(app, await machineCommand(app, ceo), { machineId: HOST_KEY, hostname: 'server-box' })).json().machine.id as string;
+    await db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.machineId, host));
+    const shown = await listed(app, ceo);
+    expect(shown.builtin.machine).toEqual({ id: host, hostname: 'server-box' });
+    expect(shown.builtin).toMatchObject({ webPort: null, refusedBy: [] });
+    expect(shown.machines.find(machine => machine.id === host)).toMatchObject({ core: null, needsCore: false });
   });
 });

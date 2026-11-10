@@ -583,6 +583,11 @@ export type MachineView = {
   browserError?: string | null;
   /* Older servers omit it; null while no update waits on the machine. */
   drain?: MachineDrain | null;
+  /* The company's core on it: where the company opens on that machine, and how the machine reaches the server; null
+     without the core. Older servers omit it. */
+  core?: { webPort: number | null; path: 'direct' | 'relay' | null } | null;
+  /* Its owner may put the company's core on it: it joined before machines had one, and its nodes are about. */
+  needsCore?: boolean;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -611,11 +616,13 @@ export type Running = {
 /* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
 /* canAnswer: this person opens, closes or declines it; an older server sends none, as only the CEO saw it. */
 export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null; canAnswer?: boolean };
-export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
+export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add' | 'core'; plans: string[]; subscriptionIds?: string[]; dismissedSubscriptionIds?: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null };
+/* webPort: where the company opens on the server's own machine. refusedBy: the machines on the server's network whose
+   connections it did not take. Older servers omit both. */
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null; webPort?: number | null; refusedBy?: string[] };
 
 export type JobView = {
   id: string;

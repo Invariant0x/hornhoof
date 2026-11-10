@@ -40,7 +40,7 @@ export function interruptionOf(ctx: Ctx, node: { id: string | null; name: string
 
 export async function builtinInterruption(ctx: Ctx, now: Hello, at: Date): Promise<RestartCut> {
   const [company] = await ctx.db.select({ id: companies.id }).from(companies).where(eq(companies.singleton, true));
-  const machine = company ? await builtinMachine(ctx.db, ctx.config.hostId, company.id) : null;
+  const machine = company ? await builtinMachine(ctx.db, ctx.config.hostId, company.id, ctx.config.machineId) : null;
   return interruptionOf(ctx, { id: null, name: BUILTIN_NAME, said: null, machine: { id: machine?.id ?? null, name: machine?.hostname ?? null } }, now, at);
 }
 

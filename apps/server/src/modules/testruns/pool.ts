@@ -108,7 +108,7 @@ export async function poolOf(ctx: Ctx, who: Person) {
     waiting.push({ ...view(row), waitingSince: row.part.queuedAt.toISOString(), why: await whyWaits(ctx, places, row.run, targets) });
   }
   const builtinLoad = loadOf([BUILTIN]);
-  const host = whole ? await builtinMachine(db, ctx.config.hostId, who.companyId) : null;
+  const host = whole ? await builtinMachine(db, ctx.config.hostId, who.companyId, ctx.config.machineId) : null;
   return {
     machines: rows.map(m => {
       const mine = served.filter(n => n.machineId === m.id).map(n => n.id);

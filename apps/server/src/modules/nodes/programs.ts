@@ -50,7 +50,7 @@ async function targets(ctx: Ctx, person: Person, id: string, ownMachine: OwnMach
   }
   await ownMachine(person, id);
   const nodes = await machineNodes(ctx.db, person.companyId);
-  const host = await builtinMachine(ctx.db, ctx.config.hostId, person.companyId);
+  const host = await builtinMachine(ctx.db, ctx.config.hostId, person.companyId, ctx.config.machineId);
   return machineProgramNodes(nodes.filter(node => node.machineId === id).map(node => node.id), id, host);
 }
 

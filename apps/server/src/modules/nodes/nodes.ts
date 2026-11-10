@@ -73,15 +73,16 @@ export const SERVER_KEY = 'server:';
 export const shownMachine = notLike(machines.machineKey, `${SERVER_KEY}%`);
 
 /* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
-   server. The pool counts that computer once. None for a server installed before, or on a computer that never joined. */
-export async function builtinMachine(db: Db, hostId: string | null, companyId: string): Promise<{ id: string; hostname: string } | null> {
-  if (!hostId) return null;
+   server as its host, or as the id its keeper runs under, which is the same hash on an install of today. The pool counts
+   that computer once. None for a server installed before, or on a computer that never joined. */
+export async function builtinMachine(db: Db, hostId: string | null, companyId: string, networkId: string | null = null): Promise<{ id: string; hostname: string } | null> {
+  if (!hostId && !networkId) return null;
   const rows = await db
     .select({ id: machines.id, hostname: machines.hostname, key: machines.machineKey })
     .from(machines)
     .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
     .orderBy(asc(machines.createdAt));
-  const same = rows.find(m => hashToken(`hornhoof-host:${m.key}`) === hostId);
+  const same = rows.find(m => [hostId, networkId].includes(hashToken(`hornhoof-host:${m.key}`)));
   return same ? { id: same.id, hostname: same.hostname } : null;
 }
 

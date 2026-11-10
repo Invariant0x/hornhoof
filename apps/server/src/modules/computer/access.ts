@@ -30,7 +30,7 @@ const CLOSED: Settings = { untilSec: null, until: null, asked: null };
 /* The hostname of the company's machine the server runs on, when that computer joined as a machine; the CEO sees it
    on the access card and in the log, so it is plain which machine the access is to. */
 export async function serverMachine(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string): Promise<string | null> {
-  return (await builtinMachine(ctx.db, ctx.config.hostId, companyId))?.hostname ?? null;
+  return (await builtinMachine(ctx.db, ctx.config.hostId, companyId, ctx.config.machineId))?.hostname ?? null;
 }
 
 /* People who see the whole company see access to the computer the server runs on from their own screens, and the CEO and

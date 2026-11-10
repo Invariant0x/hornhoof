@@ -423,6 +423,13 @@ export const en = {
     addPlanAsk: (host: string) => `Which of your plans should run on ${host} too?`,
     addPlanTo: (name: string, host: string) => `Add ${name} to ${host}`,
     runOn: (host: string) => `Run this in a terminal on ${host}. It starts the plan there and opens its sign-in link. The plan keeps running on its other machines too.`,
+    openHere: 'Open here',
+    refuses: (server: string, name: string) =>
+      `${server} does not take connections from ${name}. If ${server} is a Mac with its firewall on, allow incoming connections there for Docker (com.docker.backend), or for ssh when it runs Colima.`,
+    makeCore: (host: string) => `Make ${host} a full machine of the company`,
+    coreRun: (host: string) => `Run this in a terminal on ${host}. It adds the company's core there: the company opens on its localhost, and updates come by themselves.`,
+    disconnectClaude: 'If it was stolen, its owner should also revoke its Claude sign-in at claude.ai, which stays valid for a year.',
+    firewallNote: 'If the company server runs on a Mac with its firewall on, the Mac may ask once whether Docker (com.docker.backend, or ssh with Colima) may take incoming connections: allow it, or this machine reaches the server only through hornhoof.org.',
     online: 'Online',
     lastSeen: (ago: string) => `Last seen ${ago}`,
     lastSeenNow: 'Last seen a moment ago',

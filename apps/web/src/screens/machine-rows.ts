@@ -6,6 +6,10 @@ export type MachineRow = Omit<MachineView, 'owner' | 'lendsTests'> & {
   lendsTests: boolean | null;
   server: boolean;
   source: MachineView | null;
+  /* Where the company opens on this machine: its core's port, or the server's own on the server's card. */
+  openAt: number | null;
+  /* On the server's card: the machines whose connections the server did not take. */
+  refusedBy: string[];
 };
 
 /* The server merges work in map order; older responses still keep built-in work apart. */
@@ -32,6 +36,8 @@ function machineNotes(machine: MachineView, builtin: BuiltinView | null) {
 function joinedMachineRow(machine: MachineView, builtin: BuiltinView | null, keys: MachineView['plans']): MachineRow {
   return {
     ...machine, source: machine, server: Boolean(builtin),
+    openAt: builtin?.webPort ?? machine.core?.webPort ?? null,
+    refusedBy: builtin?.refusedBy ?? [],
     ...machineConnection(machine, builtin),
     ...machineNotes(machine, builtin),
     plans: [...machine.plans, ...(builtin ? keys : [])],
@@ -44,7 +50,7 @@ export function machineRows(machines: MachineView[], builtin: BuiltinView | null
   const keys = subs.filter(s => s.kind === 'api_key').map(s => ({ id: s.id, provider: s.provider, status: s.status === 'needs_login' ? 'needs_login' as const : 'ready' as const, online: s.online }));
   const rows = machines.map(m => joinedMachineRow(m, m.id === host ? builtin : null, keys));
   if (!builtin || machines.some(m => m.id === host)) return rows;
-  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null, drain: builtin.drain ?? null }];
+  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, openAt: builtin.webPort ?? null, refusedBy: builtin.refusedBy ?? [], owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null, drain: builtin.drain ?? null }];
 }
 
 function poolLoads(machines: MachineView[], host: MachineView | null, builtin: BuiltinView | null, apart: BuiltinView | null): NodeLoad[] {

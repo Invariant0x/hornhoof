@@ -39,6 +39,8 @@ const JoinBody = z.object({
   core: z.boolean().default(false),
 });
 
+/* A machine whose nodes were heard from within a day is about, and can be offered the company's core. */
+const CORE_OFFER_MS = 24 * 60 * 60 * 1000;
 /* The port a server's web door has when its keeper has reported none. */
 const WEB_PORT = 8080;
 /* What an installer needs for the core: nothing but the port when the computer is the server's own, which has all of
@@ -233,7 +235,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = and(isNull(machines.revokedAt), shownMachine);
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name, machineKey: machines.machineKey, networkId: machines.networkId, webPort: machines.webPort, path: machines.path })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -244,7 +246,14 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await runningAgents(ctx, me);
-    const programHost = await builtinMachine(db, config.hostId, me.companyId);
+    const programHost = await builtinMachine(db, config.hostId, me.companyId, config.machineId);
+    /* The server's own place in the network, as its keeper reported it, and the workers on its own network that could
+       not reach it there. */
+    const [ownRow] = me.scopeKind === 'company' ? await db.select({ id: machines.id, webPort: machines.webPort }).from(machines).where(and(eq(machines.companyId, me.companyId), isNull(machines.revokedAt), eq(machines.role, 'data'), sql`not (${shownMachine})`)).limit(1) : [];
+    const refusedBy = me.scopeKind === 'company' ? (await db.select({ hostname: machines.hostname }).from(machines).where(and(eq(machines.companyId, me.companyId), live, eq(machines.role, 'worker'), eq(machines.directFails, true))).orderBy(machines.createdAt)).map(row => row.hostname) : [];
+    /* A computer joined before machines had the company's core is offered one by its owner, while its nodes are about. */
+    const seenLately = (machineId: string) => on(machineId).some(n => n.lastSeenAt !== null && Date.now() - n.lastSeenAt.getTime() < CORE_OFFER_MS);
+    const needsCore = (m: (typeof rows)[number]) => m.ownerId === me.id && m.kind === 'computer' && !m.networkId && !isServerComputer(config, m.machineKey) && seenLately(m.id);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
     const sight = await viewerOf(db, me);
     const allParts = await db
@@ -274,6 +283,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               drain: nodeDrain(ctx, BUILTIN),
               programs: programsFor(hub, [BUILTIN]),
               browserError: hub.browserErrorOf(BUILTIN),
+              webPort: ownRow?.webPort ?? null,
+              refusedBy,
             }
           : null,
       machines: rows.map(m => ({
@@ -289,6 +300,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,
+        /* Where the company opens on that machine, and how the machine reaches the server; none without the core. */
+        core: m.networkId ? { webPort: m.webPort, path: m.path } : null,
+        needsCore: needsCore(m),
         drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),

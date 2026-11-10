@@ -32,16 +32,20 @@ export async function loadMachineCommands(
   live: { current: boolean },
   setCommand: (cmd: ActiveCommand | null) => void,
   setAddCommands: (cmds: Record<string, ActiveCommand>) => void,
+  setCoreCommands: (cmds: Record<string, ActiveCommand>) => void = () => undefined,
 ): Promise<void> {
   const res = await fetchShownCommands();
   if (!live.current || !res) return;
   const found = res.commands.findLast(c => c.kind === 'machine');
   setCommand(found ? toActiveCommand(found) : null);
   const adds: Record<string, ActiveCommand> = {};
+  const cores: Record<string, ActiveCommand> = {};
   for (const c of res.commands) {
     if (c.kind === 'add' && c.machineId) adds[c.machineId] = toActiveCommand(c);
+    if (c.kind === 'core' && c.machineId) cores[c.machineId] = toActiveCommand(c);
   }
   setAddCommands(adds);
+  setCoreCommands(cores);
 }
 
 /* The install command with Copy, and what running it means for the person's subscription, or for their machine. A
@@ -117,12 +121,15 @@ export const commandBlockOpen = (cmd: ShownCommand): boolean =>
 export function ActiveCommandPanel({
   heading,
   run,
+  note,
   trust,
   shown,
   onCancel,
 }: {
   heading: string;
   run: string;
+  /* What else the person should know before they run it. */
+  note?: string;
   trust?: string;
   shown: ActiveCommand;
   onCancel: () => void;
@@ -132,6 +139,7 @@ export function ActiveCommandPanel({
     <Edge className="panel" cut={12}>
       <h2>{heading}</h2>
       <p className="muted">{run}</p>
+      {note && <p className="muted">{note}</p>}
       <CommandBox command={shown.command} trust={trust} />
       <CommandLifetime expiresAt={shown.expiresAt} />
       <div className="actions">
