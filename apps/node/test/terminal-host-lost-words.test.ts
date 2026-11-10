@@ -188,7 +188,10 @@ it('starts anew for the next turn a program whose tools were turned away as it c
   const tools = { url: 'http://127.0.0.1:9/mcp', token: 'tok-turn' };
   expect(await c.next('Look at the release.', { tools })).toMatchObject({ ok: true });
   expect(c.tmux.launch).toHaveBeenCalledTimes(2);
-  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual([WORDS, 'Look at the release.']);
+  /* Started anew, it has its tools: the turn after goes on in it, and no turn ends as one without tools. */
+  expect(await c.next('Look at the checkout.', { tools })).toMatchObject({ ok: true });
+  expect(c.tmux.launch).toHaveBeenCalledTimes(2);
+  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual([WORDS, 'Look at the release.', 'Look at the checkout.']);
 });
 
 it('stops typing them after a few tries and leaves it to the operator case', async () => {

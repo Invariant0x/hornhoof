@@ -14,7 +14,7 @@ import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, listsAtStart, until } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 export const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -72,8 +72,6 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     mkdirSync(dirname(file), { recursive: true });
     record(kind === 'codex' ? { type: 'session_meta', payload: { id: SESSION, cwd: workDir } } : { type: 'metadata' });
     if (kind !== 'codex') await hook('start', { session_id: SESSION });
-    /* The program lists its tools as it starts, as each of these does with a session, unless the test makes its calls. */
-    if (!options.connects) host['bridge']['heardList'](options.key ?? 'receipt', Date.now());
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
@@ -100,13 +98,15 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     }
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => options.secrets ?? [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, ...(options.operator ? { operator: options.operator } : {}), ...options.host });
+  /* The program lists its tools as it starts, unless the test makes its calls to them. */
+  if (!options.connects) listsAtStart(host);
   await host.start();
   const results: Promise<unknown>[] = [];
   const run = (prompt = 'HANG', jobId = options.jobId ?? 'job-receipt') => {
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: options.sessionId === undefined ? SESSION : options.sessionId, ...(prompt ? {} : { tools: undefined }) });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
     const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));

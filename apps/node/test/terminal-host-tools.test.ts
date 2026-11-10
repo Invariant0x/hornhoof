@@ -112,4 +112,27 @@ describe("a program's connection to Hornhoof's tools", () => {
     expect(await next).toMatchObject({ ok: true });
     expect(up.heard).toEqual([{ method: 'initialize', auth: 'Bearer tok-turn' }, { method: 'tools/list', auth: 'Bearer tok-turn' }]);
   });
+
+  /* A new Kimi session connects to its tools only with its first message, and Antigravity once it takes one, so the node
+     cannot tell before a turn that such a program lost them. Its turn ends as one without tools, which the server repeats
+     later and does not remind, and the next turn starts it anew. */
+  it('ends the turn of a program with no session yet that was turned away as it connected as one without tools, and starts it anew once', async () => {
+    const up = await hornhoof();
+    /* A turn with nothing to type started the program, which waits for its first message to begin a session. */
+    const c = await liveTerminal('kimi', 'queued', { host: { hornhoof: up.url }, connects: true, sessionId: null, prompt: '' });
+    expect(await c.running).toMatchObject({ ok: true, sessionId: null });
+    /* It connects with no turn open, no turn opens while it waits, and the node knows no answer. */
+    expect(await call(c.host, 1, 'initialize')).toMatchObject({ id: 1, error: { code: -32001 } });
+    const turn = async (prompt: string, jobId: string) => {
+      const running = c.run(prompt, jobId);
+      await until(() => c.sent.some(m => m.type === 'job.program' && m.jobId === jobId && m.state === 'thinking'));
+      c.finish();
+      return await running;
+    };
+    expect(await turn('NEXT', 'job-next')).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'tools' } });
+    expect(c.launch).toHaveBeenCalledTimes(1);
+    expect(await turn('AGAIN', 'job-again')).toMatchObject({ ok: true });
+    expect(c.launch).toHaveBeenCalledTimes(2);
+    expect(c.log.mock.calls.filter(([line]) => String(line).startsWith("Hornhoof's tools refused"))).toHaveLength(1);
+  });
 });
