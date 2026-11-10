@@ -79,7 +79,12 @@ case "$1" in
       *) echo cid-app ;;
     esac ;;
   rm) if [ "${2:-}" = "$(cat "$PORTS/lock" 2> /dev/null)" ]; then rm -f "$PORTS/lock"; fi ;;
-  cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
+  # STUB_NO_OVERLAY=1: a build from before machines had the company's core.
+  cp)
+    case "$2" in
+      *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+      *:/app/compose.worker.yaml) [ -z "${STUB_NO_OVERLAY:-}" ] || exit 1; echo 'services: {db: {profiles: [data]}}' > "$3" ;;
+    esac ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
@@ -143,6 +148,8 @@ case "$1" in
         exit 0 ;;
     esac
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
+    # STUB_SET_SERVER=fail: the node cannot be moved to another address.
+    WORD=set-server; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; [ "${STUB_SET_SERVER:-ok}" != fail ] || exit 1; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi
     WORD=--take-over; if has "$@"; then take_over_helper "$@"; fi ;;
   exec)

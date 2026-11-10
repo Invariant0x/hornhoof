@@ -5,7 +5,14 @@
 #   install.sh                                                   update the nodes already on this machine
 #   install.sh server                                            install or update the Hornhoof server
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
-#   install.sh --uninstall                                       remove this machine's nodes
+#   install.sh --uninstall                                       remove this machine's nodes, and the company's core here
+#   install.sh worker                                            for the updater of a machine that joined: move its core
+#
+# A join also brings the company's small core to the machine: front, the keeper and the updater, in a folder of the
+# company's own under the home folder, with no database and no secret of the company. The join's answer says so with a
+# line "core <folder> <ticket> <port> <company>", which the keeper there redeems once; "core-here <port>" when this
+# computer is the server's own, which has all of Hornhoof already; and "build <tag> <app> <node> <updater>" for the exact
+# images of the build the server runs. The machine's nodes then reach the company at their own machine's front door.
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
@@ -54,6 +61,8 @@ PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
 # How long a joined node may take to get its plan's sign-in from Hornhoof, in seconds.
 SIGNIN_WAIT="${HORNHOOF_SIGNIN_WAIT:-20}"
+# How long a machine's new core may take to get its place in the company from the server, in seconds.
+CORE_WAIT="${HORNHOOF_CORE_WAIT:-120}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 PULLED="${HORNHOOF_PULLED:-}"
 APP_REF="${HORNHOOF_APP_REF:-}"
@@ -81,7 +90,8 @@ SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
 FIRST_PEER_PORT=8180
-USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall'
+USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | worker | --uninstall'
+UNREADABLE='Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command.'
 
 OS=''
 ARCH=''
@@ -322,21 +332,75 @@ node_server() {
   if [ "$NODE_SERVER" != "$SERVER" ]; then LOCAL_SERVER=1; fi
 }
 
+# This computer's name as the company sees it.
+host_name() {
+  local host
+  host=$(hostname 2> /dev/null | tr -cd 'A-Za-z0-9._-' | cut -c1-120)
+  printf '%s' "${host:-machine}"
+}
+
+# What the join brought for the company's core here: CORE says it brought any, with the folder, the ticket the keeper
+# redeems once, the web port of the company's server and the company, or CORE_HERE, the web port of the server's own
+# front when this computer is the server's. BUILD_TAG is the build the server runs, whose three images are then in
+# APP_REF, NODE_REF and UPDATER_REF.
+CORE=''
+CORE_FOLDER=''
+CORE_TICKET=''
+CORE_PORT=''
+CORE_COMPANY=''
+CORE_HERE=''
+BUILD_TAG=''
+
+# by_digest_of <repository> <image>: the image is one of that very repository, named by its digest.
+by_digest_of() { [ "${2%%@*}" = "$1" ] && [[ "${2#*@}" =~ ^sha256:[0-9a-f]{64}$ ]]; }
+
+a_port() { case "$1" in '' | *[!0-9]*) return 1 ;; esac; [ "${#1}" -le 5 ] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]; }
+
+# take_build <tag> <app> <node> <updater> <rest>: the images of the server's build, each by its digest in Hornhoof's
+# own repository, since they run with this computer's Docker.
+take_build() {
+  [ -z "$5" ] || return 1
+  [[ "$1" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || return 1
+  by_digest_of "$APP_IMAGE" "$2" && by_digest_of "$APP_IMAGE-node" "$3" && by_digest_of "$APP_IMAGE-updater" "$4" || return 1
+  BUILD_TAG=$1
+  APP_REF=$2
+  NODE_REF=$3
+  UPDATER_REF=$4
+}
+
+# take_core <folder> <ticket> <port> <company> <rest>
+take_core() {
+  [ -z "$5" ] || return 1
+  [[ "$1" =~ ^hornhoof-[a-z0-9-]{1,64}$ ]] && [[ "$2" =~ ^[A-Za-z0-9_-]{43}$ ]] && a_port "$3" || return 1
+  [[ "$4" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  CORE=1
+  CORE_FOLDER=$1
+  CORE_TICKET=$2
+  CORE_PORT=$3
+  CORE_COMPANY=$4
+}
+
+# take_core_here <port> <rest>
+take_core_here() {
+  [ -z "$2" ] && a_port "$1" || return 1
+  CORE=1
+  CORE_HERE=$1
+}
+
 # Lines "<node> <provider> <key>", turned into "id:provider:key" words. A machine that joins without a plan gets one
-# node of its own, with "machine" for its provider.
+# node of its own, with "machine" for its provider. The lines of the core come before them.
 JOINED=''
 join_machine() {
-  local code=$1 machine host body request status id provider key
+  local code=$1 machine host body request status id provider key more rest
   case "$code" in
     '' | *[!A-Za-z0-9_-]*) fail "This command is not valid. Copy it again from Hornhoof." ;;
   esac
   machine=$(machine_id)
-  host=$(hostname 2> /dev/null | tr -cd 'A-Za-z0-9._-' | cut -c1-120)
-  [ -n "$host" ] || host=machine
+  host=$(host_name)
   say "Connecting this machine ($host) to Hornhoof."
   body=$(mktemp)
   request=$(mktemp)
-  printf '{"code":"%s","machineId":"%s","hostname":"%s","os":"%s","arch":"%s"}' "$code" "$machine" "$host" "$OS" "$ARCH" > "$request"
+  printf '{"code":"%s","machineId":"%s","hostname":"%s","os":"%s","arch":"%s","core":true}' "$code" "$machine" "$host" "$OS" "$ARCH" > "$request"
   status=$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' -H 'content-type: application/json' -H 'accept: text/plain' \
     --data-binary "@$request" "$SERVER/api/nodes/join") || status=000
   rm -f "$request"
@@ -368,13 +432,29 @@ join_machine() {
       fail "Hornhoof answered $status to the join. Try again in a minute, or get a new command in Hornhoof."
       ;;
   esac
-  while read -r id provider key; do
-    case "$id$provider$key" in *[!A-Za-z0-9_-]*) fail "Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command." ;; esac
+  while read -r id provider key more rest; do
+    case "$id" in
+      build)
+        take_build "$provider" "$key" "$more" "${rest%% *}" "${rest#"${rest%% *}"}" || fail "$UNREADABLE"
+        continue
+        ;;
+      core)
+        take_core "$provider" "$key" "$more" "${rest%% *}" "${rest#"${rest%% *}"}" || fail "$UNREADABLE"
+        continue
+        ;;
+      core-here)
+        take_core_here "$provider" "$key$more$rest" || fail "$UNREADABLE"
+        continue
+        ;;
+    esac
+    case "$id$provider$key$more$rest" in *[!A-Za-z0-9_-]*) fail "$UNREADABLE" ;; esac
+    [ -z "$more" ] || fail "$UNREADABLE"
     case "$provider" in claude | codex | kimi | glm | antigravity | machine) ;; *) continue ;; esac
     [ -n "$id" ] && [ -n "$key" ] && JOINED="$JOINED $id:$provider:$key"
   done < "$body"
   rm -f "$body"
-  [ -n "$JOINED" ] || fail "Hornhoof returned no subscriptions for this command. Get a new one in Hornhoof under Subscriptions."
+  # A command for the core alone brings no node, and is a join all the same.
+  [ -n "$JOINED$CORE" ] || fail "Hornhoof returned no subscriptions for this command. Get a new one in Hornhoof under Subscriptions."
 }
 
 node_name() { printf 'hornhoof-%s-%s' "$2" "${1:0:8}"; }
@@ -565,6 +645,123 @@ login_node() {
   wait "$watcher" 2> /dev/null || true
 }
 
+# local_front <port>: the nodes started from here on reach the company at this machine's own front door, as a container
+# reaches its host. They keep the company's address on their label, so the next run still finds them by it.
+local_front() {
+  NODE_SERVER="http://host.docker.internal:$1"
+  LOCAL_SERVER=1
+}
+
+# The folder of the core this machine has for the company at SERVER; nothing when it has none.
+core_of_server() {
+  local env
+  for env in "$BASE_DIR"-*/.env; do
+    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_ROLE)" = worker ] && [ "$(value_in "$env" HORNHOOF_JOIN_SERVER)" = "$SERVER" ]; then
+      dirname "$env"
+      return 0
+    fi
+  done
+}
+
+# On a machine with the company's core, a node that is started again goes to the core's front.
+front_of_core() {
+  local core
+  core=$(core_of_server)
+  if [ -n "$core" ]; then local_front "$(port_of "$core/.env")"; fi
+}
+
+# move_node <name>: a node from before the machine had the core still names the company's own address. It is only
+# moved when it is restarted anyway, and keeps its key and what it has to say; one that cannot be moved goes on as it was.
+move_node() {
+  local name=$1 own
+  [ -n "$LOCAL_SERVER" ] || return 0
+  own=$("${DOCKER[@]}" exec "$name" cat /data/node.json 2> /dev/null | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p' || true)
+  if [ -z "$own" ] || [ "$own" = "$NODE_SERVER" ]; then return 0; fi
+  printf '%s\n' "$NODE_SERVER" |
+    "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-server ||
+    say "Could not point $name at this machine's own address, so it goes on through $own."
+}
+
+# The folder of the company's core on this computer: the one that names the company already, else the one the server
+# named, and with that name taken by another company's the next of -2 to -9.
+core_dir() {
+  local parent env dir n=1
+  parent=$(dirname "$BASE_DIR")
+  for env in "$parent"/hornhoof-*/.env; do
+    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_COMPANY)" = "$CORE_COMPANY" ]; then
+      dirname "$env"
+      return 0
+    fi
+  done
+  dir="$parent/$CORE_FOLDER"
+  while [ -e "$dir" ]; do
+    n=$((n + 1))
+    [ "$n" -le 9 ] || fail "There are 9 Hornhoof folders here already. Remove one you do not use."
+    dir="$parent/$CORE_FOLDER-$n"
+  done
+  printf '%s' "$dir"
+}
+
+# The company's core on a machine that joined: front, the keeper and the updater in a folder of the company's own, with
+# no database and no secret of the company. A folder that is there keeps its settings; the ticket is new each time, and
+# the keeper redeems it once, with its own key, for its place in the company. The nodes then go to this machine's front.
+worker_core() {
+  local env_file waited=0 web
+  WORKER=1
+  SERVER_DIR=$(core_dir) || exit 1
+  env_file="$SERVER_DIR/.env"
+  find_compose
+  [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
+  [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
+  [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
+  if [ -f "$env_file" ]; then
+    ENV_BEFORE=1
+    say "Keeping the settings in $env_file."
+  else
+    mkdir -p "$SERVER_DIR"
+    (
+      umask 077
+      printf 'HORNHOOF_PORT=\n' > "$env_file"
+    )
+    # .env names the two compose files, so docker compose run by hand in the folder starts the core alone too.
+    set_env COMPOSE_PROJECT_NAME "$(basename "$SERVER_DIR")"
+    set_env COMPOSE_FILE compose.yaml:compose.worker.yaml
+    set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
+    set_env HORNHOOF_ROLE worker
+    set_env HORNHOOF_COMPANY "$CORE_COMPANY"
+    set_env HORNHOOF_JOIN_SERVER "$SERVER"
+    set_env HORNHOOF_MACHINE_ID "$(host_id)"
+    machine_lines
+    set_env HORNHOOF_HEALTH_URL http://keeper:7080/api/keeper
+    set_env HORNHOOF_VERSION "${BUILD_TAG:-${PIN:-latest}}"
+    set_env HORNHOOF_APP_REF "$APP_REF"
+    set_env HORNHOOF_NODE_REF "$NODE_REF"
+    set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
+  fi
+  set_env HORNHOOF_JOIN_TICKET "$CORE_TICKET"
+  compose_from_image
+  if [ -z "$PULLED" ]; then
+    say "Downloading the images of the company's core."
+    (cd "$SERVER_DIR" && "${COMPOSE[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+  fi
+  WANT_WEB=$CORE_PORT
+  reserve_ports
+  say "Starting the company's core on this machine, in $SERVER_DIR."
+  start_keeper_and_front "${COMPOSE[@]}"
+  compose_step "${COMPOSE[@]}" up -d --no-build || start_failed
+  web=$(port_of "$env_file")
+  say "Waiting for this machine to get its place in the company."
+  until curl -fsS --max-time 5 "http://localhost:$web/api/keeper" 2> /dev/null | grep -q '"certificate":true'; do
+    waited=$((waited + 2))
+    if [ "$waited" -ge "$CORE_WAIT" ]; then
+      say "This machine's core started, and keeps trying to reach the company server. See docker compose logs keeper in $SERVER_DIR."
+      break
+    fi
+    sleep 2
+  done
+  local_front "$web"
+}
+
 node_mode() {
   local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late
   detect_system
@@ -588,6 +785,16 @@ node_mode() {
   if [ -n "$code" ]; then
     join_machine "$code"
     RETRY='This command is used up: disconnect this machine in Hornhoof under Subscriptions, then get a new command.'
+    # The node image of the build the server runs, which the join named exactly.
+    if [ -n "$BUILD_TAG" ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
+      IMAGE=$NODE_REF
+      pull_image
+    fi
+    if [ -n "$CORE_HERE" ]; then
+      local_front "$CORE_HERE"
+    elif [ -n "$CORE" ]; then
+      worker_core
+    fi
     for entry in $JOINED; do
       id=${entry%%:*}
       key=${entry##*:}
@@ -602,6 +809,7 @@ node_mode() {
   # Without a code this run updates the nodes on this machine: they move to the new image with their volumes.
   # With a code it only starts the joined nodes and leaves the others, and their running jobs, alone.
   if [ -z "$code" ]; then
+    front_of_core
     for entry in $existing; do
       name=${entry%%:*}
       id=${entry#*:}
@@ -609,12 +817,20 @@ node_mode() {
       named_free "$id" || continue
       provider=${name#hornhoof-}
       provider=${provider%-*}
-      if wait_for_node "$name"; then start_node "$name" "$id" "$provider"; fi
+      if wait_for_node "$name"; then
+        move_node "$name"
+        start_node "$name" "$id" "$provider"
+      fi
     done
   fi
 
   if [ -z "$FROM_UPDATER" ] && [ -n "$STARTED$LEFT" ]; then nodes_updater; fi
   if [ -z "$STARTED" ] && [ -n "$LEFT" ]; then fail "Nothing changed on this machine."; fi
+  # A command for the core alone starts no node: the machine's nodes go on, and find the core when they next start.
+  if [ -z "$STARTED" ] && [ -n "$CORE" ]; then
+    say "The company's core is on this machine now. Its nodes stay as they are."
+    return 0
+  fi
   if [ -z "$STARTED" ]; then
     say "There are no Hornhoof nodes on this machine yet. Get the install command in Hornhoof under Subscriptions."
     return 0
@@ -719,11 +935,38 @@ drop_nodes_updater() {
   for id in $(nodes_updaters -aq); do "${DOCKER[@]}" rm -f "$id" > /dev/null 2>&1 || true; done
 }
 
+# The company's core on this machine goes: its containers and volumes, with the machine's key in them, its folder, and
+# its line in the list of ports. A machine that joins again later is a new machine to the company.
+remove_core() {
+  local core=$1 registry
+  say "Removing the company's core in $core."
+  find_compose
+  (cd "$core" && "${COMPOSE[@]}" down -v) > /dev/null 2>&1 || say "Could not stop the core in $core. Run docker compose down -v there, then remove the folder."
+  APP_REF=$(value_in "$core/.env" HORNHOOF_APP_REF)
+  SERVER_DIR=$core
+  if [ -n "$APP_REF" ]; then
+    take_port_lock
+    registry=$(read_registry) || registry=''
+    other_lines "$registry" | write_registry || say "Could not take $core off the list of Hornhoof's ports on this computer."
+    drop_port_lock "$PORT_LOCK_ID"
+  fi
+  rm -rf "$core"
+}
+
 uninstall_mode() {
-  local entry names='' name answer
+  local entry names='' name answer core
   detect_system
   docker_works || fail "Docker is not running, so there are no nodes to remove. Start Docker, then run this again."
   for entry in $(existing_nodes); do names="$names ${entry%%:*}"; done
+  core=$(core_of_server)
+  if [ -z "$names" ] && [ -n "$core" ]; then
+    answer=$(ask "Remove the company's core from this machine, in $core? [y/N] " n)
+    case "$answer" in
+      y | Y | yes) remove_core "$core" ;;
+      *) say "Nothing was removed." ;;
+    esac
+    return 0
+  fi
   if [ -z "$names" ]; then
     drop_nodes_updater
     say "There are no Hornhoof nodes on this machine."
@@ -731,6 +974,7 @@ uninstall_mode() {
   fi
   say "Hornhoof nodes on this machine:"
   for name in $names; do say "  $name"; done
+  if [ -n "$core" ]; then say "The company's core on this machine, in $core, goes with them."; fi
   answer=$(ask "Remove these nodes? [y/N] " n)
   case "$answer" in
     y | Y | yes) ;;
@@ -740,6 +984,7 @@ uninstall_mode() {
       ;;
   esac
   for name in $names; do "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true; done
+  if [ -n "$core" ]; then remove_core "$core"; fi
   drop_nodes_updater
   say "The nodes are removed."
   answer=$(ask "Also delete their volumes, with the sign-ins and work files? [y/N] " n)
@@ -753,6 +998,22 @@ uninstall_mode() {
 }
 
 # --- Server -------------------------------------------------------------------------------------
+
+# Docker Compose as this computer has it, in COMPOSE.
+COMPOSE=()
+find_compose() {
+  if "${DOCKER[@]}" compose version > /dev/null 2>&1; then
+    COMPOSE=("${DOCKER[@]}" compose)
+  elif command -v docker-compose > /dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+  elif [ "$OS" = darwin ] && command -v brew > /dev/null 2>&1; then
+    say "Installing Docker Compose with Homebrew."
+    brew install docker-compose || fail "Homebrew could not install Docker Compose. Run brew doctor, then run this command again."
+    COMPOSE=(docker-compose)
+  else
+    fail "Docker Compose is missing. Install the Docker Compose plugin, then run this command again."
+  fi
+}
 
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
@@ -870,17 +1131,47 @@ set_env() {
   mv "$new" "$file"
 }
 
-# compose.yaml comes inside the app image, so the compose file always matches the build it starts.
+# compose.yaml comes inside the app image, so the compose file always matches the build it starts: the exact image
+# this run starts, when it names one. A machine that keeps no data also takes the overlay that leaves the services of
+# the data out. An image that is here already is not downloaded again.
+WORKER=''
 compose_from_image() {
-  local image="$APP_IMAGE:${PIN:-latest}" cid
+  local image="${APP_REF:-$APP_IMAGE:${PIN:-latest}}" cid
   say "Getting compose.yaml from $image."
-  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+  if [ -z "$PULLED" ]; then
+    "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+  fi
   cid=$("${DOCKER[@]}" create "$image") || fail "Could not read $image. Run this command again."
   if ! "${DOCKER[@]}" cp "$cid:/app/compose.yaml" "$SERVER_DIR/compose.yaml" > /dev/null; then
     "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
     fail "$image has no compose.yaml. Pick a newer build with HORNHOOF_VERSION, or set HORNHOOF_COMPOSE_URL."
   fi
+  if [ -n "$WORKER" ] && ! "${DOCKER[@]}" cp "$cid:/app/compose.worker.yaml" "$SERVER_DIR/compose.worker.yaml" > /dev/null; then
+    "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
+    fail "$image is a build from before machines had the company's core. Update Hornhoof, then get a new command."
+  fi
   "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
+}
+
+# What the company knows this computer by on its local network: its name, its system, and on a Mac its addresses, which
+# Docker there cannot see from inside. The updater's container is not this computer, so it leaves the lines as they are.
+mac_addresses() {
+  local list='' card address
+  for card in en0 en1; do
+    address=$(ipconfig getifaddr "$card" 2> /dev/null || true)
+    case "$address" in '' | *[!0-9.]*) ;; *) list="$list${list:+,}$address" ;; esac
+  done
+  printf '%s' "$list"
+}
+
+machine_lines() {
+  local addresses
+  [ -z "$FROM_UPDATER" ] || return 0
+  set_env HORNHOOF_HOSTNAME "$(host_name)"
+  set_env HORNHOOF_HOST_OS "$OS"
+  [ "$OS" = darwin ] || return 0
+  addresses=$(mac_addresses)
+  if [ -n "$addresses" ]; then set_env HORNHOOF_ADDRESSES "$addresses"; fi
 }
 
 # The address of the server's public link at hornhoof.org, from the tunnel settings the app writes once the company
@@ -980,6 +1271,8 @@ NEW_WEB=''
 NEW_PEER=''
 # Ports Docker refused during this run.
 REFUSED_PORTS=''
+# The web port a machine that joined asks for first: the one the company's server has.
+WANT_WEB=''
 
 # Whoever made a lock more than 2 minutes ago is gone. It goes by the id just read, so a lock made meanwhile stays.
 remove_stale_port_lock() {
@@ -1084,8 +1377,8 @@ record_ports() {
   set_env HORNHOOF_PORT "$2"
   set_env HORNHOOF_PEER_PORT "$3"
   # People get the company's link at setup, so the server starts at its address on this computer. Another address of
-  # its own, such as a domain, goes into PUBLIC_URL later.
-  if [ -z "$ENV_BEFORE" ]; then set_env PUBLIC_URL "http://localhost:$2"; fi
+  # its own, such as a domain, goes into PUBLIC_URL later. A machine that only joined has no address of the company's.
+  if [ -z "$ENV_BEFORE" ] && [ -z "$WORKER" ]; then set_env PUBLIC_URL "http://localhost:$2"; fi
 }
 
 choose_ports() {
@@ -1097,6 +1390,12 @@ choose_ports() {
   peer=$(kept_port "$1" HORNHOOF_PEER_PORT "${own##* }")
   # A company from before ports were kept runs on the first one.
   if [ -z "$web" ] && [ -n "$ENV_BEFORE" ]; then web=$FIRST_PORT; fi
+  # A machine that joined takes the web port of the company's server when it is free here, so the company opens at the
+  # same address on every machine.
+  if [ -z "$web" ] && [ -n "$WANT_WEB" ] && port_is_free "$WANT_WEB" "$held"; then
+    web=$WANT_WEB
+    NEW_WEB=1
+  fi
   if [ -z "$web" ]; then
     web=$(first_free_port "$FIRST_PORT" "$held")
     NEW_WEB=1
@@ -1223,17 +1522,8 @@ server_mode() {
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
-  if "${DOCKER[@]}" compose version > /dev/null 2>&1; then
-    compose=("${DOCKER[@]}" compose)
-  elif command -v docker-compose > /dev/null 2>&1; then
-    compose=(docker-compose)
-  elif [ "$OS" = darwin ] && command -v brew > /dev/null 2>&1; then
-    say "Installing Docker Compose with Homebrew."
-    brew install docker-compose || fail "Homebrew could not install Docker Compose. Run brew doctor, then run this command again."
-    compose=(docker-compose)
-  else
-    fail "Docker Compose is missing. Install the Docker Compose plugin, then run this command again."
-  fi
+  find_compose
+  compose=("${COMPOSE[@]}")
   if [ -z "$FROM_UPDATER" ] && [ -z "$NAME" ] && [ -z "${HORNHOOF_SERVER_DIR:-}" ]; then choose_name; fi
   # A named server is its own compose project, so its containers, network and volumes never meet another's.
   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
@@ -1284,6 +1574,7 @@ server_mode() {
     id=$(host_id)
     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
   fi
+  machine_lines
   # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
   # random hex from the updater, whose container cannot read that key.
   if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
@@ -1328,6 +1619,53 @@ server_mode() {
   esac
 }
 
+# The updater of a machine that joined runs this, from the build it moves to: the core's compose files and settings name
+# that build, and its keeper and front start on it. The updater itself is replaced only after the keeper answers, by the
+# updater that runs this. Then the company's nodes here go to the node image of the same build, each only when it runs
+# another image, with its work let end as on any update.
+worker_mode() {
+  local env_file entry name id provider
+  detect_system
+  WORKER=1
+  env_file="$SERVER_DIR/.env"
+  [ -n "${HORNHOOF_SERVER_DIR:-}" ] && [ -f "$env_file" ] || fail "There is no core of a company to update here. $USAGE"
+  [ "$(env_value HORNHOOF_ROLE)" = worker ] || fail "$SERVER_DIR is a server's folder: run install.sh server there."
+  SERVER=$(env_value HORNHOOF_JOIN_SERVER)
+  find_compose
+  [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
+  [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
+  [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
+  set_env HORNHOOF_VERSION "${PIN:-latest}"
+  set_env HORNHOOF_APP_REF "$APP_REF"
+  set_env HORNHOOF_NODE_REF "$NODE_REF"
+  set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
+  if [ -n "$COMPOSE_SRC" ]; then
+    cp "$COMPOSE_SRC" "$SERVER_DIR/compose.yaml"
+    cp "${COMPOSE_SRC%compose.yaml}compose.worker.yaml" "$SERVER_DIR/compose.worker.yaml" || fail "This build has no compose.worker.yaml beside its compose.yaml."
+  else
+    compose_from_image
+  fi
+  if [ -z "$PULLED" ]; then
+    (cd "$SERVER_DIR" && "${COMPOSE[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+  fi
+  say "Starting the company's core${PIN:+ $PIN}."
+  compose_step "${COMPOSE[@]}" up -d --no-build keeper front || start_failed
+
+  IMAGE="${HORNHOOF_NODE_IMAGE:-$NODE_REF}"
+  local_front "$(port_of "$env_file")"
+  for entry in $(existing_nodes); do
+    name=${entry%%:*}
+    id=${entry#*:}
+    [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$name" 2> /dev/null || true)" != "$IMAGE" ] || continue
+    provider=${name#hornhoof-}
+    provider=${provider%-*}
+    if wait_for_node "$name"; then
+      move_node "$name"
+      start_node "$name" "$id" "$provider" '' hornhoof_update
+    fi
+  done
+}
+
 # --- Start --------------------------------------------------------------------------------------
 
 MODE=node
@@ -1352,6 +1690,7 @@ while [ $# -gt 0 ]; do
     --urgent) URGENT=1 ;;
     node) MODE=node ;;
     server) MODE=server ;;
+    worker) MODE=worker ;;
     --uninstall) MODE=uninstall ;;
     -h | --help)
       say "$USAGE"
@@ -1373,5 +1712,6 @@ if [ -n "${HORNHOOF_SERVER_DIR:-}" ]; then SERVER_DIR=$HORNHOOF_SERVER_DIR; fi
 case "$MODE" in
   node) node_mode "$CODE" ;;
   server) server_mode ;;
+  worker) worker_mode ;;
   uninstall) uninstall_mode ;;
 esac

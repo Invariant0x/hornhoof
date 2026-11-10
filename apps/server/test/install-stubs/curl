@@ -15,6 +15,10 @@ case "$url" in
   */api/health)
     if [ "${STUB_HEALTH:-ok}" = fail ]; then echo "curl: (7) Failed to connect" >&2; exit 7; fi
     reply '{"ok":true}' ;;
+  # The keeper of a machine's core, which says whether it has its place in the company: STUB_KEEPER.
+  */api/keeper)
+    has_place='{"certificate":true}'
+    reply "${STUB_KEEPER:-$has_place}" ;;
   */api/nodes/join)
     reply "${STUB_JOIN_BODY:-}"
     [ -n "$fmt" ] && printf '%s' "${STUB_JOIN_STATUS:-200}" ;;

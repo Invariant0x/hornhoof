@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+# A Mac's address on one of its cards. STUB_IPCONFIG words are "card=address".
+for w in ${STUB_IPCONFIG:-}; do [ "${w%%=*}" = "${2:-}" ] && { echo "${w#*=}"; exit 0; }; done
+exit 1
