@@ -119,8 +119,13 @@ const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsW
 
 const harnessSettings = (set: z.infer<typeof Env>): Pick<Config, 'harnessDir' | 'harnessBytes'> => ({ ...(set.HARNESS_DIR ? { harnessDir: set.HARNESS_DIR } : {}), harnessBytes: (set.HARNESS_MB ?? 20_480) * 1024 * 1024 });
 
+/* One compose file serves a server and a worker, which holds no secret, so compose passes these two names empty when
+   .env lacks them. A server that got one empty says what to do about it. */
+const emptyIn = (name: string, what: string): Error => new Error(`${name} is empty. Put the company's ${what} into .env, or run the install command again.`);
+
 function secretOf(env: NodeJS.ProcessEnv): Buffer {
   const raw = env.HORNHOOF_SECRET;
+  if (raw === '') throw emptyIn('HORNHOOF_SECRET', 'secret');
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
   const secret = Buffer.from(raw, 'base64');
   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
@@ -128,6 +133,7 @@ function secretOf(env: NodeJS.ProcessEnv): Buffer {
 }
 
 function nodeKeyOf(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.NODE_KEY === '') throw emptyIn('NODE_KEY', 'node key');
   const nodeKey = env.NODE_KEY || undefined;
   if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
   return nodeKey;

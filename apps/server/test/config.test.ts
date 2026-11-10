@@ -120,6 +120,14 @@ describe('loadConfig', () => {
     }
   });
 
+  /* Compose passes both names empty when .env lacks them, so that one file serves a server and a worker. */
+  it('says what to do about a secret or a node key that came empty', () => {
+    expect(() => loadConfig({ HORNHOOF_SECRET: '' })).toThrow("HORNHOOF_SECRET is empty. Put the company's secret into .env, or run the install command again.");
+    expect(() => loadConfig({})).toThrow('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
+    expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_KEY: '' })).toThrow("NODE_KEY is empty. Put the company's node key into .env, or run the install command again.");
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).nodeKey).toBeUndefined();
+  });
+
   it('names every wrong setting at once', () => {
     expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, PORT: 'abc', REGISTRY_URL: 'registry' })).toThrow(/PORT must be[\s\S]*REGISTRY_URL must be an http:\/\/ or https:\/\/ address/);
   });

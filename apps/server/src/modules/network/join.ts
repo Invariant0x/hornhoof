@@ -12,6 +12,7 @@ import { ApiError, loggable } from '../../errors.js';
 import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { CERT_DAYS, RENEW_AFTER_DAYS, type Issued } from './authority.js';
+import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
 export const TICKET_HOURS = 24;
@@ -58,14 +59,7 @@ export async function issueTicket(tx: Db, machineId: string, now = new Date()): 
   return ticket;
 }
 
-/* What a machine signs to ask for a renewal, and what the authority signs to answer it. The answer names the request, so
-   one answer cannot stand for another. */
-export const renewMessage = (machine: string, serial: string, at: string): string => `hornhoof-renew:${machine}:${serial}:${at}`;
-export const renewedMessage = (machine: string, serial: string, at: string, payload: string): string =>
-  `hornhoof-renewed:${machine}:${serial}:${at}:${payload}`;
-
-/* payload: JSON text. signature: Ed25519 by the company's authority, in base64. */
-export type Signed = { payload: string; signature: string };
+export { renewMessage, renewedMessage, type Signed } from './renewal.js';
 type RenewAsk = { machine: string; serial: string; at: string };
 
 /* A renewal travels over plain HTTP too, so the machine takes its answer only with the signature of the authority it

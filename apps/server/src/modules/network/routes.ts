@@ -1,4 +1,3 @@
-import { isIPv4 } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -6,14 +5,14 @@ import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
 import { companies, LINK_PATHS, machines, publicLinks, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
 import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, workerLink, workerView } from './join.js';
 import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
 import { keeperAsker, type Asker } from './via.js';
 
-/* The private networks, and the ranges and the one loopback address that only tests report. */
-const PRIVATE = [/^10\./, /^172\.(?:1[6-9]|2\d|3[01])\./, /^192\.168\./, /^192\.0\.2\./, /^198\.51\.100\./, /^203\.0\.113\./];
-const isPrivateAddress = (address: string): boolean => isIPv4(address) && (address === '127.0.0.1' || PRIVATE.some(range => range.test(address)));
+/* A machine reports the addresses of its local networks, and the one loopback address that only tests report. */
+const isPrivateAddress = (address: string): boolean => isPrivate(address) || address === '127.0.0.1';
 
 const SignKey = z.string().min(1).max(1024);
 const CertificateBody = z.object({ signKey: SignKey });
