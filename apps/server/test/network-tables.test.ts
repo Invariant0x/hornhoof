@@ -56,6 +56,28 @@ describe("the network's tables and the orchestrator's SQL", () => {
     await expect(rows(`INSERT INTO machine_online (machine_id, day, seconds) VALUES ('${machine!.id}', '2026-11-11', 20)`)).rejects.toMatchObject({ code: '42501' });
   });
 
+  it('keeps the orchestrator out of computer access and its commands, even when it is granted them', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const agentSql = app.ctx.agentSql!;
+    const rows = async (text: string) => (await agentSql.run(text, 'write'))[0]!;
+    await rows('SELECT 1');
+    const [company] = await db.select().from(companies);
+    const [owner] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'mac-0001-abcd' }).returning();
+    await db.execute(sql`INSERT INTO machine_access (machine_id, company_id) VALUES (${machine!.id}, ${company!.id})`);
+    await db.execute(sql`INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) VALUES (${company!.id}, ${machine!.id}, 'true', 300)`);
+    await db.execute(sql.raw(`GRANT SELECT, INSERT, UPDATE, DELETE ON machine_access, computer_runs TO "${agentRole('postgres')}"`));
+    for (const table of ['machine_access', 'computer_runs']) {
+      expect((await rows(`SELECT * FROM ${table}`)).rows, table).toEqual([]);
+      expect((await rows(`DELETE FROM ${table}`)).changed, table).toBe(0);
+    }
+    expect((await rows(`UPDATE machine_access SET until = now() + interval '1 hour'`)).changed).toBe(0);
+    await expect(rows(`INSERT INTO machine_access (machine_id, company_id, until) VALUES (gen_random_uuid(), '${company!.id}', now() + interval '1 hour')`)).rejects.toMatchObject({ code: '42501' });
+    await expect(rows(`INSERT INTO computer_runs (company_id, machine_id, command, timeout_s) VALUES ('${company!.id}', '${machine!.id}', 'id', 300)`)).rejects.toMatchObject({ code: '42501' });
+    expect(rowsOf(await db.execute(sql`SELECT count(*)::int AS n FROM computer_runs`))).toEqual([{ n: 1 }]);
+  });
+
   it('lets the orchestrator read what a machine is in the network, and change none of it', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);

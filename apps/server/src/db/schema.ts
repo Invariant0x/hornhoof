@@ -2181,3 +2181,55 @@ export const personKeys = pgTable(
   },
   () => [check('person_keys_iterations', sql`iterations >= 600000`)],
 ).enableRLS();
+
+/* Computer access to one machine of the company: open while `until` is ahead, what the orchestrator asked it for, who
+   opened it, and the grant its owner signed, which the machine's keeper checks against the key it holds. */
+export const machineAccess = pgTable(
+  'machine_access',
+  {
+    machineId: uuid('machine_id')
+      .primaryKey()
+      .references(() => machines.id),
+    companyId: companyId(),
+    until: timestamp('until', { withTimezone: true }),
+    askedReason: text('asked_reason'),
+    askedAt: timestamp('asked_at', { withTimezone: true }),
+    openedBy: uuid('opened_by').references(() => people.id),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    grant: jsonb('grant').$type<{ payload: string; signature: string }>(),
+  },
+  () => [check('machine_access_asked', sql`(asked_reason IS NULL) = (asked_at IS NULL)`)],
+).enableRLS();
+
+/* waiting: its machine's keeper has not taken it; sent: the keeper took it; lost: the keeper no longer holds it and gave
+   no answer, so what it did is not known. */
+export const RUN_STATES = ['waiting', 'sent', 'done', 'lost'] as const;
+export type RunState = (typeof RUN_STATES)[number];
+
+/* The commands the orchestrator runs on a machine while its access is open, and their answers. */
+export const computerRuns = pgTable(
+  'computer_runs',
+  {
+    id: id(),
+    companyId: companyId(),
+    machineId: uuid('machine_id')
+      .notNull()
+      .references(() => machines.id),
+    jobId: uuid('job_id').references(() => jobs.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    command: text('command').notNull(),
+    timeoutS: integer('timeout_s').notNull(),
+    state: text('state', { enum: RUN_STATES }).notNull().default('waiting'),
+    exit: integer('exit'),
+    /* The end of what it printed. */
+    output: text('output'),
+    createdAt: createdAt(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    doneAt: timestamp('done_at', { withTimezone: true }),
+  },
+  t => [
+    index('computer_runs_machine_state').on(t.machineId, t.state),
+    check('computer_runs_state', sql`state IN ('waiting', 'sent', 'done', 'lost')`),
+    check('computer_runs_timeout', sql`timeout_s BETWEEN 1 AND 1800`),
+  ],
+).enableRLS();

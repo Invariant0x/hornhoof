@@ -611,3 +611,41 @@ describe('migration 0103, what joined machines need', () => {
     expect(await codeOf(db.execute(sql`insert into peer_secrets (kind, secret_enc) values ('x', 's')`))).toBe('23514');
   });
 });
+
+describe('migration 0104, computer access per machine', () => {
+  async function fullyMigrated(): Promise<PgliteDatabase> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await client.exec(AFTER_MIGRATIONS);
+    /* No company or person stands behind the rows of these tests, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    return db;
+  }
+  const codeOf = (work: Promise<unknown>): Promise<string | undefined> => work.then(() => undefined, (err: { code?: string; cause?: { code?: string } }) => err.cause?.code ?? err.code);
+
+  it('adds access per machine and its commands, journaled and closed', async () => {
+    const db = await fullyMigrated();
+    const tables = await db.execute<{ relname: string; closed: boolean; journaled: boolean }>(sql`select c.relname, c.relrowsecurity as closed,
+      exists (select from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'net_journal') as journaled
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relname in ('machine_access', 'computer_runs') order by 1`);
+    expect(tables.rows).toEqual(['computer_runs', 'machine_access'].map(relname => ({ relname, closed: true, journaled: true })));
+  });
+
+  it('takes only the states and times of a command there are, and a request only whole', async () => {
+    const db = await fullyMigrated();
+    const run = (state: string, timeout: number) =>
+      db.execute(sql`insert into computer_runs (company_id, machine_id, command, timeout_s, state) values (gen_random_uuid(), gen_random_uuid(), 'true', ${timeout}, ${state})`);
+    for (const state of ['waiting', 'sent', 'done', 'lost']) await run(state, 300);
+    await run('waiting', 1);
+    await run('waiting', 1800);
+    expect(await codeOf(run('queued', 300))).toBe('23514');
+    expect(await codeOf(run('waiting', 0))).toBe('23514');
+    expect(await codeOf(run('waiting', 1801))).toBe('23514');
+
+    await db.execute(sql`insert into machine_access (machine_id, company_id) values (gen_random_uuid(), gen_random_uuid())`);
+    await db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason, asked_at) values (gen_random_uuid(), gen_random_uuid(), 'look', now())`);
+    expect(await codeOf(db.execute(sql`insert into machine_access (machine_id, company_id, asked_reason) values (gen_random_uuid(), gen_random_uuid(), 'look')`))).toBe('23514');
+  });
+});
