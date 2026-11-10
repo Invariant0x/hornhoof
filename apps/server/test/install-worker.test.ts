@@ -165,6 +165,35 @@ describe('install.sh on a machine that joins', () => {
     expect(r.calls.find(call => call.startsWith('docker run -d'))).toContain('--add-host host.docker.internal:host-gateway');
   });
 
+  it("carries the owner's key into the core, and nowhere else", () => {
+    const key = 'Ab-_'.repeat(30) + 'Zz';
+    const first = install({ args: ['--join', CODE, '--owner-key', key], env: { STUB_JOIN_BODY: body(CORE) } });
+    expect(first.code, first.out).toBe(0);
+    expect(valueOf(dotEnv(first.dir), 'HORNHOOF_OWNER_KEY')).toEqual([key]);
+    /* The server never hears it. */
+    expect(first.calls.filter(call => call.includes(key))).toEqual([]);
+    const again = (args: string[], lines = [CORE]) =>
+      install({ args, env: { STUB_JOIN_BODY: body(...lines), HOME: home(first.dir), HORNHOOF_HOME: join(home(first.dir), '.hornhoof'), HORNHOOF_DIR: join(home(first.dir), 'hornhoof'), STUB_PORTS_DIR: first.dir } });
+    /* A command without the key keeps the one the core has; one with another key brings that one. */
+    again(['--join', CODE]);
+    expect(valueOf(dotEnv(first.dir), 'HORNHOOF_OWNER_KEY')).toEqual([key]);
+    const other = key.replace('Zz', 'Yy');
+    again(['--join', CODE, '--owner-key', other]);
+    expect(valueOf(dotEnv(first.dir), 'HORNHOOF_OWNER_KEY')).toEqual([other]);
+
+    /* With no core in the answer there is nowhere to keep it. */
+    const nodeOnly = install({ args: ['--join', CODE, '--owner-key', key], env: { STUB_JOIN_BODY: body(MACHINE) } });
+    expect(nodeOnly.code).toBe(0);
+    expect(folders(nodeOnly.dir)).toEqual([]);
+    /* A key that cannot be one stops the command before anything is asked. */
+    for (const bad of [`${key}$`, 'short', `${key} more`]) {
+      const refused = install({ args: ['--join', CODE, '--owner-key', bad], env: { STUB_JOIN_BODY: body(CORE) } });
+      expect(refused.code, bad).toBe(1);
+      expect(refused.out).toContain("This command's owner key cannot be read. Get a new command in Hornhoof.");
+      expect(refused.calls).toEqual([]);
+    }
+  });
+
   it("writes a Mac's addresses down, since Docker there cannot see them", () => {
     const r = install({ env: { STUB_JOIN_BODY: body(CORE), STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_IPCONFIG: 'en0=192.168.1.20 en1=10.0.0.4' } });
     expect(r.code, r.out).toBe(0);

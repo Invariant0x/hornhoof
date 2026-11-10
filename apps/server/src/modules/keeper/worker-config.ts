@@ -1,3 +1,4 @@
+import { isP256 } from '../computer/owner-key.js';
 import { NETWORK_ID } from '../network/ids.js';
 import { addressesIn } from './addresses.js';
 import { publishedFrom, type Published } from './identity.js';
@@ -17,9 +18,12 @@ export type WorkerConfig = {
   ports: Published;
   /* The machine's addresses as the installer wrote them down. */
   addresses: string[];
+  /* The key of the machine's owner, as the command they ran here carried it: the keeper pins it once it joined. */
+  ownerKey: string | null;
 };
 
 const RUN_AGAIN = 'Run the join command from Hornhoof on this machine again.';
+const NO_PIN = `HORNHOOF_OWNER_KEY is not a key, so this machine pins no owner. ${RUN_AGAIN}`;
 
 function joinServerOf(value: string | undefined): string {
   try {
@@ -32,9 +36,11 @@ function joinServerOf(value: string | undefined): string {
 }
 
 /* Reads the worker's own lines of the environment and nothing else of it. */
-export function workerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
+export function workerConfig(env: NodeJS.ProcessEnv, log: (line: string) => void = () => undefined): WorkerConfig {
   const machineId = env.HORNHOOF_MACHINE_ID ?? '';
   if (!NETWORK_ID.test(machineId)) throw new Error(`HORNHOOF_MACHINE_ID is not set. ${RUN_AGAIN}`);
+  const ownerKey = env.HORNHOOF_OWNER_KEY || null;
+  if (ownerKey && !isP256(ownerKey)) log(NO_PIN);
   return {
     machineId,
     joinServer: joinServerOf(env.HORNHOOF_JOIN_SERVER),
@@ -44,5 +50,6 @@ export function workerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
     commit: env.HORNHOOF_COMMIT || 'local',
     ports: publishedFrom(env),
     addresses: addressesIn(env),
+    ownerKey: ownerKey && isP256(ownerKey) ? ownerKey : null,
   };
 }

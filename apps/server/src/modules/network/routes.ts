@@ -35,6 +35,8 @@ const ReportBody = z.object({
   directFails: z.boolean().optional(),
   /* How far the machine is with the server's build: downloaded, installing, or failed at it. Null: with none. */
   update: z.object({ commit: z.string().min(1).max(64), state: z.enum(UPDATE_STATES) }).nullable().optional(),
+  /* The print of the owner's key the machine pinned from the command its owner ran there; null with none. */
+  pin: z.string().regex(/^[A-Za-z0-9_-]{43}$/).nullable().optional(),
 });
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
@@ -122,7 +124,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, update, ...said } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, pin, ...said } = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
     if (!machine) return reply.code(204).send();
     const installed = await db.transaction(async tx => {
@@ -133,7 +135,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
          again at once. */
       const failed = update?.state === 'failed' ? { failedCommit: update.commit, failedAt: now } : {};
       const follows = update === undefined ? {} : { updateCommit: update?.commit ?? null, updateState: update?.state ?? null, ...failed };
-      const [after] = await tx.update(machines).set({ ...said, ...follows, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* A report that says nothing of the pin keeps the one the machine said before. */
+      const pinned = pin === undefined ? {} : { ownerPin: pin };
+      const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
       return Boolean(row && after && goodGrant(row, now) && !goodGrant(after, now));
     });

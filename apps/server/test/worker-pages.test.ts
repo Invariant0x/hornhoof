@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import type http from 'node:http';
 import { describe, expect, it } from 'vitest';
 import { disconnectedAnswer, noLeaderAnswer } from '../src/modules/keeper/worker-pages.js';
@@ -58,13 +59,23 @@ describe("a worker keeper's settings", () => {
 
   it("reads the worker's own lines, and no secret of the company", () => {
     const config = workerConfig({ ...ENV, HORNHOOF_SECRET: 's'.repeat(44), NODE_KEY: 'n'.repeat(40), DATABASE_URL: 'postgres://x', POSTGRES_PASSWORD: 'p' });
-    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [] });
+    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], ownerKey: null });
     expect(JSON.stringify(config)).not.toMatch(/ssss|nnnn|postgres/);
   });
 
   it('takes the ticket, the ports, the addresses and the name the installer wrote', () => {
     const config = workerConfig({ ...ENV, HORNHOOF_JOIN_SERVER: 'https://acme.hornhoof.test', HORNHOOF_JOIN_TICKET: 't'.repeat(43), HORNHOOF_PORT: '8081', HORNHOOF_PEER_PORT: '8181', HORNHOOF_ADDRESSES: '192.168.1.20, 10.0.0.4,', HORNHOOF_COMMIT: 'c0ffee', HORNHOOF_CONTROL_DIR: '/tmp/c' });
     expect(config).toMatchObject({ joinServer: 'https://acme.hornhoof.test', ticket: 't'.repeat(43), ports: { web: 8081, peer: 8181 }, addresses: ['192.168.1.20', '10.0.0.4'], commit: 'c0ffee', controlDir: '/tmp/c' });
+  });
+
+  it("takes the owner's key only when it is one, and says so when it is not", () => {
+    const key = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: key }).ownerKey).toBe(key);
+    expect(workerConfig({ ...ENV }).ownerKey).toBeNull();
+    const lines: string[] = [];
+    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: `${key}$` }, line => lines.push(line)).ownerKey).toBeNull();
+    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: 'A'.repeat(122) }, line => lines.push(line)).ownerKey).toBeNull();
+    expect(lines).toEqual(Array(2).fill('HORNHOOF_OWNER_KEY is not a key, so this machine pins no owner. Run the join command from Hornhoof on this machine again.'));
   });
 
   it('refuses to start without its id or the server it joined at, and says to run the command again', () => {

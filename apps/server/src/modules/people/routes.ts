@@ -9,7 +9,7 @@ import { changedBy, personColumns, requireCompanyScope, requirePerson, startSess
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions, personKeys } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { onAgent } from '../conversation/queue.js';
@@ -106,6 +106,9 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
     if (!row) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
+    /* The person's key was wrapped with the password that ends here, so it goes too: they make a new one, and their
+       machines take it from the next command they run there. */
+    await tx.delete(personKeys).where(eq(personKeys.personId, personId));
     await tx.insert(invites).values(inviteFor(token, by, personId));
     return row!;
   });

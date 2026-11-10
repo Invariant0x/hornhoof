@@ -8,7 +8,7 @@ type Running = { start(): Promise<unknown>; stop(): Promise<void> };
 async function workerKeeper(): Promise<Running> {
   const { WorkerKeeper } = await import('./modules/keeper/worker.js');
   const { workerConfig } = await import('./modules/keeper/worker-config.js');
-  return new WorkerKeeper({ config: workerConfig(process.env), frontHost: 'front', log });
+  return new WorkerKeeper({ config: workerConfig(process.env, log), frontHost: 'front', log });
 }
 
 async function dataKeeper(): Promise<Running> {

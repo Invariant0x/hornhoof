@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,8 @@ import { machines } from '../src/db/schema.js';
 import { CERT_FILE, type HeldCertificate } from '../src/modules/keeper/certificate.js';
 import { Keeper, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { machineKey, writePrivately } from '../src/modules/keeper/machine-keys.js';
+import { PIN_FILE, readPin } from '../src/modules/keeper/owner-pin.js';
+import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { PEERS_FILE, TICKET_FILE, WorkerKeeper, type WorkerKeeperOptions, type WorkerStatus } from '../src/modules/keeper/worker.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
@@ -143,7 +145,7 @@ async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}) {
   const { machine, ticket } = await c.joined();
   const config: WorkerConfig = {
     machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(),
-    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'],
+    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'], ownerKey: null,
   };
   return { machine, config, ...(await workerOn(c, config, over)) };
 }
@@ -346,6 +348,34 @@ describe("a worker's keeper", () => {
     expect(go.until! * 1000 - Date.now()).toBeGreaterThan(14 * 60_000);
     expect((await c.rowOf(w.machine)).goCommit).toBe(build.tag);
     expect(read('request.json').id).toBe(request.id);
+  });
+
+  it("pins its owner's key only from a ticket that let it in, and reports the pin's print", async () => {
+    const c = await company();
+    const keyOf = () => generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+    const ownerKey = keyOf();
+    const { machine, ticket } = await c.joined();
+    const config: WorkerConfig = { machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(), commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: [], ownerKey };
+    const w = await workerOn(c, config);
+    await until(() => hasLeader(w.status()));
+    expect(readPin(config.dir)).toBe(ownerKey);
+    expect(statSync(join(config.dir, PIN_FILE)).mode & 0o777).toBe(0o600);
+    await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(ownerKey));
+    await w.stop();
+
+    /* A ticket the server refuses pins nothing, whatever key came with it. */
+    const refused = await workerOn(c, { ...config, ticket: 'x'.repeat(43), ownerKey: keyOf() });
+    await until(() => refused.lines.some(line => line.includes('its join ticket was used or has expired')));
+    expect(readPin(config.dir)).toBe(ownerKey);
+    await refused.stop();
+
+    /* The owner runs a new command there, which carries another key: its ticket lets the machine in, and the pin follows. */
+    const { issueTicket } = await import('../src/modules/network/join.js');
+    const next = keyOf();
+    const renewed = await workerOn(c, { ...config, ticket: await issueTicket(c.db, machine), ownerKey: next });
+    await until(() => readPin(config.dir) === next);
+    await until(async () => (await c.rowOf(machine)).ownerPin === keyPrint(next));
+    await renewed.stop();
   });
 
   it("has a data machine's keeper report its addresses and its host's name", async () => {

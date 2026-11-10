@@ -47,6 +47,9 @@ services:
       # install.sh wrote them down.
       HORNHOOF_ADDRESSES: ${HORNHOOF_ADDRESSES:-}
       HORNHOOF_HOSTNAME: ${HORNHOOF_HOSTNAME:-}
+      # The key of the machine's owner, as the join command they ran there carried it. The keeper of a machine that
+      # joined pins it, and only what that key signs opens the machine later.
+      HORNHOOF_OWNER_KEY: ${HORNHOOF_OWNER_KEY:-}
     volumes:
       - control:/control
       # The machine's own key, which never leaves this volume.

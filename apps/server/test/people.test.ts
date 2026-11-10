@@ -1,8 +1,9 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, invites, people, sessions, teams } from '../src/db/schema.js';
+import { agents, companies, departments, invites, people, personKeys, sessions, teams } from '../src/db/schema.js';
 import { sessionFrom, setUpCompany, testApp } from './helpers.js';
 
 const as = (token: string) => ({ cookies: { hh_session: token } });
@@ -340,6 +341,24 @@ describe('POST /api/people/:id/invite', () => {
     const accepted = await app.inject({ method: 'POST', url: `/api/invites/${tokenOf(res.json().inviteUrl)}/accept`, payload: { password: 'a brand new password' } });
     expect(accepted.statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'maria@acme.com', password: 'a brand new password' } })).statusCode).toBe(200);
+  });
+
+  /* The key was wrapped with the password that the reset ends, so nobody could open it again. */
+  it("takes the person's own key away on a reset, and lets them make a new one", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const first = await invite(app, ceo, { name: 'Marat', email: 'marat@acme.com', title: '', access: { whole: true } });
+    const marat = { id: first.json().person.id, token: sessionFrom(await app.inject({ method: 'POST', url: `/api/invites/${tokenOf(first.json().inviteUrl)}/accept`, payload: { password: PASSWORD } })) };
+    const publicKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64url');
+    const key = { publicKey, wrapped: 'd3JhcHBlZA', salt: 'c2FsdA', iv: 'aXY', iterations: 600_000 };
+    expect((await app.inject({ method: 'PUT', url: '/api/me/key', payload: { password: PASSWORD, ...key }, ...as(marat.token) })).statusCode).toBe(204);
+    expect(await db.select().from(personKeys).where(eq(personKeys.personId, marat.id))).toHaveLength(1);
+
+    const res = await reinvite(app, ceo, marat.id);
+    expect(await db.select().from(personKeys).where(eq(personKeys.personId, marat.id))).toEqual([]);
+    const again = sessionFrom(await app.inject({ method: 'POST', url: `/api/invites/${tokenOf(res.json().inviteUrl)}/accept`, payload: { password: 'a brand new password' } }));
+    expect((await app.inject({ url: '/api/me/key', ...as(again) })).json()).toEqual({ key: null });
+    expect((await app.inject({ method: 'PUT', url: '/api/me/key', payload: { password: 'a brand new password', ...key }, ...as(again) })).statusCode).toBe(204);
   });
 
   it('replaces an expired invite', async () => {

@@ -90,7 +90,7 @@ SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
 FIRST_PEER_PORT=8180
-USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | worker | --uninstall'
+USAGE='Usage: install.sh [--join <code> [--owner-key <key>]] [--urgent] | server [--name <name>] [--urgent] | worker | --uninstall'
 UNREADABLE='Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command.'
 
 OS=''
@@ -350,6 +350,9 @@ CORE_PORT=''
 CORE_COMPANY=''
 CORE_HERE=''
 BUILD_TAG=''
+# The key of the person who runs the join command, as the command carried it. It goes into the core's settings with the
+# ticket, for the keeper to pin, and nowhere else: it is never sent to the server.
+OWNER_KEY=''
 
 # by_digest_of <repository> <image>: the image is one of that very repository, named by its digest.
 by_digest_of() { [ "${2%%@*}" = "$1" ] && [[ "${2#*@}" =~ ^sha256:[0-9a-f]{64}$ ]]; }
@@ -739,6 +742,8 @@ worker_core() {
     set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
   fi
   set_env HORNHOOF_JOIN_TICKET "$CORE_TICKET"
+  # A command without the key leaves the one the last command brought.
+  if [ -n "$OWNER_KEY" ]; then set_env HORNHOOF_OWNER_KEY "$OWNER_KEY"; fi
   compose_from_image
   if [ -z "$PULLED" ]; then
     say "Downloading the images of the company's core."
@@ -1679,6 +1684,11 @@ while [ $# -gt 0 ]; do
       CODE=$2
       shift
       ;;
+    --owner-key)
+      [ $# -ge 2 ] || fail "--owner-key needs the key from the command Hornhoof showed. $USAGE"
+      OWNER_KEY=$2
+      shift
+      ;;
     --server)
       [ $# -ge 2 ] || fail "--server needs the Hornhoof address. $USAGE"
       SERVER=${2%/}
@@ -1703,6 +1713,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+if [ -n "$OWNER_KEY" ]; then
+  [[ "$OWNER_KEY" =~ ^[A-Za-z0-9_-]{80,200}$ ]] || fail "This command's owner key cannot be read. Get a new command in Hornhoof."
+  [ -n "$CODE" ] || fail "--owner-key goes with --join. $USAGE"
+fi
 if [ -n "$NAME" ]; then
   [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
   valid_name "$NAME" || fail "--name takes lowercase letters, digits and dashes, up to 32 characters, such as acme."

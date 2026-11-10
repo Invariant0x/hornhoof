@@ -51,6 +51,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'requireKeeper', path: /^\/api\/network\/(?:certificate|peers|report)$/, rule: "this machine's keeper alone: its address together with the header no door lets through" },
   { name: 'redeemTicket', path: /^\/api\/network\/join$/, rule: "the one-use ticket a join command gave the machine's installer" },
   { name: 'signedRenewal', path: /^\/api\/network\/renew$/, rule: "a request signed with the machine's own key, of this moment and taken once" },
+  { name: 'ownSession', path: /^\/api\/me\/key$/, rule: "the person's own session, never one the orchestrator acts in" },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },
 ];
 

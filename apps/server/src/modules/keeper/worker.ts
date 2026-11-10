@@ -9,6 +9,7 @@ import { PeerSessions, type DialTarget, type PeerSessionsOptions } from '../../n
 import { KEEPER_HOLD_MS, passThrough, serve, startingAnswer, type Refusal, type Target } from '../../net/proxy.js';
 import { TunnelKeeper, type Client } from '../link/tunnel.js';
 import { visitClientFor, VISIT_FIRST_PORT, type VisitSettings } from '../link/visit-client.js';
+import { keyPrint } from '../computer/owner-key.js';
 import { certFacts } from '../network/authority.js';
 import type { DataMachine, WorkerLink } from '../network/join.js';
 import { renewedMessage, renewMessage } from '../network/renewal.js';
@@ -19,6 +20,7 @@ import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFron
 import { Following } from './following.js';
 import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
+import { pinKey, readPin } from './owner-pin.js';
 import { updaterBusy } from './updater-status.js';
 import type { WorkerConfig } from './worker-config.js';
 import { disconnectedAnswer, noLeaderAnswer } from './worker-pages.js';
@@ -302,6 +304,23 @@ export class WorkerKeeper {
     }
   }
 
+  /* The owner's key is pinned from the command they ran here, and only once that command's ticket let this machine in:
+     a join that was refused pins nothing, and no answer of a server ever does. */
+  private pinOwner(): void {
+    const { ownerKey, dir } = this.opts.config;
+    if (!ownerKey) return;
+    try {
+      pinKey(dir, ownerKey);
+    } catch (err) {
+      this.opts.log(`Could not keep the owner's key in the keeper's folder: ${reasonOf(err)}`);
+    }
+  }
+
+  private pinPrint(): string | null {
+    const pinned = readPin(this.opts.config.dir);
+    return pinned ? keyPrint(pinned) : null;
+  }
+
   private async post(url: string, body: unknown): Promise<{ status: number; body: unknown }> {
     const signal = AbortSignal.any([this.stopping.signal, AbortSignal.timeout(ASK_MS)]);
     const res = await (this.opts.fetch ?? fetch)(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal, redirect: 'error' });
@@ -325,6 +344,7 @@ export class WorkerKeeper {
     const res = await this.post(`${joinServer}/api/network/join`, { ticket, networkId: machineId, signKey });
     if (res.status === 200) {
       this.spend(ticket);
+      this.pinOwner();
       this.mergeView((res.body as { view?: unknown } | null)?.view);
       return res.body as HeldCertificate;
     }
@@ -493,6 +513,7 @@ export class WorkerKeeper {
         path: state.path,
         directFails: state.directFails,
         update: this.following.update(),
+        pin: this.pinPrint(),
       };
       const res = await this.askLeader('POST', '/api/network/report', body);
       if (res && !res.ok && !this.disconnected) throw new Error(`the company server answered ${res.status}`);

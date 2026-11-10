@@ -214,6 +214,22 @@ describe('the network routes the keeper calls', () => {
     expect((await report({ uptimeS: 7 }, from('00000000-0000-4000-8000-000000000000'))).statusCode).toBe(404);
   });
 
+  it("keeps the print of the owner's key a machine pinned", async () => {
+    const c = await company();
+    const worker = await c.joined('worker', newKey());
+    const report = (payload: object) => c.app.inject({ method: 'POST', url: '/api/network/report', payload, ...from(worker.id) });
+    const pinOf = async () => (await c.db.select().from(machines).where(eq(machines.id, worker.id)))[0]!.ownerPin;
+    const pin = 'P'.repeat(43);
+    expect((await report({ pin })).statusCode).toBe(204);
+    expect(await pinOf()).toBe(pin);
+    /* A report that says nothing of it keeps it, and one that says there is none clears it. */
+    expect((await report({ uptimeS: 3 })).statusCode).toBe(204);
+    expect(await pinOf()).toBe(pin);
+    expect((await report({ pin: null })).statusCode).toBe(204);
+    expect(await pinOf()).toBeNull();
+    for (const bad of ['P'.repeat(42), 'P'.repeat(44), `${'P'.repeat(42)}$`]) expect((await report({ pin: bad })).statusCode, bad).toBe(400);
+  });
+
   it('answers that the server has no machine id when it has none', async () => {
     const c = await company({ HORNHOOF_MACHINE_ID: '' });
     const res = await c.certificate(newKey());

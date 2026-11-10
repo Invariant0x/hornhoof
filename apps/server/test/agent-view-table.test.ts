@@ -155,6 +155,7 @@ const NO_AGENT_DATA: string[] = [
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
   'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
   'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/core', 'POST /api/machines/:id/disconnect', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
+  'GET /api/me/key', 'PUT /api/me/key',
   'POST /api/network/certificate', 'POST /api/network/join', 'GET /api/network/peers', 'POST /api/network/renew', 'POST /api/network/report',
   'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
   'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',
