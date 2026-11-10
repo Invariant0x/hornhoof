@@ -47,7 +47,8 @@ const NO_LEADER = 'No leader of the company is in reach.';
 
 const HelloBody = z.object({ machine: z.string(), role: z.enum(MACHINE_ROLES), lead: z.boolean(), commit: z.string(), seen: z.string() });
 
-type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; pinged: boolean };
+/* asking: a hello is on its way. pinged: the last ping was answered. */
+type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; asking: boolean; pinged: boolean };
 /* failed: the addresses whose last direct try failed. */
 type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number };
 
@@ -260,7 +261,7 @@ export class PeerSessions {
         h2.on('error', ignore);
         const session = h2;
         askHello(session, this.opts.connectMs ?? CONNECT_MS).then(
-          hello => settle({ h2: session, path, hello, timers: [], pinged: true }),
+          hello => settle({ h2: session, path, hello, timers: [], asking: false, pinged: true }),
           () => fail(true),
         );
       });
@@ -294,10 +295,14 @@ export class PeerSessions {
     this.opts.changed?.();
   }
 
+  /* One hello at a time, each with the patience a connect gets: a busy machine answers late, and that is no reason to
+     let go of it. One that does not answer at all ends the session. */
   private hello(session: Session): void {
-    if (session.h2.destroyed) return;
-    askHello(session.h2, this.opts.helloMs ?? HELLO_MS).then(
+    if (session.h2.destroyed || session.asking) return;
+    session.asking = true;
+    askHello(session.h2, this.opts.connectMs ?? CONNECT_MS).then(
       hello => {
+        session.asking = false;
         const news = hello.lead !== session.hello.lead;
         session.hello = hello;
         if (news) this.opts.changed?.();

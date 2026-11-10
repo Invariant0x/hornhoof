@@ -1,20 +1,38 @@
-import { loadConfig } from './config.js';
-import { KEEPER_NAME, openDb } from './db/client.js';
-import { publishedFrom } from './modules/keeper/identity.js';
-import { Keeper } from './modules/keeper/keeper.js';
-import { leaseOfMachine } from './modules/keeper/lease-store.js';
+/* The keeper of a machine. One that keeps the company's data holds the lease, the link and the peer link; a worker's
+   reaches such a machine and serves the company on its own address. Each loads only its own modules, so a worker's
+   never reads the company's settings, which it does not have. */
+const log = (line: string): void => console.log(line);
 
-const config = loadConfig(process.env);
-const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
+type Running = { start(): Promise<unknown>; stop(): Promise<void> };
 
-/* Where this machine's database listens, for the peers that keep data too. */
-function dbTargetOf(): { host: string; port: number } | null {
-  if (!config.databaseUrl) return null;
-  const { hostname, port } = new URL(config.databaseUrl);
-  return { host: hostname, port: Number(port) || 5432 };
+async function workerKeeper(): Promise<Running> {
+  const { WorkerKeeper } = await import('./modules/keeper/worker.js');
+  const { workerConfig } = await import('./modules/keeper/worker-config.js');
+  return new WorkerKeeper({ config: workerConfig(process.env, log), frontHost: 'front', log });
 }
 
-const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line), lease: leaseOfMachine(config, line => console.log(line)), published: publishedFrom(process.env), dbTarget: dbTargetOf() });
+async function dataKeeper(): Promise<Running> {
+  const { loadConfig } = await import('./config.js');
+  const { KEEPER_NAME, openDb } = await import('./db/client.js');
+  const { publishedFrom } = await import('./modules/keeper/identity.js');
+  const { Keeper } = await import('./modules/keeper/keeper.js');
+  const { leaseOfMachine } = await import('./modules/keeper/lease-store.js');
+  const config = loadConfig(process.env);
+  const db = config.databaseUrl ? openDb(config.databaseUrl, KEEPER_NAME, { statementTimeoutMs: 2000 }) : null;
+  /* Where this machine's database listens, for the peers that keep data too. */
+  const dbTarget = (): { host: string; port: number } | null => {
+    if (!config.databaseUrl) return null;
+    const { hostname, port } = new URL(config.databaseUrl);
+    return { host: hostname, port: Number(port) || 5432 };
+  };
+  const addresses = (process.env.HORNHOOF_ADDRESSES ?? '').split(',').map(address => address.trim()).filter(Boolean);
+  return new Keeper({
+    config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log),
+    published: publishedFrom(process.env), dbTarget: dbTarget(), addresses, hostname: process.env.HORNHOOF_HOSTNAME || null,
+  });
+}
+
+const keeper = await (process.env.HORNHOOF_ROLE === 'worker' ? workerKeeper() : dataKeeper());
 
 await keeper.start();
 

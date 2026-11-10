@@ -87,6 +87,15 @@ export class CertificateKeeper {
     this.look();
   }
 
+  /* Takes a certificate that came another way than by ask, as a signed renewal brings one: only one for this machine's
+     key, of the authority it names. Whether it was taken. */
+  accept(value: unknown): boolean {
+    const held = heldFor(value, this.opts.key);
+    if (!held || this.stopped) return false;
+    this.take(held);
+    return true;
+  }
+
   onChange(fn: (held: HeldCertificate) => void): void {
     this.listeners.push(fn);
   }

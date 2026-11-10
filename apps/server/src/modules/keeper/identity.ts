@@ -7,6 +7,8 @@ import { Measures } from './measures.js';
 const KEY_RETRY_MS = 60_000;
 const REPORT_EVERY_MS = 20_000;
 const SAY_AGAIN_MS = 3_600_000;
+/* A host's name as the report takes it; one written another way is left out, and the report goes without it. */
+const HOSTNAME = /^[A-Za-z0-9._-]{1,120}$/;
 
 export type Published = { web: number | null; peer: number | null };
 export type IdentityOptions = {
@@ -21,6 +23,11 @@ export type IdentityOptions = {
   reportEveryMs?: number;
   keyRetryMs?: number;
   sampleMs?: number;
+  /* Where the machine can be dialed on its local networks, and the name of its host, to report with the measures. */
+  addresses?: () => string[];
+  hostname?: string | null;
+  /* What a test's keeper reports as its place in place of its own. */
+  reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
 };
 
 /* A port as compose gives it in the environment; null for anything that is no port. */
@@ -121,7 +128,8 @@ export class MachineIdentity {
     if (this.stopped || !this.opts.leading()) return;
     try {
       const { web, peer } = this.opts.published;
-      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
+      const place = this.opts.reportAs?.() ?? { addresses: this.opts.addresses?.() ?? [], ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
+      const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(HOSTNAME.test(this.opts.hostname ?? '') ? { hostname: this.opts.hostname } : {}), ...place };
       const res = await askApp(this.opts.app, 'POST', '/api/network/report', body, this.stopping.signal);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {

@@ -101,7 +101,7 @@ async function standUp(as: { id?: string; role?: MachineRole } = {}) {
       everyMs: 10,
       helloMs: 10,
       directEveryMs: 10,
-      pingMs: 50,
+      pingMs: 60_000,
       ...over,
     });
     onTestFinished(() => sessions.close());

@@ -1,9 +1,7 @@
 import type http from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { isAddressOf } from '../../auth/tunnel.js';
 import type { Config } from '../../config.js';
 import type { Db } from '../../db/client.js';
-import { firstForwarded, INVOCATION, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, UUID, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
+import { firstForwarded, KEEPER_HOLD_MS, passThrough, serve, socketAddress, startingAnswer, type PassOptions, type Refusal, type Target } from '../../net/proxy.js';
 import { clientFor, linkClientId, type FrpcLocal } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.js';
@@ -11,7 +9,9 @@ import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
 import { servedCertificate } from '../tls/store.js';
 import { certInfo } from '../tls/x509.js';
 import type { Term } from '../../db/net.js';
+import { ownAddresses } from './addresses.js';
 import type { HeldCertificate } from './certificate.js';
+import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
 import { MachineIdentity, type Published } from './identity.js';
 import { PeerLink, type PeerPorts } from './peer-link.js';
 import type { PeerServices } from '../link/peer-client.js';
@@ -22,8 +22,7 @@ import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
 import { updaterBusy } from './updater-status.js';
 
-/* peerApp: what the relay's service for the app alone reaches, on this machine only. */
-export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081 } as const;
+export { KEEPER_PORTS } from './doors.js';
 
 const DOOR_PORTS = { front: KEEPER_PORTS.front, linkHttp: KEEPER_PORTS.linkHttp, linkTls: LINK_TLS_PORT };
 
@@ -55,6 +54,11 @@ export type KeeperOptions = {
   /* The machine's ports as compose publishes them, to report with its measures. */
   published?: Published;
   reportEveryMs?: number;
+  /* The machine's addresses as the installer wrote them down, and its host's name, to report as well. */
+  addresses?: string[];
+  hostname?: string | null;
+  /* What a test's keeper reports as its place in place of its own. */
+  reportAs?: () => { addresses: string[]; peerPort: number; webPort: number };
   /* This machine's database, for peers that keep data: where the peer link's CONNECT db goes. */
   dbTarget?: Target | null;
   /* How often the app is asked what the network holds now: the revoked certificates and what the machine offers. */
@@ -81,18 +85,6 @@ const LINK_HOST = '127.0.0.1';
    ends by itself, does not hold the stop up for longer. */
 const STOP_GRACE_MS = 5000;
 
-const MAINTENANCE_JSON = JSON.stringify({
-  error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
-});
-const MAINTENANCE_TEXT = 'Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n';
-
-/* startingAnswer already decides who gets JSON and who gets a page, so the two answers cannot split differently. */
-function maintenanceAnswer(req: http.IncomingMessage): Refusal {
-  const contentType = startingAnswer(req).headers['Content-Type']!;
-  const body = contentType === 'application/json' ? MAINTENANCE_JSON : MAINTENANCE_TEXT;
-  return { status: 503, headers: { 'Content-Type': contentType, 'Retry-After': '10' }, body };
-}
-
 const LEASE_PATH = '/api/network/lease';
 const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
 const PROOF_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
@@ -106,21 +98,6 @@ function proofNonce(req: http.IncomingMessage): string | null | undefined {
   const nonce = new URLSearchParams(query).get('nonce') ?? '';
   return NONCE.test(nonce) ? nonce : null;
 }
-
-/* The id front stamped a tool call with, when the request has one. */
-function invocationOf(req: http.IncomingMessage): Record<string, string> {
-  const id = String(req.headers[INVOCATION] ?? '').toLowerCase();
-  return UUID.test(id) ? { [INVOCATION]: id } : {};
-}
-
-/* Anyone on the default network can reach the front port and write a header, so what it says counts only from front:
-   the visitor's address, and the id of a tool call. */
-const visitorFromFront =
-  (frontHost: string | null) =>
-  async (req: http.IncomingMessage): Promise<Record<string, string>> => {
-    if (!(await isAddressOf(frontHost, socketAddress(req)))) return { 'x-forwarded-for': socketAddress(req) };
-    return { 'x-forwarded-for': firstForwarded(req) || socketAddress(req), ...invocationOf(req) };
-  };
 
 /* What frps wrote, its first entry being the visitor. Only link traffic is ever marked as https. */
 function visitorFromLink(req: http.IncomingMessage): Record<string, string> {
@@ -167,24 +144,6 @@ function oneAtATime(work: () => Promise<unknown>): () => Promise<void> {
   };
 }
 
-function listenOn(server: http.Server, port: number, host: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    /* It stays on: after the start an error is one failed accept, and the next visitor should still get through. */
-    server.on('error', reject);
-    server.listen(port, host, () => resolve((server.address() as AddressInfo).port));
-  });
-}
-
-function closeWithin(server: http.Server, ms: number): Promise<void> {
-  return new Promise(resolve => {
-    const giveUp = setTimeout(resolve, ms);
-    server.close(() => {
-      clearTimeout(giveUp);
-      resolve();
-    });
-  });
-}
-
 /* Holds this machine's lease and sets the app's mode by it, runs the public link's frpc as its child, ends the link's TLS,
    and carries what comes in from front and the link to the app. */
 export class Keeper {
@@ -217,6 +176,9 @@ export class Keeper {
           leading: () => this.mode() === 'lead',
           log: opts.log,
           reportEveryMs: opts.reportEveryMs,
+          addresses: () => ownAddresses({ controlDir: opts.config.controlDir, env: opts.addresses ?? [], seen: [] }),
+          hostname: opts.hostname,
+          reportAs: opts.reportAs,
         })
       : null;
   }
