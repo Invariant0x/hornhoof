@@ -3,6 +3,7 @@ import { useT } from '../i18n';
 import type { TaskLine } from '../types';
 import { Edge } from './Edge';
 import { TaskRow } from './TaskRow';
+import { stageName } from './stage-name';
 
 /* A group of rows: a turn, the tasks given outside turns or what a search found. A folded group shows only its head until
    it is opened. found: the tasks stay in the order given, flat, as a search ranks them; otherwise by number in trees. */
@@ -56,7 +57,7 @@ function TaskTableRow({ task, rows }: { task: TaskLine; rows: Rows }) {
   const [open, setOpen] = useState(false);
   const name = `#${task.number} ${task.title}`;
   const place = rows.place(task);
-  const stage = task.echelons.stage ? t.tasks.echelons.stages[task.echelons.stage] : t.tasks.echelons.coordination;
+  const stage = task.echelons.stage ? stageName(t, task.echelons, task.echelons.stage) : t.tasks.echelons.coordination;
   return (
     <>
       <tr className={`rm${open ? ' open' : ''}${rows.selected === task.id ? ' on' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) setOpen(!open); }}>

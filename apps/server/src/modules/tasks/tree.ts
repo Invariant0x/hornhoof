@@ -1,4 +1,4 @@
-import { ECHELON_STAGES, type EchelonsSnapshot, type EchelonFindingsView, type EchelonStage } from '@hornhoof/protocol/echelons';
+import { ECHELON_STAGES, isStaged, type EchelonsSnapshot, type EchelonFindingsView, type EchelonStage } from '@hornhoof/protocol/echelons';
 import type { TurnAlarm, TurnProgram } from '@hornhoof/protocol/map';
 import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { countedSegments, turnSegments, withExternalWait, withPrograms, type FactTurn } from './tree-programs.js';
@@ -453,7 +453,7 @@ function submittedBy(event: FactTaskEvent, actorId: string): boolean {
 }
 
 function observedLineEnd(task: FactTask, moves: FactTaskEvent[], actorId: string, completedAt: Date | null): Date | null {
-  const handedOn = task.status === 'done' && task.echelons.resultKind === 'code' ? moves.find(event => submittedBy(event, actorId)) : undefined;
+  const handedOn = task.status === 'done' && isStaged(task.echelons.resultKind) ? moves.find(event => submittedBy(event, actorId)) : undefined;
   return handedOn && completedAt && handedOn.createdAt < completedAt ? handedOn.createdAt : completedAt;
 }
 

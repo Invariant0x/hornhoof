@@ -616,7 +616,7 @@ class TaskTools {
     this.server.registerTool(
       'report',
       {
-        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; the accepting head names the ready candidate/revision and observed integration commit. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
+        description: 'Reports the current assigned stage: Architecture hands its plan to Development; Tests names the exact candidate/revision and completed run ids; the accepting head names the ready candidate/revision and observed integration commit, or nothing but the summary where the result is a document. Main requires the normal human approval of that exact commit. Coordination aggregates accepted child results. Code never bypasses Review through a report.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1), verification: Verification.optional(), acceptance: AcceptanceInput.optional() },
       },
       async ({ task: ref, done, summary, verification, acceptance }) =>
@@ -651,7 +651,7 @@ class TaskTools {
     this.server.registerTool(
       'submit',
       {
-        description: 'Hands the current Development or checking-stage candidate forward. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, when the candidate\'s own change passed and it only needs the main line, its owner merges the main line into the candidate branch and submits the merge with review.baseCommit naming the main commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
+        description: 'Hands the current Development or checking-stage candidate forward. Where task.echelons says document, the department keeps no repository: attach the files to the task, give summary and evidence, and name no review. Review and Security fix findings themselves on the same branch, without returning to the author. At Tests, when the candidate\'s own change passed and it only needs the main line, its owner merges the main line into the candidate branch and submits the merge with review.baseCommit naming the main commit taken in: the candidate stays at Tests to be checked again. summary: what you did; evidence: the command you ran and what it printed, the link, the check. review.baseCommit is the commit the change starts from. The server reads the head of the branch named after the task (task-<number> or the only task-<number>-...), or of review.branch when the work is on another branch; a repair stays on the branch of the candidate it repairs. review.commit, when given, must be that head. Without a readable commit the submission is refused with the reason. Check the change before handing it forward. Submitting starts no test run.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional(), operationId: z.uuid().optional() },
       },
       async ({ task: ref, summary, evidence, review, operationId }) =>
@@ -682,16 +682,16 @@ class TaskTools {
       'verdict',
       {
         description:
-          'Records the current checker decision on an exact candidate. PASS hands it forward; a defect remains with this checker to fix. Wrong-goal escalate asks the head, without an author return. Review can add Security by naming a concrete risk. Structured issues record provenance; numeric counts are derived, never supplied.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), reviewedCommit: ReviewSha, issues: z.array(IssueInput).max(99).optional(), security: z.string().trim().min(1).max(2000).optional(), escalate: z.boolean().optional() },
+          'Records the current checker decision on an exact candidate: reviewedCommit names the commit checked, or candidateId from task.echelons where the result is a document. PASS hands it forward; a defect remains with this checker to fix. Wrong-goal escalate asks the head, without an author return. Review can add Security by naming a concrete risk. Structured issues record provenance of a commit, and the findings of a document go in the comment; numeric counts are derived, never supplied.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), reviewedCommit: ReviewSha.optional(), candidateId: z.uuid().optional(), issues: z.array(IssueInput).max(99).optional(), security: z.string().trim().min(1).max(2000).optional(), escalate: z.boolean().optional() },
       },
-      async ({ task: ref, pass, comment: why, reviewedCommit, issues, security, escalate }) =>
+      async ({ task: ref, pass, comment: why, reviewedCommit, candidateId, issues, security, escalate }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, why);
           const review = await reviewContext(this.ctx.db, task.id);
           const evidence = bindReviewEvidence(await taskEvidence(this.ctx, task), review?.commit ?? null);
-          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, issues, security, escalate, evidence: keptEvidence(evidence) });
+          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, reviewedCommit, candidateId, issues, security, escalate, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await this.where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );

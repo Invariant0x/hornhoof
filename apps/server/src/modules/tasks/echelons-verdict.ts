@@ -1,8 +1,8 @@
 import { issuesForEchelon } from './review-findings.js';
-import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import type { DocumentCandidate, EchelonCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { checkingIdentity, departmentHead, heldCheckingIdentity } from './echelons-assign.js';
-import { currentCandidate } from './echelons-candidates.js';
+import { currentHanded } from './echelons-candidates.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { sameChecker, type CheckerIdentity } from './echelons-policy.js';
@@ -31,9 +31,26 @@ function verdictState(route: Route, verdict: Verdict, agentId: string): Route['s
   };
 }
 
-function verdictData(route: Route, candidate: EchelonCandidate, identity: CheckerIdentity, verdict: Verdict, issues: Awaited<ReturnType<typeof issuesForEchelon>>, state: Route['state']) {
-  const evidence = bindReviewEvidence(verdict.evidence ?? [], candidate.commit);
-  return { issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, reviewedCommit: candidate.commit, routeRevision: route.revision, checker: identity,
+type Checked = EchelonCandidate | DocumentCandidate;
+const isCommit = (candidate: Checked): candidate is EchelonCandidate => 'commit' in candidate;
+
+/* The checker names what it checked, so a verdict never lands on a candidate handed in after it looked. */
+function requireNamedCandidate(candidate: Checked, verdict: Verdict): void {
+  if (isCommit(candidate) ? verdict.reviewedCommit !== candidate.commit : verdict.candidateId !== candidate.id) {
+    throw refuse(409, 'task_changed', isCommit(candidate) ? 'Name the exact current candidate commit in the verdict.' : 'Name the exact current candidate in the verdict: candidateId, as task.echelons gives it.');
+  }
+}
+
+/* Findings of a document go in the words of its verdict: a structured finding names a path and a line of a commit. */
+async function verdictIssues(ctx: Reader, task: Task, route: Route, candidate: Checked, identity: CheckerIdentity, verdict: Verdict) {
+  if (isCommit(candidate)) return issuesForEchelon(ctx.db, task, route, candidate, identity, verdict.issues ?? [], verdict.pass);
+  if (verdict.issues?.length) throw refuse(400, 'task_invalid', 'A document has no paths and lines to pin a finding to. Say in the comment what is wrong and where.');
+  return [];
+}
+
+function verdictData(route: Route, candidate: Checked, identity: CheckerIdentity, verdict: Verdict, issues: Awaited<ReturnType<typeof issuesForEchelon>>, state: Route['state']) {
+  const evidence = isCommit(candidate) ? bindReviewEvidence(verdict.evidence ?? [], candidate.commit) : [];
+  return { issues, pass: verdict.pass, stage: route.state.stage, candidateId: candidate.id, ...(isCommit(candidate) ? { reviewedCommit: candidate.commit } : {}), routeRevision: route.revision, checker: identity,
     ...(evidence.length ? { evidence } : {}), ...(verdict.security ? { addedSecurity: state.security } : {}), ...(verdict.escalate ? { wrongGoal: true } : {}),
   };
 }
@@ -45,12 +62,12 @@ export async function echelonVerdict(ctx: Reader, agentId: string, taskId: strin
   requireCheckingOwner(task, route, agentId);
   refusePaused(task);
   if (!verdict.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
-  const candidate = await currentCandidate(ctx.db, task, route);
-  if (verdict.reviewedCommit !== candidate.commit) throw refuse(409, 'task_changed', 'Name the exact current candidate commit in the verdict.');
+  const candidate = await currentHanded(ctx.db, task, route);
+  requireNamedCandidate(candidate, verdict);
   const identity = await checkingIdentity(ctx, task, route, candidate);
   if (await waitsForPerson(ctx.db, task.id)) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   const state = verdictState(route, verdict, agentId);
-  const issues = await issuesForEchelon(ctx.db, task, route, candidate, identity, verdict.issues ?? [], verdict.pass);
+  const issues = await verdictIssues(ctx, task, route, candidate, identity, verdict);
   const n = { kind: 'verdict' as const, actor: { agentId }, text: verdict.comment.trim(), data: verdictData(route, candidate, identity, verdict, issues, state) };
   const held = async (tx: Tx) => { if (!sameChecker(await heldCheckingIdentity(tx, task, route, candidate), identity)) throw refuse(409, 'task_changed', 'The checking assignment changed. Ask the head to assign it again.'); };
   if (verdict.escalate) {

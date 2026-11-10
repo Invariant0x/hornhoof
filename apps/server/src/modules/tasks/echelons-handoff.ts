@@ -1,4 +1,4 @@
-import type { EchelonCandidate, EchelonStage, EchelonStep } from '@hornhoof/protocol/echelons';
+import type { EchelonStage, EchelonStep, HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import type { Route } from './echelons-store.js';
 import { checkerFor, departmentHead } from './echelons-assign.js';
@@ -25,7 +25,7 @@ function handoffTask(stage: EchelonStage, owner: CheckerIdentity | null): Partia
 }
 
 /* Past its last stage the result is ready, and the head of the department accepts it. */
-async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: EchelonCandidate): Promise<Handoff> {
+async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const headId = await departmentHead(ctx.db, task);
   const state: Route['state'] = { ...route.state, phase: 'ready', candidateId: candidate.id, assignment: null,
     stages: route.state.stages.map(step => step.stage === route.state.stage ? { ...step, status: 'complete', candidateId: candidate.id } : step),
@@ -35,7 +35,7 @@ async function readyHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, cand
 
 type Handoff = { state: Route['state']; set: Partial<Task>; wakes: Wake[] };
 
-export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: EchelonCandidate): Promise<Handoff> {
+export async function forwardHandoff(ctx: Pick<Ctx, 'db'>, task: Task, route: Route, candidate: HandedCandidate): Promise<Handoff> {
   const at = route.state.stages.findIndex(step => step.stage === route.state.stage);
   const next = route.state.stages.slice(at + 1).find(step => step.status !== 'skipped');
   if (!next && route.state.stage === 'tests') throw refuse(409, 'task_invalid', 'Tests must verify the final candidate before integration.');

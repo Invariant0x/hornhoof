@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import type { EchelonCandidate } from '@hornhoof/protocol/echelons';
+import type { HandedCandidate } from '@hornhoof/protocol/echelons';
 import type { Ctx } from '../../app.js';
 import { agents, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -25,6 +25,21 @@ export async function agentIdentity(db: Reader['db'], companyId: string, agentId
   return capability === null ? null : { agentId: row.id, subscriptionId: row.subscriptionId, model: row.model, provider: modelProvider(row.provider), capability };
 }
 
+/* Whoever hands a result in runs a model whose strength is known, so the checker after it can be chosen no weaker. */
+export async function producerIdentity(db: Reader['db'], task: Task, agentId: string): Promise<CheckerIdentity> {
+  const producer = await agentIdentity(db, task.companyId, agentId);
+  if (!producer) throw new ApiError(409, 'conflict', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.', 'task_invalid');
+  return producer;
+}
+
+/* Whether the department has somebody to check after the author at a stage that asks for the ability: an employee at
+   work outside its teams, as the stages take nobody from a team, and not its head, who checks only where named. */
+export async function hasChecker(db: Reader['db'], author: Pick<typeof agents.$inferSelect, 'id' | 'companyId' | 'departmentId'>, ability: string): Promise<boolean> {
+  const staff = await db.select({ id: agents.id, kind: agents.kind, skills: agents.skills }).from(agents)
+    .where(and(eq(agents.companyId, author.companyId), eq(agents.departmentId, author.departmentId!), isNull(agents.teamId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  return staff.some(agent => agent.id !== author.id && agent.kind !== 'head' && agent.skills.includes(ability));
+}
+
 /* A head checks only where it is named: picked by itself, it would take a stage from its department's employees. */
 function canCheckTask(agent: typeof agents.$inferSelect, task: Task, ability: string, named: string | null): boolean {
   if (named ? agent.id !== named : agent.kind === 'head') return false;
@@ -44,7 +59,7 @@ export async function checkerFor(ctx: Reader, task: Task, producer: CheckerIdent
 }
 
 /* A verdict and a repair use the same live assignment, including its ability and subscription. */
-export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+export async function checkingIdentity(ctx: Reader, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   const ability = route.state.stage ? route.state.abilities[route.state.stage] : undefined;
   const identity = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, candidate), ability, task.assigneeAgentId) : null;
   if (!identity || !sameChecker(identity, route.state.assignment)) throw new ApiError(409, 'conflict', 'The checking assignment changed. Ask the head to assign it again.', 'task_changed');
@@ -53,7 +68,7 @@ export async function checkingIdentity(ctx: Reader, task: Task, route: Route, ca
 
 /* Inside the transaction that commits a checker's result: the card is held until it commits, so a model, subscription
    or ability change either lands before this read and refuses the result, or waits until the result is in. */
-export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: EchelonCandidate): Promise<CheckerIdentity> {
+export async function heldCheckingIdentity(tx: Tx, task: Task, route: Route, candidate: HandedCandidate): Promise<CheckerIdentity> {
   if (task.assigneeAgentId) await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, task.assigneeAgentId), eq(agents.companyId, task.companyId))).for('share');
   return checkingIdentity({ db: tx }, task, route, candidate);
 }

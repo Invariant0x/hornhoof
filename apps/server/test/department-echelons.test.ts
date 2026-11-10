@@ -2,24 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, subscriptions } from '../src/db/schema.js';
 import { createTask, loadTask, report, submit, verdict, type NewTask } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
+import { wakePrompt } from '../src/modules/tasks/wake.js';
 import type { TemplateKey } from '@hornhoof/protocol';
 import { echelonsTurn, setUpCompany, testApp } from './helpers.js';
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
 
-/* A department of the given template that keeps its work in a repository, in a turn run in echelons: a head, an author
-   and one more employee who carries the given skills. */
-async function fixture(templateKey: TemplateKey | null, roles: { head: string; author: string }, checkerSkills: string[]) {
+/* A department of the given template in a turn run in echelons: a head, an author and one more employee who carries the
+   given skills. It keeps its work in a repository unless told otherwise. */
+async function fixture(templateKey: TemplateKey | null, roles: { head: string; author: string }, checkerSkills: string[], options: { repo?: boolean; turn?: boolean } = {}) {
   const { app, db } = await testApp();
   await setUpCompany(app);
   const [company] = await db.select().from(companies);
   const [claude] = await db.select().from(subscriptions);
-  const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey, roleCode: 'DEP', repoUrl: 'https://github.com/acme/site.git' }).returning();
+  const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey, roleCode: 'DEP', repoUrl: options.repo === false ? null : 'https://github.com/acme/site.git' }).returning();
   const skillsOf = (roleKey: string) => app.ctx.templates.roles.get(roleKey)!.skills.filter(s => s.on).map(s => s.id);
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, model: string, skills = skillsOf(roleKey)) =>
     (await db.insert(agents).values({ companyId: company!.id, departmentId: department!.id, name, kind, roleKey, subscriptionId: claude!.id, model, skills }).returning())[0]!;
-  await echelonsTurn(db, company!.id);
+  if (options.turn !== false) await echelonsTurn(db, company!.id);
   const head = await hire('Head', 'head', roles.head, 'claude-opus-5-5');
   const author = await hire('Author', 'worker', roles.author, 'claude-sonnet-5-5');
   const checker = await hire('Checker', 'worker', roles.author, 'claude-opus-5-5', checkerSkills);
@@ -31,7 +32,8 @@ async function fixture(templateKey: TemplateKey | null, roles: { head: string; a
   };
   const create = (changes: Partial<NewTask> = {}) => createTask(app.ctx, { agentId: head.id }, { ...input, ...changes });
   const echelons = async (id: string) => (await taskDetail(app.ctx, await loadTask(db, id), () => true)).echelons;
-  return { ctx: app.ctx, db, head, author, checker, create, echelons };
+  const log = async (id: string) => (await taskDetail(app.ctx, await loadTask(db, id), () => true)).log;
+  return { ctx: app.ctx, db, head, author, checker, create, echelons, log };
 }
 
 const marketing = () => fixture('marketing', { head: 'MKT-HEAD', author: 'MKT-WRITE' }, ['hh-check-work']);
@@ -97,5 +99,96 @@ describe('the stages of a department other than Development', () => {
     const route = await f.echelons(task.id);
     expect(route.stages.map(step => step.stage)).toEqual(['architecture', 'development', 'review', 'security', 'tests']);
     expect(route.abilities).toEqual({ review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment' });
+  });
+});
+
+const HAND_IN = { summary: 'The launch text is attached as launch.md.', evidence: 'Read it against the brief and the price list.' };
+const office = (checkerSkills = ['hh-check-work'], options: { turn?: boolean } = {}) =>
+  fixture('marketing', { head: 'MKT-HEAD', author: 'MKT-WRITE' }, checkerSkills, { repo: false, ...options });
+
+describe('a department that keeps no repository', () => {
+  it('takes the work of an employee through its stages as a document', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    expect(task).toMatchObject({ executorAgentId: f.author.id, assigneeAgentId: f.author.id });
+    const route = await f.echelons(task.id);
+    expect(route).toMatchObject({ resultKind: 'document', stage: 'development', abilities: { review: 'hh-check-work' } });
+    expect(route.stages.map(step => step.stage)).toEqual(['development', 'review']);
+  });
+
+  it('hands the document to the checker, and to the head once it passed', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    const handed = await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    expect(handed.task).toMatchObject({ status: 'review', assigneeAgentId: f.checker.id });
+    const candidate = (await f.log(task.id)).findLast(event => event.kind === 'submitted')!.data.candidate as { id: string; digest: string };
+    expect(candidate).toMatchObject({ parentId: null, digest: expect.stringMatching(/^[a-f0-9]{64}$/), producedBy: { agentId: f.author.id, stage: 'development' } });
+    expect(candidate).not.toHaveProperty('commit');
+    const passed = await verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Every price matches the list.', candidateId: candidate.id });
+    expect(passed.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    expect(await f.echelons(task.id)).toMatchObject({ phase: 'ready', candidateId: candidate.id });
+    const done = await report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted the checked text.' });
+    expect(done.task).toMatchObject({ status: 'done', assigneeAgentId: null });
+    expect(await f.echelons(task.id)).toMatchObject({ phase: 'done' });
+    expect((await f.log(task.id)).findLast(event => event.kind === 'report')!.data).toMatchObject({ acceptedDocument: { candidateId: candidate.id, digest: candidate.digest } });
+  });
+
+  it('keeps a document that did not pass with its checker, who corrects it and hands the corrected one on', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    const first = (await f.echelons(task.id)).candidateId!;
+    await expect(verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Fine.', candidateId: f.author.id }).then(() => null)).rejects.toMatchObject({ status: 409 });
+    const failed = await verdict(f.ctx, f.checker.id, task.id, { pass: false, comment: 'The second price is last year\'s.', candidateId: first });
+    expect(failed.task).toMatchObject({ status: 'working', assigneeAgentId: f.checker.id });
+    const corrected = await submit(f.ctx, f.checker.id, task.id, { summary: 'Corrected the second price.', evidence: 'Compared with the price list again.' });
+    expect(corrected.task).toMatchObject({ status: 'open', assigneeAgentId: f.head.id });
+    const candidate = (await f.log(task.id)).findLast(event => event.kind === 'submitted')!.data.candidate;
+    expect(candidate).toMatchObject({ parentId: first, producedBy: { agentId: f.checker.id, stage: 'review' } });
+  });
+
+  it('refuses a commit in a document hand-in, a report in place of it, and an acceptance before the check', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    await expect(submit(f.ctx, f.author.id, task.id, { ...HAND_IN, review: { baseCommit: BASE } }).then(() => null)).rejects.toMatchObject({ status: 400 });
+    await expect(report(f.ctx, f.author.id, task.id, { done: true, summary: 'Done.' }).then(() => null)).rejects.toMatchObject({ status: 400 });
+    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    await expect(report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted.' }).then(() => null)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('closes a group over an accepted document', async () => {
+    const f = await office();
+    const group = await createTask(f.ctx, { agentId: f.head.id }, { title: 'Launch', brief: 'Prepare the launch.', body: 'Texts for the launch.', departmentId: f.head.departmentId!, assigneeAgentId: f.head.id });
+    const { task } = await f.create({ paths: undefined, parentId: group.task.id });
+    await submit(f.ctx, f.author.id, task.id, HAND_IN);
+    await verdict(f.ctx, f.checker.id, task.id, { pass: true, comment: 'Checked.', candidateId: (await f.echelons(task.id)).candidateId! });
+    await report(f.ctx, f.head.id, task.id, { done: true, summary: 'Accepted the checked text.' });
+    const closed = await report(f.ctx, f.head.id, group.task.id, { done: true, summary: 'The launch texts are ready.' });
+    expect(closed.task).toMatchObject({ status: 'done' });
+  });
+
+  it('tells whoever holds a document how it is handed in, checked and accepted', async () => {
+    const f = await office();
+    const { task } = await f.create({ paths: undefined });
+    const told = (agentId: string, why: 'assigned' | 'review' | 'reviewed') => wakePrompt({ kind: 'worker' }, { ...task, assigneeAgentId: agentId }, { agentId, taskId: task.id, why }, 'document');
+    expect(told(f.author.id, 'assigned')).toContain('hand the result in with submit as a document');
+    expect(told(f.checker.id, 'review')).toContain('give verdict naming candidateId');
+    expect(told(f.checker.id, 'review')).not.toMatch(/branch|commit/);
+    expect(told(f.head.id, 'reviewed')).toContain('record acceptance with report done true');
+  });
+
+  it('works as before where nobody in the department carries the skill of the check', async () => {
+    const f = await office(['mkt-copywriting']);
+    const { task } = await f.create({ paths: undefined });
+    expect(task.executorAgentId).toBeNull();
+    expect(await f.echelons(task.id)).toMatchObject({ resultKind: 'coordination', stages: [] });
+    expect((await report(f.ctx, f.author.id, task.id, { done: true, summary: 'Wrote the launch text.' })).task).toMatchObject({ status: 'done' });
+  });
+
+  it('works as before outside a turn, and in a department whose route has no check', async () => {
+    const outside = await office(['hh-check-work'], { turn: false });
+    expect(await outside.echelons((await outside.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
+    const home = await fixture('household', { head: 'HHD-HEAD', author: 'HHD-BILLS' }, ['hh-check-work'], { repo: false });
+    expect(await home.echelons((await home.create({ paths: undefined })).task.id)).toMatchObject({ resultKind: 'coordination' });
   });
 });

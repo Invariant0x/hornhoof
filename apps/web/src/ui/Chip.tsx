@@ -7,13 +7,14 @@ import { Edge } from './Edge';
 import { AgentIcon, ProviderMark } from './icons';
 import { AgentState, type AgentLive } from './AgentState';
 import { CH, CW } from '../screens/schema';
+import { stageName } from './stage-name';
 
 export const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
 
 const taskText = (e: Employee, t: ReturnType<typeof useT>) => {
   if (!e.task) return '';
   const route = e.task.echelons;
-  const stage = route.ownerAgentId === e.id && route.stage ? `${t.tasks.echelons.stages[route.stage]} ` : '';
+  const stage = route.ownerAgentId === e.id && route.stage ? `${stageName(t, route, route.stage)} ` : '';
   return `${stage}#${e.task.number} ${e.task.title}`;
 };
 

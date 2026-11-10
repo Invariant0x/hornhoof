@@ -1,3 +1,4 @@
+import { isStaged } from '@hornhoof/protocol/echelons';
 import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
@@ -27,6 +28,10 @@ function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: stri
   if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
     finish: 'carry it end to end alone, as the task says: code, checks, tests, merge and release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
     stuck: 'use blocked',
+  };
+  if (task.assigneeAgentId === agentId && kind === 'document') return {
+    finish: 'follow task.echelons: hand the result in with submit as a document, its files attached to the task and no commit named; at a checking stage correct it yourself and submit it again, or give verdict naming candidateId',
+    stuck: 'use blocked or escalate a wrong goal to the head',
   };
   if (task.assigneeAgentId === agentId) return {
     finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; report verified final-candidate runs in Tests; integrate only with the head authorization',
@@ -75,9 +80,11 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKin
     case 'wait_ended':
       return waitEndedPrompt(task, w.text);
     case 'review':
+      if (kind === 'document') return `${ref} is with you at its current checking stage. ${read} It is handed in as a document: read the hand-in in its log and fetch the files it names. Check it against the task and correct what is wrong yourself. Submit the corrected document, or give verdict naming candidateId from task.echelons when it meets the goal. Escalate a wrong goal to the head.`;
       return `${ref} is with you at its current checking stage. ${read} ${READ_PROOF} Check the candidate, record findings with their provenance and fix them yourself in the same branch within the assigned paths. Submit a changed candidate with affected proof; give verdict on its exact commit when it meets the goal. Escalate a wrong goal to the head.`;
     case 'reviewed':
-      return `${ref} passed Tests on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
+      if (kind === 'document') return `${ref} passed every stage of its route. ${read} Read the checked document and record acceptance with report done true. Do not request another version from the author.`;
+      return `${ref} passed the last stage of its route on its final candidate. ${read} Verify the exact candidate and finished receipts, then integrate only within your authority and record acceptance. Do not request another implementation from the author.`;
     case 'done':
       return `${ref}, which you gave out, has an accepted result and is done. Read the result with the task tool, then go on with ${own}.`;
     case 'reported':
@@ -503,7 +510,7 @@ async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
 
 async function transferableWork(ctx: Ctx, task: Task): Promise<boolean> {
   const route = await routeOf(ctx.db, task);
-  return route.state.resultKind === 'code' && !route.state.candidateId && ['architecture', 'development'].includes(route.state.stage ?? '');
+  return isStaged(route.state.resultKind) && !route.state.candidateId && ['architecture', 'development'].includes(route.state.stage ?? '');
 }
 
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {

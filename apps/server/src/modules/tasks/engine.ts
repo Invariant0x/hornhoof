@@ -3,13 +3,15 @@ import { testsReport, type Verification } from './echelons-tests.js';
 import { acceptCandidate, type AcceptanceInput } from './echelons-accept.js';
 import { architectureReport, coordinationReport } from './echelons-report.js';
 import { replayedSubmission, submissionOperation, type Submission } from './echelons-operations.js';
-import { agentIdentity, checkerFor, checkingIdentity, heldCheckingIdentity } from './echelons-assign.js';
-import { producedCandidate, currentCandidate, requireRepairHistory } from './echelons-candidates.js';
+import { checkerFor, checkingIdentity, hasChecker, heldCheckingIdentity, producerIdentity } from './echelons-assign.js';
+import { producedCandidate, currentCandidate, currentHanded, requireRepairHistory } from './echelons-candidates.js';
+import { acceptDocument, documentHandIn } from './echelons-document.js';
 import { forwardHandoff } from './echelons-handoff.js';
 import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
-import { turnkeyReport, turnkeyWork } from './turnkey.js';
-import { createRoute, departmentStages, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { turnkeyReport, turnkeyWork, wouldGoThroughEchelons } from './turnkey.js';
+import { createRoute, departmentStages, documentCheck, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { isStaged } from '@hornhoof/protocol/echelons';
 import type { StageRoute } from '../templates/load.js';
 import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
@@ -331,7 +333,7 @@ function stuckGoes(ctx: Live, task: Task): { also: (tx: Tx) => Promise<void>; te
 }
 
 export type NewTask = {
-  resultKind?: 'code' | 'coordination';
+  resultKind?: 'code' | 'document' | 'coordination';
   title: string;
   brief: string;
   body: string;
@@ -405,7 +407,8 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     updatedAt: new Date(),
   }).returning();
   /* A part of the same work may touch what its whole may, as the head approved it there. */
-  await createRoute(tx, child!, { paths: (await routeOf(tx, parent)).paths }, plan);
+  const whole = await routeOf(tx, parent);
+  await createRoute(tx, child!, { paths: whole.paths, ...(whole.state.resultKind === 'document' ? { resultKind: 'document' } : {}) }, plan);
   const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, after: [], independentPartOf: parent.id } });
   const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
   recordCause([wake], { kind: 'created', actor }, event.id, child!);
@@ -460,7 +463,7 @@ async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | nul
   const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
   stillOpen(now!);
   const route = await routeOf(tx, now!);
-  if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking candidate cannot acquire unfinished child work.');
+  if (isStaged(route.state.resultKind) && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking candidate cannot acquire unfinished child work.');
   const open = await openAfter(tx, now!);
   if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
   return now!;
@@ -550,10 +553,27 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   return { task: row!, wakes, independent };
 }
 
+/* Whether work of a department with no repository goes through its stages as a document: in a turn run in echelons, from
+   an employee outside the turnkey teams, where the route of the department has a check and somebody else there carries
+   its skill. Anywhere else such work is done as before, by its holder alone. */
+async function handsInDocument(ctx: Ctx, input: NewTask): Promise<boolean> {
+  const check = documentCheck(await departmentStages(ctx, input.departmentId));
+  if (!check) return false;
+  const author = await workingAgent(ctx.db, null, input.assigneeAgentId);
+  if (!(await hasChecker(ctx.db, author, check))) return false;
+  const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
+  return wouldGoThroughEchelons(ctx.db, { companyId: author.companyId, turnId: await turnForNewTask(ctx.db, author.companyId, parent), holderId: author.id });
+}
+
+async function executorResult(ctx: Ctx, input: NewTask): Promise<NonNullable<NewTask['resultKind']>> {
+  if (await repoAt(ctx, [input.productId ?? null, input.departmentId])) return 'code';
+  return await handsInDocument(ctx, input) ? 'document' : 'coordination';
+}
+
 export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
   if (input.resultKind === undefined && input.executor) {
-    const resultKind = await repoAt(ctx, [input.productId ?? null, input.departmentId]) ? 'code' : 'coordination';
-    input = { ...input, resultKind, executor: resultKind === 'code' };
+    const resultKind = await executorResult(ctx, input);
+    input = { ...input, resultKind, executor: resultKind !== 'coordination' };
   }
   const setup = await prepareNewTask(ctx, actor, input);
   const { task, wakes, independent } = await ctx.db.transaction(tx => insertNewTask(tx, actor, input, setup));
@@ -569,7 +589,7 @@ export async function submissionTask(ctx: Live, agentId: string, taskId: string)
   stillOpen(task);
   const kind = (await routeOf(ctx.db, task)).state.resultKind;
   if (kind === 'turnkey') throw turnkeyWork(task);
-  if (kind !== 'code') throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
+  if (!isStaged(kind)) throw refuse(400, 'task_invalid', `#${task.number} has a coordination result. Report its checked child results.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not waiting for your work');
   refusePaused(task);
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
@@ -601,25 +621,31 @@ function requireSubmissionStage(task: Task, route: Route): void {
   if (!['development', 'review', 'security', 'cleanup', 'tests'].includes(route.state.stage ?? '') || route.state.phase !== 'active') throw notYours(task, 'is not waiting for code from your current stage');
 }
 
+/* The commit as it is handed in: read from the repository, inside the paths the head approved, and on top of what the
+   stage received. */
+async function commitHandIn(ctx: Live, agentId: string, task: Task, route: Route, r: Submission) {
+  const input = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
+  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, input?.branch);
+  const producer = await producerIdentity(ctx.db, task, agentId);
+  if (input) await checkingIdentity(ctx, task, route, input);
+  const candidate = producedCandidate(route, producer, review);
+  if (input) await requireRepairHistory(ctx, task, input, candidate);
+  return { input, candidate, review };
+}
+
 async function submitCandidate(ctx: Live, agentId: string, taskId: string, r: Submission, operation: ReturnType<typeof submissionOperation>): Promise<Moved> {
   const task = await submissionTask(ctx, agentId, taskId);
   const route = await routeOf(ctx.db, task);
   requireSubmissionStage(task, route);
   if (route.state.stage === 'tests') return takeMainAtTests(ctx, agentId, task, route, r, operation);
-  const inputCandidate = route.state.stage === 'development' ? null : await currentCandidate(ctx.db, task, route);
-  const review = await captureReview(ctx, { ...task, executorAgentId: agentId }, r.review, inputCandidate?.branch);
-  const producer = await agentIdentity(ctx.db, task.companyId, agentId);
-  if (!producer) throw refuse(409, 'task_invalid', 'The producer model needs a known capability policy before handoff. Select a known model on the employee card; Default has no verified runtime identity.');
-  if (inputCandidate) await checkingIdentity(ctx, task, route, inputCandidate);
-  const candidate = producedCandidate(route, producer, review);
-  if (inputCandidate) await requireRepairHistory(ctx, task, inputCandidate, candidate);
+  const { input, candidate, review } = route.state.resultKind === 'document' ? await documentHandIn(ctx, agentId, task, route, r) : await commitHandIn(ctx, agentId, task, route, r);
   const next = await forwardHandoff(ctx, task, route, candidate);
   const unstuck = stuckGoes(ctx, task);
   const row = await move(ctx, task, next.set, {
     kind: 'submitted', actor: { agentId }, text: r.summary, returned: true,
     data: { evidence: r.evidence, candidate, ...(operation ? { operation } : {}), routeRevision: route.revision, ...(review ? { review } : {}) },
   }, async tx => {
-    if (inputCandidate) await heldCheckingIdentity(tx, task, route, inputCandidate);
+    if (input) await heldCheckingIdentity(tx, task, route, input);
     await changeRoute(tx, route, next.state);
     await unstuck.also(tx);
   }, next.wakes);
@@ -675,7 +701,7 @@ async function reportStage(ctx: Live, task: Task, route: Route, agentId: string,
   stillOpen(task);
   await refuseWaiting(ctx.db, task);
   switch (stage) {
-    case 'acceptance': return acceptCandidate(ctx, task, route, agentId, input.summary, input.acceptance);
+    case 'acceptance': return route.state.resultKind === 'document' ? acceptDocument(ctx, task, route, agentId, input.summary) : acceptCandidate(ctx, task, route, agentId, input.summary, input.acceptance);
     case 'tests': return testsReport(ctx, task, route, agentId, input.summary, input.verification, input.done);
     case 'architecture': return architectureReport(ctx, task, route, agentId, input.summary);
     case 'coordination': return coordinationReport(ctx, task, route, agentId, input.summary);
@@ -691,7 +717,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: Repo
   const route = await routeOf(ctx.db, task);
   const stage = reportedStage(route, r.done);
   if (stage) return reportStage(ctx, task, route, agentId, r, stage);
-  if (route.state.resultKind === 'code') throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
+  if (isStaged(route.state.resultKind)) throw refuse(400, 'task_invalid', 'Use the current executable stage command, or blocked when work cannot continue. A report cannot bypass Review and Tests.');
   requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };
@@ -820,7 +846,7 @@ async function waitingRouteChecker(ctx: Live, task: Task, route: Route) {
   if (route.state.phase !== 'waiting' || !route.state.candidateId || !route.state.stage) return null;
   const ability = route.state.abilities[route.state.stage];
   if (!ability) return null;
-  return checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, null);
+  return checkerFor(ctx, task, (await currentHanded(ctx.db, task, route)).producedBy, ability, null);
 }
 
 export async function resumeWaitingRoutes(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[] }> {
@@ -908,7 +934,7 @@ function reopenRewrittenTask(task: Task, state: Route['state'], change: TaskChan
 
 async function changePrerequisites(ctx: Ctx, task: Task, route: Route, change: TaskChange, set: Partial<Task>): Promise<void> {
   if (change.after === undefined) return;
-  if (route.state.resultKind === 'code' && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
+  if (isStaged(route.state.resultKind) && !['architecture', 'development'].includes(route.state.stage ?? '')) throw refuse(409, 'task_invalid', 'A checking result cannot acquire unfinished prerequisites.');
   checkAfterPlans(change.after, change.afterPlans);
   await checkAfter(ctx.db, task.companyId, task.turnId, change.after);
   await refuseAbove(ctx.db, task.parentId, change.after);
@@ -1154,7 +1180,7 @@ export async function handOver(ctx: Live, task: Task, to: string, text: string):
 }
 
 function requireUnsubmittedWork(task: Task, route: Route): void {
-  if (route.state.resultKind !== 'code' || route.state.candidateId || !['architecture', 'development'].includes(route.state.stage ?? '') || task.assigneeAgentId !== task.executorAgentId) throw refuse(409, 'task_invalid', 'Only unsubmitted work can change executor automatically.');
+  if (!isStaged(route.state.resultKind) || route.state.candidateId || !['architecture', 'development'].includes(route.state.stage ?? '') || task.assigneeAgentId !== task.executorAgentId) throw refuse(409, 'task_invalid', 'Only unsubmitted work can change executor automatically.');
 }
 
 /* Repeated startup failures stop task turns and notify the giver, or ask a person when there is no other giver. */
@@ -1302,7 +1328,7 @@ async function statusAfterWait(tx: Tx, task: Task, was: Task['status'] | undefin
   const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
   if (Number(left!.n)) return null;
   const route = await routeOf(tx, task);
-  if (route.state.resultKind !== 'code') return 'working';
+  if (!isStaged(route.state.resultKind)) return 'working';
   if (route.state.phase === 'waiting') return null;
   return STATUS_AT_STAGE[route.state.stage ?? 'development'] ?? 'working';
 }

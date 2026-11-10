@@ -1,5 +1,6 @@
 import { useT } from '../i18n';
 import type { TaskLine, TaskStatus } from '../types';
+import { stageName } from './stage-name';
 
 /* What needs people first, then what moves, then what has not started and what waits for its turn; closed tasks after. */
 export const ORDER: TaskStatus[] = ['waiting', 'blocked', 'review', 'working', 'open', 'planned', 'done', 'cancelled'];
@@ -24,7 +25,7 @@ export function TaskRow({ task, on, place, onOpen, showTurn = true }: { task: Ta
         <span className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</span>
         {place}
         {ownerName && <span>{t.tasks.echelons.owner(ownerName)}</span>}
-        <span className="trow-gate">{workflow.stage ? t.tasks.echelons.stages[workflow.stage] : t.tasks.echelons.coordination}</span>
+        <span className="trow-gate">{workflow.stage ? stageName(t, workflow, workflow.stage) : t.tasks.echelons.coordination}</span>
         {showTurn && task.turn !== null && <span>{t.tasks.turn(task.turn)}</span>}
       </span>
     </button>

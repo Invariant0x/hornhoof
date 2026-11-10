@@ -1,6 +1,7 @@
 import type { EchelonFindingsView, EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { useT } from '../i18n';
 import type { Org, TaskDetail } from '../types';
+import { phaseName, stageName } from './stage-name';
 
 const STAGE_CLASS = { pending: 'next', active: 'current', complete: 'passed', skipped: 'skipped' };
 
@@ -16,17 +17,18 @@ export function TaskWorkflow({ workflow, task, org }: { workflow: EchelonsSnapsh
 }
 
 export function WorkflowStages({ workflow, resolveOwner }: { workflow: EchelonsSnapshot; resolveOwner(id: string): string }) {
-  const labels = useT().tasks.echelons;
+  const t = useT();
+  const labels = t.tasks.echelons;
   const reason = (value: string) => labels.reasons[value as keyof typeof labels.reasons] ?? value;
   return <section className="fit">
     <h4>{workflow.resultKind === 'coordination' ? labels.coordination : workflow.resultKind === 'turnkey' ? labels.turnkey : labels.heading}</h4>
-    <p className="muted" role="status">{labels.phases[workflow.phase]}</p>
+    <p className="muted" role="status">{phaseName(t, workflow)}</p>
     <ol className="tgates" aria-label={labels.heading}>
       {workflow.stages.map(stage => {
         const current = stage.stage === workflow.stage;
         const owner = current ? workflow.ownerAgentId : stage.ownerAgentId;
         return <li key={stage.stage} className={STAGE_CLASS[stage.status]} aria-current={current ? 'step' : undefined}>
-          <b>{labels.stages[stage.stage]}</b>{' '}<span>{labels.statuses[stage.status]}</span>
+          <b>{stageName(t, workflow, stage.stage)}</b>{' '}<span>{labels.statuses[stage.status]}</span>
           {owner && <p>{labels.owner(resolveOwner(owner))}</p>}
           {stage.reason && <p className="muted">{reason(stage.reason)}</p>}
         </li>;
