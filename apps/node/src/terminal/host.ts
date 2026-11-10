@@ -2294,7 +2294,7 @@ export class TerminalHost {
   private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
-    if (stopIsLate({ promptIn: this.stoppable(a), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (stopIsLate({ promptIn: this.stoppable(a), answersPerson: Boolean(a.personWords), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
     if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);

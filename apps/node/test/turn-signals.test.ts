@@ -41,6 +41,7 @@ describe('whose a stop hook is', () => {
     ['from a session the agent left and went back to', { promptIn: true, from: 'old', session: 'old', left }, false],
     ['from a session the host has not heard of, as a cleared conversation goes on in', { promptIn: true, from: 'unknown', session: 'new', left }, false],
     ['from a program that names no session', { promptIn: true, from: undefined, session: 'new', left }, false],
+    ["that answers a person's own words, sent while the prompt waited", { promptIn: false, answersPerson: true, from: 'new', session: 'new', left }, false],
   ])('%s', (_, stop, late) => {
     expect(stopIsLate(stop)).toBe(late);
   });
