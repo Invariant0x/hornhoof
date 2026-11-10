@@ -8,7 +8,8 @@ export type UpdaterStatus = {
   version: string;
   commit?: string;
   state: 'running' | 'done' | 'failed' | 'rolled_back';
-  step: 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
+  /* wait: a worker downloaded the build and waits for its turn to install it. */
+  step: 'backup' | 'pull' | 'wait' | 'install' | 'health' | 'rollback' | 'finished';
   log: string;
   at: string;
 };

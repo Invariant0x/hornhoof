@@ -3,10 +3,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { cameOverHttps } from '../../auth/tunnel.js';
-import { companies, LINK_PATHS, machines, publicLinks, type MachineRole } from '../../db/schema.js';
+import { companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
+import { followOf, goodGrant, releaseHeld } from './follow.js';
 import { NETWORK_ID } from './ids.js';
 import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, viewFor, workerLink, workerView } from './join.js';
 import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
@@ -32,6 +33,8 @@ const ReportBody = z.object({
   hostname: z.string().regex(/^[A-Za-z0-9._-]{1,120}$/).optional(),
   path: z.enum(LINK_PATHS).nullable().optional(),
   directFails: z.boolean().optional(),
+  /* How far the machine is with the server's build: downloaded, installing, or failed at it. Null: with none. */
+  update: z.object({ commit: z.string().min(1).max(64), state: z.enum(UPDATE_STATES) }).nullable().optional(),
 });
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
@@ -108,24 +111,33 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* Only the leader signs, so only it uses the authority's key. */
     const crlPem = authority && leading() ? await makeCrl(authority, revoked) : null;
     /* A link that cannot be told now is left out, and a worker keeps the one it has. */
-    const link = machine?.role === 'worker' ? await workerLink(ctx) : await linkOf(machine);
-    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data: await dataMachines(db) };
+    const worker = machine?.role === 'worker' ? machine : null;
+    const link = worker ? await workerLink(ctx) : await linkOf(machine);
+    /* A worker also hears of the server's build, and when it may install it. */
+    const follow = worker ? await followOf(ctx, worker.id) : {};
+    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data: await dataMachines(db), ...follow };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
      alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const { hostname, ...said } = ReportBody.parse(req.body ?? {});
+    const { hostname, update, ...said } = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
-    if (machine) {
-      await db.transaction(async tx => {
-        const [row] = await tx.select({ reportAt: machines.reportAt }).from(machines).where(eq(machines.id, machine.id)).for('update');
-        const now = new Date();
-        await countOnline(tx, machine.id, row?.reportAt ?? null, now);
-        await tx.update(machines).set({ ...said, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id));
-      });
-    }
+    if (!machine) return reply.code(204).send();
+    const installed = await db.transaction(async tx => {
+      const [row] = await tx.select().from(machines).where(eq(machines.id, machine.id)).for('update');
+      const now = new Date();
+      await countOnline(tx, machine.id, row?.reportAt ?? null, now);
+      /* A failure at the build it was told to install, or at the one it downloaded, is remembered, so it is not told
+         again at once. */
+      const failed = update?.state === 'failed' ? { failedCommit: update.commit, failedAt: now } : {};
+      const follows = update === undefined ? {} : { updateCommit: update?.commit ?? null, updateState: update?.state ?? null, ...failed };
+      const [after] = await tx.update(machines).set({ ...said, ...follows, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
+      /* Its turn to install is over once it says so: it runs the build, or the install failed. */
+      return Boolean(row && after && goodGrant(row, now) && !goodGrant(after, now));
+    });
+    if (installed) void releaseHeld(ctx);
     return reply.code(204).send();
   });
 

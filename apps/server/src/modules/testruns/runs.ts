@@ -30,6 +30,7 @@ import { pickMachine } from './pick.js';
 import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
+import { holdsMachine } from '../network/follow.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -886,11 +887,17 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       if (candidates.length) await runReached(ctx, run, 'host_slot');
       return;
     }
-    const [taken] = await db
-      .update(testParts)
-      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
-      .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
-      .returning();
+    /* No part goes to a machine that installs its build now: asked and claimed in one transaction, so the word to install
+       and this part never cross. The server's own node is never held so. */
+    const taken = await db.transaction(async tx => {
+      if (!place.builtin && (await holdsMachine(tx, place.nodeId))) return null;
+      const [claimed] = await tx
+        .update(testParts)
+        .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
+        .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
+        .returning();
+      return claimed ?? null;
+    });
     if (!taken) return;
     const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, withKept(partMessage(run, part, found.repo, task.number), kept));
     /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */

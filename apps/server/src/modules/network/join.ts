@@ -12,6 +12,7 @@ import { ApiError, loggable } from '../../errors.js';
 import { Server } from '../link/client.js';
 import { tunnelSettings } from '../link/link.js';
 import { CERT_DAYS, RENEW_AFTER_DAYS, type Issued } from './authority.js';
+import type { Go, LeaderBuild } from './follow.js';
 import { renewedMessage, renewMessage, type Signed } from './renewal.js';
 import { authorityOf, certify, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials } from './store.js';
 
@@ -104,7 +105,7 @@ export type DataMachine = { machine: string; networkId: string; hostname: string
 export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string };
 /* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
    keeps the link it has. */
-export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link?: WorkerLink | null };
+export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link?: WorkerLink | null; build: LeaderBuild | null; go: Go | null };
 
 /* The machines that keep the company's data, with where their keepers said they are: the ones a worker dials. */
 export async function dataMachines(db: Db): Promise<DataMachine[]> {
@@ -172,13 +173,15 @@ export async function workerLink(ctx: Ctx): Promise<WorkerLink | null | undefine
   return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey };
 }
 
-/* What a worker knows of the network: who it is, whom to trust and whom not, where the data machines are, and the link. */
+/* What a worker knows of the network: who it is, whom to trust and whom not, where the data machines are, and the link.
+   The server's build and the word to install it are told only through the peer link, to the machine's own keeper: a view
+   that goes with a join or a renewal carries none. */
 export async function workerView(ctx: Ctx, machineId: string): Promise<WorkerView> {
   const row = await networkMachine(ctx.db, machineId);
   if (!row) throw notAMachine();
   const authority = await authorityOf(ctx.db, ctx.config);
   const link = await workerLink(ctx);
-  return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }) };
+  return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }), build: null, go: null };
 }
 
 const dayOf = (at: Date): string => at.toISOString().slice(0, 10);

@@ -13,6 +13,7 @@ import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testP
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { linkOf, publicUrl } from '../link/link.js';
+import { leaderBuild, type LeaderBuild } from '../network/follow.js';
 import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
 import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
@@ -50,6 +51,9 @@ const coreLine = (core: CoreAnswer): string => ('here' in core ? `core-here ${co
    its place when a command runs there again. */
 const keptWhileConnected = (column: AnyPgColumn) => sql`CASE WHEN ${machines.revokedAt} IS NULL THEN ${column} END`;
 const NO_PLACE_AFTER_DISCONNECT = { role: keptWhileConnected(machines.role), signKey: keptWhileConnected(machines.signKey), networkId: keptWhileConnected(machines.networkId) };
+
+/* The three images of the server's build, each by its digest, as the installer pulls them. */
+const buildLine = (image: string, build: LeaderBuild): string => `build ${build.tag} ${image}@${build.digest} ${image}-node@${build.nodeDigest} ${image}-updater@${build.updaterDigest}\n`;
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
@@ -163,12 +167,15 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
+    /* The server's own build, when it knows it, so the core comes up on the build the server runs. */
+    const build = core ? await leaderBuild(ctx) : null;
 
-    /* The core's line first, then one line per node: the installer names its container after the node. */
+    /* The build's line and the core's first, then one line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
-      return reply.type('text/plain; charset=utf-8').send((core ? coreLine(core) : '') + joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
+      const first = (build ? buildLine(config.image, build) : '') + (core ? coreLine(core) : '');
+      return reply.type('text/plain; charset=utf-8').send(first + joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
     }
-    return { machine: joined.machine, nodes: joined.nodes, core };
+    return { machine: joined.machine, nodes: joined.nodes, core, build };
   });
 
   /* The core lives in a folder named after the company and takes the server's own web port first, so the company opens

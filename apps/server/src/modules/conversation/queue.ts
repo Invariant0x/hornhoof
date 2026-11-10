@@ -14,6 +14,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
+import { holdsMachine } from '../network/follow.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -422,7 +423,7 @@ async function insertRunningTurn(
   text: string,
   personId: string | null,
   repeated: RepeatedTurn | null,
-): Promise<{ jobId: string; token: string }> {
+): Promise<{ jobId: string; token: string } | null> {
   const [last] = await ctx.db
     .select({ hash: jobs.instructionsHash })
     .from(jobs)
@@ -430,24 +431,32 @@ async function insertRunningTurn(
     .orderBy(desc(jobs.startedAt))
     .limit(1);
   const token = newToken();
-  const [job] = await ctx.db
-    .insert(jobs)
-    .values({
-      companyId: target.agent.companyId,
-      subscriptionId: target.sub.id,
-      nodeId: node.kind === 'node' ? node.nodeId : null,
-      agentId: target.agent.id,
-      kind: 'conversation',
-      status: 'running',
-      startedAt: new Date(),
-      prompt: text,
-      timeoutMs: TURN_TIMEOUT_MS,
-      ...(await turnOwner(ctx, personId, repeated)),
-      toolTokenHash: hashToken(token),
-      instructionsHash: last ? last.hash : null,
-    })
-    .returning({ id: jobs.id });
-  return { jobId: job!.id, token };
+  const nodeId = node.kind === 'node' ? node.nodeId : null;
+  const owner = await turnOwner(ctx, personId, repeated);
+  /* No turn begins on a machine that installs its build now: asked and written in one transaction, so the word to
+     install and this turn never cross. */
+  const job = await ctx.db.transaction(async tx => {
+    if (await holdsMachine(tx, nodeId)) return null;
+    const [row] = await tx
+      .insert(jobs)
+      .values({
+        companyId: target.agent.companyId,
+        subscriptionId: target.sub.id,
+        nodeId,
+        agentId: target.agent.id,
+        kind: 'conversation',
+        status: 'running',
+        startedAt: new Date(),
+        prompt: text,
+        timeoutMs: TURN_TIMEOUT_MS,
+        ...owner,
+        toolTokenHash: hashToken(token),
+        instructionsHash: last ? last.hash : null,
+      })
+      .returning({ id: jobs.id });
+    return row!;
+  });
+  return job && { jobId: job.id, token };
 }
 
 async function appendOpenedWords(
@@ -489,6 +498,7 @@ async function storeTypedTurn(
   /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
   if (running && running.id !== queuedFrom) return null;
   const opened = await insertRunningTurn(ctx, node, target, text, personId, openedQueued ? openedQueued.repeated : null);
+  if (!opened) return null;
   await appendOpenedWords(ctx, target.agent.companyId, agentId, opened.jobId, text, personId, openedQueued);
   await publishWorking(ctx, target.agent.companyId);
   return opened;
@@ -833,12 +843,16 @@ async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: strin
 /* Takes the waiting turn to send it, running from now on. In the same write each line of the map its work keeps on, with
    the tasks that go out along with it, begins a new cycle: a server that stops once the turn went out never brings the
    line's old return back, and a turn whose cycle cannot be kept is not taken. The lines when one began a cycle. */
-async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | null> {
+async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
   return ctx.db.transaction(tx => takeCurrent(tx, job, along, sending));
 }
 
-async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | null> {
+/* The turn's machine installs its build now: the turn is not taken and waits, and goes out when the machine is done. */
+const HELD = 'held';
+
+async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | typeof HELD | null> {
   if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
+  if (await holdsMachine(tx, sending.nodeId)) return HELD;
   const [row] = await tx
     .update(jobs)
     .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
@@ -977,6 +991,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
+  if (taken === HELD) return;
   if (!taken) return sendNext(ctx, agentId);
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
