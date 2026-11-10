@@ -13,7 +13,7 @@ database on 2026-11-09, before its tasks and turns were removed.
 | `apps/web` | 26,900 | 33,200 |
 | `packages/protocol` | 3,000 | 3,700 |
 | `scripts`, `apps/updater` | 4,000 | 2,700 |
-| `templates` (50 roles, 178 skills) | 463,000 characters | |
+| `templates` (54 roles, 179 skills) | 463,000 characters | |
 
 The database has 91 tables. An agent can be offered about 108 tools.
 
@@ -103,7 +103,7 @@ Checked by searching for importers outside tests.
   "unavailable".
 - `planningHistory` (`testruns/plan-history.ts`), `test-impact-replay*.ts`, `independentView`, the wake cause
   `changes`, `gateCounts`, `encodeNativeDecision`: only tests use them.
-- The skill `hh-questions`: given to nobody.
+- The skill `hh-questions` was given to nobody; since 2026-11-10 every employee carries it.
 - `outbound` and `model-checks`: reachable, but the live company has no row in any of their 23 tables, and the web
   calls 2 of their 28 routes.
 

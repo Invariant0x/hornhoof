@@ -61,6 +61,12 @@ describe('the route of every department template', () => {
     ]);
   });
 
+  it('tells every member how a document is handed in, and every head how a result that passed its stages is accepted', () => {
+    expect(templates.skills.get('hh-task-flow')!.body).toMatch(/task\.echelons says document[\s\S]*hh-attach[\s\S]*name no commit/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/stages of your department's route[\s\S]*reaches you once they passed[\s\S]*a document[\s\S]*"report" done true/);
+    expect(templates.skills.get('orch-company')!.body).toMatch(/every department's work goes through the stages of that department's own route[^.]*hands in a document in place of a commit/);
+  });
+
   it('takes a department made from no template through the route of Development', () => {
     expect(templates.stagesOf(null)).toBe(templates.stagesOf('development'));
   });

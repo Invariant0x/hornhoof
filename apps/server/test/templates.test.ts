@@ -813,6 +813,8 @@ describe('templates', () => {
       const skill = templates.skills.get('hh-questions');
       expect(skill).toBeDefined();
       expect(skill!.kind).toBe('core');
+      /* A rule on whom to ask is of use only to an employee who carries it, and every one of them asks. */
+      expect(CORE_SKILLS).toContain('hh-questions');
       expect(skill!.grants).toEqual([]);
       expect(skill!.body).toContain('- **Materials**:');
       expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
