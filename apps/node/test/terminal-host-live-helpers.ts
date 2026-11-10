@@ -61,7 +61,8 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     if (event === 'prompt') initial = false;
     transit++;
     try {
-      const res = await fetch(`${hookUrl}/${event}`, { method: 'POST', body: JSON.stringify(body) });
+      /* A fresh connection each call: a kept-alive one reaches the bridge only once the server drops it, about 6 s on macOS, while the clock stands still. */
+      const res = await fetch(`${hookUrl}/${event}`, { method: 'POST', body: JSON.stringify(body), headers: { connection: 'close' } });
       if (!res.ok) throw new Error(`Hook ${event}: ${res.status}`);
       return await res.text();
     } finally { transit--; }
