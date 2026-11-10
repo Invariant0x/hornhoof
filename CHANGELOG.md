@@ -5,6 +5,23 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.18.2] - 2026-11-10
+
+Code work outside a turn and quick fixes go to a turnkey team, not to the members of the echelons.
+
+### Before you update
+
+- A member of a turnkey team reviews, checks the security of and tests its own work. Turn on the skills of every
+  echelon on the cards of a turnkey team's members: plan review, API design, review, security, test gaps, browser
+  scenarios, test environment, release checks and release notes.
+
+### Changed
+
+- The orchestrator and the heads give code work outside a turn, and a small, quick fix that need not go through every
+  echelon, to a member of a turnkey team, who does it end to end alone with its own review and security check.
+  Members who work in the echelons take neither, and where there is no turnkey team such work waits for a turn. It is a
+  rule of their instructions: Hornhoof itself refuses no assignment.
+
 ## [0.18.1] - 2026-11-10
 
 Less in the way of a turn before turn 19. Code nothing reached is gone with its tables, a quiet program is shown to
