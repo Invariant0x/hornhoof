@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
+import { forgetOwnerKey } from '../owner-key';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me, Org } from '../types';
 import { LogoMark } from '../ui/icons';
@@ -369,10 +370,12 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     };
   }, [menu]);
 
+  /* The person's key leaves this device with their session, whatever the server answered. */
   async function signOut() {
     try {
       await api.post('/api/auth/logout');
     } finally {
+      await forgetOwnerKey();
       onSignOut();
     }
   }

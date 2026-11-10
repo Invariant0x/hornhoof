@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { keyDefaults } from '../src/owner-key';
 import { Shell } from '../src/screens/Shell';
 import { MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
 import { decl, px } from './css';
@@ -86,6 +87,20 @@ describe('Shell', () => {
     expect(screen.getByRole('button', { name: 'People' })).toBeInTheDocument();
     expect(localStorage.getItem('hh-lang')).toBe('en');
     expect(document.documentElement.lang).toBe('en');
+  });
+
+  it("lets the person's key go from this device at sign-out, before the screen changes", async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'POST /api/auth/logout': [204] });
+    const key = { publicKey: 'k', privateKey: {} as CryptoKey };
+    await keyDefaults.store.put(key);
+    let keptAtSignOut: unknown = 'not asked';
+    const onSignOut = () => void keyDefaults.store.get().then(found => (keptAtSignOut = found));
+    render(<LanguageProvider><Shell me={ME} onSignOut={onSignOut} /></LanguageProvider>);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'Log out' }));
+    await waitFor(() => expect(keptAtSignOut).toBeNull());
+    expect(await keyDefaults.store.get()).toBeNull();
   });
 
   it('shows the version and build in the account menu', async () => {

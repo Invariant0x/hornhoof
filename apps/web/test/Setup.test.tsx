@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
-import { mockApi, type Call } from './api-mock';
+import { mockApi, type Call, withKey } from './api-mock';
 import { decl } from './css';
 
 /* The same long random name for every start, so the tests know what the Link field holds before anything is typed. */
@@ -125,7 +125,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
-    expect(screen.getByText(command)).toBeInTheDocument();
+    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     expect(screen.getByText('Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
@@ -321,6 +321,27 @@ describe('the public link on the setup screen', () => {
   });
 });
 
+describe("the setup's command and its owner's key", () => {
+  beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+
+  it('makes the key with the password just typed in the form, and asks for nothing', async () => {
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join JOIN-CODE-123';
+    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command }], 'GET /api/me/key': [200, { key: null }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await fillFirstTwoSteps(user, 'a password typed here');
+    await user.click(screen.getByRole('radio', { name: 'My subscription' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(calls.some(call => call.method === 'PUT' && call.path === '/api/me/key')).toBe(true));
+    const sent = calls.find(call => call.method === 'PUT' && call.path === '/api/me/key')!.body as { password: string; publicKey: string };
+    expect(sent.password).toBe('a password typed here');
+    expect(await screen.findByText(`${command} --owner-key ${sent.publicKey}`)).toBeInTheDocument();
+    /* The only password field is long gone: nothing was asked a second time. */
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  });
+});
+
 describe('the new link on the setup screen', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/setup?code=LINK-CODE-123');
@@ -370,7 +391,8 @@ describe('the new link on the setup screen', () => {
     await act(() => vi.advanceTimersByTimeAsync(0));
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
-    expect(screen.getByText(command)).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(await screen.findByText(withKey(command))).toBeInTheDocument();
   });
 
   it('goes to the map with Next when the setup made no command', async () => {

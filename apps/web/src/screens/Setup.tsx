@@ -142,14 +142,18 @@ function useAfterSetup(onDone: (done: { welcome: boolean }) => void) {
   const [command, setCommand] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanProvider>('claude');
   const [made, setMade] = useState<MadeLink | null>(null);
+  /* The password the person just chose, kept for the one command this screen still shows: their key is made with it. */
+  const [password, setPassword] = useState('');
   const done = () => onDone({ welcome: true });
   return {
     command,
     plan,
     made,
-    answer(answer: SetupAnswer, chosen: PlanProvider) {
+    password,
+    answer(answer: SetupAnswer, chosen: PlanProvider, typed: string) {
       setCommand(answer.command ?? null);
       setPlan(chosen);
+      setPassword(typed);
       if (answer.link) setMade(answer.link);
       else if (!answer.command) done();
     },
@@ -377,7 +381,7 @@ function StepsHead({ step }: { step: number }) {
 
 interface WizardProps {
   linkDomain: string;
-  onAnswer: (answer: SetupAnswer, plan: PlanProvider) => void;
+  onAnswer: (answer: SetupAnswer, plan: PlanProvider, password: string) => void;
 }
 
 /* The three steps of setup, with what the person has written kept while they go back and forth. */
@@ -389,7 +393,7 @@ function Wizard({ linkDomain, onAnswer }: WizardProps) {
   const [problems, setProblems] = useState<Problems>({});
   const sent = useSubmit(
     form,
-    answer => onAnswer(answer, form.plan),
+    answer => onAnswer(answer, form.plan, form.password),
     refusal => {
       setProblems({ [refusal.where]: refusal.text });
       setAskCode(was => was || refusal.where === 'code');
@@ -433,13 +437,14 @@ function Wizard({ linkDomain, onAnswer }: WizardProps) {
 }
 
 /* The command that connects the person's own machine, shown when the orchestrator runs on their plan. */
-function ConnectMachine({ command, plan, onDone }: { command: string; plan: PlanProvider; onDone: () => void }) {
+/* The password is the one the person just chose in this form, so their key is made with it and nothing more is asked. */
+function ConnectMachine({ command, plan, password, onDone }: { command: string; plan: PlanProvider; password: string; onDone: () => void }) {
   const t = useT();
   return (
     <Card>
       <h1>{t.setup.connectMachine}</h1>
       <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
-      <CommandBox command={command} />
+      <CommandBox command={command} password={password} />
       <p className="muted">{t.setup.joinOnce}</p>
       <div className="actions">
         <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>
@@ -460,6 +465,6 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
       </Card>
     );
   }
-  if (after.command) return <ConnectMachine command={after.command} plan={after.plan} onDone={after.done} />;
+  if (after.command) return <ConnectMachine password={after.password} command={after.command} plan={after.plan} onDone={after.done} />;
   return <Wizard linkDomain={linkDomain} onAnswer={after.answer} />;
 }

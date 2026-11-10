@@ -1,3 +1,4 @@
+import { forgetOwnerKey } from './owner-key-store';
 /* message: the server's own words, empty when it gave none; the screens word the rest from the dictionaries. */
 export class ApiFailure extends Error {
   /* What the server gave with the reason for a screen to show, such as the machines it names. */
@@ -31,11 +32,19 @@ async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Respon
   }
 }
 
+/* A session the server no longer knows is over on this device too: the person's key goes with it. A wrong password is no
+   such end. */
+async function failed(status: number, data: unknown): Promise<ApiFailure> {
+  const why = failure(status, data);
+  if (status === 401 && why.reason === 'signed_out') await forgetOwnerKey();
+  return why;
+}
+
 async function respond<T>(path: string, init: RequestInit): Promise<T> {
   const res = await fetchOrigin(path, init);
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw failure(res.status, data);
+  if (!res.ok) throw await failed(res.status, data);
   return data as T;
 }
 

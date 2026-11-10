@@ -1,8 +1,11 @@
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useT, type Messages } from '../i18n';
+import { withOwnerKey } from '../owner-key';
 import type { ShownCommand } from '../types';
 import { CopyButton } from './CopyButton';
 import { Edge } from './Edge';
+import { useOwnerKey } from './PasswordPrompt';
 import { useNow } from './reset';
 
 export type ActiveCommand = { id: string; command: string; expiresAt: string | null };
@@ -41,15 +44,54 @@ export async function loadMachineCommands(
   setAddCommands(adds);
 }
 
-/* The install command with Copy, and what running it means for the person's subscription, or for their machine. */
-export function CommandBox({ command, trust }: { command: string; trust?: string }) {
+/* The install command with Copy, and what running it means for the person's subscription, or for their machine. A
+   command that joins a machine shows only with the viewer's own key on it, so no machine joins without knowing its
+   owner: with no key yet it is made first, with the password the screen holds or else asked for, and never shown
+   without it. Any other command shows as it is. */
+export function CommandBox({ command, trust, password }: { command: string; trust?: string; password?: string }) {
   const t = useT();
+  const joins = command.includes(' --join ');
+  const { publicKey, prompt } = useOwnerKey();
+  const [key, setKey] = useState<string | null>(null);
+  const [left, setLeft] = useState(false);
+  const [tries, setTries] = useState(0);
+
+  useEffect(() => {
+    if (!joins) return;
+    let live = true;
+    setLeft(false);
+    /* The screen's own password is for the first try: one that did not work is asked for after it. */
+    publicKey(tries === 0 ? password : undefined).then(
+      found => {
+        if (!live) return;
+        setKey(found);
+        setLeft(found === null);
+      },
+      () => live && setLeft(true),
+    );
+    return () => {
+      live = false;
+    };
+  }, [joins, tries, password, publicKey]);
+
+  const shown = joins ? (key ? withOwnerKey(command, key) : null) : command;
   return (
     <div className="command-box">
-      <div className="command">
-        <code>{command}</code>
-        <CopyButton text={command} />
-      </div>
+      {shown ? (
+        <div className="command">
+          <code>{shown}</code>
+          <CopyButton text={shown} />
+        </div>
+      ) : left ? (
+        <>
+          <p className="muted">{t.subs.ownerKeyNeeded}</p>
+          <div className="actions">
+            <button className="btn" type="button" onClick={() => setTries(n => n + 1)}>{t.subs.ownerKeyEnter}</button>
+          </div>
+        </>
+      ) : (
+        prompt ?? <p className="muted">{t.subs.ownerKeyMaking}</p>
+      )}
       <p className="trust">{trust ?? t.subs.trust}</p>
     </div>
   );

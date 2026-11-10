@@ -4,7 +4,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
-import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
+import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS, withKey } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 /* xterm needs a real canvas; the window only has to know the terminal is there. */
@@ -310,7 +310,7 @@ describe('AgentWindow', () => {
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
     const card = await screen.findByRole('region', { name: 'Command to add Claude to ivan-laptop' });
-    expect(within(card).getByText(command)).toBeInTheDocument();
+    expect(await within(card).findByText(withKey(command))).toBeInTheDocument();
     expect(within(card).getByText(/^Run this in a terminal on ivan-laptop\./)).toBeInTheDocument();
     expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Done' }));
