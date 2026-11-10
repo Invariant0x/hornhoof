@@ -2,8 +2,9 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent } from '@hornhoof/protocol';
+import { vi } from 'vitest';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
-import type { TermJob } from '../src/terminal/host.js';
+import type { TerminalHost, TermJob } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 
@@ -19,6 +20,16 @@ export const kimiScreen = (input: string) => {
 };
 
 export const until = (check: () => boolean | Promise<boolean>) => eventually(check);
+
+/* The stand-in programs list their tools as they start, as each real one does with a session. The node counts what a
+   program does from the end of its launch, when it starts to watch it, so their listing comes then. */
+export function listsAtStart(host: TerminalHost): void {
+  const watch = host['watch'].bind(host);
+  vi.spyOn(host as unknown as { watch(a: { key: string; startedAt: number }): void }, 'watch').mockImplementation(a => {
+    host['bridge']['heardList'](a.key, a.startedAt);
+    watch(a as Parameters<typeof watch>[0]);
+  });
+}
 
 export const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
