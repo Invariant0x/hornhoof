@@ -1618,6 +1618,8 @@ button.mat:hover { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow);
 .task-sum p { margin: 0; overflow-wrap: anywhere; }
 .task-sum h3 { margin: 0; font-size: 13px; }
 .task-sum .entry-actions, .backlog > .entry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* An agent window lies over the end of the page, so while one is open the way into a task moves to the start of its row. */
+@media (min-width: 761px) { .body.with-window .task-sum .entry-actions { justify-content: flex-start; } }
 .bl-text { white-space: pre-wrap; }
 .backlog { display: grid; gap: 12px; }
 .backlog-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px; }
