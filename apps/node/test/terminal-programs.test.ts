@@ -205,9 +205,9 @@ describe('Codex in a terminal', () => {
 });
 
 describe('Antigravity CLI in a terminal', () => {
-  it('runs agy itself with session trust, model and effort, and resumes its conversation', () => {
+  it('runs agy itself with session trust, no feedback survey, model and effort, and resumes its conversation', () => {
     const base = { bin: '/t/agy', home: '/h', workDir: '/w/g1', instructionsFile: null, urls: URLS };
-    const trust = ['--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: ['/w/g1'] })];
+    const trust = ['--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: ['/w/g1'], showFeedbackSurvey: false })];
     const first = agyProgram.launch({ ...base, sessionId: null, model: 'gemini-4-argon', effort: 'high' });
     expect(first.command).toEqual(['/t/agy', '--model', 'gemini-4-argon', '--effort', 'high', ...trust]);
     expect(first.sessionId).toBeNull();

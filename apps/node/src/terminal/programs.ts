@@ -142,8 +142,8 @@ export const kimiProgram: TermProgram = {
 export const agyProgram: TermProgram = {
   kind: 'antigravity',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    /* agy names a new conversation in its first invocation hook. */
-    const command = [bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), '--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: [workDir] })];
+    /* agy names a new conversation in its first invocation hook. Its feedback survey takes the input from the turn's words. */
+    const command = [bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), '--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: [workDir], showFeedbackSurvey: false })];
     /* agy keeps everything in HOME, and leaves the program in the node's tools folder as the node installed it. */
     return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', ...bridgeEnv(urls) }, sessionId };
   },
