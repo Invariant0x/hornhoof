@@ -86,8 +86,8 @@ describe('migration histories merged in turn 5', () => {
         update node_codes set dismissed_subscription_ids = array['00000000-0000-4000-8000-000000000003']::uuid[];`);
     }
     const newColumns = branch === 'main'
-      ? { jobs: ['requested_prompt'], tasks: ['external_wait', 'work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['dismissed_subscription_ids'] }
-      : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: ['work_kind', 'risk_class', 'urgent', 'small'], node_codes: [] };
+      ? { jobs: ['requested_prompt'], tasks: ['external_wait', 'work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['dismissed_subscription_ids', 'core'] }
+      : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: ['work_kind', 'risk_class', 'urgent', 'small'], node_codes: ['core'] };
     const tables = ['companies', 'people', 'subscriptions', 'agents', 'tasks', 'jobs', 'agent_events', 'node_codes'] as const;
     const before = await Promise.all(tables.map(table => source.query<SnapshotRow>(`select to_jsonb(r) as row from ${table} r`)));
     const recordedBefore = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;

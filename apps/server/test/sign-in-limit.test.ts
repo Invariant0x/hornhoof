@@ -40,6 +40,12 @@ describe('addressKey', () => {
     expect(addressKey('::1')).toBe('0:0:0:0::/64');
   });
 
+  it('counts a whole peer machine as one address of its own', () => {
+    const worker = 'peer:11111111-1111-4111-8111-111111111111';
+    expect(addressKey(worker)).toBe(worker);
+    expect(addressKey('peer:22222222-2222-4222-8222-222222222222')).not.toBe(addressKey(worker));
+  });
+
   it.each([
     ['with a dotted tail', '::ffff:203.0.113.5'],
     ['in capitals', '::FFFF:203.0.113.5'],

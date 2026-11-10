@@ -11,7 +11,9 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
-import { publicUrl } from '../link/link.js';
+import { linkOf, publicUrl } from '../link/link.js';
+import { companyFolder, isServerComputer, issueTicket } from '../network/join.js';
+import { findThisMachine } from '../network/store.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
@@ -31,7 +33,16 @@ const JoinBody = z.object({
   os: z.enum(['linux', 'darwin']),
   arch: z.enum(['arm64', 'x86_64']),
   kind: z.enum(MACHINE_KINDS).default('computer'),
+  /* An installer that can set up the company's core on the computer asks for it. */
+  core: z.boolean().default(false),
 });
+
+/* The port a server's web door has when its keeper has reported none. */
+const WEB_PORT = 8080;
+/* What an installer needs for the core: nothing but the port when the computer is the server's own, which has all of
+   Hornhoof already. */
+type CoreAnswer = { folder: string; ticket: string; port: number; company: string } | { here: true; port: number };
+const coreLine = (core: CoreAnswer): string => ('here' in core ? `core-here ${core.port}\n` : `core ${core.folder} ${core.ticket} ${core.port} ${core.company}\n`);
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
@@ -78,6 +89,11 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
     }
 
+    /* The core comes to an installer that asks for it, and with a command made for it. The server's own computer needs
+       no ticket. */
+    const wantsCore = body.core || code.core;
+    const here = wantsCore && isServerComputer(config, body.machineId);
+
     const joined = await db.transaction(async tx => {
       const used = await tx
         .update(nodeCodes)
@@ -115,12 +131,16 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null } })
         .returning({ id: machines.id });
 
+      const ticket = wantsCore && !here ? await issueTicket(tx, machine!.id) : null;
+      /* A command for the core brings no node: the machine has its nodes, and they move to the core by themselves. */
+      if (code.core) return { machine: { id: machine!.id }, nodes: [], ticket };
+
       /* The machine's own node has no plan: it takes test runs, and the machine its owner's plans later. */
       if (alone) {
         const key = newToken();
         const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: null }, hashToken(key));
         if (!nodeId) throw alreadyThere();
-        return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }] };
+        return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }], ticket };
       }
 
       /* Each plan signs in on this machine by itself, with a key of its own; one that runs here already is left as it is. */
@@ -132,16 +152,25 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       if (!made.length) throw code.machineId ? alreadyThere() : codeUsed();
       await settlePlans(tx, made.map(n => n.subscriptionId));
-      return { machine: { id: machine!.id }, nodes: made };
+      return { machine: { id: machine!.id }, nodes: made, ticket };
     });
     closeJoined(hub, joined.nodes);
+    const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
 
-    /* One line per node: the installer names its container after the node. */
+    /* The core's line first, then one line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
-      return reply.type('text/plain; charset=utf-8').send(joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
+      return reply.type('text/plain; charset=utf-8').send((core ? coreLine(core) : '') + joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
     }
-    return joined;
+    return { machine: joined.machine, nodes: joined.nodes, core };
   });
+
+  /* The core lives in a folder named after the company and takes the server's own web port first, so the company opens
+     at the same address on every machine. */
+  async function coreFor(ticket: string | null, companyId: string): Promise<CoreAnswer> {
+    const port = (await findThisMachine(db, config))?.webPort ?? WEB_PORT;
+    if (!ticket) return { here: true, port };
+    return { folder: companyFolder((await linkOf(db))?.name ?? null, companyId), ticket, port, company: companyId };
+  }
 
   /* A command for a machine of one's own that joins without a plan. */
   app.post('/api/machines/command', async (req, reply) => {
@@ -166,6 +195,21 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (there) throw new ApiError(409, 'conflict', 'This subscription is on this machine already.', 'already_on_machine');
     reply.code(201);
     return createInstallCommand(db, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id], machineId: machine.id });
+  });
+
+  /* The company's core for a machine joined before machines had one: a command for that machine alone, which brings
+     the core and no node. Only the machine's owner may put Hornhoof's core on their computer. */
+  app.post('/api/machines/:id/core', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt), shownMachine, eq(machines.kind, 'computer')));
+    if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+    if (machine.personId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
+    if (machine.networkId || isServerComputer(config, machine.machineKey)) {
+      throw new ApiError(409, 'conflict', 'This machine is a full machine of the company already.', 'core_present');
+    }
+    reply.code(201);
+    return createInstallCommand(db, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: [], machineId: machine.id, core: true });
   });
 
   nodeCommandRoutes(app, ctx);

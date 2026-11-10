@@ -137,6 +137,10 @@ export type ErrorReason =
   | 'no_machine_id'
   | 'key_changed'
   | 'not_a_machine'
+  | 'ticket_used'
+  | 'machine_taken'
+  | 'renew_refused'
+  | 'core_present'
   | 'starting';
 
 export const NOT_CONFIRMED = 'Hornhoof could not confirm this change. It may be saved; look before you try again.';

@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import type { FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
-import { socketAddress } from '../net/proxy.js';
+import { socketAddress, UUID } from '../net/proxy.js';
 
 /* Looked up by name each time, since a container gets a new address when it starts again. */
 export async function isAddressOf(name: string | null | undefined, address: string): Promise<boolean> {
@@ -18,7 +18,7 @@ export const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean
 
 /* A request the keeper passed on from the link, which only it marks as https. Anyone can write that header, so it is
    believed only from the keeper container. */
-async function cameOverHttps(req: FastifyRequest, config: Config): Promise<boolean> {
+export async function cameOverHttps(req: FastifyRequest, config: Config): Promise<boolean> {
   const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim();
   return proto === 'https' && (await fromTunnel(req, config));
 }
@@ -28,9 +28,17 @@ export async function overLink(req: FastifyRequest, config: Config): Promise<boo
   return cameOverHttps(req, config);
 }
 
+/* How an address that stands for a whole peer machine begins. */
+export const PEER_ADDRESS = 'peer:';
+
 /* Who sent the request: through the keeper, the first address of X-Forwarded-For, which the keeper writes whatever the
-   visitor wrote; otherwise the socket's own address. */
+   visitor wrote; otherwise the socket's own address. What came through a peer machine counts as that one machine: the
+   forwarded address there is the word of the machine's owner, who could change it with every try. The header that names
+   the machine is read here and not through the network module, which reads this one. */
 export async function clientAddress(req: FastifyRequest, config: Config): Promise<string> {
+  const viaTunnel = await fromTunnel(req, config);
+  const peer = String(req.headers['x-hornhoof-via'] ?? '').toLowerCase();
+  if (viaTunnel && UUID.test(peer)) return `${PEER_ADDRESS}${peer}`;
   const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim();
-  return forwarded && (await fromTunnel(req, config)) ? forwarded : socketAddress(req.raw);
+  return forwarded && viaTunnel ? forwarded : socketAddress(req.raw);
 }

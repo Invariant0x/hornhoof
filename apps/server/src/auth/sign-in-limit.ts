@@ -2,6 +2,7 @@ import { eq, sql, type SQL } from 'drizzle-orm';
 import { hashToken } from '../crypto/tokens.js';
 import type { Db } from '../db/client.js';
 import { signInAttempts } from '../db/schema.js';
+import { PEER_ADDRESS } from './tunnel.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -46,9 +47,9 @@ const isIpv4Mapped = (groups: number[]) => groups.slice(0, 5).every(group => gro
 const asIpv4 = ([high, low]: number[]) => [high! >> 8, high! & 0xff, low! >> 8, low! & 0xff].join('.');
 
 /* What the limit counts an address as: an IPv4 as its text, in whichever form it came, an IPv6 as its /64, since one
-   visitor holds a whole /64. */
+   visitor holds a whole /64, and a peer machine as itself. */
 export function addressKey(address: string): string {
-  if (!address.includes(':')) return address;
+  if (!address.includes(':') || address.startsWith(PEER_ADDRESS)) return address;
   const groups = eightGroups(address);
   return isIpv4Mapped(groups) ? asIpv4(groups.slice(6)) : `${groups.slice(0, 4).map(hexGroup).join(':')}::/64`;
 }

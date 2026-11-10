@@ -2,7 +2,7 @@ import type http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { z } from 'zod';
-import { VIA } from '../modules/network/via.js';
+import { KEEPER_MARK, OWN_VIA, VIA } from '../modules/network/via.js';
 import type { Peer } from './peer-server.js';
 import { firstForwarded, INVOCATION, passThrough, serve, startingAnswer, type Target } from './proxy.js';
 
@@ -21,12 +21,15 @@ export function openTcp(target: Target): Promise<net.Socket> {
   });
 }
 
-/* What the app hears about a peer. The name comes from its certificate; passThrough has already dropped what it said. */
+/* What the app hears about a peer. The name comes from its certificate; passThrough drops what the request said of
+   itself. A peer's front door passes anybody's request this way, so the peer's name alone does not say its keeper asks:
+   the keeper sends its own requests with the header every front door takes off a visitor's, and only those get the mark. */
 export function peerHeaders(req: http.IncomingMessage, peer: Peer): Record<string, string> {
   const invocation = z.uuid().safeParse(req.headers[INVOCATION]);
   return {
     'x-forwarded-for': firstForwarded(req) || peer.address,
     [VIA]: peer.machine,
+    ...(req.headers[VIA] === OWN_VIA ? { [KEEPER_MARK]: '1' } : {}),
     ...(invocation.success ? { [INVOCATION]: invocation.data } : {}),
   };
 }

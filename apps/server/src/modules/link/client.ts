@@ -10,7 +10,7 @@ export type FrpcLocal = { http: { ip: string; port: number }; https: { ip: strin
 type Identity = { clientId: string; local: FrpcLocal };
 
 /* The parts of the relay's tunnel Hornhoof takes: the frps server and how to reach it. */
-const Server = z.object({
+export const Server = z.object({
   serverAddr: z.string().regex(/^[A-Za-z0-9.-]{1,253}$/),
   serverPort: z.number().int().min(1).max(65535),
   protocol: z.literal('wss'),
@@ -30,14 +30,10 @@ export const quoted = (text: string) => JSON.stringify(text);
 /* The same on every start of this machine's frpc, so the relay knows it for the one that held the link before. */
 export const linkClientId = (name: string, machineId: string): string => `${name}-${machineId.slice(0, 8)}-link`;
 
-/* How a frpc of this link logs in at the relay, whatever it then offers: the relay's server, the link's name and key, and
-   the id this client keeps across its starts. It refuses a link that is not what a link is, so nothing of the relay's
-   words reaches the config unread. */
-export function frpcHead(settings: TunnelSettings, clientId: string): string {
-  const server = Server.parse(settings.tunnel);
-  if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
-  if (!settings.key) throw new Error('the link has no key');
-  if (!clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
+/* How a frpc of Hornhoof reaches the relay, under the id it keeps across its starts. Nothing of the relay's words reaches
+   the config unread. */
+export function frpcTransport(tunnel: unknown, clientId: string): string {
+  const server = Server.parse(tunnel);
   return `serverAddr = ${quoted(server.serverAddr)}
 serverPort = ${server.serverPort}
 loginFailExit = false
@@ -49,7 +45,16 @@ transport.protocol = "wss"
 transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
 transport.heartbeatInterval = -1
 transport.tcpMuxKeepaliveInterval = 10
-metadatas.name = ${quoted(settings.name)}
+`;
+}
+
+/* How a frpc of this link logs in at the relay, whatever it then offers: the relay's server, the link's name and key, and
+   the id this client keeps across its starts. It refuses a link that is not what a link is. */
+export function frpcHead(settings: TunnelSettings, clientId: string): string {
+  if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
+  if (!settings.key) throw new Error('the link has no key');
+  if (!clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
+  return `${frpcTransport(settings.tunnel, clientId)}metadatas.name = ${quoted(settings.name)}
 metadatas.key = ${quoted(settings.key)}
 metadatas.client = ${quoted(clientId)}
 `;

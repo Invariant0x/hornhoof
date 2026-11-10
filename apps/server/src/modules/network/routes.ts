@@ -1,14 +1,24 @@
+import { isIPv4 } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { certificates, companies, machines, publicLinks, type MachineRole } from '../../db/schema.js';
+import { cameOverHttps } from '../../auth/tunnel.js';
+import { companies, LINK_PATHS, machines, publicLinks, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { issueCertificate, makeCrl } from './authority.js';
-import { authorityOf, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
-import { askerOf, type Asker } from './via.js';
+import { makeCrl } from './authority.js';
+import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, workerLink, workerView } from './join.js';
+import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
+import { keeperAsker, type Asker } from './via.js';
 
-const CertificateBody = z.object({ signKey: z.string().min(1).max(1024) });
+/* The private networks, and the ranges and the one loopback address that only tests report. */
+const PRIVATE = [/^10\./, /^172\.(?:1[6-9]|2\d|3[01])\./, /^192\.168\./, /^192\.0\.2\./, /^198\.51\.100\./, /^203\.0\.113\./];
+const isPrivateAddress = (address: string): boolean => isIPv4(address) && (address === '127.0.0.1' || PRIVATE.some(range => range.test(address)));
+
+const SignKey = z.string().min(1).max(1024);
+const CertificateBody = z.object({ signKey: SignKey });
+const JoinBody = z.object({ ticket: z.string().length(43), networkId: z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/), signKey: SignKey });
+const RenewBody = z.object({ machine: z.uuid(), serial: z.string().regex(/^[0-9a-f]{1,64}$/), at: z.iso.datetime(), signature: z.string().min(1).max(200) });
 const Port = z.number().int().min(1).max(65535);
 const ReportBody = z.object({
   uptimeS: z.number().int().min(0).optional(),
@@ -17,22 +27,27 @@ const ReportBody = z.object({
   commit: z.string().max(64).optional(),
   webPort: Port.optional(),
   peerPort: Port.optional(),
+  /* Where the machine can be dialed on its local networks, and how it reaches the server now. */
+  addresses: z.array(z.string().refine(isPrivateAddress)).max(8).optional(),
+  hostname: z.string().regex(/^[A-Za-z0-9._-]{1,120}$/).optional(),
+  path: z.enum(LINK_PATHS).nullable().optional(),
+  directFails: z.boolean().optional(),
 });
 
 const notKeeper = () => new ApiError(403, 'forbidden', "Only this machine's keeper may ask this.", 'not_keeper');
-const notAMachine = () => new ApiError(404, 'not_found', "This machine is not one of the company's network.", 'not_a_machine');
 const keyChanged = () => new ApiError(409, 'conflict', "This machine's key changed. Connect it again with a new command.", 'key_changed');
 
 type Holder = { id: string; role: MachineRole };
 
-/* What the keeper asks its app for: a certificate for the machine's key, the list of revoked certificates with what the
-   machine offers its peers, and a place for the machine's measures. Each answers only the keeper, for the machine the app
-   runs on, or a peer machine the keeper's peer door named by its certificate. */
+/* What a keeper asks the app for: a certificate for the machine's key, the list of revoked certificates with what the
+   machine offers its peers or needs to reach them, and a place for the machine's measures. Each answers only a keeper,
+   for the machine the app runs on, or for a peer machine the keeper's peer door named by its certificate. A machine that
+   has no certificate yet, or none that still works, comes with a ticket or its key's signature instead. */
 export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
-  /* Every route here asks this first: who is not the keeper gets no further. */
+  /* The keeper's routes ask this first: who is not a keeper gets no further. */
   const requireKeeper = async (req: FastifyRequest): Promise<Asker> => {
-    const who = await askerOf(req, config);
+    const who = await keeperAsker(req, config);
     if (!who) throw notKeeper();
     return who;
   };
@@ -44,31 +59,23 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     return company.id;
   };
 
-  /* The machine a certificate is for. The app's own gets its row here, with whatever key its keeper holds now; a peer's
-     must be the row it joined as, with the key it joined with. */
-  async function holderOf(who: Asker, signKey: string): Promise<Holder> {
-    if (who.own) {
-      const mine = await thisMachine(db, config, await companyId());
-      await db.update(machines).set({ signKey }).where(eq(machines.id, mine.id));
-      return { id: mine.id, role: 'data' };
-    }
-    const row = await networkMachine(db, who.machine);
-    if (!row) throw notAMachine();
-    if (row.signKey !== signKey) throw keyChanged();
-    return { id: row.id, role: row.role! };
-  }
-
-  /* An older certificate of the machine is not revoked: it ends by itself. */
+  /* An older certificate of the machine is not revoked: it ends by itself. The app's own machine gets its row here, with
+     whatever key its keeper holds now; a peer's must be the row it joined as, with the key it joined with. */
   app.post('/api/network/certificate', async req => {
     const who = await requireKeeper(req);
     const { signKey } = CertificateBody.parse(req.body);
-    const holder = await holderOf(who, signKey);
-    const authority = await makeAuthorityOnce(db, config, await companyId());
-    const issued = await issueCertificate(authority, { machineId: holder.id, role: holder.role, signKey }).catch((err: Error) => {
-      throw new ApiError(400, 'validation', err.message);
+    const company = await companyId();
+    const id = who.own ? (await thisMachine(db, config, company)).id : who.machine;
+    const authority = await makeAuthorityOnce(db, config, company);
+    const { role, issued } = await db.transaction(async tx => {
+      const row = await lockLiveMachine(tx, id);
+      const role = who.own ? 'data' : row?.role;
+      if (!row || !role) throw notAMachine();
+      if (who.own) await tx.update(machines).set({ signKey }).where(eq(machines.id, id));
+      else if (row.signKey !== signKey) throw keyChanged();
+      return { role, issued: await certify(tx, authority, { id, role, signKey }) };
     });
-    await db.insert(certificates).values({ serial: issued.serial, machineId: holder.id, until: issued.until });
-    return { machine: holder.id, role: holder.role, certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() };
+    return { machine: id, role, certPem: issued.certPem, authorityPem: authority.certPem, until: issued.until.toISOString() };
   });
 
   /* The machine the asker is, when it is one of the network. */
@@ -82,31 +89,58 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { id: row.id, role: row.role! };
   }
 
-  /* What the machine offers its peers through the relay. None without a public link, and none while a secret is missing
-     where the app does not lead and so makes none. The way to the data is told only to a machine that keeps data. */
+  /* What a data machine offers its peers through the relay, the way to the data among it. None without a public link,
+     and none while a secret is missing where the app does not lead and so makes none. */
   async function linkOf(machine: Holder | null) {
     const [link] = machine ? await db.select({ name: publicLinks.name }).from(publicLinks).limit(1) : [];
     if (!machine || !link) return null;
     const appSecret = await peerSecret(db, config, 'app', leading());
-    const dataSecret = machine.role === 'data' ? await peerSecret(db, config, 'data', leading()) : undefined;
-    if (!appSecret || dataSecret === null) return null;
-    return { name: link.name, appSecret, ...(dataSecret ? { dataSecret } : {}) };
+    const dataSecret = await peerSecret(db, config, 'data', leading());
+    return appSecret && dataSecret ? { name: link.name, appSecret, dataSecret } : null;
   }
 
+  /* A worker gets the link as it uses it, with the visitor key and never the way to the data; either kind also learns
+     where the data machines are. */
   app.get('/api/network/peers', async req => {
     const machine = await machineOf(await requireKeeper(req));
     const authority = await authorityOf(db, config);
     const revoked = await revokedSerials(db);
     /* Only the leader signs, so only it uses the authority's key. */
     const crlPem = authority && leading() ? await makeCrl(authority, revoked) : null;
-    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, link: await linkOf(machine) };
+    const link = machine?.role === 'worker' ? await workerLink(ctx) : await linkOf(machine);
+    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, link, data: await dataMachines(db) };
   });
 
+  /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
+     alone, which has none else: a computer someone joined said its name then. */
   app.post('/api/network/report', async (req, reply) => {
     const who = await requireKeeper(req);
-    const said = ReportBody.parse(req.body ?? {});
+    const { hostname, ...said } = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
-    if (machine) await db.update(machines).set({ ...said, reportAt: new Date() }).where(eq(machines.id, machine.id));
+    if (machine) {
+      await db.transaction(async tx => {
+        const [row] = await tx.select({ reportAt: machines.reportAt }).from(machines).where(eq(machines.id, machine.id)).for('update');
+        const now = new Date();
+        await countOnline(tx, machine.id, row?.reportAt ?? null, now);
+        await tx.update(machines).set({ ...said, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id));
+      });
+    }
     return reply.code(204).send();
+  });
+
+  /* A machine's keeper comes here once, before it has a certificate, with the ticket its join command brought. Whoever
+     holds the ticket is that machine, so nothing else is asked. The link's secrets go only into an answer that travels
+     over TLS; a keeper that joined over plain HTTP reads them through its peer link. */
+  app.post('/api/network/join', async req => {
+    const { machine, role, issued, authorityPem } = await redeemTicket(ctx, JoinBody.parse(req.body));
+    const { link, ...view } = await workerView(ctx, machine);
+    const shown = (await cameOverHttps(req, config)) ? { ...view, link } : view;
+    return { machine, role, certPem: issued.certPem, authorityPem, until: issued.until.toISOString(), view: shown };
+  });
+
+  /* A machine whose certificate ended, or whose secrets changed, asks again by its key's signature. */
+  app.post('/api/network/renew', async (req, reply) => {
+    const { status, answer } = await signedRenewal(ctx, RenewBody.parse(req.body), await cameOverHttps(req, config));
+    return reply.code(status).send(answer);
   });
 }

@@ -83,6 +83,24 @@ describe('POST /api/auth/login', () => {
     expect((await via('203.0.113.9', '198.51.100.99', SETUP.password)).statusCode).toBe(429);
   });
 
+  it('counts sign-ins through a worker as one address', async () => {
+    const { app } = await testApp({ TUNNEL_HOST: '192.0.2.10' });
+    await setUpCompany(app);
+    const worker = '11111111-1111-4111-8111-111111111111';
+    /* The peer door passes on the forwarded address the worker's side wrote, and the worker's owner writes it as they like. */
+    const through = (machine: string, forwarded: string, password = 'wrong password!') =>
+      app.inject({ ...login('ivan@acme.com', password), remoteAddress: '192.0.2.10', headers: { 'x-hornhoof-via': machine, 'x-forwarded-for': forwarded } });
+    for (let i = 0; i < 10; i++) expect((await through(worker, `203.0.113.${i}`)).statusCode).toBe(401);
+    const blocked = await through(worker, '203.0.113.99', SETUP.password);
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toMatchObject({ code: 'too_many', reason: 'too_many_attempts' });
+    expect((await through('22222222-2222-4222-8222-222222222222', '203.0.113.99', SETUP.password)).statusCode).toBe(200);
+    /* The header names a machine only from the keeper's address. */
+    const direct = (forwarded: string, password = 'wrong password!') =>
+      app.inject({ ...login('maria@acme.com', password), remoteAddress: `198.51.100.${forwarded}`, headers: { 'x-hornhoof-via': worker } });
+    for (let i = 0; i < 11; i++) expect((await direct(String(i))).statusCode).toBe(401);
+  });
+
   it('stops one email after 50 attempts in an hour from any addresses, and other emails go on', async () => {
     const { app } = await testApp();
     await setUpCompany(app);

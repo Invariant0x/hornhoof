@@ -16,7 +16,9 @@ const MACHINE_ID = 'a1b2c3d4'.repeat(4);
 const VIA = 'x-hornhoof-via';
 /* The keeper's own request: from its address, with the header no door lets through. */
 const OWN = { remoteAddress: '127.0.0.1', headers: { [VIA]: 'keeper' } };
-const from = (machine: string) => ({ remoteAddress: '127.0.0.1', headers: { [VIA]: machine } });
+/* A peer machine's keeper, as the peer door passes its own requests on: named by its certificate, and marked as the
+   keeper's and not a visitor's of that machine. */
+const from = (machine: string) => ({ remoteAddress: '127.0.0.1', headers: { [VIA]: machine, 'x-hornhoof-keeper': '1' } });
 
 const newKey = (): string => generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
 
@@ -141,7 +143,7 @@ describe('the network routes the keeper calls', () => {
   it('hands the peer secrets to the machine that offers them', async () => {
     const c = await company();
     const before = (await c.peers()).json();
-    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null });
+    expect(before).toEqual({ machine: null, authorityPem: null, revoked: [], crlPem: null, link: null, data: [] });
 
     const tunnel = { serverAddr: 'relay.hornhoof.test', serverPort: 443, protocol: 'wss' };
     await saveLink(c.db, c.config, c.companyId, { name: 'acme', url: 'https://acme.hornhoof.test', key: 'k'.repeat(32), tunnel });
@@ -155,10 +157,7 @@ describe('the network routes the keeper calls', () => {
     expect(((await c.peers()).json() as typeof own).link).toEqual(own.link);
     expect(await c.db.select().from(peerSecrets)).toHaveLength(2);
 
-    const worker = await c.joined('worker', newKey());
-    const theirs = (await c.peers(from(worker.id))).json() as typeof own;
-    expect(theirs.machine).toBe(worker.id);
-    expect(theirs.link).toEqual({ name: 'acme', appSecret: own.link.appSecret });
+    /* What a worker gets of the link is in network-join.test.ts: it needs the relay's visitor key. */
     expect((await c.peers(from('00000000-0000-4000-8000-000000000000'))).json().error.reason).toBe('not_a_machine');
   });
 

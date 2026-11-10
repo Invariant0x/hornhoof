@@ -363,6 +363,16 @@ describe('peerHeaders', () => {
     expect(peerHeaders(asked({ 'x-forwarded-for': '198.51.100.7, 192.0.2.1' }), peer)['x-forwarded-for']).toBe('198.51.100.7');
   });
 
+  it("marks only the keeper's own requests", () => {
+    const MARK = 'x-hornhoof-keeper';
+    /* The peer's keeper asks as itself, with the header no front door lets a visitor write. */
+    expect(peerHeaders(asked({ [VIA]: 'keeper' }), peer)).toMatchObject({ [VIA]: WORKER_ID, [MARK]: '1' });
+    /* What came through the peer's front door has no such header, whatever else it says of itself. */
+    expect(peerHeaders(asked({}), peer)).not.toHaveProperty(MARK);
+    expect(peerHeaders(asked({ [MARK]: '1' }), peer)).not.toHaveProperty(MARK);
+    expect(peerHeaders(asked({ [VIA]: WORKER_ID, [MARK]: '1' }), peer)).not.toHaveProperty(MARK);
+  });
+
   it('passes an invocation only when it is a uuid', () => {
     expect(peerHeaders(asked({ 'x-hornhoof-invocation': INVOCATION }), peer)['x-hornhoof-invocation']).toBe(INVOCATION);
     expect(peerHeaders(asked({ 'x-hornhoof-invocation': 'not-a-uuid' }), peer)).not.toHaveProperty('x-hornhoof-invocation');

@@ -18,3 +18,16 @@ export async function askerOf(req: FastifyRequest, config: Config): Promise<Aske
   if (!(await fromTunnel(req, config))) return null;
   return said === OWN_VIA ? { own: true } : { own: false, machine: said };
 }
+
+/* The mark of a request a peer machine's keeper made itself. A worker's front door passes anybody's request to the server
+   over its peer link, and the peer door names the worker on all of them; it writes this mark only on the ones the
+   worker's keeper sent as its own, which no front door lets a visitor write. */
+export const KEEPER_MARK = 'x-hornhoof-keeper';
+
+/* Who asks the routes that are a keeper's alone: this machine's keeper, or a peer machine's keeper and nobody who came
+   through that machine. */
+export async function keeperAsker(req: FastifyRequest, config: Config): Promise<Asker | null> {
+  const who = await askerOf(req, config);
+  if (who && !who.own && req.headers[KEEPER_MARK] !== '1') return null;
+  return who;
+}

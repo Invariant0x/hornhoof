@@ -3,9 +3,9 @@ import { and, asc, desc, eq, gt, isNotNull, isNull, like, ne, sql } from 'drizzl
 import type { Config } from '../../config.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { authority, certificates, companies, machines, peerSecrets, people } from '../../db/schema.js';
+import { authority, certificates, companies, machines, peerSecrets, people, type MachineRole } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { makeAuthority, type Authority } from './authority.js';
+import { issueCertificate, makeAuthority, type Authority, type Issued } from './authority.js';
 import { SERVER_KEY } from '../nodes/nodes.js';
 
 /* The row of the machine the app itself runs on is no computer anyone joined: its key says so, and the screens and the
@@ -57,9 +57,9 @@ export async function thisMachine(db: Db, config: Config, companyId: string): Pr
 }
 
 /* The same row, when it is there: nothing is made. */
-export async function findThisMachine(db: Db, config: Config): Promise<{ id: string } | null> {
+export async function findThisMachine(db: Db, config: Config): Promise<{ id: string; webPort: number | null } | null> {
   if (!config.machineId) return null;
-  const [mine] = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.networkId, config.machineId), live));
+  const [mine] = await db.select({ id: machines.id, webPort: machines.webPort }).from(machines).where(and(eq(machines.networkId, config.machineId), live));
   return mine ?? null;
 }
 
@@ -67,6 +67,16 @@ export async function findThisMachine(db: Db, config: Config): Promise<{ id: str
 export async function networkMachine(db: Db, id: string): Promise<typeof machines.$inferSelect | null> {
   const [row] = await db.select().from(machines).where(and(eq(machines.id, id), live, isNotNull(machines.role)));
   return row ?? null;
+}
+
+/* A new certificate for a machine's key, with its row, so it can be revoked. The caller holds the machine's row locked
+   and found it live (lockLiveMachine): Disconnect marks that row first, so it revokes whatever was issued before it. */
+export async function certify(tx: Db, by: Authority, holder: { id: string; role: MachineRole; signKey: string }): Promise<Issued> {
+  const issued = await issueCertificate(by, { machineId: holder.id, role: holder.role, signKey: holder.signKey }).catch((err: Error) => {
+    throw new ApiError(400, 'validation', err.message);
+  });
+  await tx.insert(certificates).values({ serial: issued.serial, machineId: holder.id, until: issued.until });
+  return issued;
 }
 
 /* The serials revoked and not yet expired, sorted: what a peer must refuse now. */

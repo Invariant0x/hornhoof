@@ -6,7 +6,8 @@ import { ApiError } from '../../errors.js';
 
 export const NODE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
-type Place = { companyId: string; personId: string; subscriptionIds: string[]; machineId?: string };
+/* core: a command that brings the company's core to its machine, and no node. */
+type Place = { companyId: string; personId: string; subscriptionIds: string[]; machineId?: string; core?: boolean };
 
 /* Lock the owner before preparing plans too, so two connect requests cannot create the same plan twice. */
 export async function lockCommandOwner(db: Db, personId: string): Promise<void> {
@@ -14,7 +15,7 @@ export async function lockCommandOwner(db: Db, personId: string): Promise<void> 
 }
 
 function commandPlace(input: Place) {
-  if (input.machineId) return eq(nodeCodes.machineId, input.machineId);
+  if (input.machineId) return and(eq(nodeCodes.machineId, input.machineId), eq(nodeCodes.core, input.core ?? false));
   const plans = input.subscriptionIds.length ? arrayOverlaps(nodeCodes.subscriptionIds, input.subscriptionIds) : sql`cardinality(${nodeCodes.subscriptionIds}) = 0`;
   return and(isNull(nodeCodes.machineId), plans);
 }
@@ -31,7 +32,7 @@ async function insertNodeCode(tx: Db, input: Place): Promise<string> {
   const code = newToken();
   await tx.insert(nodeCodes).values({
     codeHash: hashToken(code), companyId: input.companyId, personId: input.personId,
-    subscriptionIds: input.subscriptionIds, machineId: input.machineId ?? null,
+    subscriptionIds: input.subscriptionIds, machineId: input.machineId ?? null, core: input.core ?? false,
     expiresAt: new Date(Date.now() + NODE_CODE_TTL_MS),
   });
   return code;
