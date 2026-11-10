@@ -655,11 +655,17 @@ local_front() {
   LOCAL_SERVER=1
 }
 
+# core_servers <.env>: every address this machine joined the core's company through, one per line. A company has several:
+# its address on the local network, its public link. Each node carries the one its own command came from.
+core_servers() {
+  { value_in "$1" HORNHOOF_SERVERS | tr ',' '\n'; value_in "$1" HORNHOOF_JOIN_SERVER; } | awk 'NF && !seen[$0]++'
+}
+
 # The folder of the core this machine has for the company at SERVER; nothing when it has none.
 core_of_server() {
   local env
   for env in "$BASE_DIR"-*/.env; do
-    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_ROLE)" = worker ] && [ "$(value_in "$env" HORNHOOF_JOIN_SERVER)" = "$SERVER" ]; then
+    if [ -r "$env" ] && [ "$(value_in "$env" HORNHOOF_ROLE)" = worker ] && core_servers "$env" | grep -q -x -F -e "$SERVER"; then
       dirname "$env"
       return 0
     fi
@@ -718,8 +724,12 @@ worker_core() {
   [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
   [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
   if [ -f "$env_file" ]; then
-    ENV_BEFORE=1
+    # A run that stopped before the ports were chosen left the line empty: that folder has no ports to keep yet.
+    if ! grep -q '^HORNHOOF_PORT=$' "$env_file"; then ENV_BEFORE=1; fi
     say "Keeping the settings in $env_file."
+    # The keeper redeems the ticket where this command came from, which may be another address of the company than the
+    # one it joined through before.
+    set_env HORNHOOF_JOIN_SERVER "$SERVER"
   else
     mkdir -p "$SERVER_DIR"
     (
@@ -741,6 +751,7 @@ worker_core() {
     set_env HORNHOOF_NODE_REF "$NODE_REF"
     set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
   fi
+  set_env HORNHOOF_SERVERS "$(core_servers "$env_file" | tr '\n' ',' | sed 's/,$//')"
   set_env HORNHOOF_JOIN_TICKET "$CORE_TICKET"
   # A command without the key leaves the one the last command brought.
   if [ -n "$OWNER_KEY" ]; then set_env HORNHOOF_OWNER_KEY "$OWNER_KEY"; fi
@@ -766,7 +777,27 @@ worker_core() {
   done
   # The core's own updater moves this company's nodes here from now on, so the one that did it before goes.
   drop_nodes_updater
-  local_front "$web"
+}
+
+# The join used the command up by now, so a core that cannot be set up must not take the joined nodes with it: they
+# start all the same and reach the company at its own address, and the next command sets the core up.
+core_and_front() {
+  local port rc=0
+  port=$(mktemp)
+  set +e
+  (
+    set -e
+    worker_core
+    port_of "$SERVER_DIR/.env" > "$port"
+  )
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    local_front "$(cat "$port")"
+  else
+    say "The company's core could not be set up on this machine, so what this command connects reaches the company directly for now. To set the core up, get a new command in Hornhoof under Machines and run it here."
+  fi
+  rm -f "$port"
 }
 
 node_mode() {
@@ -800,7 +831,7 @@ node_mode() {
     if [ -n "$CORE_HERE" ]; then
       local_front "$CORE_HERE"
     elif [ -n "$CORE" ]; then
-      worker_core
+      core_and_front
     fi
     for entry in $JOINED; do
       id=${entry%%:*}
@@ -835,7 +866,7 @@ node_mode() {
   if [ -z "$STARTED" ] && [ -n "$LEFT" ]; then fail "Nothing changed on this machine."; fi
   # A command for the core alone starts no node: the machine's nodes go on, and find the core when they next start.
   if [ -z "$STARTED" ] && [ -n "$CORE" ]; then
-    say "The company's core is on this machine now. Its nodes stay as they are."
+    if [ -n "$LOCAL_SERVER" ]; then say "The company's core is on this machine now. Its nodes stay as they are."; fi
     return 0
   fi
   if [ -z "$STARTED" ]; then
@@ -961,11 +992,23 @@ remove_core() {
 }
 
 uninstall_mode() {
-  local entry names='' name answer core
+  local entry names='' name answer core asked
   detect_system
   docker_works || fail "Docker is not running, so there are no nodes to remove. Start Docker, then run this again."
-  for entry in $(existing_nodes); do names="$names ${entry%%:*}"; done
   core=$(core_of_server)
+  if [ -n "$core" ]; then
+    # The core goes, so the company's nodes here go whichever of its addresses each joined through.
+    asked=$SERVER
+    while IFS= read -r SERVER; do
+      [ -n "$SERVER" ] || continue
+      for entry in $(existing_nodes); do
+        case " $names " in *" ${entry%%:*} "*) ;; *) names="$names ${entry%%:*}" ;; esac
+      done
+    done <<< "$(core_servers "$core/.env")"
+    SERVER=$asked
+  else
+    for entry in $(existing_nodes); do names="$names ${entry%%:*}"; done
+  fi
   if [ -z "$names" ] && [ -n "$core" ]; then
     answer=$(ask "Remove the company's core from this machine, in $core? [y/N] " n)
     case "$answer" in
@@ -1020,6 +1063,20 @@ find_compose() {
   else
     fail "Docker Compose is missing. Install the Docker Compose plugin, then run this command again."
   fi
+  compose_new_enough || fail "Docker Compose $("${COMPOSE[@]}" version --short 2> /dev/null || true) on this computer is too old for this Hornhoof, which needs 2.20 or newer. Update Docker, then run this command again."
+}
+
+# Hornhoof's compose file says that a service may be absent, which Compose reads from 2.20 on. A version that cannot be
+# read is let through: the start itself then says what is wrong.
+compose_new_enough() {
+  local version major minor
+  version=$("${COMPOSE[@]}" version --short 2> /dev/null | tr -d 'v' || true)
+  major=${version%%.*}
+  minor=${version#*.}
+  minor=${minor%%.*}
+  case "$major" in '' | *[!0-9]*) return 0 ;; esac
+  case "$minor" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 20 ]; }
 }
 
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
@@ -1631,17 +1688,22 @@ server_mode() {
 # updater that runs this. Then the company's nodes here go to the node image of the same build, each only when it runs
 # another image, with its work let end as on any update.
 worker_mode() {
-  local env_file entry name id provider
+  local env_file
   detect_system
   WORKER=1
   env_file="$SERVER_DIR/.env"
   [ -n "${HORNHOOF_SERVER_DIR:-}" ] && [ -f "$env_file" ] || fail "There is no core of a company to update here. $USAGE"
   [ "$(env_value HORNHOOF_ROLE)" = worker ] || fail "$SERVER_DIR is a server's folder: run install.sh server there."
-  SERVER=$(env_value HORNHOOF_JOIN_SERVER)
-  find_compose
   [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
   [ -n "$NODE_REF" ] || NODE_REF="$APP_IMAGE-node:${PIN:-latest}"
   [ -n "$UPDATER_REF" ] || UPDATER_REF="$APP_IMAGE-updater:${PIN:-latest}"
+  # The updater asks for the nodes alone when the core runs its build already and a node could not be moved with it.
+  if [ -z "${HORNHOOF_WORKER_NODES:-}" ]; then worker_core_update; fi
+  worker_nodes_update
+}
+
+worker_core_update() {
+  find_compose
   set_env HORNHOOF_VERSION "${PIN:-latest}"
   set_env HORNHOOF_APP_REF "$APP_REF"
   set_env HORNHOOF_NODE_REF "$NODE_REF"
@@ -1657,20 +1719,31 @@ worker_mode() {
   fi
   say "Starting the company's core${PIN:+ $PIN}."
   compose_step "${COMPOSE[@]}" up -d --no-build keeper front || start_failed
+}
 
+# The company's nodes on this machine, whichever of its addresses each joined through, go to the node image of the core's
+# build: each only when it runs another, with its work let end first.
+worker_nodes_update() {
+  local env_file="$SERVER_DIR/.env" entry name id provider seen=' ' front
   IMAGE="${HORNHOOF_NODE_IMAGE:-$NODE_REF}"
-  local_front "$(port_of "$env_file")"
-  for entry in $(existing_nodes); do
-    name=${entry%%:*}
-    id=${entry#*:}
-    [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$name" 2> /dev/null || true)" != "$IMAGE" ] || continue
-    provider=${name#hornhoof-}
-    provider=${provider%-*}
-    if wait_for_node "$name"; then
-      move_node "$name"
-      start_node "$name" "$id" "$provider" '' hornhoof_update
-    fi
-  done
+  front=$(port_of "$env_file")
+  while IFS= read -r SERVER; do
+    [ -n "$SERVER" ] || continue
+    for entry in $(existing_nodes); do
+      name=${entry%%:*}
+      id=${entry#*:}
+      case "$seen" in *" $name "*) continue ;; esac
+      seen="$seen$name "
+      [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$name" 2> /dev/null || true)" != "$IMAGE" ] || continue
+      provider=${name#hornhoof-}
+      provider=${provider%-*}
+      local_front "$front"
+      if wait_for_node "$name"; then
+        move_node "$name"
+        start_node "$name" "$id" "$provider" '' hornhoof_update
+      fi
+    done
+  done <<< "$(core_servers "$env_file")"
 }
 
 # --- Start --------------------------------------------------------------------------------------

@@ -30,7 +30,7 @@ import { pickMachine } from './pick.js';
 import { runPurpose, runScope, scopeSource, scopeWords } from './purpose.js';
 import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 import { keepPartTimings } from './timings.js';
-import { holdsMachine } from '../network/follow.js';
+import { holdsMachine, installingMachines } from '../network/follow.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -287,7 +287,10 @@ export async function targetOf(ctx: Ctx, run: Pick<Run, 'kind' | 'branch' | 'dep
 /* Snapshot companies before assigning parts, so reservations in this pass are counted exactly once. */
 async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, Place[]>> {
   const places = new Map<string, Place[]>();
-  for (const id of new Set(companyIds)) places.set(id, await placesOf(ctx, id));
+  /* A machine that installs its build is no place for a part: offered, it would be picked for being idle, and every
+     part would wait for it while others stand free. The server's own node is never such a machine. */
+  const busy = await installingMachines(ctx.db);
+  for (const id of new Set(companyIds)) places.set(id, (await placesOf(ctx, id)).filter(place => place.builtin || !place.machineId || !busy.has(place.machineId)));
   return places;
 }
 

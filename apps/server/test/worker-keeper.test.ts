@@ -17,6 +17,7 @@ import { keyPrint } from '../src/modules/computer/owner-key.js';
 import { PEERS_FILE, TICKET_FILE, WorkerKeeper, type WorkerKeeperOptions, type WorkerStatus } from '../src/modules/keeper/worker.js';
 import type { WorkerConfig } from '../src/modules/keeper/worker-config.js';
 import { certFacts, issueCertificate } from '../src/modules/network/authority.js';
+import { refreshBuild } from '../src/modules/network/follow.js';
 import { renewedMessage } from '../src/modules/network/renewal.js';
 import { authorityOf } from '../src/modules/network/store.js';
 import { fakeLease } from './fake-lease.js';
@@ -331,6 +332,7 @@ describe("a worker's keeper", () => {
     const build = { version: '0.19.0', tag: 'b'.repeat(40), digest: 'sha256:app', nodeDigest: 'sha256:node', updaterDigest: 'sha256:updater', commit: 'b'.repeat(40) };
     vi.spyOn(c.app.ctx.updates, 'find').mockResolvedValue({ tag: build.tag, digest: build.digest, version: build.version, commit: build.commit, created: '', title: '', migrations: 0 });
     vi.spyOn(c.app.ctx.updates, 'siblings').mockResolvedValue({ node: build.nodeDigest, updater: build.updaterDigest });
+    await refreshBuild(c.app.ctx);
     const w = await worker(c);
     const control = (name: string) => join(w.config.controlDir, name);
     const read = (name: string) => JSON.parse(readFileSync(control(name), 'utf8')) as { id: string; tag?: string; commit?: string; until?: number };

@@ -62,6 +62,7 @@ import { fromOwnPages } from './auth/origin.js';
 import { handOverSession, requirePerson } from './auth/session.js';
 import { registerRequestSources } from './modules/sources/requests.js';
 import { keyRoutes } from './modules/computer/keys.js';
+import { refreshBuild } from './modules/network/follow.js';
 import { networkRoutes } from './modules/network/routes.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
@@ -175,6 +176,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.tls = new LinkTls(ctx);
   app.addHook('onClose', async () => ctx.tls.stop());
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+  /* Its own build, for the machines that follow it, asked for off the path of any request. A server told to ask the
+     registry only when asked waits for the first machine that wants to know. */
+  ctx.mode.whenLead(() => void (config.updateCheckMs > 0 && refreshBuild(ctx)), () => undefined);
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
   ctx.mode.whenLeaving(() => closeOpenSockets(app));
   app.addHook('onReady', async () => {

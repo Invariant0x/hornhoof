@@ -7,7 +7,7 @@ import { companies, LINK_PATHS, machines, publicLinks, UPDATE_STATES, type Machi
 import { ApiError } from '../../errors.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
-import { followOf, goodGrant, releaseHeld } from './follow.js';
+import { followOf, installs, releaseHeld } from './follow.js';
 import { NETWORK_ID } from './ids.js';
 import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, viewFor, workerLink, workerView } from './join.js';
 import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
@@ -133,13 +133,16 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
       await countOnline(tx, machine.id, row?.reportAt ?? null, now);
       /* A failure at the build it was told to install, or at the one it downloaded, is remembered, so it is not told
          again at once. */
-      const failed = update?.state === 'failed' ? { failedCommit: update.commit, failedAt: now } : {};
+      /* Said once, when the machine first says so: it goes on saying it with every report, and the hours until the next
+         try count from the failure, not from its last mention. */
+      const news = update?.state === 'failed' && !(row?.updateState === 'failed' && row.failedCommit === update.commit);
+      const failed = news ? { failedCommit: update.commit, failedAt: now } : {};
       const follows = update === undefined ? {} : { updateCommit: update?.commit ?? null, updateState: update?.state ?? null, ...failed };
       /* A report that says nothing of the pin keeps the one the machine said before. */
       const pinned = pin === undefined ? {} : { ownerPin: pin };
       const [after] = await tx.update(machines).set({ ...said, ...follows, ...pinned, ...(who.own && hostname ? { hostname } : {}), reportAt: now }).where(eq(machines.id, machine.id)).returning();
       /* Its turn to install is over once it says so: it runs the build, or the install failed. */
-      return Boolean(row && after && goodGrant(row, now) && !goodGrant(after, now));
+      return Boolean(row && after && installs(row, now) && !installs(after, now));
     });
     if (installed) void releaseHeld(ctx);
     return reply.code(204).send();

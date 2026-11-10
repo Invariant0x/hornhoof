@@ -311,7 +311,7 @@ export type StructureItem = NewItem | ChangeItem;
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 
 export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed' | 'turn_refused' | 'input_left';
-export type TurnRefusal = 'busy' | 'unknown_words';
+export type TurnRefusal = 'busy' | 'unknown_words' | 'machine_updating';
 
 /* Who wrote or got a message: a person (id null: the company's people at large), an agent, or Hornhoof itself. */
 export type MessageParty = {

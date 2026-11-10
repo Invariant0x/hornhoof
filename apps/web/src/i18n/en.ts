@@ -622,6 +622,7 @@ export const en = {
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',
+      machine_updating: 'This machine is installing a new build of Hornhoof, so no turn opened for what was typed. Type it again in a few minutes, when the machine is back.',
     },
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',

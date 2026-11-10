@@ -139,7 +139,9 @@ describe('install.sh on a machine that joins', () => {
     expect(second.code, second.out).toBe(0);
     expect(folders(first.dir)).toEqual(['hornhoof-qwerty']);
     expect(valueOf(dotEnv(first.dir), 'HORNHOOF_JOIN_TICKET')).toEqual(['U'.repeat(43)]);
-    expect(dotEnv(first.dir).replace(/^HORNHOOF_JOIN_TICKET=.*\n/m, '')).toBe(before.replace(/^HORNHOOF_JOIN_TICKET=.*\n/m, ''));
+    /* Nothing else of its settings changed: its ports, its images, its id. */
+    const kept = (text: string) => text.split('\n').filter(line => line && !line.startsWith('HORNHOOF_JOIN_TICKET=')).sort();
+    expect(kept(dotEnv(first.dir))).toEqual(kept(before));
     /* Another company whose server names the same folder gets one beside it, with ports of its own. */
     const other = again([`core hornhoof-qwerty ${TICKET} 8080 0f0f0f0f-0000-4000-8000-00000000000b`]);
     expect(other.code, other.out).toBe(0);
@@ -152,8 +154,9 @@ describe('install.sh on a machine that joins', () => {
     const first = install({ env: { STUB_JOIN_BODY: body(CORE) } });
     for (let n = 2; n <= 9; n++) mkdirSync(join(home(first.dir), `hornhoof-qwerty-${n}`));
     const r = install({ env: { STUB_JOIN_BODY: body(`core hornhoof-qwerty ${TICKET} 8080 0f0f0f0f-0000-4000-8000-00000000000c`), HOME: home(first.dir), HORNHOOF_HOME: join(home(first.dir), '.hornhoof'), HORNHOOF_DIR: join(home(first.dir), 'hornhoof') } });
-    expect(r.code).toBe(1);
     expect(r.out).toContain('There are 9 Hornhoof folders here already. Remove one you do not use.');
+    expect(r.out).toContain("The company's core could not be set up on this machine");
+    expect(folders(first.dir)).toHaveLength(9);
   });
 
   it("points nodes at the server's own front on its computer, and makes no folder", () => {
@@ -203,10 +206,40 @@ describe('install.sh on a machine that joins', () => {
     expect(valueOf(dotEnv(none.dir), 'HORNHOOF_ADDRESSES')).toEqual([]);
   });
 
-  it('refuses a build from before machines had the core, and says what to do', () => {
-    const r = install({ env: { STUB_JOIN_BODY: body(CORE, MACHINE), STUB_NO_OVERLAY: '1' } });
-    expect(r.code).toBe(1);
-    expect(r.out).toContain('is a build from before machines had the company\'s core. Update Hornhoof, then get a new command.');
+  /* The join used the command up by then, so the node it brought must not be lost with the core. */
+  it('starts the joined node all the same when the core cannot be set up, and says so', () => {
+    const failures: Record<string, string>[] = [{ STUB_NO_OVERLAY: '1' }, { STUB_UP_FAIL: 'keeper' }, { STUB_REGISTRY: 'unreadable' }];
+    for (const env of failures) {
+      const r = install({ env: { STUB_JOIN_BODY: body(CORE, MACHINE), ...env } });
+      expect(r.code, JSON.stringify(env)).toBe(0);
+      expect(r.out).toContain("The company's core could not be set up on this machine, so what this command connects reaches the company directly for now.");
+      /* The node reaches the company at the address the command came from. */
+      expect(r.calls).toContain(`stdin ${SERVER} ${SUB_A} machine node-key-aaaaaaaaaaaaaaaa`);
+      expect(r.calls.some(call => call.startsWith('docker run -d'))).toBe(true);
+    }
+    const old = install({ env: { STUB_JOIN_BODY: body(CORE, MACHINE), STUB_NO_OVERLAY: '1' } });
+    expect(old.out).toContain('is a build from before machines had the company\'s core. Update Hornhoof, then get a new command.');
+  });
+
+  it('chooses ports for a folder a run left half made', () => {
+    const first = install({ env: { STUB_JOIN_BODY: body(CORE), STUB_UP_FAIL: 'keeper' } });
+    expect(valueOf(dotEnv(first.dir), 'HORNHOOF_PORT')).toEqual(['8080']);
+    /* A run that stopped before the ports: the line is there and empty, and something took 8080 meanwhile. */
+    const stopped = install({ env: { STUB_JOIN_BODY: body(CORE), STUB_REGISTRY: 'unreadable' } });
+    expect(valueOf(dotEnv(stopped.dir), 'HORNHOOF_PORT')).toEqual(['']);
+    const again = install({ env: { STUB_JOIN_BODY: body(CORE), HOME: home(stopped.dir), HORNHOOF_HOME: join(home(stopped.dir), '.hornhoof'), HORNHOOF_DIR: join(home(stopped.dir), 'hornhoof'), STUB_PORTS_DIR: stopped.dir, STUB_BOUND_PORTS: '8080' } });
+    expect(again.code, again.out).toBe(0);
+    expect(valueOf(dotEnv(stopped.dir), 'HORNHOOF_PORT')).toEqual(['8081']);
+  });
+
+  it('says so when Docker Compose is too old for the compose file', () => {
+    for (const version of ['2.19.1', 'v2.17.0', '1.29.2']) {
+      const r = install({ args: ['server'], tty: '\n', env: { STUB_COMPOSE_VERSION: version } });
+      expect(r.code, version).toBe(1);
+      expect(r.out).toContain('is too old for this Hornhoof, which needs 2.20 or newer. Update Docker, then run this command again.');
+      expect(up(r.calls)).toEqual([]);
+    }
+    for (const version of ['2.20.0', 'v2.39.4', '5.0.1', 'unknown']) expect(install({ args: ['server'], tty: '\n', env: { STUB_COMPOSE_VERSION: version } }).code, version).toBe(0);
   });
 });
 
@@ -270,6 +303,37 @@ describe('install.sh on a machine that has the core', () => {
     const same = install({ args: ['worker'], env: { ...fromUpdater, STUB_NODE_IMAGES: `${NODE}=${refs.HORNHOOF_NODE_REF}` }, tty: '' });
     expect(same.code).toBe(0);
     expect(same.calls.some(call => call.startsWith('docker run -d') || call.startsWith('docker stop'))).toBe(false);
+  });
+
+  it("knows the company by every address it was joined through", () => {
+    const { first, shared } = withCore();
+    const core = join(home(first.dir), 'hornhoof-qwerty');
+    const LINK = 'https://acme.hornhoof.test';
+    const LINKED = 'hornhoof-codex-9f1e2d3c';
+    /* A second command, copied from the company's public link, on the same machine. */
+    const second = install({ env: { ...shared, HORNHOOF_SERVER: LINK, STUB_JOIN_BODY: body(`core hornhoof-acme ${'U'.repeat(43)} 8080 ${COMPANY}`), STUB_CONTAINERS: '' } });
+    expect(second.code, second.out).toBe(0);
+    const env = readFileSync(join(core, '.env'), 'utf8');
+    /* The keeper redeems the new ticket where this command came from, and both addresses are the company's. */
+    expect(valueOf(env, 'HORNHOOF_JOIN_SERVER')).toEqual([LINK]);
+    expect(valueOf(env, 'HORNHOOF_SERVERS')).toEqual([`${SERVER},${LINK}`]);
+    /* The updater moves the nodes of both, and the nodes of no other company. */
+    const refs = { HORNHOOF_APP_REF: `${APP}@sha256:${'4'.repeat(64)}`, HORNHOOF_NODE_REF: `${APP}-node@sha256:${'5'.repeat(64)}`, HORNHOOF_UPDATER_REF: `${APP}-updater@sha256:${'6'.repeat(64)}` };
+    const containers = `${NODE}=${SERVER} ${LINKED}=${LINK} hornhoof-kimi-aaaaaaaa=https://other.example.test`;
+    const r = install({ args: ['worker'], tty: '', env: { ...shared, ...refs, HORNHOOF_FROM_UPDATER: '1', HORNHOOF_UPDATER_REV: '2', HORNHOOF_SERVER_DIR: core, HORNHOOF_VERSION: '0.19.0', HORNHOOF_PULLED: '1', HORNHOOF_WORKER_NODES: '1', HORNHOOF_SERVER: '', STUB_CONTAINERS: containers } });
+    expect(r.code, r.out).toBe(0);
+    const started = r.calls.filter(call => call.startsWith('docker run -d')).map(call => call.match(/--name (\S+)/)![1]);
+    expect(started.sort()).toEqual([NODE, LINKED].sort());
+    /* Asked for the nodes alone, it leaves the core as it runs. */
+    expect(up(r.calls)).toEqual([]);
+    expect(readFileSync(join(core, '.env'), 'utf8')).toBe(env);
+    /* An uninstall asked for from either address takes the core and the nodes of both. */
+    const gone = install({ args: ['--uninstall'], tty: 'y\nn\n', env: { ...shared, HORNHOOF_SERVER: LINK, STUB_CONTAINERS: containers } });
+    expect(gone.code, gone.out).toBe(0);
+    expect(gone.calls).toContain(`docker rm -f ${NODE}`);
+    expect(gone.calls).toContain(`docker rm -f ${LINKED}`);
+    expect(gone.calls).not.toContain('docker rm -f hornhoof-kimi-aaaaaaaa');
+    expect(existsSync(core)).toBe(false);
   });
 
   it('runs as a worker only in the folder of a core', () => {

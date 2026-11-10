@@ -105,6 +105,24 @@ describe('the updater of a worker', () => {
     expect(again.calls.filter(c => c.startsWith('installer worker'))).toHaveLength(1);
   });
 
+  /* A node whose work would not end while the core moved stays on its image; nothing else would ever move it. */
+  it('looks at the nodes again by itself, with the installer of its own build and the images its settings name', async () => {
+    const refs = `HORNHOOF_APP_REF=${APP}@${DIGESTS['0.4.1']}\nHORNHOOF_NODE_REF=${APP}-node@${NODE_DIGESTS['0.4.1']}\nHORNHOOF_UPDATER_REF=${APP}-updater@${UPDATER_DIGESTS['0.4.1']}\n`;
+    const s = stand(`HORNHOOF_ROLE=worker\nHORNHOOF_VERSION=0.4.1\n${refs}`);
+    const installer = join(s.dir, 'own-install.sh');
+    writeFileSync(installer, `printf 'own installer %s nodes=%s dir=%s node=%s from=%s\\n' "$*" "$HORNHOOF_WORKER_NODES" "$HORNHOOF_SERVER_DIR" "$HORNHOOF_NODE_REF" "$HORNHOOF_FROM_UPDATER" >> "$STUB_LOG"\n`);
+    const r = await runOnce(s, null, { ...WORKER, HORNHOOF_INSTALLER: installer });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`own installer worker nodes=1 dir=${s.server} node=${APP}-node@${NODE_DIGESTS['0.4.1']} from=1`);
+    /* A server's updater asks its server about its nodes, as before, and runs no such installer. */
+    const server = stand();
+    const asServer = await runOnce(server, null, { HORNHOOF_INSTALLER: installer });
+    expect(asServer.calls.some(call => call.startsWith('own installer'))).toBe(false);
+    /* A core whose settings name no image of Hornhoof's own is left alone. */
+    const odd = stand('HORNHOOF_ROLE=worker\nHORNHOOF_NODE_REF=ghcr.io/acme/other:latest\n');
+    expect((await runOnce(odd, null, { ...WORKER, HORNHOOF_INSTALLER: installer })).calls.some(call => call.startsWith('own installer'))).toBe(false);
+  });
+
   it("writes the machine's own addresses on Linux, and leaves them when it cannot read them", async () => {
     const s = stand();
     const interfaces = [

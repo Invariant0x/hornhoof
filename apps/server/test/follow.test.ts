@@ -1,9 +1,9 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi, type MockInstance } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, jobs, machines, nodes, people, testParts, testRuns } from '../src/db/schema.js';
-import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, followOf, goodGrant, holdsMachine, leaderBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
+import { FOLLOW_RETRY_MS, FOLLOW_TURN_MS, followOf, goodGrant, holdsMachine, installingMachines, installs, leaderBuild, machineInstalls, refreshBuild, releaseHeld, type LeaderBuild } from '../src/modules/network/follow.js';
 import type { Build } from '../src/modules/updates/registry.js';
 import { as, connectNode, listen, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
@@ -19,19 +19,25 @@ const keeperOf = (machine: string) => ({ remoteAddress: '127.0.0.1', headers: { 
 const newKey = (): string => generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
 
 /* A server that runs the build of COMMIT, which the registry has, and no worker yet. */
-async function company(env: NodeJS.ProcessEnv = {}) {
+type Spies = { find: MockInstance<(tag: string) => Promise<Build | null>>; siblings: MockInstance<(tag: string) => Promise<{ node: string; updater: string }>> };
+
+/* spoil: what the registry says otherwise, set before the server first asks it. */
+async function company(env: NodeJS.ProcessEnv = {}, spoil: (registry: Spies) => void = () => undefined) {
   const { app, db, config } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: HOST_ID, HORNHOOF_COMMIT: COMMIT, NODE_PING_MS: '2147483647', ...env });
-  const ceo = await setUpCompany(app);
   const { ctx } = app;
   const find = vi.spyOn(ctx.updates, 'find').mockResolvedValue(BUILD);
   const siblings = vi.spyOn(ctx.updates, 'siblings').mockResolvedValue({ node: 'sha256:node', updater: 'sha256:updater' });
+  spoil({ find, siblings });
+  const ceo = await setUpCompany(app);
+  /* The server asks the registry off the path of any request, and a view names the build once it has heard. */
+  await refreshBuild(ctx);
   const [acme] = await db.select().from(companies);
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   /* A worker of the network on an older build. */
   const worker = async (name: string, more: Partial<typeof machines.$inferInsert> = {}) =>
     (await db.insert(machines).values({ companyId: acme!.id, personId: owner!.id, machineKey: `${name}-0001-abcd`, hostname: name, role: 'worker', signKey: newKey(), networkId: hashToken(name), commit: OLD, ...more }).returning())[0]!.id;
   const report = async (machine: string, payload: object) => expect((await app.inject({ method: 'POST', url: '/api/network/report', payload, ...keeperOf(machine) })).statusCode).toBe(204);
-  const view = async (machine: string) => (await app.inject({ url: '/api/network/peers', ...keeperOf(machine) })).json() as { build: LeaderBuild | null; go: { commit: string; until: string } | null };
+  const view = async (machine: string) => (await app.inject({ url: '/api/network/peers', ...keeperOf(machine) })).json() as { build: LeaderBuild | null; go: { commit: string; until: string; leftMs: number } | null };
   const rowOf = async (machine: string) => (await db.select().from(machines).where(eq(machines.id, machine)))[0]!;
   const ready = (machine: string) => report(machine, { update: { commit: COMMIT, state: 'ready' } });
   return { app, db, config, ctx, ceo, companyId: acme!.id, ownerId: owner!.id, find, siblings, worker, report, view, rowOf, ready };
@@ -40,29 +46,30 @@ async function company(env: NodeJS.ProcessEnv = {}) {
 describe("following the server's build", () => {
   it('knows its own build by its commit', async () => {
     const c = await company();
-    expect(await leaderBuild(c.ctx)).toEqual(B);
+    expect(leaderBuild(c.ctx)).toEqual(B);
     expect(c.find).toHaveBeenCalledWith(COMMIT);
     expect(c.siblings).toHaveBeenCalledWith(COMMIT);
-    /* The registry is not asked again for a while. */
-    await leaderBuild(c.ctx);
-    expect(c.find).toHaveBeenCalledTimes(1);
+    /* The registry is not asked again for a while, and never on the way of a request. */
+    const asked = c.find.mock.calls.length;
+    leaderBuild(c.ctx);
+    await c.view(await c.worker('mac'));
+    expect(c.find).toHaveBeenCalledTimes(asked);
   });
 
   /* Each is no build to follow: the workers stay where they are. */
   it.each([
-    ['a commit the registry does not have', (c: Awaited<ReturnType<typeof company>>) => c.find.mockResolvedValue(null)],
-    ['a build with no updater image', (c: Awaited<ReturnType<typeof company>>) => c.siblings.mockResolvedValue({ node: 'sha256:node', updater: '' })],
-    ['a registry that does not answer', (c: Awaited<ReturnType<typeof company>>) => c.find.mockRejectedValue(new Error('The registry answered 503.'))],
+    ['a commit the registry does not have', (registry: Spies) => void registry.find.mockResolvedValue(null)],
+    ['a build with no updater image', (registry: Spies) => void registry.siblings.mockResolvedValue({ node: 'sha256:node', updater: '' })],
+    ['a registry that does not answer', (registry: Spies) => void registry.find.mockRejectedValue(new Error('The registry answered 503.'))],
   ])('knows no build of its own with %s', async (_name, spoil) => {
-    const c = await company();
-    spoil(c);
-    expect(await leaderBuild(c.ctx)).toBeNull();
+    const c = await company({}, spoil);
+    expect(leaderBuild(c.ctx)).toBeNull();
     expect((await c.view(await c.worker('mac'))).build).toBeNull();
   });
 
   it('asks nobody when it was built by hand and names no commit', async () => {
     const local = await company({ HORNHOOF_COMMIT: 'local' });
-    expect(await leaderBuild(local.ctx)).toBeNull();
+    expect(leaderBuild(local.ctx)).toBeNull();
     expect(local.find).not.toHaveBeenCalled();
   });
 
@@ -89,7 +96,7 @@ describe("following the server's build", () => {
     expect(Date.parse(first.go!.until) - Date.now()).toBeGreaterThan(FOLLOW_TURN_MS - MINUTE);
     expect(await c.view(w2)).toMatchObject({ build: B, go: null });
     /* Asked again, it hears the same word, with the same end. */
-    expect((await c.view(w1)).go).toEqual(first.go);
+    expect((await c.view(w1)).go).toMatchObject({ commit: COMMIT, until: first.go!.until });
 
     /* The second machine waits while a turn or a test part runs on it, though the first is done. */
     await c.report(w1, { commit: COMMIT, update: null });
@@ -109,14 +116,15 @@ describe("following the server's build", () => {
     const t0 = new Date('2031-03-10T12:00:00Z');
     const at = (ms: number) => new Date(t0.getTime() + ms);
     const first = await followOf(c.ctx, w1, t0);
-    expect(first.go).toEqual({ commit: COMMIT, until: at(FOLLOW_TURN_MS).toISOString() });
-    for (let minute = 1; minute < 15; minute++) expect((await followOf(c.ctx, w1, at(minute * MINUTE))).go).toEqual(first.go);
+    expect(first.go).toEqual({ commit: COMMIT, until: at(FOLLOW_TURN_MS).toISOString(), leftMs: FOLLOW_TURN_MS });
+    /* The same end each time, with less of the stretch left, which the machine counts by its own clock. */
+    for (let minute = 1; minute < 15; minute++) expect((await followOf(c.ctx, w1, at(minute * MINUTE))).go).toEqual({ ...first.go, leftMs: FOLLOW_TURN_MS - minute * MINUTE });
     /* The quarter of an hour is over: the word ends by itself, and this build is not tried again for hours. */
     for (const minute of [15, 16, 20, 60, 359]) expect((await followOf(c.ctx, w1, at(minute * MINUTE))).go, String(minute)).toBeNull();
     /* The other machine does not wait for the one that never came back. */
     expect((await followOf(c.ctx, w2, at(15 * MINUTE))).go).toMatchObject({ commit: COMMIT });
     await c.db.update(machines).set({ commit: COMMIT }).where(eq(machines.id, w2));
-    expect((await followOf(c.ctx, w1, at(FOLLOW_RETRY_MS + MINUTE))).go).toEqual({ commit: COMMIT, until: at(FOLLOW_RETRY_MS + MINUTE + FOLLOW_TURN_MS).toISOString() });
+    expect((await followOf(c.ctx, w1, at(FOLLOW_RETRY_MS + MINUTE))).go).toEqual({ commit: COMMIT, until: at(FOLLOW_RETRY_MS + MINUTE + FOLLOW_TURN_MS).toISOString(), leftMs: FOLLOW_TURN_MS });
   });
 
   it('ends a turn to install at once when the machine says the install failed', async () => {
@@ -135,6 +143,45 @@ describe("following the server's build", () => {
     expect((await c.view(w1)).go).toBeNull();
     const later = new Date(Date.now() + FOLLOW_RETRY_MS + MINUTE);
     expect((await followOf(c.ctx, w1, later)).go).toMatchObject({ commit: COMMIT });
+  });
+
+  it('counts the hours to the next try from the failure, not from its last mention', async () => {
+    const c = await company();
+    const w = await c.worker('mac');
+    await c.ready(w);
+    expect((await c.view(w)).go).not.toBeNull();
+    await c.report(w, { update: { commit: COMMIT, state: 'failed' } });
+    const first = (await c.rowOf(w)).failedAt!;
+    /* The machine goes on saying so with every report. */
+    await c.db.update(machines).set({ failedAt: new Date(first.getTime() - 3 * 3_600_000) }).where(eq(machines.id, w));
+    await c.report(w, { update: { commit: COMMIT, state: 'failed' } });
+    expect((await c.rowOf(w)).failedAt!.getTime()).toBe(first.getTime() - 3 * 3_600_000);
+    /* A failure at another build, or one that comes after the machine was ready again, is a new one. */
+    await c.ready(w);
+    await c.report(w, { update: { commit: COMMIT, state: 'failed' } });
+    expect((await c.rowOf(w)).failedAt!.getTime()).toBeGreaterThanOrEqual(first.getTime());
+  });
+
+  it('keeps a machine that says it installs for as long as it says so, and lets no other begin', async () => {
+    const c = await company();
+    const [w1, w2] = [await c.worker('one'), await c.worker('two')];
+    await c.ready(w1);
+    await c.ready(w2);
+    const t0 = new Date();
+    expect((await followOf(c.ctx, w1, t0)).go).not.toBeNull();
+    await c.report(w1, { update: { commit: COMMIT, state: 'installing' } });
+    /* Its quarter of an hour is over, and it is at it still: it reported a moment ago. */
+    const late = new Date(t0.getTime() + FOLLOW_TURN_MS + MINUTE);
+    await c.db.update(machines).set({ reportAt: new Date(late.getTime() - 20_000) }).where(eq(machines.id, w1));
+    expect(goodGrant(await c.rowOf(w1), late)).toBe(false);
+    expect(installs(await c.rowOf(w1), late)).toBe(true);
+    expect((await installingMachines(c.db, late)).has(w1)).toBe(true);
+    expect((await followOf(c.ctx, w2, late)).go).toBeNull();
+    /* A machine that fell silent holds nothing. */
+    const silent = new Date(late.getTime() + 5 * MINUTE);
+    expect(installs(await c.rowOf(w1), silent)).toBe(false);
+    expect((await installingMachines(c.db, silent)).has(w1)).toBe(false);
+    expect((await followOf(c.ctx, w2, silent)).go).toMatchObject({ commit: COMMIT });
   });
 
   it('gives no word to install while the server does not lead or installs an update itself', async () => {
@@ -168,6 +215,7 @@ describe("following the server's build", () => {
     await c.ready(w);
     expect((await c.view(w)).go).not.toBeNull();
     expect(await c.db.transaction(tx => holdsMachine(tx, nodeId))).toBe(true);
+    expect(await machineInstalls(c.db, nodeId)).toBe(true);
     /* A turn that comes now waits, and a part of a test run finds no place there. */
     expect((await c.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'hello' }, ...as(c.ceo) })).statusCode).toBeLessThan(300);
     const queued = () => c.db.select().from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));

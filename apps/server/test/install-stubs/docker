@@ -110,6 +110,8 @@ case "$1" in
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
+    # STUB_COMPOSE_VERSION: what "compose version --short" says; nothing unless a test names one.
+    case "$*" in 'compose version --short') [ -z "${STUB_COMPOSE_VERSION:-}" ] || echo "$STUB_COMPOSE_VERSION"; exit 0 ;; esac
     case " $* " in *' up '*) up_fails "$@"; binds_ports "$@"; migrate_runs "$@" ;; esac
     case "$*" in
       *' pull') case "${STUB_PULL:-ok}" in fail) echo "pull access denied" >&2; exit 1 ;; esac ;;

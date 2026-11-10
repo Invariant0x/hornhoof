@@ -168,7 +168,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     closeJoined(hub, joined.nodes);
     const core = wantsCore ? await coreFor(joined.ticket, code.companyId) : null;
     /* The server's own build, when it knows it, so the core comes up on the build the server runs. */
-    const build = core ? await leaderBuild(ctx) : null;
+    const build = core ? leaderBuild(ctx) : null;
 
     /* The build's line and the core's first, then one line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {

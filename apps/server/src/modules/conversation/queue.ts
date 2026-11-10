@@ -14,7 +14,7 @@ import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../u
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { holdsMachine } from '../network/follow.js';
+import { holdsMachine, machineInstalls } from '../network/follow.js';
 import { roomFor, turnSent } from '../nodes/program-room.js';
 import { jobsOf } from '../nodes/messages.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -489,6 +489,8 @@ async function storeTypedTurn(
   const target = await agentOnNode(ctx, node, agentId);
   if (!target || (queued && (await queuedUsed(ctx, agentId, queued.seq)))) return null;
   const openedQueued: OpenedQueued | null = queued ? { ...queued, repeated: await repeatedTurn(ctx, queued.job, queued.source) } : null;
+  /* A machine that installs its build takes no turn, and nothing of what stands there is changed for one. */
+  if (node.kind === 'node' && (await machineInstalls(ctx.db, node.nodeId))) return null;
   /* A turn that only started the program is over once the person types: their turn takes its place. */
   await ctx.db
     .update(jobs)
@@ -539,7 +541,8 @@ export async function turnRefused(ctx: Ctx, node: NodeIdentity, agentId: string,
   const target = await agentOnNode(ctx, node, agentId);
   if (!target) return;
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-  const reason: TurnRefusal = running && running.id !== queuedFrom ? 'busy' : 'unknown_words';
+  const installing = node.kind === 'node' && (await machineInstalls(ctx.db, node.nodeId));
+  const reason: TurnRefusal = installing ? 'machine_updating' : running && running.id !== queuedFrom ? 'busy' : 'unknown_words';
   ctx.terminals.refuse(agentId, reason);
   await appendEvent(ctx, { companyId: target.agent.companyId, agentId, kind: 'turn_refused', data: { reason } });
 }
@@ -964,6 +967,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const repo = at?.repo ?? null;
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
+  /* A machine that installs its build takes no turn now; the turn waits and goes out by itself when the machine is done.
+     Asked here, before the turn's words are put together, and once more when the turn is taken. */
+  if (await machineInstalls(db, place.nodeId)) return;
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
   const along: Along[] = [];
   for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);

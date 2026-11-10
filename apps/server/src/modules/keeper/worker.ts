@@ -104,7 +104,7 @@ const Answer = z.object({
 });
 /* The server's build and this machine's turn to install it, as the leader's view names them; none when it names none. */
 const Build = z.object({ version: z.string(), tag: z.string(), digest: z.string(), nodeDigest: z.string(), updaterDigest: z.string(), commit: z.string() });
-const Follow = z.object({ build: Build.nullable().catch(null).default(null), go: z.object({ commit: z.string(), until: z.string() }).nullable().catch(null).default(null) });
+const Follow = z.object({ build: Build.nullable().catch(null).default(null), go: z.object({ commit: z.string(), until: z.string(), leftMs: z.number().min(0) }).nullable().catch(null).default(null) });
 const SignedShape = z.object({ payload: z.string(), signature: z.string() });
 const Renewed = z.object({ authorityPem: z.string(), role: z.enum(MACHINE_ROLES), certPem: z.string().nullable(), until: z.string().nullable(), view: z.unknown() });
 

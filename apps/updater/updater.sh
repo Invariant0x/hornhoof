@@ -791,10 +791,27 @@ act_on_nodes() {
 
 # One look at the nodes, which never waits: a request for an update goes first, and the server lets go of the nodes when
 # this stops asking.
+# On a worker the installer moves the company's nodes with the core. One whose work would not end then stays on its
+# image, so now and again the installer of this updater's own build looks at the nodes alone: each on another image than
+# the one .env names goes to it once it is free, and the others are left as they are.
+worker_nodes() {
+  local now
+  now=$(date +%s)
+  [ "$now" -ge "$NODES_AT" ] || return 0
+  NODES_AT=$((now + NODES_RETRY))
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] && [ -f "$INSTALLER" ] || return 0
+  own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" || return 0
+  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_WORKER_NODES=1 \
+    HORNHOOF_VERSION="$(env_value HORNHOOF_VERSION)" HORNHOOF_APP_REF="$(env_value HORNHOOF_APP_REF)" HORNHOOF_NODE_REF="$(env_value HORNHOOF_NODE_REF)" \
+    HORNHOOF_UPDATER_REF="$(env_value HORNHOOF_UPDATER_REF)" bash "$INSTALLER" worker > /dev/null 2>&1 || printf 'Could not move the nodes of this machine to its build.\n'
+}
+
 catch_up_nodes() {
   local now code answer poll behind
-  # A worker holds no key to ask the company server with: the installer moves its nodes when it installs.
-  if worker; then return 0; fi
+  if worker; then
+    worker_nodes
+    return 0
+  fi
   now=$(date +%s)
   [ "$now" -ge "$NODES_AT" ] || return 0
   NODES_AT=$((now + NODES_CHECK))
@@ -1128,9 +1145,15 @@ ALIVE=$!
   sleep 1
 done) &
 RUNS=$!
-trap 'kill $ALIVE $RUNS 2> /dev/null || true' EXIT
-while true; do
+# The machine's addresses are read apart from an update too, which may wait for its turn for hours while the keeper
+# takes a list for stale after a few minutes.
+(while true; do
   write_addresses || true
+  sleep 5
+done) &
+ADDRS=$!
+trap 'kill $ALIVE $RUNS $ADDRS 2> /dev/null || true' EXIT
+while true; do
   handle_request
   catch_up_nodes || printf 'Could not look at the nodes.\n'
   sleep 2

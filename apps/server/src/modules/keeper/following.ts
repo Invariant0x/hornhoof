@@ -9,10 +9,12 @@ import { Hourly, readJson, reasonOf, writePrivately } from './machine-keys.js';
 
 /* The request for the server's build this keeper gave its updater last: its id, the build's tag, and when. */
 export const FOLLOW_FILE = 'follow.json';
-/* The server's word to install, as the updater reads it. until: seconds since 1970. */
+/* The server's word to install, as the updater reads it. until: seconds since 1970, by this machine's clock. */
 export const GO_FILE = 'go.json';
 
 const Asked = z.object({ id: z.string(), tag: z.string(), at: z.string() });
+/* said: the server's own end of the word, by which a word already passed on is known. */
+const Word = z.object({ id: z.string(), commit: z.string(), until: z.number(), said: z.string() });
 type Asked = z.infer<typeof Asked>;
 /* The steps in which the updater changes what runs: a request given now would cut it. */
 const CHANGING = new Set(['install', 'health', 'rollback']);
@@ -78,9 +80,13 @@ export class Following {
   private pass(go: Go): void {
     const mine = this.asked();
     if (!mine || go.commit !== mine.tag) return;
-    const word = { id: mine.id, commit: go.commit, until: Math.floor(Date.parse(go.until) / 1000) };
     const file = join(this.opts.controlDir, GO_FILE);
-    if (JSON.stringify(readJson(file)) === JSON.stringify(word)) return;
+    const held = Word.safeParse(readJson(file));
+    /* One word is written once: the server repeats it with every view, each time with less of its stretch left. */
+    if (held.success && held.data.id === mine.id && held.data.commit === go.commit && held.data.said === go.until) return;
+    /* The stretch that is left, counted from now by this machine's own clock, which need not agree with the server's. */
+    const until = Math.floor((this.now().getTime() + go.leftMs) / 1000);
+    const word = { id: mine.id, commit: go.commit, until, said: go.until };
     writeFileSync(`${file}.new`, JSON.stringify(word));
     renameSync(`${file}.new`, file);
   }

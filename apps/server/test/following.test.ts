@@ -71,12 +71,19 @@ describe("a worker following the server's build", () => {
     const s = standUp();
     const until = '2031-03-10T12:15:00.000Z';
     /* A word for a build it never asked its updater for is nobody's. */
-    s.following.heard(null, { commit: B1.tag, until });
+    s.following.heard(null, { commit: B1.tag, until, leftMs: 900_000 });
     expect(s.go()).toBeNull();
-    s.following.heard(B1, { commit: B2.tag, until });
+    s.following.heard(B1, { commit: B2.tag, until, leftMs: 900_000 });
     expect(s.go()).toBeNull();
-    s.following.heard(B1, { commit: B1.tag, until });
-    expect(s.go()).toEqual({ id: s.request()!.id, commit: B1.tag, until: Date.parse(until) / 1000 });
+    /* The stretch that is left is counted by this machine's own clock, which runs an hour ahead of the server's here. */
+    s.clock.now = new Date('2031-03-10T13:00:00Z');
+    s.following.heard(B1, { commit: B1.tag, until, leftMs: 900_000 });
+    const word = { id: s.request()!.id, commit: B1.tag, until: Date.parse('2031-03-10T13:15:00Z') / 1000, said: until };
+    expect(s.go()).toEqual(word);
+    /* The same word again, with less of it left, is the word already passed on. */
+    s.clock.now = new Date('2031-03-10T13:05:00Z');
+    s.following.heard(B1, { commit: B1.tag, until, leftMs: 600_000 });
+    expect(s.go()).toEqual(word);
   });
 
   it('takes a newer build while the old one downloads or waits, and never while it is installed', () => {
