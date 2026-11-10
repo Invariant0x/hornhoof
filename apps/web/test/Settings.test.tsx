@@ -119,7 +119,8 @@ describe('Share access', () => {
     const user = userEvent.setup();
     render(<Settings me={ME} onClose={() => {}} />);
     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
+    /* The field takes its random name as it mounts, which is one render after the words above. */
+    expect(await screen.findByDisplayValue(RANDOM)).toBe(screen.getByLabelText('Link'));
     expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
     await screen.findByText(`${RANDOM}.hornhoof.org is free.`);
     await user.click(screen.getByRole('button', { name: 'Open on the internet' }));
