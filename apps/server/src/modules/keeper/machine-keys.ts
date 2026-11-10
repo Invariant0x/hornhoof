@@ -8,6 +8,35 @@ const KEY_FILE = 'machine.key';
 
 export type MachineKey = { privatePem: string; publicPem: string };
 
+/* What a file or a text holds as JSON; null for one that is missing or is not JSON. */
+export function jsonOf(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function readJson(path: string): unknown {
+  try {
+    return jsonOf(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/* Whether a failure that lasts may be said now: each kind once an hour at most. */
+export class Hourly {
+  private readonly saidAt = new Map<string, number>();
+
+  due(what: string): boolean {
+    const now = Date.now();
+    if (now - (this.saidAt.get(what) ?? -Infinity) < 3_600_000) return false;
+    this.saidAt.set(what, now);
+    return true;
+  }
+}
+
 /* What a failure says of itself. */
 export const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 

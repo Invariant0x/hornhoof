@@ -143,7 +143,7 @@ async function worker(c: Company, over: Partial<WorkerKeeperOptions> = {}) {
   const { machine, ticket } = await c.joined();
   const config: WorkerConfig = {
     machineId: hostIdOf(MAC.machineId), joinServer: `http://127.0.0.1:${c.appPort}`, ticket, controlDir: folder(), dir: folder(),
-    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'], hostname: null, ownerKey: null,
+    commit: 'w0rker', ports: { web: 18081, peer: null }, addresses: ['192.168.1.20'],
   };
   return { machine, config, ...(await workerOn(c, config, over)) };
 }

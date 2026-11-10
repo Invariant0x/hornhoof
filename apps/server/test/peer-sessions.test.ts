@@ -64,7 +64,7 @@ async function standUp(as: { id?: string; role?: MachineRole } = {}) {
   const authority = await makeAuthority(COMPANY);
   const server = await machineOf(authority, as.id ?? SERVER_ID, as.role ?? 'data');
   const worker = await machineOf(authority, WORKER_ID, 'worker');
-  const state = { lead: true, hellos: 0, crl: await makeCrl(authority, []), revoked: new Set<string>() };
+  const state = { lead: true as boolean | string, hellos: 0, crl: await makeCrl(authority, []), revoked: new Set<string>() };
   const door = new PeerDoor({ app: await echoApp() });
   await door.start();
   onTestFinished(() => door.stop());
@@ -240,6 +240,43 @@ describe("a worker's sessions to the company's data machines", () => {
     expect(sessions.state().refused).toBe(false);
   });
 
+  it('takes a data machine that answers oddly for no refusal', async () => {
+    const stand = await standUp();
+    /* A hello of a shape this build does not read, as a machine of another version might give. */
+    stand.state.lead = 'yes';
+    const sessions = stand.sessionsWith();
+    sessions.use([stand.target()]);
+    await until(() => stand.state.hellos >= 3);
+    expect(sessions.leader()).toBeNull();
+    expect(sessions.state()).toEqual({ path: null, directFails: false, refused: false });
+    expect(stand.said).toEqual([]);
+  });
+
+  it("dials all of a machine's addresses at once, so one that is silent holds nothing up", async () => {
+    const stand = await standUp();
+    /* With all the patience in the world for each address: one after another, the second would never be tried. */
+    const sessions = stand.sessionsWith({ connectMs: 3_600_000 });
+    sessions.use([stand.target({ addresses: ['192.0.2.1', '192.0.2.2', '127.0.0.1'] })]);
+    await until(() => sessions.leader() !== null);
+    expect(sessions.leader()!.path).toBe('direct');
+  });
+
+  it('lets what the relay session carries end by itself when a direct one takes its place', async () => {
+    const stand = await standUp();
+    const sessions = stand.sessionsWith({ connectMs: 200 });
+    sessions.use([stand.target({ addresses: [NOWHERE], relayPort: stand.appPort })]);
+    await until(() => sessions.leader()?.path === 'relay');
+    const carried = await sessions.connectApp();
+    sessions.use([stand.target({ addresses: ['127.0.0.1'], relayPort: stand.appPort })]);
+    await until(() => sessions.leader()?.path === 'direct');
+    /* A request on the stream opened before still gets its answer. */
+    const chunks: Buffer[] = [];
+    carried.on('data', (chunk: Buffer) => chunks.push(chunk));
+    carried.write(Buffer.from('GET /api/still HTTP/1.1\r\nHost: app\r\nConnection: close\r\n\r\n'));
+    await until(() => Buffer.concat(chunks).toString().includes('/api/still'));
+    expect(Buffer.concat(chunks).toString()).toMatch(/^HTTP\/1\.1 200 /);
+  });
+
   it('dials nobody without a certificate, and lets go of a machine it is no longer told', async () => {
     const stand = await standUp();
     let held: HeldCertificate | null = null;
@@ -299,6 +336,31 @@ describe("the door to the leader's app", () => {
     await door.open();
     await door.open();
     expect((await ask(port, { path: '/api/health' })).status).toBe(200);
+  });
+
+  it('lets go of what it carries when it shuts, and opens again at once', async () => {
+    const { door, port } = await withDoor();
+    /* A connection that never ends by itself, as a node's WebSocket is. */
+    const open = net.connect(port, '127.0.0.1');
+    /* It may end with a reset, which is an end like any other here. */
+    open.on('error', () => undefined);
+    await new Promise(resolve => open.once('connect', resolve));
+    const gone = new Promise(resolve => open.once('close', resolve));
+    await door.shut();
+    await gone;
+    await door.open();
+    expect((await ask(port, { path: '/api/health' })).status).toBe(200);
+  });
+
+  it('takes another port when its own was taken meanwhile', async () => {
+    const { door, port } = await withDoor();
+    await door.shut();
+    const squatter = net.createServer();
+    await new Promise<void>(resolve => squatter.listen(port, '127.0.0.1', resolve));
+    onTestFinished(() => void squatter.close());
+    await door.open();
+    expect(door.port()).not.toBe(port);
+    expect((await ask(door.port(), { path: '/api/health' })).status).toBe(200);
   });
 
   it('closes a connection it cannot carry to a leader', async () => {

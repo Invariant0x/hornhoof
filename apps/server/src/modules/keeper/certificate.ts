@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { certFacts, issuedBy, needsRenewal } from '../network/authority.js';
 import type { MachineRole } from '../../db/schema.js';
-import { reasonOf, writePrivately } from './machine-keys.js';
+import { readJson, reasonOf, writePrivately } from './machine-keys.js';
 import type { MachineKey } from './machine-keys.js';
 
 export const CERT_FILE = 'certificate.json';
@@ -46,14 +45,6 @@ function fitsKey(held: HeldCertificate, key: MachineKey): boolean {
 function heldFor(value: unknown, key: MachineKey): HeldCertificate | null {
   const parsed = HeldShape.safeParse(value);
   return parsed.success && fitsKey(parsed.data, key) ? parsed.data : null;
-}
-
-function readJson(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    return null;
-  }
 }
 
 export function readHeldCertificate(dir: string, key: MachineKey): HeldCertificate | null {

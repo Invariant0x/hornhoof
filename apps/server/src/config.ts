@@ -1,3 +1,4 @@
+import { NETWORK_ID } from './modules/network/ids.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NodeBuild } from '@hornhoof/protocol';
@@ -107,7 +108,7 @@ const Env = z.object({
   ),
   HORNHOOF_MACHINE_ID: z.preprocess(
     unset,
-    z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+    z.string().regex(NETWORK_ID, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
   ),
 });
 

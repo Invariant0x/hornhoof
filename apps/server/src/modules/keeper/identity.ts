@@ -1,12 +1,11 @@
 import type { Target } from '../../net/proxy.js';
 import { askApp } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
-import { machineKey, reasonOf, type MachineKey } from './machine-keys.js';
+import { Hourly, machineKey, reasonOf, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 
 const KEY_RETRY_MS = 60_000;
 const REPORT_EVERY_MS = 20_000;
-const SAY_AGAIN_MS = 3_600_000;
 /* A host's name as the report takes it; one written another way is left out, and the report goes without it. */
 const HOSTNAME = /^[A-Za-z0-9._-]{1,120}$/;
 
@@ -50,7 +49,7 @@ export class MachineIdentity {
   private reportTimer: NodeJS.Timeout | undefined;
   private stopped = false;
   private keyFailureSaid = false;
-  private reportFailureSaidAt: number | null = null;
+  private readonly hourly = new Hourly();
   private reporting: Promise<void> | null = null;
   /* Ends what the keeper has asked its app for when it stops. */
   private readonly stopping = new AbortController();
@@ -134,10 +133,7 @@ export class MachineIdentity {
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {
       if (this.stopped) return;
-      const now = Date.now();
-      if (this.reportFailureSaidAt !== null && now - this.reportFailureSaidAt < SAY_AGAIN_MS) return;
-      this.reportFailureSaidAt = now;
-      this.opts.log(`Could not report this machine's measures to the app: ${reasonOf(err)}`);
+      if (this.hourly.due('report')) this.opts.log(`Could not report this machine's measures to the app: ${reasonOf(err)}`);
     }
   }
 }

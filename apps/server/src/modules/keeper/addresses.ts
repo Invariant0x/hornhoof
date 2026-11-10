@@ -18,6 +18,9 @@ export function isPrivate(address: string): boolean {
   return isIPv4(address) && PRIVATE.some(range => range.test(address));
 }
 
+/* The machine's addresses as the installer wrote them into its environment. */
+export const addressesIn = (env: NodeJS.ProcessEnv): string[] => (env.HORNHOOF_ADDRESSES ?? '').split(',').map(address => address.trim()).filter(Boolean);
+
 function found(controlDir: string, now: Date): string[] {
   try {
     const file = Found.parse(JSON.parse(readFileSync(join(controlDir, ADDRESSES_FILE), 'utf8')));

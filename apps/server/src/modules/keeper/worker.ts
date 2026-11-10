@@ -1,5 +1,4 @@
 import { createPrivateKey, sign, verify, X509Certificate } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import type http from 'node:http';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -17,7 +16,7 @@ import { ownAddresses } from './addresses.js';
 import { askApp, type AppAnswer } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { closeWithin, KEEPER_PORTS, listenOn, maintenanceAnswer, visitorFromFront } from './doors.js';
-import { machineKey, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
+import { Hourly, jsonOf, machineKey, readJson, reasonOf, writePrivately, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 import { updaterBusy } from './updater-status.js';
 import type { WorkerConfig } from './worker-config.js';
@@ -77,7 +76,6 @@ const REPORT_EVERY_MS = 20_000;
 const RENEW_AFTER_MS = 10_000;
 const RENEW_EVERY_MS = 30_000;
 const ASK_MS = 10_000;
-const SAY_AGAIN_MS = 3_600_000;
 const FRPC_EVERY_MS = 3000;
 const FRPC_RESTART_MS = 2000;
 const STOP_GRACE_MS = 5000;
@@ -103,14 +101,6 @@ const Answer = z.object({
 });
 const SignedShape = z.object({ payload: z.string(), signature: z.string() });
 const Renewed = z.object({ authorityPem: z.string(), role: z.enum(MACHINE_ROLES), certPem: z.string().nullable(), until: z.string().nullable(), view: z.unknown() });
-
-function readJson(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    return null;
-  }
-}
 
 /* Why the server refused, as its errors say it. */
 function reasonIn(body: unknown): string | null {
@@ -144,7 +134,9 @@ export class WorkerKeeper {
   private tunnel: TunnelKeeper<Visit> | null = null;
   private readonly measures: Measures;
   private readonly door: LeaderDoor;
-  private doorTarget: Target = { host: LOOPBACK, port: 0 };
+  /* Where the door to the leader's app listens. The front door reads it at each request, so a door that had to take
+     another port is found there. */
+  private readonly doorTarget: Target = { host: LOOPBACK, port: 0 };
   private doorWork: Promise<unknown> = Promise.resolve();
   private doorOpen = false;
   private front: http.Server | null = null;
@@ -159,7 +151,7 @@ export class WorkerKeeper {
   private renewTriedAt: number | null = null;
   private renewing = false;
   private lastMoment = 0;
-  private readonly saidAt = new Map<string, number>();
+  private readonly hourly = new Hourly();
   /* Ends what the keeper has asked the server for when it stops. */
   private readonly stopping = new AbortController();
 
@@ -184,7 +176,7 @@ export class WorkerKeeper {
     });
     /* A new certificate is shown to the data machines at once, not at the next look. */
     this.certificates.onChange(() => this.sessions.use(this.targets()));
-    this.doorTarget = { host: LOOPBACK, port: await this.door.start() };
+    this.doorTarget.port = await this.door.start();
     await this.door.shut();
     this.front = this.frontDoor();
     const front = await listenOn(this.front, this.opts.ports?.front ?? KEEPER_PORTS.front, this.opts.host ?? '0.0.0.0');
@@ -244,10 +236,7 @@ export class WorkerKeeper {
 
   /* One line an hour at most for a failure that lasts. */
   private sayHourly(what: string, line: string): void {
-    const now = Date.now();
-    if (now - (this.saidAt.get(what) ?? -Infinity) < SAY_AGAIN_MS) return;
-    this.saidAt.set(what, now);
-    this.opts.log(line);
+    if (this.hourly.due(what)) this.opts.log(line);
   }
 
   /* The data machines of the view, each with the loopback port the visitor opens to it while there is a link. */
@@ -360,10 +349,17 @@ export class WorkerKeeper {
     if (this.renewDue(now)) void this.renew();
   }
 
+  /* One change of the door after another. A door that could not open is tried again at the next look. */
   private setDoor(open: boolean): void {
     if (open === this.doorOpen) return;
     this.doorOpen = open;
-    this.doorWork = this.doorWork.then(() => (open ? this.door.open() : this.door.shut())).catch((err: unknown) => this.opts.log(`The keeper's door to the company server failed: ${reasonOf(err)}`));
+    this.doorWork = this.doorWork
+      .then(() => (open ? this.door.open() : this.door.shut()))
+      .then(() => void (this.doorTarget.port = this.door.port()))
+      .catch((err: unknown) => {
+        this.doorOpen = false;
+        this.sayHourly('door', `The keeper's door to the company server could not open: ${reasonOf(err)}`);
+      });
   }
 
   /* At once when a data machine did not take the certificate or the certificate has ended, after a while with no session
@@ -429,7 +425,7 @@ export class WorkerKeeper {
     const res = await this.post(`${place}/api/network/renew`, { ...ask, signature }).catch(() => null);
     const signed = SignedShape.safeParse(res?.body);
     if (!res || !signed.success || !this.signedByAuthority(held, ask, signed.data)) return false;
-    const payload = readPayload(signed.data.payload);
+    const payload = jsonOf(signed.data.payload);
     if (res.status === 410 && (payload as { disconnected?: unknown } | null)?.disconnected === true) {
       this.cutOff();
       return true;
@@ -532,13 +528,5 @@ export class WorkerKeeper {
         held: req => (this.disconnected ? disconnectedAnswer(req) : this.noLeader(req)),
       }),
     );
-  }
-}
-
-function readPayload(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
   }
 }

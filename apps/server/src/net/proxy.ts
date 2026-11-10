@@ -255,7 +255,8 @@ function closeAfterFlush(socket: Duplex, last?: string): void {
   socket.end(last, () => socket.destroy());
 }
 
-function spliceSockets(client: Duplex, target: Duplex): void {
+/* Joins two connections, byte for byte, each closing once the other has, with what was written still going out. */
+export function spliceSockets(client: Duplex, target: Duplex): void {
   target.on('error', ignore);
   client.once('close', () => closeAfterFlush(target));
   target.once('close', () => closeAfterFlush(client));

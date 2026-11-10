@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isLinkName } from '@hornhoof/protocol/link';
+import { NETWORK_ID } from '../network/ids.js';
 import { frpcTransport, quoted } from './client.js';
 import { serviceName } from './peer-client.js';
 import type { Client } from './tunnel.js';
@@ -20,10 +21,9 @@ export type VisitSettings = { name: string; serverAddr: string; serverPort: numb
    named after. */
 type Visit = { machineId: string; targets: string[] };
 
-const MACHINE_ID = /^[0-9a-f]{32,64}$/;
 
 function visitor(link: VisitSettings, from: string, target: string, port: number): string {
-  if (!MACHINE_ID.test(target)) throw new Error(`${target} is not a machine id`);
+  if (!NETWORK_ID.test(target)) throw new Error(`${target} is not a machine id`);
   return `
 [[visitors]]
 name = ${quoted(`${link.name}-${from.slice(0, 8)}-to-${target.slice(0, 8)}`)}
@@ -40,7 +40,7 @@ bindPort = ${port}
 export function visitConfigFor(link: VisitSettings, { machineId, targets }: Visit): string {
   if (!isLinkName(link.name)) throw new Error(`${link.name} is not a link name`);
   if (!link.visitorKey) throw new Error('the link has no visitor key');
-  if (!MACHINE_ID.test(machineId)) throw new Error(`${machineId} is not a machine id`);
+  if (!NETWORK_ID.test(machineId)) throw new Error(`${machineId} is not a machine id`);
   const clientId = visitClientId(link.name, machineId);
   const head = `${frpcTransport({ serverAddr: link.serverAddr, serverPort: link.serverPort, protocol: 'wss' }, clientId)}metadatas.name = ${quoted(link.name)}
 metadatas.visitor = ${quoted(link.visitorKey)}

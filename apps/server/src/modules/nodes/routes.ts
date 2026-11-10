@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { MACHINE_KINDS } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -43,6 +44,12 @@ const WEB_PORT = 8080;
    Hornhoof already. */
 type CoreAnswer = { folder: string; ticket: string; port: number; company: string } | { here: true; port: number };
 const coreLine = (core: CoreAnswer): string => ('here' in core ? `core-here ${core.port}\n` : `core ${core.folder} ${core.ticket} ${core.port} ${core.company}\n`);
+
+/* A machine that comes back after a Disconnect is the same row, but has no place in the company's network until its
+   keeper redeems a new ticket: the key it had before is let in by nothing. A machine that was never disconnected keeps
+   its place when a command runs there again. */
+const keptWhileConnected = (column: AnyPgColumn) => sql`CASE WHEN ${machines.revokedAt} IS NULL THEN ${column} END`;
+const NO_PLACE_AFTER_DISCONNECT = { role: keptWhileConnected(machines.role), signKey: keptWhileConnected(machines.signKey), networkId: keptWhileConnected(machines.networkId) };
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
@@ -128,7 +135,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [machine] = await tx
         .insert(machines)
         .values({ companyId: code.companyId, personId: code.personId, machineKey: body.machineId, ...details })
-        .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null } })
+        .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null, ...NO_PLACE_AFTER_DISCONNECT } })
         .returning({ id: machines.id });
 
       const ticket = wantsCore && !here ? await issueTicket(tx, machine!.id) : null;

@@ -121,13 +121,33 @@ describe("the lock on a machine's row", () => {
     expect(await found).toBeNull();
   });
 
+  /* Both take the machine's row first and its ticket after: the other way round each would hold what the other waits
+     for, and the database would end one of them. Whichever comes first, no certificate outlives the Disconnect. */
+  it('lets a join and a Disconnect of one machine take their turns', async () => {
+    const machineKey = 'leaving-0001-abcd';
+    const [row] = await db.insert(machines).values({ companyId, personId, machineKey, hostname: 'leaving' }).returning();
+    const ticket = await issueTicket(db, row!.id);
+    const holder = await holding(MACHINE_ROW, [row!.id]);
+    const join = app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId: hostIdOf(machineKey), signKey: newKey() } });
+    const disconnect = other.transaction(async tx => {
+      const now = new Date();
+      await tx.update(machines).set({ revokedAt: now }).where(eq(machines.id, row!.id));
+      await revokeMachineRows(tx, [row!.id], now);
+    });
+    await untilWaiting(2);
+    await holder.query('COMMIT');
+    const [answer] = await Promise.all([join, disconnect]);
+    expect([200, 410]).toContain(answer.statusCode);
+    expect(await liveCertificates(row!.id)).toEqual([]);
+  });
+
   it('gives two joins of one ticket at once one certificate and one refusal', async () => {
     const machineKey = 'joining-0001-abcd';
     const [row] = await db.insert(machines).values({ companyId, personId, machineKey, hostname: 'joining' }).returning();
     const ticket = await issueTicket(db, row!.id);
-    const payload = { ticket, networkId: hostIdOf(machineKey), signKey: newKey() };
+    /* Two keepers with a key each: the one that comes second is not the one that used the ticket. */
     const holder = await holding('SELECT 1 FROM machine_tickets WHERE ticket_hash = $1 FOR UPDATE', [hashToken(ticket)]);
-    const joins = [0, 1].map(() => app.inject({ method: 'POST', url: '/api/network/join', payload }));
+    const joins = [0, 1].map(() => app.inject({ method: 'POST', url: '/api/network/join', payload: { ticket, networkId: hostIdOf(machineKey), signKey: newKey() } }));
     await untilWaiting(2);
     await holder.query('COMMIT');
     const answers = await Promise.all(joins);

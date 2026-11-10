@@ -58,13 +58,13 @@ describe("a worker keeper's settings", () => {
 
   it("reads the worker's own lines, and no secret of the company", () => {
     const config = workerConfig({ ...ENV, HORNHOOF_SECRET: 's'.repeat(44), NODE_KEY: 'n'.repeat(40), DATABASE_URL: 'postgres://x', POSTGRES_PASSWORD: 'p' });
-    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [], hostname: null, ownerKey: null });
+    expect(config).toEqual({ machineId: MACHINE_ID, joinServer: 'http://192.168.1.7:8080', ticket: null, controlDir: '/control', dir: '/keeper', commit: 'local', ports: { web: null, peer: null }, addresses: [] });
     expect(JSON.stringify(config)).not.toMatch(/ssss|nnnn|postgres/);
   });
 
   it('takes the ticket, the ports, the addresses and the name the installer wrote', () => {
-    const config = workerConfig({ ...ENV, HORNHOOF_JOIN_SERVER: 'https://acme.hornhoof.test', HORNHOOF_JOIN_TICKET: 't'.repeat(43), HORNHOOF_PORT: '8081', HORNHOOF_PEER_PORT: '8181', HORNHOOF_ADDRESSES: '192.168.1.20, 10.0.0.4,', HORNHOOF_HOSTNAME: 'ivan-mac', HORNHOOF_COMMIT: 'c0ffee', HORNHOOF_CONTROL_DIR: '/tmp/c' });
-    expect(config).toMatchObject({ joinServer: 'https://acme.hornhoof.test', ticket: 't'.repeat(43), ports: { web: 8081, peer: 8181 }, addresses: ['192.168.1.20', '10.0.0.4'], hostname: 'ivan-mac', commit: 'c0ffee', controlDir: '/tmp/c' });
+    const config = workerConfig({ ...ENV, HORNHOOF_JOIN_SERVER: 'https://acme.hornhoof.test', HORNHOOF_JOIN_TICKET: 't'.repeat(43), HORNHOOF_PORT: '8081', HORNHOOF_PEER_PORT: '8181', HORNHOOF_ADDRESSES: '192.168.1.20, 10.0.0.4,', HORNHOOF_COMMIT: 'c0ffee', HORNHOOF_CONTROL_DIR: '/tmp/c' });
+    expect(config).toMatchObject({ joinServer: 'https://acme.hornhoof.test', ticket: 't'.repeat(43), ports: { web: 8081, peer: 8181 }, addresses: ['192.168.1.20', '10.0.0.4'], commit: 'c0ffee', controlDir: '/tmp/c' });
   });
 
   it('refuses to start without its id or the server it joined at, and says to run the command again', () => {
@@ -73,16 +73,5 @@ describe("a worker keeper's settings", () => {
     for (const HORNHOOF_JOIN_SERVER of [undefined, '', 'acme', 'ftp://acme.test']) {
       expect(() => workerConfig({ ...ENV, HORNHOOF_JOIN_SERVER })).toThrow("HORNHOOF_JOIN_SERVER is not the address of the company's server. Run the join command from Hornhoof on this machine again.");
     }
-  });
-
-  it("takes the owner's key only when it is one, and says so once when it is not", () => {
-    const key = 'A-_9'.repeat(30);
-    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: key }).ownerKey).toBe(key);
-    expect(workerConfig({ ...ENV }).ownerKey).toBeNull();
-    const lines: string[] = [];
-    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: `${key}$` }, line => lines.push(line)).ownerKey).toBeNull();
-    expect(workerConfig({ ...ENV, HORNHOOF_OWNER_KEY: 'short' }, line => lines.push(line)).ownerKey).toBeNull();
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('HORNHOOF_OWNER_KEY is not a key');
   });
 });

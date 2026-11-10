@@ -7,7 +7,8 @@ import { companies, LINK_PATHS, machines, publicLinks, type MachineRole } from '
 import { ApiError } from '../../errors.js';
 import { isPrivate } from '../keeper/addresses.js';
 import { makeCrl } from './authority.js';
-import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, workerLink, workerView } from './join.js';
+import { NETWORK_ID } from './ids.js';
+import { countOnline, dataMachines, lockLiveMachine, notAMachine, redeemTicket, signedRenewal, viewFor, workerLink, workerView } from './join.js';
 import { authorityOf, certify, findThisMachine, makeAuthorityOnce, networkMachine, peerSecret, revokedSerials, thisMachine } from './store.js';
 import { keeperAsker, type Asker } from './via.js';
 
@@ -16,7 +17,7 @@ const isPrivateAddress = (address: string): boolean => isPrivate(address) || add
 
 const SignKey = z.string().min(1).max(1024);
 const CertificateBody = z.object({ signKey: SignKey });
-const JoinBody = z.object({ ticket: z.string().length(43), networkId: z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/), signKey: SignKey });
+const JoinBody = z.object({ ticket: z.string().length(43), networkId: z.string().regex(NETWORK_ID), signKey: SignKey });
 const RenewBody = z.object({ machine: z.uuid(), serial: z.string().regex(/^[0-9a-f]{1,64}$/), at: z.iso.datetime(), signature: z.string().min(1).max(200) });
 const Port = z.number().int().min(1).max(65535);
 const ReportBody = z.object({
@@ -106,8 +107,9 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
     const revoked = await revokedSerials(db);
     /* Only the leader signs, so only it uses the authority's key. */
     const crlPem = authority && leading() ? await makeCrl(authority, revoked) : null;
+    /* A link that cannot be told now is left out, and a worker keeps the one it has. */
     const link = machine?.role === 'worker' ? await workerLink(ctx) : await linkOf(machine);
-    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, link, data: await dataMachines(db) };
+    return { machine: machine?.id ?? null, authorityPem: authority?.certPem ?? null, revoked, crlPem, ...(link === undefined ? {} : { link }), data: await dataMachines(db) };
   });
 
   /* Each report also counts as time online, by the time of the one before. A name is taken for the server's own row
@@ -132,9 +134,8 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
      over TLS; a keeper that joined over plain HTTP reads them through its peer link. */
   app.post('/api/network/join', async req => {
     const { machine, role, issued, authorityPem } = await redeemTicket(ctx, JoinBody.parse(req.body));
-    const { link, ...view } = await workerView(ctx, machine);
-    const shown = (await cameOverHttps(req, config)) ? { ...view, link } : view;
-    return { machine, role, certPem: issued.certPem, authorityPem, until: issued.until.toISOString(), view: shown };
+    const view = viewFor(await workerView(ctx, machine), await cameOverHttps(req, config));
+    return { machine, role, certPem: issued.certPem, authorityPem, until: issued.until.toISOString(), view };
   });
 
   /* A machine whose certificate ended, or whose secrets changed, asks again by its key's signature. */

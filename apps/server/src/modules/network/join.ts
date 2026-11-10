@@ -102,7 +102,9 @@ export async function revokeMachineRows(tx: Db, machineIds: string[], now: Date)
 
 export type DataMachine = { machine: string; networkId: string; hostname: string | null; addresses: string[]; peerPort: number | null; webPort: number | null };
 export type WorkerLink = { name: string; url: string; serverAddr: string; serverPort: number; appSecret: string; visitorKey: string };
-export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link: WorkerLink | null };
+/* link: null when the company has no link; left out when it has one that cannot be told now, so whoever reads the view
+   keeps the link it has. */
+export type WorkerView = { machine: string; role: MachineRole; authorityPem: string | null; revoked: string[]; data: DataMachine[]; link?: WorkerLink | null };
 
 /* The machines that keep the company's data, with where their keepers said they are: the ones a worker dials. */
 export async function dataMachines(db: Db): Promise<DataMachine[]> {
@@ -156,16 +158,17 @@ export function visitorKeyOf(ctx: Ctx, opts: { force?: boolean } = {}): Promise<
   return answer;
 }
 
-/* The public link as a worker uses it. None without a link, outside lead, where no secret is made, or while the relay has
-   given no visitor key. It carries neither the link's key nor the way to the data. */
-export async function workerLink(ctx: Ctx): Promise<WorkerLink | null> {
-  if (ctx.mode.current() !== 'lead') return null;
+/* The public link as a worker uses it, with neither the link's key nor the way to the data. Null: the company has no
+   link. Undefined: it has one, but this app cannot tell it now, since it does not lead and so makes no secret, or the
+   relay has given no visitor key yet. */
+export async function workerLink(ctx: Ctx): Promise<WorkerLink | null | undefined> {
   const settings = await tunnelSettings(ctx.db, ctx.config);
-  const server = settings ? Server.safeParse(settings.tunnel) : null;
-  if (!settings || !server?.success) return null;
+  if (!settings) return null;
+  if (ctx.mode.current() !== 'lead') return undefined;
+  const server = Server.safeParse(settings.tunnel);
   const appSecret = await peerSecret(ctx.db, ctx.config, 'app', true);
   const visitorKey = await visitorKeyOf(ctx);
-  if (!appSecret || !visitorKey) return null;
+  if (!server.success || !appSecret || !visitorKey) return undefined;
   return { name: settings.name, url: settings.url, serverAddr: server.data.serverAddr, serverPort: server.data.serverPort, appSecret, visitorKey };
 }
 
@@ -174,7 +177,8 @@ export async function workerView(ctx: Ctx, machineId: string): Promise<WorkerVie
   const row = await networkMachine(ctx.db, machineId);
   if (!row) throw notAMachine();
   const authority = await authorityOf(ctx.db, ctx.config);
-  return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), link: await workerLink(ctx) };
+  const link = await workerLink(ctx);
+  return { machine: row.id, role: row.role!, authorityPem: authority?.certPem ?? null, revoked: await revokedSerials(ctx.db), data: await dataMachines(ctx.db), ...(link === undefined ? {} : { link }) };
 }
 
 const dayOf = (at: Date): string => at.toISOString().slice(0, 10);
@@ -213,24 +217,31 @@ type Certified = { machine: string; role: MachineRole; issued: Issued; authority
 
 /* A machine's keeper redeems its ticket: the ticket's machine becomes a worker of the network under the id of its
    computer, with the key the keeper holds, and gets its first certificate. The ticket works once, for the computer it
-   was made on, while its machine is connected and its person active; a refusal writes nothing. A computer has one row in
-   the network: a second person's row on it waits until the first is disconnected. */
+   was made on, while its machine is connected and its person active; a refusal writes nothing. A keeper whose answer was
+   lost on the way asks again with the same key and is answered again, for as long as the ticket's day lasts: with the
+   ticket spent and no certificate it would have no way in. A computer has one row in the network: a second person's row
+   on it waits until the first is disconnected. */
 export async function redeemTicket(ctx: Ctx, ask: JoinAsk): Promise<Certified> {
   if (ctx.mode.current() !== 'lead') throw notLeading();
   const now = new Date();
+  const hash = hashToken(ask.ticket);
   const join = ctx.db.transaction(async tx => {
-    const [ticket] = await tx.select().from(machineTickets).where(eq(machineTickets.ticketHash, hashToken(ask.ticket))).for('update');
-    if (!ticket || ticket.usedAt || ticket.expiresAt <= now) throw ticketUsed();
-    const row = await lockLiveMachine(tx, ticket.machineId);
-    const [person] = row ? await tx.select({ status: people.status }).from(people).where(eq(people.id, row.personId)) : [];
-    if (!row || person?.status !== 'active') throw ticketUsed();
+    /* The machine's row first and the ticket after it, as Disconnect takes them: the other way round the two would wait
+       on each other. */
+    const [named] = await tx.select({ machineId: machineTickets.machineId }).from(machineTickets).where(eq(machineTickets.ticketHash, hash));
+    const row = named ? await lockLiveMachine(tx, named.machineId) : null;
+    const [ticket] = row ? await tx.select().from(machineTickets).where(eq(machineTickets.ticketHash, hash)).for('update') : [];
+    if (!row || !ticket || ticket.expiresAt <= now) throw ticketUsed();
+    if (ticket.usedAt && row.signKey !== ask.signKey) throw ticketUsed();
+    const [person] = await tx.select({ status: people.status }).from(people).where(eq(people.id, row.personId));
+    if (person?.status !== 'active') throw ticketUsed();
     if (ask.networkId !== hostIdOf(row.machineKey)) throw machineTaken();
     /* A disconnected row that still names this computer gives it up. A live one keeps it: its row is not locked here,
        and one that takes the id in this very moment is met by the column's unique rule below. */
     const holders = await tx.select({ id: machines.id, revokedAt: machines.revokedAt }).from(machines).where(and(eq(machines.networkId, ask.networkId), ne(machines.id, row.id)));
     if (holders.some(holder => !holder.revokedAt)) throw machineTaken();
     if (holders.length > 0) await tx.update(machines).set({ networkId: null }).where(inArray(machines.id, holders.map(holder => holder.id)));
-    await tx.update(machineTickets).set({ usedAt: now }).where(eq(machineTickets.ticketHash, ticket.ticketHash));
+    if (!ticket.usedAt) await tx.update(machineTickets).set({ usedAt: now }).where(eq(machineTickets.ticketHash, hash));
     await tx.update(machines).set({ networkId: ask.networkId, role: 'worker', signKey: ask.signKey }).where(eq(machines.id, row.id));
     /* A core installed anew has a new key, and what the old key held ends with it. */
     if (row.signKey && row.signKey !== ask.signKey) await tx.update(certificates).set({ revokedAt: now }).where(and(eq(certificates.machineId, row.id), isNull(certificates.revokedAt)));
@@ -260,6 +271,15 @@ export async function claimRenewal(tx: Db, row: { id: string; renewAt: Date | nu
 
 export type RenewAnswer = { status: 200 | 410; answer: Signed };
 
+/* The view as an answer may carry it: the link's secrets go only into one that travels over TLS, so a listener on the
+   local network sees none, and the machine keeps the link it has. */
+export function viewFor(view: WorkerView, overTls: boolean): WorkerView {
+  if (overTls) return view;
+  const open = { ...view };
+  delete open.link;
+  return open;
+}
+
 /* A machine asks for its view of the network, and for a new certificate when the one it names is unknown, revoked or
    near its end, by a request signed with its own key: its certificate may have expired, or the secrets changed, so it
    cannot come through the peer link. A disconnected machine that proves its key learns that it was cut off, and nobody
@@ -284,11 +304,10 @@ export async function signedRenewal(ctx: Ctx, ask: RenewAsk & { signature: strin
     return { role: row.role, issued, authorityPem: authority.certPem };
   });
   if (!taken) return { status: 410, answer: await signedAnswer(ctx, ask, { disconnected: true }) };
-  const { link, ...view } = await workerView(ctx, ask.machine);
   const body = {
     machine: ask.machine, serial: ask.serial, at: ask.at, role: taken.role, authorityPem: taken.authorityPem,
     certPem: taken.issued?.certPem ?? null, until: taken.issued?.until.toISOString() ?? null,
-    view: withLink ? { ...view, link } : view,
+    view: viewFor(await workerView(ctx, ask.machine), withLink),
   };
   return { status: 200, answer: await signedAnswer(ctx, ask, body) };
 }

@@ -78,7 +78,8 @@ function askHello(h2: ClientHttp2Session, ms: number): Promise<Hello> {
         if (status !== 200) throw new Error(`The peer link answered its hello with ${status}.`);
         resolve(HelloBody.parse(JSON.parse(Buffer.concat(chunks).toString())));
       } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
+        /* silent: the stream ended with no answer at all, which is how a machine hangs up on a peer it does not take. */
+        reject(Object.assign(err instanceof Error ? err : new Error(String(err)), { silent: status === 0 }));
       }
     });
     stream.end();
@@ -185,19 +186,29 @@ export class PeerSessions {
     }
   }
 
-  private async dialDirect(kept: Kept): Promise<Session | null> {
+  /* Every address at once, and the first that answers wins: one that drops what it is sent would else hold the others,
+     and the relay after them, up for its whole patience. Which of them failed is known once all have ended. */
+  private dialDirect(kept: Kept): Promise<Session | null> {
     kept.directTriedAt = Date.now();
     const { addresses, peerPort } = kept.target;
-    if (!peerPort) return null;
-    for (const address of addresses) {
-      const session = await this.open(kept.target, address, peerPort, 'direct');
-      if (session) {
-        kept.failed.clear();
-        return session;
+    if (!peerPort || addresses.length === 0) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const failed = new Set<string>();
+      let left = addresses.length;
+      let won = false;
+      for (const address of addresses) {
+        void this.open(kept.target, address, peerPort, 'direct').then(session => {
+          left--;
+          if (session && won) session.h2.destroy();
+          else if (session) resolve(session);
+          else failed.add(address);
+          won ||= Boolean(session);
+          if (left > 0) return;
+          kept.failed = failed;
+          if (!won) resolve(null);
+        });
       }
-      kept.failed.add(address);
-    }
-    return null;
+    });
   }
 
   private dialRelay(kept: Kept): Promise<Session | null> {
@@ -220,8 +231,8 @@ export class PeerSessions {
   /* A session that said hello, or null: nothing answered there in time, the machine there is not the one dialed, or it
      did not take this machine's certificate. With TLS 1.3 the handshake is through on this side before the data machine
      has looked at this machine's certificate, and a keeper that refuses one closes the connection with no word. So a
-     session counts from its first hello, and a machine that showed the right certificate and then hung up before that
-     hello is taken to have refused this one's. */
+     session counts from its first hello, and a machine that showed the right certificate and then hung up with no
+     answer to that hello is taken to have refused this one's. One that answered it, however oddly, has not. */
   private open(target: DialTarget, host: string, port: number, path: LinkPath): Promise<Session | null> {
     const held = this.opts.held();
     if (!held || this.closed) return Promise.resolve(null);
@@ -262,7 +273,7 @@ export class PeerSessions {
         const session = h2;
         askHello(session, this.opts.connectMs ?? CONNECT_MS).then(
           hello => settle({ h2: session, path, hello, timers: [], asking: false, pinged: true }),
-          () => fail(true),
+          (err: { silent?: boolean }) => fail(err.silent === true),
         );
       });
     });
@@ -271,16 +282,19 @@ export class PeerSessions {
   private refuse(): void {
     if (this.refused) return;
     this.refused = true;
-    this.opts.log("A data machine of the company did not take this machine's certificate.");
+    this.opts.log("A data machine of the company hung up before its first answer: it may not take this machine's certificate.");
     this.opts.changed?.();
   }
 
   private keep(kept: Kept, session: Session): void {
     if (this.closed || !this.kept.includes(kept) || session.h2.destroyed) return void session.h2.destroy();
-    /* A direct session takes the place of the one through the relay. */
+    /* A direct session takes the place of the one through the relay, which ends once what it still carries has. */
     const before = kept.session;
     kept.session = session;
-    before?.h2.destroy();
+    if (before) {
+      for (const timer of before.timers) clearInterval(timer);
+      before.h2.close();
+    }
     this.refused = false;
     session.h2.once('close', () => {
       for (const timer of session.timers) clearInterval(timer);

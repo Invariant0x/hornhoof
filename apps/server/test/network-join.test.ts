@@ -170,13 +170,24 @@ describe('joining the company as a machine', () => {
     const first = certFacts(said.certPem).serial;
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toMatchObject([{ serial: first, revokedAt: null }]);
 
-    const again = await c.redeem(ticket, MAC.machineId, keys.pem);
+    /* Whoever else got hold of the ticket comes too late. */
+    const again = await c.redeem(ticket, MAC.machineId, newKeys().pem);
     expect(again.statusCode).toBe(410);
     expect(again.json().error).toEqual({ code: 'gone', message: 'This join ticket was used or has expired. Run the command from Hornhoof again.', reason: 'ticket_used' });
     expect((await c.redeem('x'.repeat(43), MAC.machineId, keys.pem)).statusCode).toBe(410);
     const expired = await issueTicket(c.db, machine, new Date(Date.now() - 25 * 3_600_000));
     expect(errorOf(await c.redeem(expired, MAC.machineId, keys.pem))).toBe('ticket_used');
     expect(await c.db.select().from(certificates).where(eq(certificates.machineId, machine))).toHaveLength(1);
+    expect((await c.rowOf(machine)).signKey).toBe(keys.pem);
+
+    /* The keeper that redeemed it and lost the answer asks again with the same key, and is answered again: with the
+       ticket spent and no certificate it would have no way in. Once the ticket's day is over, no more. */
+    const lost = await c.redeem(ticket, MAC.machineId, keys.pem);
+    expect(lost.statusCode).toBe(200);
+    expect(certFacts((lost.json() as Joined).certPem)).toMatchObject({ machineId: machine, role: 'worker' });
+    await c.db.update(machineTickets).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(machineTickets.ticketHash, hashToken(ticket)));
+    expect(errorOf(await c.redeem(ticket, MAC.machineId, keys.pem))).toBe('ticket_used');
+    await c.db.update(certificates).set({ revokedAt: new Date() }).where(eq(certificates.serial, certFacts((lost.json() as Joined).certPem).serial));
 
     /* The same key again changes nothing that works; a new key, as after the core was installed anew, ends what the old
        key held. */
@@ -343,9 +354,11 @@ describe('joining the company as a machine', () => {
     expect(kept!.secretEnc).not.toContain(c.relay.visitorKeys.get('acme'));
     expect(decryptSecret(kept!.secretEnc, c.config.secret)).toContain(c.relay.visitorKeys.get('acme'));
 
+    /* A machine that does not lead makes no secret, so it says nothing of the link: a worker keeps the one it has. Null
+       would say that the company has no link. */
     writeKeeperState(c.control, { mode: 'read', at: new Date().toISOString(), link: null });
     await c.app.ctx.mode.check();
-    expect(((await c.peers(keeperOf(w.machine))).json() as { link: unknown }).link).toBeNull();
+    expect((await c.peers(keeperOf(w.machine))).json()).not.toHaveProperty('link');
     /* Nothing is handed out by a machine that does not lead. */
     const ticket = await issueTicket(c.db, w.machine);
     const waiting = await c.redeem(ticket, MAC.machineId, w.keys.pem);
@@ -355,9 +368,14 @@ describe('joining the company as a machine', () => {
 
   it('asks the relay for a visitor key at most once a minute, and again for a link of another name', async () => {
     const c = await company();
+    const w = await c.worker();
+    /* A company with no link says so. */
+    expect(((await c.peers(keeperOf(w.machine))).json() as { link: unknown }).link).toBeNull();
     await c.link('acme');
     c.relay.down = true;
     expect(await visitorKeyOf(c.app.ctx)).toBeNull();
+    /* With a link whose key the relay did not give, the view says nothing of the link. */
+    expect((await c.peers(keeperOf(w.machine))).json()).not.toHaveProperty('link');
     c.relay.down = false;
     /* A relay that did not answer is not asked again at once. */
     expect(await visitorKeyOf(c.app.ctx)).toBeNull();
@@ -470,6 +488,21 @@ describe('joining the company as a machine', () => {
     expect(errorOf(late)).toBe('code_used');
     expect((await c.peers(keeperOf(machine))).statusCode).toBe(404);
     expect((await c.app.inject({ method: 'POST', url: '/api/network/certificate', payload: { signKey: keys.pem }, ...keeperOf(machine) })).statusCode).toBe(404);
+  });
+
+  it('gives a machine connected again no place in the network until its keeper redeems a new ticket', async () => {
+    const c = await company();
+    const w = await c.worker();
+    expect((await c.disconnect(w.machine)).statusCode).toBe(204);
+    /* The owner runs a command there again, and the row is the machine's once more. */
+    const back = (await c.join(await c.command())).json() as { machine: { id: string } };
+    expect(back.machine.id).toBe(w.machine);
+    expect(await c.rowOf(w.machine)).toMatchObject({ revokedAt: null, role: null, signKey: null, networkId: null });
+    /* The key the machine had before the Disconnect opens nothing: whoever holds it is not let back in by it. */
+    const old = await c.renew(w);
+    expect(old.statusCode).toBe(404);
+    expect(await c.db.select().from(certificates).where(and(eq(certificates.machineId, w.machine), isNull(certificates.revokedAt)))).toEqual([]);
+    expect((await c.peers(keeperOf(w.machine))).statusCode).toBe(404);
   });
 
   it('leaves the secrets alone when a computer with no core is disconnected', async () => {

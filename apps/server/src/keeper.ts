@@ -8,11 +8,12 @@ type Running = { start(): Promise<unknown>; stop(): Promise<void> };
 async function workerKeeper(): Promise<Running> {
   const { WorkerKeeper } = await import('./modules/keeper/worker.js');
   const { workerConfig } = await import('./modules/keeper/worker-config.js');
-  return new WorkerKeeper({ config: workerConfig(process.env, log), frontHost: 'front', log });
+  return new WorkerKeeper({ config: workerConfig(process.env), frontHost: 'front', log });
 }
 
 async function dataKeeper(): Promise<Running> {
   const { loadConfig } = await import('./config.js');
+  const { addressesIn } = await import('./modules/keeper/addresses.js');
   const { KEEPER_NAME, openDb } = await import('./db/client.js');
   const { publishedFrom } = await import('./modules/keeper/identity.js');
   const { Keeper } = await import('./modules/keeper/keeper.js');
@@ -25,10 +26,9 @@ async function dataKeeper(): Promise<Running> {
     const { hostname, port } = new URL(config.databaseUrl);
     return { host: hostname, port: Number(port) || 5432 };
   };
-  const addresses = (process.env.HORNHOOF_ADDRESSES ?? '').split(',').map(address => address.trim()).filter(Boolean);
   return new Keeper({
     config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log, lease: leaseOfMachine(config, log),
-    published: publishedFrom(process.env), dbTarget: dbTarget(), addresses, hostname: process.env.HORNHOOF_HOSTNAME || null,
+    published: publishedFrom(process.env), dbTarget: dbTarget(), addresses: addressesIn(process.env), hostname: process.env.HORNHOOF_HOSTNAME || null,
   });
 }
 
