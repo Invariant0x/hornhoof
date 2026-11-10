@@ -891,7 +891,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
       proposalId: propId,
       materialRevision: 2,
       materialDigest: propDigest,
-      items: [{ template: 'support', note: 'Поддержка клиентов.' }],
+      items: [{ template: 'support', note: 'Поддержка клиентов.', staff: true }],
     },
   }]);
 });
