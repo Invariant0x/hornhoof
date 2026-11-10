@@ -34,7 +34,7 @@ function fakeView(): FakeView {
   }) as unknown as FakeView;
 }
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { key?: string; jobId?: string; operatorDelivery?: OperatorDelivery; prompt?: string; openMs?: number; connects?: boolean; sessionId?: string | null; limits?: () => Promise<Limits | null>; operator?: OperatorOptions; secrets?: string[]; host?: Partial<ConstructorParameters<typeof TerminalHost>[0]> } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -106,7 +106,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     initial = true;
     turn++;
     const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
-    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: SESSION, ...(prompt ? {} : { tools: undefined }) });
+    const base = makeJob(options.key ?? 'receipt', prompt, { jobId, workDir, sessionId: options.sessionId === undefined ? SESSION : options.sessionId, ...(prompt ? {} : { tools: undefined }) });
     const program = options.limits ? { ...base.program, limits: options.limits } : base.program;
     const running = host.run({ ...base, program, home, operatorDelivery: options.operatorDelivery }).then(result => {
       sent.push(jobDone(jobId, result, []));
