@@ -27,3 +27,7 @@ export function modelForTier(tier: RoleTier, provider: string, models: readonly 
 /* The same on a plan as the database holds it, or the program's default when it names none. */
 export const modelOnPlan = (tier: RoleTier, plan: { provider: ProviderId; models: ModelOption[] | null }): string =>
   modelForTier(tier, plan.provider, modelsFor(plan.provider, plan.models)) ?? '';
+
+/* The strength an employee asks for where it works: its role's, and the strongest in a turnkey team, whose member does a
+   task whole with nobody checking after. */
+export const tierIn = (role: Pick<Role, 'tier'>, team: { turnkey: boolean } | null | undefined): RoleTier => (team?.turnkey ? 'top' : role.tier);

@@ -261,3 +261,13 @@ Development authors write a failing test before the change, run only affected te
 | `skills/home-shopping.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-bills.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-calendar.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `teams/development/DEV-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/design/DSN-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/marketing/MKT-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/sales/SAL-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/support/SUP-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/finance/FIN-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/business_development/BIZ-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/operations/OPS-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/home_devices/HOM-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |
+| `teams/household/HHD-TEAM.md` | Written for Hornhoof | Hornhoof's own turnkey mode: one member does a task whole, with no stage after it | Hornhoof |

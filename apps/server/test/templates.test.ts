@@ -431,7 +431,7 @@ describe('templates', () => {
   it('names where every template comes from and under which licence', () => {
     const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
     const files = readdirSync(DIR, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && f !== 'SOURCES.md');
-    expect(files.length).toBe(roles.length + skills.length);
+    expect(files.length).toBe(roles.length + skills.length + templates.teams.size);
     for (const file of files) expect(sources, file).toContain(`| \`${file}\` |`);
     /* Every repository a skill learned from has its licence in the table of sources. */
     const repos = new Set([...sources.matchAll(/^\| ([\w.-]+\/[\w.-]+(?:, [\w.-]+\/[\w.-]+)*) \|/gm)].flatMap(m => m[1]!.split(', ')));
@@ -578,11 +578,31 @@ describe('templates', () => {
     for (const part of ['title', 'problem', 'facts', 'source', 'guesses', 'why', 'change', 'gain']) expect(review, part).toContain(`${part}:`);
   });
 
+  it('has a turnkey team for every department, of members of that department', () => {
+    const teams = [...templates.teams.values()];
+    expect(teams.map(team => team.department).sort()).toEqual([...new Set(roles.map(r => r.department))].sort());
+    for (const team of teams) {
+      expect(team.turnkey, team.id).toBe(true);
+      expect(templates.teamsOf(team.department), team.id).toEqual([team]);
+      expect(team.title.ru, team.id).toMatch(/[а-я]/i);
+      expect(team.description.en.length, team.id).toBeGreaterThan(20);
+      expect(team.members.length, team.id).toBeGreaterThan(0);
+      for (const member of team.members) {
+        expect(templates.roles.get(member.role), `${team.id}: ${member.role}`).toMatchObject({ department: team.department, kind: 'member' });
+        expect(member.count, `${team.id}: ${member.role}`).toBeGreaterThan(0);
+      }
+      /* No id of a team is the id of a role. */
+      expect(templates.roles.has(team.id), team.id).toBe(false);
+    }
+    expect(templates.teams.get('DEV-TEAM')!.members).toEqual([{ role: 'DEV-ENG', count: 2 }]);
+  });
+
   it('has the full development roster', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
-    expect(ids).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
-    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
+    /* The default roster has someone for every echelon: Architecture, Development, Review, Security and Tests. */
+    expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-ENG', 'DEV-REV', 'DEV-TEST', 'DEV-SEC']);
+    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-BE', 'DEV-FE', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
     expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
     expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);

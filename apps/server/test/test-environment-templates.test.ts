@@ -36,7 +36,7 @@ describe('product environment ownership', () => {
   });
 
   it('keeps final checks and existing role skills while adding the environment procedure', () => {
-    expect(templates.roles.get('DEV-TEST')).toMatchObject({ schema: 'final_check', gate: null, inDefault: false });
+    expect(templates.roles.get('DEV-TEST')).toMatchObject({ schema: 'final_check', gate: null, inDefault: true });
     expect(templates.roles.get('DEV-QA')).toMatchObject({ schema: null, gate: null, inDefault: false });
     expect(templates.roles.get('DEV-HEAD')).toMatchObject({ schema: null, gate: null, inDefault: true });
     const previous: Record<string, string[]> = {

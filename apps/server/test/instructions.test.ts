@@ -43,7 +43,7 @@ const SKILLS = [
   skill('dev-migrations', 'Migrations', 'Never edit a shipped migration.'),
 ];
 
-const T: Templates = { roles: new Map([[ROLE.id, ROLE]]), skills: new Map(SKILLS.map(s => [s.id, s])), roster: () => [ROLE] };
+const T: Templates = { roles: new Map([[ROLE.id, ROLE]]), skills: new Map(SKILLS.map(s => [s.id, s])), teams: new Map(), roster: () => [ROLE], teamsOf: () => [] };
 
 type AgentRow = typeof agents.$inferSelect;
 
