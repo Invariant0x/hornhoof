@@ -55,6 +55,13 @@ describe('install.sh on a machine that joins', () => {
     expect(started).toContain(`--label hornhoof.server=${SERVER}`);
   });
 
+  it("lets the core's updater move the nodes from now on", () => {
+    const r = install({ env: { STUB_JOIN_BODY: body(CORE, MACHINE), STUB_NODES_UPDATER: 'nodes-updater-1' } });
+    expect(r.code, r.out).toBe(0);
+    expect(r.calls).toContain('docker rm -f nodes-updater-1');
+    expect(r.calls.some(call => call.includes('start-nodes'))).toBe(false);
+  });
+
   it('takes a core line alone, with or without the build, and starts no node', () => {
     for (const lines of [[CORE], [BUILD, CORE]]) {
       const r = install({ env: { STUB_JOIN_BODY: body(...lines) } });

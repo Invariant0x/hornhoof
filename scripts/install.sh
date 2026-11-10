@@ -759,6 +759,8 @@ worker_core() {
     fi
     sleep 2
   done
+  # The core's own updater moves this company's nodes here from now on, so the one that did it before goes.
+  drop_nodes_updater
   local_front "$web"
 }
 
