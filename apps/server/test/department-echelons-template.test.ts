@@ -43,6 +43,24 @@ describe('the route of every department template', () => {
     }
   });
 
+  it('gives a member of a turnkey team the skill of every check of its department, as it does them alone', () => {
+    for (const team of [...templates.teams.values()].filter(t => t.turnkey)) {
+      for (const { role } of team.members) {
+        const carried = new Set([...templates.roles.get(role)!.skills.filter(skill => skill.on).map(skill => skill.id), ...team.skills]);
+        for (const { stage, ability } of templates.stagesOf(team.department).stages) {
+          if (ability && stage !== 'cleanup') expect([...carried], `${team.id} ${role} ${stage}`).toContain(ability);
+        }
+      }
+    }
+  });
+
+  it('gives the turnkey team of Development the skills of every echelon: plan, review, security, tests and release', () => {
+    expect(templates.teams.get('DEV-TEAM')!.skills).toEqual([
+      'dev-plan-review', 'dev-api-design', 'dev-review-diff', 'dev-review-fix', 'dev-review-verdict', 'dev-security-review', 'dev-security-fix',
+      'dev-threat-model', 'dev-test-gaps', 'dev-e2e-tests', 'dev-test-environment', 'dev-ci-release', 'dev-release-notes',
+    ]);
+  });
+
   it('takes a department made from no template through the route of Development', () => {
     expect(templates.stagesOf(null)).toBe(templates.stagesOf('development'));
   });

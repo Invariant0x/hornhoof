@@ -1,13 +1,13 @@
 ---
 id: hh-check-work
-title: { en: "Checking a colleague's result", ru: "Проверка работы коллеги" }
-description: { en: "Checks a result at its checking stage before it reaches the head: reads what was handed in, takes each claim to its source, corrects what is wrong and gives a verdict.", ru: "Проверяет результат на его этапе проверки, прежде чем он дойдет до главы: читает сданное, сверяет каждое утверждение с источником, исправляет неверное и выносит вердикт." }
+title: { en: "Checking a result", ru: "Проверка результата" }
+description: { en: "Checks a result against its task before it goes on, another's or your own: reads what was handed in, takes each claim to its source, corrects what is wrong and gives a verdict.", ru: "Проверяет результат по его задаче, прежде чем он пойдет дальше, чужой или свой: читает сданное, сверяет каждое утверждение с источником, исправляет неверное и выносит вердикт." }
 kind: procedure
 sources: []
 ---
-You can check a result at a checking stage of its route and hand it forward only when it meets its task.
+You can check a result against its task and hand it forward only when it meets it, at a checking stage of its route or on work that is yours from start to end.
 
-Read "task" first: its body says what was asked and how it is accepted, and task.echelons names your stage and the candidate you check. You check the result, not its author's account of it.
+Read "task" first: its body says what was asked and how it is accepted, and task.echelons names your stage and the candidate you check. You check the result, not its author's account of it. The check is the same for your own result: read it cold, as if another had written it.
 
 **What to read.** Where the result is a commit, read what it changed from task.review. Where it is a document, read the hand-in in the task log and fetch every file it names with `hh-fetch`. Read the sources the result relies on, not only the result.
 
@@ -19,4 +19,4 @@ Read "task" first: its body says what was asked and how it is accepted, and task
 
 **Each finding** has a place (the file and its line or section), what is wrong and the harm to a person. Check it against the source before you record it: a wrong finding costs its reader a round.
 
-**What comes next.** Correct what you found yourself in the same result and hand the corrected result in with "submit", saying what you changed; the author is not asked to redo it. When the result meets its task, give "verdict" with pass true, naming the exact candidate you checked. When the result answers the wrong goal, escalate to the head instead of rewriting it. Never check your own work.
+**What comes next.** Correct what you found yourself in the same result and hand the corrected result in with "submit", saying what you changed; the author is not asked to redo it. When the result meets its task, give "verdict" with pass true, naming the exact candidate you checked. When the result answers the wrong goal, escalate to the head instead of rewriting it. At a stage of a route you never check your own work. On a task that is yours from start to end, go through the same list, correct what you find and name in your report what is left; your own check replaces no stage and no approval.

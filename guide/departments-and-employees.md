@@ -115,7 +115,7 @@ The checker must use a model at least as capable as the producer's. Hornhoof pre
 
 Cleanup is optional and off by default. When the head enables it for a task or turn, it follows Review and uses the existing dev-cleanup skill. Tests checks the exact final candidate after all repairs. Findings retain their stage and candidate history; they are counted once.
 
-A department's sub-unit can be marked "Works turnkey" on the department's screen. Each of its members then does a task alone from start to finish: code, checks, tests, merge and release. Such a task goes through no stages, and nobody else in the department checks it, whatever its text says. The mark holds for tasks given from then on.
+A department's sub-unit can be marked "Works turnkey" on the department's screen. Each of its members then does a task alone from start to finish: code, checks, tests, merge and release. Such a task goes through no stages, and nobody else in the department checks it, whatever its text says. The mark holds for tasks given from then on. The turnkey team a department's template brings gives each member the skills of every check of that department, as the member does them alone.
 
 ## How is work checked in the other departments?
 
@@ -131,7 +131,7 @@ Every department has a route of its own: the stages its work goes through in a t
 | Finance | Finance auditor |
 | Operations | Reliability engineer and Integrations engineer, each the other's work |
 
-The one who checks carries the skill "Checking a colleague's result" and runs a model at least as strong as the author's. It corrects what it finds itself and passes the result on, or sends work that answers the wrong question to the head.
+The one who checks carries the skill "Checking a result" and runs a model at least as strong as the author's. It corrects what it finds itself and passes the result on, or sends work that answers the wrong question to the head.
 
 A department that keeps its work in a repository hands in a commit, as Development does. A department with no repository hands in a document: what the employee wrote in the hand-in and the files attached to the task. The task shows its stages as "Work" and "Check", and once the check passed it waits for the head to accept it.
 
