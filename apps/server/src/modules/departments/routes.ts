@@ -19,6 +19,7 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
+import { modelOnPlan } from '../agents/role-model.js';
 import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
@@ -347,7 +348,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
-     subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
+     subscription that serves the department and runs the role's tier, with the model that tier asks for there. Every staff card
      picks from its roles, products and subscriptions. */
   app.get('/api/departments/:id/roster', async req => {
     const me = await requirePerson(req, db);
@@ -370,7 +371,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     }));
     const people: HireLine[] = [];
     for (const role of roles.filter(r => r.inDefault)) {
-      const line = { role: role.id, model: '', subscription: role.subscription, skills: role.skills };
+      const plan = serving.find(s => s.id === role.subscription);
+      const line = { role: role.id, model: plan ? modelOnPlan(role.tier, plan) : '', subscription: role.subscription, skills: role.skills };
       if (role.perProduct && products.length) for (const p of products) people.push({ ...line, name: `${role.title.en} (${deptName(p)})`, product: p.id });
       else people.push({ ...line, name: role.title.en, product: null });
     }

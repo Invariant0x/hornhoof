@@ -588,7 +588,18 @@ describe('templates', () => {
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules'), id).toBeUndefined();
-    for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
+    /* Each role asks for the strength of model its work needs: the strongest where nobody checks after and a mistake costs
+       most, a strong one for whoever checks others or leads a department of risky work, the lightest for simple work that
+       comes in a stream, and the middle one for everyone whose work is checked after. */
+    const asked: Record<string, string[]> = {
+      top: ['DEV-ARCH', 'DEV-SEC'],
+      deep: ['BIZ-HEAD', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD'],
+      fast: ['HHD-CAL', 'HHD-SUPPLY', 'MKT-SOCIAL', 'OPS-WATCH', 'SAL-SDR', 'SUP-T1'],
+    };
+    for (const role of templates.roles.values()) {
+      const tier = Object.keys(asked).find(key => asked[key]!.includes(role.id)) ?? 'standard';
+      expect(role.tier, role.id).toBe(tier);
+    }
   });
 
   it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('tells %s that a run starts with its dependencies prepared, and what to do when it did not', roleId => {

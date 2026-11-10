@@ -158,7 +158,7 @@ describe('staffing', () => {
     const staff = await c.db.select().from(agents).where(eq(agents.departmentId, c.dev.id)).orderBy(asc(agents.name));
     expect(staff.map(a => [a.name, a.kind, a.roleKey, a.model, a.subscriptionId])).toEqual([
       ['Bruno', 'worker', 'DEV-BE', 'gpt-6.1-sol', c.olegCodex],
-      ['Hanna', 'head', 'DEV-HEAD', '', c.teamKey],
+      ['Hanna', 'head', 'DEV-HEAD', 'claude-opus-5-5', c.teamKey],
     ]);
     const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
     expect(staff[0]).toMatchObject({ productId: c.products[0]!.id, skills, createdBy: ceo!.id });
@@ -233,7 +233,9 @@ describe('staffing', () => {
     const designProducts = await c.db.select().from(departments).where(eq(departments.parentId, c.design.id)).orderBy(asc(departments.position));
     const ui = roster.filter((l: { role: string }) => l.role === 'DSN-UI');
     expect(ui.map((l: { product: string; name: string }) => [l.product, l.name])).toEqual(designProducts.map(p => [p.id, `Product UI designer (${p.name})`]));
-    expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: '', subscription: c.orchestrator.subscriptionId });
+    /* Each line names the model its role's tier asks for on its plan: the middle one for the head, a strong one for the one who checks. */
+    expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: 'claude-sonnet-5-5', subscription: c.orchestrator.subscriptionId });
+    expect(roster.find((l: { role: string }) => l.role === 'DSN-QA')).toMatchObject({ model: 'claude-opus-5-5' });
     for (const l of roster) expect(l.skills).toContain(l.role === 'DSN-HEAD' ? 'hh-lead-tasks' : 'hh-task-flow');
     const { roles, products, subscriptions } = res.json();
     expect(roles[0]).toMatchObject({ id: 'DSN-HEAD', kind: 'head', subscription: c.orchestrator.subscriptionId });
@@ -244,6 +246,15 @@ describe('staffing', () => {
     const dev = (await c.app.inject({ url: `/api/departments/${c.dev.id}/roster`, ...as(c.ceo) })).json().people;
     expect(dev.map((l: { role: string }) => l.role)).not.toContain('DEV-DOCS');
     expect((await hire(c.app, c.ceo, c.design.id, { people: roster })).statusCode).toBe(201);
+  });
+
+  it('names the model of a hire that came without one by its role, keeps a named one, and leaves one with no plan to its default', async () => {
+    const c = await company();
+    const line = (role: string, over: object = {}) => ({ role, name: role, product: null, model: '', subscription: c.teamKey, skills: c.app.ctx.templates.roles.get(role)!.skills.filter(skill => skill.on).map(skill => skill.id), ...over });
+    const people = [line('DEV-SEC'), line('DEV-ENG'), line('DEV-REV', { model: 'claude-fable-5-1' }), line('DEV-DOCS', { subscription: null })];
+    expect((await hire(c.app, c.ceo, c.dev.id, { people })).statusCode).toBe(201);
+    const hired = await c.db.select({ role: agents.roleKey, model: agents.model }).from(agents).where(eq(agents.departmentId, c.dev.id));
+    expect(Object.fromEntries(hired.map(a => [a.role, a.model]))).toEqual({ 'DEV-SEC': 'claude-fable-5-1', 'DEV-ENG': 'claude-sonnet-5-5', 'DEV-REV': 'claude-fable-5-1', 'DEV-DOCS': '' });
   });
 
   it('tells the orchestrator who was hired', async () => {

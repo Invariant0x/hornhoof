@@ -163,7 +163,15 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | Sales | - | Account executive | Head of sales, Sales development representative, Sales operations analyst |
 | Support | - | Second-line support | First-line support, Head of support, Knowledge base editor |
 
-Deep roles: Architect, Code reviewer, Controller, Head of business development, Head of development, Security engineer.
+Each role asks for a strength of model, and an employee hired without a model named runs the one of that strength its plan has, by name. When the plan has none of that strength it takes the nearest stronger one, else the nearest weaker.
+
+Top roles, the strongest model there is, for work nobody checks after: Architect, Security engineer.
+
+Deep roles, a strong model, for whoever checks the work of others or leads risky work: Code reviewer, Controller, Design QA, Finance auditor, Head of business development, Head of development, Red team.
+
+Fast roles, the lightest model, for simple work that comes in a stream: Calendar helper, First-line support, Sales development representative, Social media manager, Supplies helper, Task watchdog.
+
+Every other role takes the middle one: its work is checked after.
 
 ## What if a role has nobody switched on?
 

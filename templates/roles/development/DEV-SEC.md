@@ -4,7 +4,7 @@ department: development
 kind: member
 title: { en: "Security engineer", ru: "Инженер по безопасности" }
 description: { en: "Engineer of software security and access boundaries.", ru: "Инженер безопасности программ и границ доступа." }
-tier: deep
+tier: top
 effort: xhigh
 perProduct: false
 default: true

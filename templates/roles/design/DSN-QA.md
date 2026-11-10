@@ -4,7 +4,7 @@ department: design
 kind: member
 title: { en: "Design QA", ru: "Контроль качества дизайна" }
 description: { en: "Specialist in design quality and interface consistency.", ru: "Специалист по качеству дизайна и согласованности интерфейсов." }
-tier: standard
+tier: deep
 effort: medium
 perProduct: false
 default: true

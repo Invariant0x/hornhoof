@@ -40,7 +40,7 @@ function roles(): string {
   return table(['Department', ...shown], [...new Set(all.map(r => r.department))].sort().map(key => [departmentName(key), ...shown.map(level => inDepartment(key).filter(r => r.effort === level).map(r => r.title.en).join(', ') || '-')]));
 }
 
-const deep = () => [...templates.roles.values()].filter(r => r.tier === 'deep').sort(byTitle).map(r => r.title.en).join(', ');
+const ofTier = (tier: Role['tier']) => [...templates.roles.values()].filter(r => r.tier === tier).sort(byTitle).map(r => r.title.en).join(', ');
 
 describe('the guide on programs, models and levels', () => {
   const guide = readFileSync(GUIDE, 'utf8');
@@ -57,8 +57,10 @@ describe('the guide on programs, models and levels', () => {
     expect(guide).toContain(roles());
   });
 
-  it('names the roles that need a deep model', () => {
-    expect(guide).toContain(`Deep roles: ${deep()}.`);
+  it('names the roles that ask for the strongest, a strong and the lightest model', () => {
+    expect(guide).toContain(`for work nobody checks after: ${ofTier('top')}.`);
+    expect(guide).toContain(`or leads risky work: ${ofTier('deep')}.`);
+    expect(guide).toContain(`for simple work that comes in a stream: ${ofTier('fast')}.`);
   });
 
   it('claims no list for a program whose machine reports its own', () => {
