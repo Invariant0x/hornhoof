@@ -18,8 +18,8 @@ concurrency:
 
 jobs:
   send:
-    # GitHub's machine: it has an SSH client, which our own build runner has not, and the job takes seconds.
-    runs-on: ubuntu-latest
+    # Our build runner, as for the release: its image carries the SSH client this job needs.
+    runs-on: ${{ vars.BUILD_RUNS_ON && fromJSON(vars.BUILD_RUNS_ON) || 'ubuntu-latest' }}
     steps:
       - name: Find the latest release
         id: latest
@@ -41,6 +41,7 @@ jobs:
             echo "::error::EDGE_INSTALL_KEY, EDGE_INSTALL_HOST or EDGE_KNOWN_HOSTS is not set, so hornhoof.org keeps its old install.sh."
             exit 1
           fi
+          command -v ssh > /dev/null || { echo "::error::This runner has no SSH client (openssh-client), so hornhoof.org keeps its old install.sh."; exit 1; }
           umask 077
           printf '%s\n' "$EDGE_INSTALL_KEY" > "$RUNNER_TEMP/edge-key"
           printf '%s\n' "$EDGE_KNOWN_HOSTS" > "$RUNNER_TEMP/edge-known-hosts"
