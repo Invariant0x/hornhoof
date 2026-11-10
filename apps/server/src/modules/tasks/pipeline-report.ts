@@ -1,13 +1,13 @@
 import type { DepartmentFacts, DepartmentPipeline, DepartmentReport, PipelineFacts, PipelineHead, PipelineReport, PipelineTurn, TurnFacts } from '@hornhoof/protocol';
-import { and, asc, eq, gte, inArray, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Db } from '../../db/client.js';
-import { departments, jobs, requests, taskEvents, tasks, testPartTimings, testParts, testRuns, turnSnapshots, turns } from '../../db/schema.js';
+import { agents, departments, jobs, requests, taskEvents, tasks, testPartTimings, testParts, testRuns, turnSnapshots, turns } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import { keepTimings } from '../testruns/timings.js';
 import { refuse, type Tx } from './engine.js';
-import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsTask, type LaterBug } from './pipeline-facts.js';
+import { laterBugsOf, pipelineFacts, reportRows, testsShown, type CountedFacts, type FactsInput, type FactsJob, type FactsTask, type LaterBug } from './pipeline-facts.js';
 import { NUDGES, workTree, type AgentTime } from './tree.js';
 import { treeFactsOf } from './tree-facts.js';
 
@@ -47,11 +47,21 @@ async function readTimings(db: Reader, runIds: string[]): Promise<FactsInput['ti
 }
 
 /* Everything a turn's tasks went through, read in one go. */
+/* Agent turns with whether each was one of coordination: of the orchestrator, a head or an employee of Operations. */
+async function readTurns(db: Reader, companyId: string, which: ReturnType<typeof and>): Promise<FactsJob[]> {
+  const places = await db.select({ id: departments.id, parentId: departments.parentId, templateKey: departments.templateKey }).from(departments).where(eq(departments.companyId, companyId));
+  const operations = new Set(places.filter(p => p.templateKey === 'operations').map(p => p.id));
+  const inOperations = (departmentId: string | null) => places.some(p => p.id === departmentId && (operations.has(p.id) || (p.parentId !== null && operations.has(p.parentId))));
+  const rows = await db.select({ taskId: jobs.taskId, status: jobs.status, error: jobs.error, interruption: jobs.interruption, createdAt: jobs.createdAt, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, agentKind: agents.kind, departmentId: agents.departmentId })
+    .from(jobs).leftJoin(agents, eq(agents.id, jobs.agentId)).where(and(eq(jobs.companyId, companyId), eq(jobs.kind, 'conversation'), which));
+  return rows.map(({ interruption, agentKind, departmentId, ...turn }) => ({ ...turn, interrupted: interruption !== null, coordination: agentKind === 'orchestrator' || agentKind === 'head' || inOperations(departmentId) }));
+}
+
 async function readRaw(db: Reader, companyId: string, turnTasks: FactsTask[]): Promise<RawInput> {
   const ids = turnTasks.map(t => t.id);
   const events = await db.select({ taskId: taskEvents.taskId, kind: taskEvents.kind, data: taskEvents.data, createdAt: taskEvents.createdAt }).from(taskEvents).where(and(inArray(taskEvents.taskId, ids), notInArray(taskEvents.kind, [...NUDGES]))).orderBy(asc(taskEvents.createdAt), asc(taskEvents.id));
   const asks = await db.select({ taskId: requests.taskId, createdAt: requests.createdAt, answeredAt: requests.answeredAt }).from(requests).where(inArray(requests.taskId, ids));
-  const turnsOfTasks = await db.select({ taskId: jobs.taskId, status: jobs.status, error: jobs.error, interruption: jobs.interruption, createdAt: jobs.createdAt, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt }).from(jobs).where(and(inArray(jobs.taskId, ids), eq(jobs.kind, 'conversation')));
+  const turnsOfTasks = await readTurns(db, companyId, inArray(jobs.taskId, ids));
   await keepTimings(db, companyId, ids);
   const runs = await readRuns(db, ids);
   return {
@@ -59,7 +69,7 @@ async function readRaw(db: Reader, companyId: string, turnTasks: FactsTask[]): P
     events,
     requests: asks,
     runs,
-    jobs: turnsOfTasks.map(({ interruption, ...j }) => ({ ...j, interrupted: interruption !== null })),
+    jobs: turnsOfTasks,
     timings: await readTimings(db, runs.map(r => r.id)),
   };
 }
@@ -95,7 +105,8 @@ export async function turnFacts(db: Reader, turn: Turn, until: Date): Promise<Tu
     const some = raw.tasks.filter(t => rows.find(r => r.id === t.id)?.departmentId === place.id);
     departmentsFacts.push({ department: { id: place.id, name: deptName(place) }, ...pipelineFacts({ ...partOf(raw, some), ...window, agentTime }) });
   }
-  return { version: 1, whole: pipelineFacts({ ...raw, ...window, agentTime: allTime }), departments: departmentsFacts };
+  const outside = await readTurns(db, turn.companyId, and(isNull(jobs.taskId), gte(jobs.createdAt, window.openedAt), lte(jobs.createdAt, until)));
+  return { version: 1, whole: pipelineFacts({ ...raw, outside, ...window, agentTime: allTime }), departments: departmentsFacts };
 }
 
 /* Kept as the turn closes, before the next one opens. A failure leaves the turn to close all the same, under a savepoint of

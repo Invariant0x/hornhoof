@@ -203,7 +203,7 @@ describe('waits', () => {
       tasks: [task(1, { createdAt: at(10) })],
       events: [event(1, 'started', 25)],
       requests: [{ taskId: 't1', createdAt: at(0), answeredAt: at(30) }, { taskId: 't1', createdAt: at(90), answeredAt: null }],
-      jobs: [{ taskId: 't1', status: 'done', error: null, interrupted: false, createdAt: at(0), startedAt: at(4), finishedAt: at(10) }],
+      jobs: [{ taskId: 't1', status: 'done', error: null, interrupted: false, coordination: false, createdAt: at(0), startedAt: at(4), finishedAt: at(10) }],
     }));
     expect(facts.waits.person).toEqual({ count: 2, seconds: min(40) });
     expect(facts.waits.tasks).toEqual({ count: 1, seconds: min(15) });
@@ -223,10 +223,17 @@ describe('returns, failures and interrupted turns', () => {
   });
 
   it('counts failed turns without those a restart cut off or Hornhoof ended itself', () => {
-    const job = (status: 'done' | 'failed', error: string | null, interrupted = false) => ({ taskId: 't1', status, error, interrupted, createdAt: at(0), startedAt: at(0), finishedAt: at(1) });
+    const job = (status: 'done' | 'failed', error: string | null, interrupted = false) => ({ taskId: 't1', status, error, interrupted, coordination: false, createdAt: at(0), startedAt: at(0), finishedAt: at(1) });
     const facts = pipelineFacts(input({ tasks: [task(1)], jobs: [job('failed', 'agent_failed'), job('failed', null), job('failed', 'handed_on'), job('failed', 'waiting'), job('failed', 'machine_restarted', true), job('done', null)] }));
     expect(facts.failures).toBe(2);
     expect(facts.interrupted).toBe(1);
+  });
+
+  it('counts every agent turn on the tasks and outside them, and apart those of the orchestrator, heads and Operations', () => {
+    const turn = (coordination: boolean, taskId: string | null = 't1') => ({ taskId, status: 'done', error: null, interrupted: false, coordination, createdAt: at(0), startedAt: at(0), finishedAt: at(1) });
+    const facts = pipelineFacts(input({ tasks: [task(1), task(2)], jobs: [turn(false), turn(false), turn(true)], outside: [turn(true, null), turn(true, null)] }));
+    expect(facts.turns).toEqual({ total: 5, coordination: 3, perTask: 2.5, coordinationShare: 0.6 });
+    expect(pipelineFacts(input()).turns).toEqual({ total: 0, coordination: 0, perTask: null, coordinationShare: null });
   });
 
   it('says it has no number for test selection misses while no full run could find any', () => {

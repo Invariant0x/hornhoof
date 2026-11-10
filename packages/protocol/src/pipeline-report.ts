@@ -83,6 +83,9 @@ export type AgentTimeKind = (typeof AGENT_TIMES)[number];
 export const KIND_LINES = [...WORK_KINDS, 'unset'] as const;
 export type KindLine = (typeof KIND_LINES)[number];
 
+/* Agent turns of a turn: all of them, those of the orchestrator, the heads and Operations, how many a task took and the
+   share that went to coordination. */
+export type TurnsFacts = { total: number; coordination: number; perTask: number | null; coordinationShare: number | null };
 export type KindFacts = { tasks: number; toAcceptance: number | null; returns: number; fixRounds: number };
 /* A done task, as a later bug that names it counts against it. */
 export type DoneTask = { number: number; kind: KindLine; closedAt: string };
@@ -124,6 +127,8 @@ export type PipelineFacts = {
   wholeTurn: number;
   criticalPath: { seconds: number; tasks: number[] };
   agents: Record<AgentTimeKind, number>;
+  /* Older snapshots have no such line. */
+  turns?: TurnsFacts;
   stages: Record<PipelineStage, number>;
   waits: {
     testRuns: RunWaits;
@@ -148,7 +153,7 @@ export type DepartmentFacts = PipelineFacts & { department: { id: string; name: 
 /* A turn's facts as a snapshot keeps them. */
 export type TurnFacts = { version: 1; whole: PipelineFacts; departments: DepartmentFacts[] };
 
-export const PIPELINE_SECTIONS = ['tasks', 'time', 'stages', 'agents', 'waits', 'problems', 'quality', 'kinds', 'tests'] as const;
+export const PIPELINE_SECTIONS = ['tasks', 'time', 'stages', 'agents', 'turns', 'waits', 'problems', 'quality', 'kinds', 'tests'] as const;
 export type PipelineSection = (typeof PIPELINE_SECTIONS)[number];
 export type PipelineUnit = 'seconds' | 'count' | 'ratio';
 /* One number with the same number of the previous and the baseline turn, and the change to each in percent. */

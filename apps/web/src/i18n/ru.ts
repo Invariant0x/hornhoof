@@ -757,7 +757,7 @@ export const ru: Messages = {
         comparedNone: 'Раньше ходов не было, сравнивать не с чем.',
         noAbout: 'Нет описания отдела, поэтому своих цифр отдела в отчете нет.',
         hasAbout: 'Свои цифры отдел берет из своего описания; его инструменты пока не передают их в этот отчет.',
-        sections: { tasks: 'Задачи', time: 'Сколько заняло', stages: 'Время по этапам', agents: 'Время агентов', waits: 'Ожидания по причинам', problems: 'Сдачи и сбои', quality: 'Качество после выпуска', kinds: 'По видам задач', tests: 'Время тестов' },
+        sections: { tasks: 'Задачи', time: 'Сколько заняло', stages: 'Время по этапам', agents: 'Время агентов', turns: 'Ходы агентов', waits: 'Ожидания по причинам', problems: 'Сдачи и сбои', quality: 'Качество после выпуска', kinds: 'По видам задач', tests: 'Время тестов' },
         metrics: {
           'tasks.total': 'Всего задач', 'tasks.done': 'Сделано', 'tasks.cancelled': 'Отменено', 'tasks.open': 'Не закончено', 'small.count': 'Мелкие задачи',
           'small.median': 'Мелкие задачи, от создания до закрытия, медиана',
@@ -766,6 +766,7 @@ export const ru: Messages = {
           wholeTurn: 'Весь ход', criticalPath: 'Критический путь', 'agents.total': 'Все агенты вместе',
           'stages.work': 'Работа', 'stages.review': 'Проверка', 'stages.fixes': 'Правки', 'stages.merge': 'Слияние', 'stages.turnReview': 'Ревью хода',
           'agents.work': 'Работа', 'agents.waiting': 'Ожидание', 'agents.idle': 'Простой', 'agents.lost': 'Прерывания', 'agents.queued': 'В очереди', 'agents.unknown': 'Нет данных',
+          'turns.total': 'Все ходы агентов', 'turns.coordination': 'Из них оркестратора, руководителей и операционного отдела', 'turns.perTask': 'Ходов агентов на задачу', 'turns.coordinationShare': 'Доля оркестратора, руководителей и операционного отдела',
           submitsPerTask: 'Сдач на задачу', failures: 'Сбойных ходов', interrupted: 'Оборванных ходов', selectionMisses: 'Промахи выбора тестов',
           'quality.laterBugs': 'Ошибок найдено позже', returns: 'Возвраты', fixRounds: 'Круги правок',
           'tests.total': 'Все файлы тестов', 'tests.setup': 'Подготовка', 'tests.run': 'Тесты', 'tests.teardown': 'Уборка', 'tests.files': 'Файлов замерено',

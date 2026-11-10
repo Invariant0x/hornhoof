@@ -729,7 +729,7 @@ export const en = {
         comparedNone: 'There is no earlier turn to compare with.',
         noAbout: 'This department has no description yet, so the report has no numbers of its own for it.',
         hasAbout: 'Numbers of its own come from the description of the department; its tools do not send them to this report yet.',
-        sections: { tasks: 'Tasks', time: 'How long it took', stages: 'Time by stage', agents: 'Time of the agents', waits: 'Waits by reason', problems: 'Hand-ins and failures', quality: 'Quality after release', kinds: 'By kind of task', tests: 'Test time' },
+        sections: { tasks: 'Tasks', time: 'How long it took', stages: 'Time by stage', agents: 'Time of the agents', turns: 'Agent turns', waits: 'Waits by reason', problems: 'Hand-ins and failures', quality: 'Quality after release', kinds: 'By kind of task', tests: 'Test time' },
         metrics: {
           'tasks.total': 'All tasks', 'tasks.done': 'Done', 'tasks.cancelled': 'Cancelled', 'tasks.open': 'Not finished', 'small.count': 'Small tasks',
           'small.median': 'Small tasks, creation to closing, median',
@@ -738,6 +738,7 @@ export const en = {
           wholeTurn: 'Whole turn', criticalPath: 'Critical path', 'agents.total': 'All agents together',
           'stages.work': 'Work', 'stages.review': 'Review', 'stages.fixes': 'Fixes', 'stages.merge': 'Merge', 'stages.turnReview': 'Review of the turn',
           'agents.work': 'Working', 'agents.waiting': 'Waiting', 'agents.idle': 'Idle', 'agents.lost': 'Interrupted', 'agents.queued': 'Queued', 'agents.unknown': 'No data',
+          'turns.total': 'All agent turns', 'turns.coordination': 'Of the orchestrator, heads and Operations', 'turns.perTask': 'Agent turns per task', 'turns.coordinationShare': 'Share of the orchestrator, heads and Operations',
           submitsPerTask: 'Hand-ins per task', failures: 'Failed turns', interrupted: 'Interrupted turns', selectionMisses: 'Missed by test selection',
           'quality.laterBugs': 'Bugs found later', returns: 'Returns', fixRounds: 'Fix rounds',
           'tests.total': 'All test files', 'tests.setup': 'Setup', 'tests.run': 'Tests', 'tests.teardown': 'Teardown', 'tests.files': 'Files measured',

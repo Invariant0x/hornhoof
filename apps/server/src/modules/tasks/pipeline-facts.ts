@@ -1,4 +1,4 @@
-import { AGENT_TIMES, EXTERNAL_WAITS, FILE_BUDGET_MS, KIND_LINES, PIPELINE_STAGES, TEST_BUDGET_MS, type AgentTimeKind, type DepartmentReport, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
+import { AGENT_TIMES, EXTERNAL_WAITS, FILE_BUDGET_MS, KIND_LINES, PIPELINE_STAGES, TEST_BUDGET_MS, type AgentTimeKind, type DepartmentReport, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type TurnsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
 import type { TaskEventKind, TaskStatus, TestRunFileCache } from '../../db/schema.js';
 import type { AgentTime } from './tree.js';
 
@@ -22,7 +22,8 @@ export type FactsEvent = { taskId: string; kind: TaskEventKind; data: Record<str
 export type FactsRequest = { taskId: string; createdAt: Date; answeredAt: Date | null };
 export type FactsPart = { queuedAt: Date; startedAt: Date | null; finishedAt: Date | null };
 export type FactsRun = { id: string; taskId: string; kind: 'tests' | 'work'; createdAt: Date; finishedAt: Date | null; parts: FactsPart[]; fileCache?: TestRunFileCache | null };
-export type FactsJob = { taskId: string | null; status: string; error: string | null; interrupted: boolean; createdAt: Date; startedAt: Date | null; finishedAt: Date | null };
+/* coordination: a turn of the orchestrator, a head or an employee of Operations. */
+export type FactsJob = { taskId: string | null; status: string; error: string | null; interrupted: boolean; coordination: boolean; createdAt: Date; startedAt: Date | null; finishedAt: Date | null };
 export type FactsTimings = PartTimings & { runId: string };
 export type FactsInput = {
   openedAt: Date;
@@ -33,6 +34,8 @@ export type FactsInput = {
   requests: FactsRequest[];
   runs: FactsRun[];
   jobs: FactsJob[];
+  /* Agent turns outside any task while the turn ran. They are the company's, so a department's facts have none. */
+  outside?: FactsJob[];
   agentTime: AgentTime[];
   timings: FactsTimings[];
 };
@@ -331,6 +334,11 @@ function doneTasks(work: Line[]): DoneTask[] {
   return work.filter(isDone).map(l => ({ number: l.task.number, kind: kindOf(l.task), closedAt: l.end.toISOString() }));
 }
 
+function turnsFacts(turns: FactsJob[], tasks: number): TurnsFacts {
+  const coordination = turns.filter(t => t.coordination).length;
+  return { total: turns.length, coordination, perTask: roundedRatio(turns.length, tasks), coordinationShare: roundedRatio(coordination, turns.length) };
+}
+
 export function pipelineFacts(input: FactsInput): PipelineFacts {
   const lines = linesOf(input);
   const work = lines.filter(isWork);
@@ -344,6 +352,7 @@ export function pipelineFacts(input: FactsInput): PipelineFacts {
     wholeTurn: seconds(input.openedAt, input.until),
     criticalPath: criticalPath(lines),
     agents: agentsOf(input.agentTime),
+    turns: turnsFacts([...input.jobs, ...(input.outside ?? [])], input.tasks.length),
     stages: stagesOf(lines),
     waits: {
       testRuns: runWaits(input.runs.filter(r => r.kind === 'tests'), input.until),
@@ -468,6 +477,16 @@ function testRows(t: TestsFacts): Fact[] {
   ];
 }
 
+/* A snapshot from before turns were counted has no rows here. */
+function turnRows(t: TurnsFacts | undefined): Fact[] {
+  if (!t) return [];
+  return [
+    ...counts('turns', { 'turns.total': t.total, 'turns.coordination': t.coordination }),
+    { section: 'turns', key: 'turns.perTask', unit: 'ratio', value: t.perTask },
+    { section: 'turns', key: 'turns.coordinationShare', unit: 'ratio', value: t.coordinationShare },
+  ];
+}
+
 function factsOf(counted: CountedFacts): Fact[] {
   const f = counted.facts;
   return [
@@ -475,6 +494,7 @@ function factsOf(counted: CountedFacts): Fact[] {
     ...timeFacts(f),
     ...times('stages', Object.fromEntries(PIPELINE_STAGES.map(k => [`stages.${k}`, f.stages[k]]))),
     ...times('agents', Object.fromEntries(AGENT_TIMES.map(k => [`agents.${k}`, f.agents[k]]))),
+    ...turnRows(f.turns),
     ...waitsFacts(f),
     { section: 'problems', key: 'submitsPerTask', unit: 'ratio', value: f.submitsPerTask },
     ...counts('problems', { failures: f.failures, interrupted: f.interrupted, selectionMisses: f.selectionMisses }),

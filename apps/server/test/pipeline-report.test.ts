@@ -135,6 +135,22 @@ describe('the facts of any turn', () => {
     expect(facts.whole.criticalPath.seconds).toBe(min(100));
   });
 
+  it('count the agent turns of a turn, on its tasks and outside them, and how many went to the orchestrator, heads and Operations', async () => {
+    const c = await company();
+    const { seven, one } = await closedTurn(c);
+    const [ops] = await c.db.insert(departments).values({ companyId: c.companyId, templateKey: 'operations', roleCode: 'OPS', position: 3 }).returning();
+    const [walt] = await c.db.insert(agents).values({ companyId: c.companyId, kind: 'worker', name: 'Walt', roleKey: 'OPS-WATCH', departmentId: ops!.id, model: '', subscriptionId: c.hana.subscriptionId }).returning();
+    await c.job(c.hana.id, one.id, { createdAt: at(12) });
+    await c.job(c.orchestrator.id, null, { createdAt: at(50) });
+    await c.job(walt!.id, null, { createdAt: at(60) });
+    /* After the turn closed: not its turn. */
+    await c.job(c.orchestrator.id, null, { createdAt: at(130) });
+    const facts = await turnFacts(c.db, seven, seven.closedAt!);
+    /* The closed turn had four turns of its employees on its three tasks. */
+    expect(facts.whole.turns).toEqual({ total: 7, coordination: 3, perTask: 2.33, coordinationShare: 0.43 });
+    expect(facts.departments.find(d => d.department.id === c.dev.id)!.turns).toEqual({ total: 4, coordination: 1, perTask: 2, coordinationShare: 0.25 });
+  });
+
   it('keep waits for runs apart from external waits', async () => {
     const c = await company();
     const { seven } = await closedTurn(c);
