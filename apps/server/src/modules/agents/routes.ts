@@ -17,6 +17,7 @@ import { CLOSED, leaveWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveForTeam, leaveIfOff, resumeAgent, wakeAll } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
+import { modelOnPlan } from './role-model.js';
 import type { Lang, Role, RoleSkill, Skill } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, orchestratorSteady, renderInstructions, placeOf, type Part } from './instructions.js';
@@ -335,9 +336,11 @@ function providerChanged(agent: AgentRow, next: AgentRow, before: PlanRow | unde
   return next.subscriptionId !== agent.subscriptionId && before?.provider !== after?.provider;
 }
 
-function patchModel(agent: AgentRow, next: AgentRow, body: PatchBody, before: PlanRow | undefined, after: PlanRow | undefined): void {
-  /* Another provider's programs do not know this model, so the employee starts on the new one's Default. */
-  if (providerChanged(agent, next, before, after)) next.model = '';
+function patchModel(agent: AgentRow, next: AgentRow, body: PatchBody, plans: { before: PlanRow | undefined; after: PlanRow | undefined }, role: Role | undefined): void {
+  const { before, after } = plans;
+  /* Another provider's programs do not know this model, so the employee starts on the one its role asks for on the new
+     plan, by name, and on that program's Default when it has no role or the plan runs no model Hornhoof knows. */
+  if (providerChanged(agent, next, before, after)) next.model = role && after && body.model === undefined ? modelOnPlan(role.tier, after) : '';
   if (body.model !== undefined && body.model !== '') {
     if (!after) throw invalid('Pick a subscription before a model.', 'model_unknown');
     const models = modelsFor(after.provider, after.models);
@@ -440,10 +443,10 @@ async function patched(ctx: Ctx, me: Person, agent: AgentRow, body: z.infer<type
   await patchSubscription(ctx, agent, next, body, orchestrator);
   const [before] = agent.subscriptionId ? await db.select().from(subscriptions).where(eq(subscriptions.id, agent.subscriptionId)) : [];
   const [after] = next.subscriptionId ? await db.select().from(subscriptions).where(eq(subscriptions.id, next.subscriptionId)) : [];
-  patchModel(agent, next, body, before, after);
+  const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
+  patchModel(agent, next, body, { before, after }, role);
   patchEffort(agent, next, body, before, after);
 
-  const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
   for (const [id, on] of Object.entries(body.skills ?? {})) patchSkill(ctx, me, next, role, id, on);
   patchOverrides(ctx, next, body);
   await checkInstructionLength(ctx, next, orchestrator);
