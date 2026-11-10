@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, improvements, jobs, subscriptions, taskEvents, taskRoutes, tasks, turns } from '../src/db/schema.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { settle } from '../src/modules/tasks/turns.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { invitePerson } from './helpers.js';
@@ -131,7 +132,7 @@ describe('turns', () => {
       .insert(tasks)
       .values({ companyId, number: 3, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Open child', brief: 'Keep assignee.', body: 'Continue the same work.', status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, createdByAgentId: orchestrator.id })
       .returning();
-    await db.transaction(tx => createRoute(tx, child!, { reviewerAgentId: hana.id, paths: ['logic/totals.ts'] }));
+    await db.transaction(tx => createRoute(tx, child!, { reviewerAgentId: hana.id, paths: ['logic/totals.ts'] }, developmentStages()));
     const childRoute = await routeOf(db, child!);
     const [finished] = await db
       .insert(tasks)
@@ -421,7 +422,7 @@ describe('turns', () => {
     await call(await tools(orchestrator), 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     const history = await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, departmentId: dev.id, number: i + 2, title: `Old ${i}`, status: 'done' as const, closedAt: new Date() }))).returning();
     /* Closed coordination history has a terminal route and no invented executable check. */
-    const state: typeof taskRoutes.$inferInsert['state'] = { kind: 'development_echelons', version: 1, resultKind: 'coordination', stage: null, phase: 'done', candidateId: null, assignment: null, stages: [], security: { required: false, reason: null, addedBy: null } };
+    const state: typeof taskRoutes.$inferInsert['state'] = { kind: 'development_echelons', version: 1, resultKind: 'coordination', stage: null, phase: 'done', candidateId: null, assignment: null, stages: [], abilities: {}, security: { required: false, reason: null, addedBy: null } };
     await db.insert(taskRoutes).values(history.map(task => ({ taskId: task.id, companyId, state, paths: [] })));
     const listed = await get(ceoToken, `/api/tasks?status=all&department=${dev.id}`);
     expect(listed.statusCode, listed.body).toBe(200);

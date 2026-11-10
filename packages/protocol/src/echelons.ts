@@ -22,6 +22,8 @@ export type EchelonsSnapshot = {
   phase: EchelonPhase;
   ownerAgentId: string | null;
   stages: EchelonStep[];
+  /* The skill whoever checks at a stage must carry, as the route of the task's department named it when the task was made. */
+  abilities: Partial<Record<EchelonStage, string>>;
   candidateId: string | null;
   assignment: EchelonModel | null;
   security: { required: boolean; reason: string | null; addedBy: string | null };

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, people, tasks, teams, turns, TASK_STATUSES } from '../src/db/schema.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { turnCounts } from '../src/modules/tasks/turn-progress.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -22,7 +23,7 @@ async function fixture() {
   let number = 100;
   const add = async (departmentId: string, patch: Partial<typeof tasks.$inferInsert> = {}) => {
     const task = (await db.insert(tasks).values({ companyId, number: ++number, turnId: turn!.id, departmentId, title: 'Count this task', createdByPersonId: person!.id, executorAgentId: patch.status === 'review' ? executor!.id : null, closedAt: patch.status === 'done' || patch.status === 'cancelled' ? new Date() : null, ...patch }).returning())[0]!;
-    await db.transaction(tx => createRoute(tx, task, {}));
+    await db.transaction(tx => createRoute(tx, task, {}, developmentStages()));
     return task;
   };
   const org = async (token = ceo) => {

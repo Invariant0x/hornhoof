@@ -2,13 +2,14 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
-import { verifiedCandidateEvidence } from './echelons-tests.js';
+import { testedEvidence } from './echelons-tests.js';
 import { currentCandidate } from './echelons-candidates.js';
 import type { Ctx } from '../../app.js';
+import { requiredStagesComplete } from './echelons-accept.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { giver, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 
-const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/) })).min(1) });
+const Acceptance = z.object({ candidateId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/), routeRevision: z.number().int().positive(), evidence: z.array(z.object({ runId: z.uuid(), commit: z.string().regex(/^[a-f0-9]{40}$/) })) });
 
 type Reader = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'config' | 'templates' | 'readCompare' | 'readCommit'>>;
 
@@ -67,11 +68,6 @@ async function acceptedAggregate(tx: Tx, child: Task, route: Route, report: Repo
   return { taskId: child.id, children: nested };
 }
 
-function completedReview(route: Route): boolean {
-  const reviewed = route.state.stages.some(step => step.stage === 'review' && step.status === 'complete');
-  return reviewed && route.state.stages.every(step => step.status === 'complete' || step.status === 'skipped');
-}
-
 function acceptedIdentity(acceptance: z.infer<typeof Acceptance>, route: Route, candidate: Awaited<ReturnType<typeof currentCandidate>>): boolean {
   return acceptance.candidateId === candidate.id && acceptance.commit === candidate.commit && acceptance.routeRevision === route.revision && acceptance.evidence.every(proof => proof.commit === candidate.commit);
 }
@@ -79,8 +75,8 @@ function acceptedIdentity(acceptance: z.infer<typeof Acceptance>, route: Route, 
 async function acceptedCode(tx: Tx, child: Task, route: Route, report: ReportData): Promise<AcceptedChild> {
   const candidate = await currentCandidate(tx, child, route);
   const acceptance = Acceptance.safeParse(report?.acceptedCandidate);
-  if (!completedReview(route) || !acceptance.success || !acceptedIdentity(acceptance.data, route, candidate)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
-  const evidence = (await verifiedCandidateEvidence(tx, child, route, candidate, route.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
+  if (!requiredStagesComplete(route) || !acceptance.success || !acceptedIdentity(acceptance.data, route, candidate)) throw refuse(409, 'task_invalid', 'A child candidate is unreviewed, unaccepted or stale.');
+  const evidence = (await testedEvidence(tx, child, route, candidate, route.revision - 1)).sort((a, b) => a.runId.localeCompare(b.runId));
   if (evidence.length !== acceptance.data.evidence.length || acceptance.data.evidence.some(proof => !evidence.some(run => run.runId === proof.runId && run.commit === proof.commit))) throw refuse(409, 'task_changed', 'The accepted evidence differs from its Tests report.');
   return { taskId: child.id, candidateId: candidate.id, commit: candidate.commit, evidence };
 }

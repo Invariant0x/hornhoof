@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, taskEvents, taskRoutes, tasks, testParts, turns } from '../src/db/schema.js';
 import { submit, verdict } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { BASE, FIRST, SECOND, fixture, rejectedFinding } from './review-fixture.js';
 
 describe('pinned review provenance', () => {
@@ -149,7 +150,7 @@ describe('explicit finding confirmation', () => {
     const [current] = await f.db.update(turns).set({ number: 8, title: 'Current' }).where(eq(turns.id, f.task.turnId!)).returning();
     const [old] = await f.db.insert(tasks).values({ companyId, number: 100, turnId: baseline!.id, departmentId: f.author.departmentId, title: 'Legacy review', brief: '', body: '', status: 'done', executorAgentId: f.head.id, closedAt: new Date() }).returning();
     await f.db.transaction(async tx => {
-      await createRoute(tx, old!, {});
+      await createRoute(tx, old!, {}, developmentStages());
       const route = await routeOf(tx, old!);
       await tx.update(taskRoutes).set({ state: { ...route.state, stage: null, phase: 'done', stages: [] } }).where(eq(taskRoutes.taskId, old!.id));
     });

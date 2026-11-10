@@ -2,7 +2,7 @@ import { PREPARATION_UNIT, hashTestEnvironment, parseTestEnvironment, type NodeM
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
-import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { createCoordinationRoute } from '../src/modules/tasks/echelons-store.js';
 import { verifiedReuse } from '../src/modules/tasks/review-reuse.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription, newEnvironmentRequest, noteTestCapabilities, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
@@ -37,7 +37,7 @@ async function fixture(turnNumber = 3, everyTurns = 5, preparation = false) {
   const [turn] = await db.insert(turns).values({ companyId, number: turnNumber + 100, goal: 'Fixture', status: 'open' }).returning();
   await db.update(turns).set({ number: turnNumber }).where(eq(turns.id, turn!.id));
   const [task] = await db.insert(tasks).values({ companyId, departmentId: department!.id, number: 1, title: 'Reuse fixture', status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id, turnId: turn!.id }).returning();
-  await db.transaction(tx => createRoute(tx, task!, { resultKind: 'coordination' }));
+  await db.transaction(tx => createCoordinationRoute(tx, task!));
   const [job] = await db.insert(jobs).values({ companyId, subscriptionId: agent!.subscriptionId!, agentId: agent!.id, taskId: task!.id, prompt: 'Fixture', timeoutMs: 10_000, status: 'running' }).returning();
   const node = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], tests: [], load: { cpus: 8, load: 0.1, memFree: 16 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 0, jobs: 0 }, testEnvironmentVersion: 1, testRuntimes: runtimes });

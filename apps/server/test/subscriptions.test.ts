@@ -6,6 +6,7 @@ import type { Db } from '../src/db/client.js';
 import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, people, personAccess, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
 const WHOLE = { kind: 'company', id: null, name: 'Whole company' };
@@ -425,7 +426,7 @@ describe('GET /api/subscriptions', () => {
     const vera = await hire('Vera', marketing.id);
     const bruno = await hire('Bruno', development.id);
     const [task] = await db.insert(tasks).values({ companyId: development.companyId, departmentId: development.id, number: 12, title: 'Checkout API' }).returning();
-    await db.transaction(tx => createRoute(tx, task!, {}));
+    await db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
     const since = new Date('2026-11-01T10:00:00Z');
     await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: sub.id, agentId: bruno.id, taskId: task!.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: since, answersCeo: true });
     /* A finished turn leaves its agent on the plan, without the old task or start time. */

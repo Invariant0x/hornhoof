@@ -6,6 +6,7 @@ import { cancel, lastMove, type Task, type WakeWhy } from '../src/modules/tasks/
 import { discardStaleTurn, discardStaleTurns, recordStale, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
 import { agentFailureStates } from '../src/modules/tasks/failures.js';
 import { createRoute, routeOf, routeSnapshot, type Route } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { createTestDb, echelonsTurn, statements, testApp } from './helpers.js';
 
@@ -27,7 +28,7 @@ async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
   };
   const task = async (set: Partial<Task> = {}) => db.transaction(async tx => {
     const [t] = await tx.insert(tasks).values({ companyId: company!.id, number: ++number, title: 'Checkout', small: true, turnId: turn.id, createdByAgentId: head!.id, executorAgentId: worker!.id, assigneeAgentId: worker!.id, ...set }).returning();
-    await createRoute(tx, t!, {});
+    await createRoute(tx, t!, {}, developmentStages());
     if (set.status === 'review') {
       const route = await routeOf(tx, t!);
       await tx.update(taskRoutes).set({ state: { ...route.state, stage: 'review' } }).where(eq(taskRoutes.taskId, t!.id));

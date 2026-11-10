@@ -7,6 +7,7 @@ import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
@@ -38,7 +39,7 @@ async function company() {
   const at = new Date(Date.now() - 10 * MIN);
   const task = async (set: Partial<typeof tasks.$inferInsert> = {}) => {
     const [row] = await db.insert(tasks).values({ companyId, number: ++number, title: 'Checkout API', small: true, departmentId: dev!.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id, turnId: turn.id, createdByAgentId: head.id, createdAt: at, updatedAt: at, ...set }).returning();
-    await db.transaction(tx => createRoute(tx, row!, { paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: tess.id }));
+    await db.transaction(tx => createRoute(tx, row!, { paths: ['logic/totals.ts'], reviewerAgentId: rita.id, testsAgentId: tess.id }, developmentStages()));
     await db.insert(taskEvents).values({ companyId, taskId: row!.id, kind: 'created', agentId: head.id, createdAt: at });
     return row!;
   };

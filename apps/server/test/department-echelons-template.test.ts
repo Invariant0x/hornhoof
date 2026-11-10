@@ -1,0 +1,57 @@
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { loadTemplates } from '../src/modules/templates/load.js';
+
+const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
+const templates = loadTemplates(DIR);
+
+/* A copy of the templates with the route of one department written anew. */
+function withRoute(key: string, stages: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'hornhoof-route-'));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  cpSync(DIR, dir, { recursive: true });
+  writeFileSync(join(dir, 'echelons', `${key}.md`), `---\ndepartment: ${key}\nstages:\n${stages}\n---\n`);
+  return dir;
+}
+
+describe('the route of every department template', () => {
+  it('keeps the stages of Development and the skill of each of its checks', () => {
+    expect(templates.stagesOf('development').stages).toEqual([
+      { stage: 'architecture', ability: null }, { stage: 'development', ability: null }, { stage: 'review', ability: 'dev-review-diff' },
+      { stage: 'cleanup', ability: 'dev-cleanup' }, { stage: 'security', ability: 'dev-security-review' }, { stage: 'tests', ability: 'dev-test-environment' },
+    ]);
+  });
+
+  it('gives every department a route of its own, each with the work stage', () => {
+    for (const key of TEMPLATE_KEYS) {
+      expect(templates.echelons.get(key)?.department, key).toBe(key);
+      expect(templates.stagesOf(key).stages.map(step => step.stage), key).toContain('development');
+    }
+  });
+
+  it('has an employee of the default roster who carries the skill of every check, where the route has a check', () => {
+    for (const key of TEMPLATE_KEYS) {
+      for (const { stage, ability } of templates.stagesOf(key).stages) {
+        if (!ability || stage === 'cleanup') continue;
+        const carriers = templates.roster(key).filter(role => role.kind === 'member' && role.inDefault && role.skills.some(skill => skill.id === ability && skill.on));
+        expect(carriers.map(role => role.id), `${key} ${stage}`).not.toEqual([]);
+      }
+    }
+  });
+
+  it('takes a department made from no template through the route of Development', () => {
+    expect(templates.stagesOf(null)).toBe(templates.stagesOf('development'));
+  });
+
+  it('refuses stages out of their order, a check with no skill, and a skill that does not exist', () => {
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: review, ability: hh-check-work }\n  - { stage: development }'))).toThrow(/marketing\.md: stages go in the order/);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: development }\n  - { stage: review }'))).toThrow(/marketing\.md: review needs the ability of its checker/);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: development, ability: hh-check-work }'))).toThrow(/marketing\.md: development takes no ability/);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: development }\n  - { stage: review, ability: mkt-none }'))).toThrow(/names the skill mkt-none/);
+    expect(() => loadTemplates(withRoute('marketing', '  - { stage: review, ability: hh-check-work }'))).toThrow(/a route needs the development stage/);
+  });
+});

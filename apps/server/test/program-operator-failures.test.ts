@@ -6,6 +6,7 @@ import { jobs, programOperatorCases, tasks } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
+import { developmentStages } from './templates-once.js';
 import { agentFailureState, agentFailureStates } from '../src/modules/tasks/failures.js';
 import { operatorCompany } from './program-operator-company.js';
 
@@ -17,7 +18,7 @@ it.each([
   const c = await operatorCompany(status === 'open');
   const now = new Date();
   const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', body: 'Keep working.', status: 'working', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
-  await c.db.transaction(tx => createRoute(tx, task!, {}));
+  await c.db.transaction(tx => createRoute(tx, task!, {}, developmentStages()));
   await c.db.update(jobs).set({ taskId: task!.id }).where(eq(jobs.id, c.job.id));
   let ordinal = 0;
   const record = (frame: OperatorEvidence) => acceptOperatorEvidence(c.ctx, c.identity, { ...frame, evidenceId: randomUUID(), ordinal: ordinal++ }, now);

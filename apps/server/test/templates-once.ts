@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { Config } from '../src/config.js';
-import { copyTemplates, loadTemplates, type Templates } from '../src/modules/templates/load.js';
+import { copyTemplates, loadTemplates, type StageRoute, type Templates } from '../src/modules/templates/load.js';
 
 /* Reading, checking and assembling the role and skill templates took every server a test builds a few milliseconds, the
    same work each time. A test file reads the repository's templates once and gives each server a copy of its own, so what
@@ -12,11 +12,17 @@ let loads = 0;
 
 export const templateLoads = (): number => loads;
 
-export function templatesFor(config: Pick<Config, 'templatesDir'>): Templates | undefined {
-  if (config.templatesDir !== OWN) return undefined;
+function shipped(): Templates {
   if (!read) {
     read = loadTemplates(OWN);
     loads += 1;
   }
-  return copyTemplates(read);
+  return read;
 }
+
+export function templatesFor(config: Pick<Config, 'templatesDir'>): Templates | undefined {
+  return config.templatesDir === OWN ? copyTemplates(shipped()) : undefined;
+}
+
+/* The stages of Development, for a test that makes the route of a task by hand. */
+export const developmentStages = (): StageRoute => shipped().stagesOf('development');

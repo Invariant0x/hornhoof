@@ -259,8 +259,8 @@ describe('templates', () => {
   });
 
   it('loads every role and skill', () => {
-    expect(roles).toHaveLength(50);
-    expect(skills).toHaveLength(178);
+    expect(roles).toHaveLength(54);
+    expect(skills).toHaveLength(179);
     expect(templates.roles.has('DEV-GEN')).toBe(false);
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
@@ -269,7 +269,7 @@ describe('templates', () => {
 
   it('gives every role the effort assigned to its work', () => {
     const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
-    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE', 'MKT-EDIT', 'SAL-REV', 'SUP-QA', 'BIZ-REV'];
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 
@@ -431,7 +431,7 @@ describe('templates', () => {
   it('names where every template comes from and under which licence', () => {
     const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
     const files = readdirSync(DIR, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && f !== 'SOURCES.md');
-    expect(files.length).toBe(roles.length + skills.length + templates.teams.size);
+    expect(files.length).toBe(roles.length + skills.length + templates.teams.size + templates.echelons.size);
     for (const file of files) expect(sources, file).toContain(`| \`${file}\` |`);
     /* Every repository a skill learned from has its licence in the table of sources. */
     const repos = new Set([...sources.matchAll(/^\| ([\w.-]+\/[\w.-]+(?:, [\w.-]+\/[\w.-]+)*) \|/gm)].flatMap(m => m[1]!.split(', ')));
@@ -613,7 +613,7 @@ describe('templates', () => {
        comes in a stream, and the middle one for everyone whose work is checked after. */
     const asked: Record<string, string[]> = {
       top: ['DEV-ARCH', 'DEV-SEC'],
-      deep: ['BIZ-HEAD', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD'],
+      deep: ['BIZ-HEAD', 'BIZ-REV', 'DEV-HEAD', 'DEV-RED', 'DEV-REV', 'DSN-QA', 'FIN-AUDIT', 'FIN-HEAD', 'MKT-EDIT', 'SAL-REV', 'SUP-QA'],
       fast: ['HHD-CAL', 'HHD-SUPPLY', 'MKT-SOCIAL', 'OPS-WATCH', 'SAL-SDR', 'SUP-T1'],
     };
     for (const role of templates.roles.values()) {
