@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,13 +40,14 @@ export function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stan
   return { dir, control, server, log };
 }
 
-/* One pass of the updater over request.json, with stub docker and curl first on PATH. */
-export function runOnce(s: Stand, request: object | null, env: Record<string, string> = {}) {
+/* One pass of the updater over request.json, with stub docker and curl first on PATH, and its own temporary files in the
+   stand. It takes as long as it takes: only the runner's limit for the test ends one that never ends. */
+export async function runOnce(s: Stand, request: object | null, env: Record<string, string> = {}) {
   if (request) writeFileSync(join(s.control, 'request.json'), JSON.stringify(request));
-  const res = spawnSync('bash', [SCRIPT, '--once'], {
-    encoding: 'utf8',
-    timeout: 30_000,
+  const child = spawn('bash', [SCRIPT, '--once'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: {
+      TMPDIR: s.dir,
       PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`,
       HOME: s.dir,
       STUB_LOG: s.log,
@@ -61,9 +63,14 @@ export function runOnce(s: Stand, request: object | null, env: Record<string, st
       ...env,
     },
   });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
+  child.stderr.setEncoding('utf8').on('data', (text: string) => (stderr += text));
+  const [code] = (await once(child, 'close')) as [number | null];
   const calls = readFileSync(s.log, 'utf8').trim().split('\n').filter(Boolean);
   const status = existsSync(join(s.control, 'status.json')) ? JSON.parse(readFileSync(join(s.control, 'status.json'), 'utf8')) : null;
-  return { code: res.status, out: res.stdout + res.stderr, calls, status };
+  return { code, out: stdout + stderr, calls, status };
 }
 
 export const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));

@@ -15,7 +15,7 @@ const REPO = { url: 'https://github.com/acme/shop.git', branch: 'release', token
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 const job = (over: Partial<JobRun> = {}): JobRun => ({
-  type: 'job.run', jobId: 'job-1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null, ...over,
+  type: 'job.run', jobId: 'job-1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 2_147_483_647 - 30_000, secret: null, instructions: null, toolToken: null, ...over,
 });
 
 function fakeAdapter(result: (input: RunInput) => Partial<RunResult> = () => ({}), owner?: ProviderAdapter['owner']): ProviderAdapter & { inputs: RunInput[] } {

@@ -168,7 +168,7 @@ function noticeMessage(row: Case, text: string, notification: Notification) {
 }
 
 function noticeText(row: Case, name: string, reason: { en: string; ru: string }, escalated: boolean): string {
-  return escalated ? escalationText(row, name, reason.en) : `Program operator case ${row.id} for ${name}: ${reason.en}. Read program_screen for employee ${row.agentId} and this case. Use program_keys for harmless setup or a current permission question, one key after each fresh snapshot. Follow your permission policy; leave work decisions to a person. Report needs_owner, failed or denied with tell_orchestrator. Deadline: ${row.deadlineAt.toISOString()}.`;
+  return escalated ? escalationText(row, name, reason.en) : `Program operator case ${row.id} for ${name}: ${reason.en}. Read program_screen for employee ${row.agentId}. Answer it with program_keys after a fresh snapshot: any keys and text, any question, the subscription owner's own too. Follow your permission policy. Report needs_owner, failed or denied with tell_orchestrator. Deadline: ${row.deadlineAt.toISOString()}.`;
 }
 
 function escalationText(row: Case, name: string, reason: string): string {

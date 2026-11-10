@@ -8,18 +8,12 @@ import { agyProgram, agyTranscript, claudeProgram, claudeTranscript, codexProgra
 import { TurnWords } from '../src/terminal/program-restart.js';
 import { agySteps, LineTail } from '../src/terminal/transcripts.js';
 import { Tmux } from '../src/terminal/tmux.js';
+import { until } from './terminal-host-helpers.js';
 
 const programs = { claude: claudeProgram, codex: codexProgram, kimi: kimiProgram, antigravity: agyProgram };
 type Kind = keyof typeof programs;
 const folders: string[] = [];
 const write = (file: string, text: string) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); };
-const until = async (check: () => boolean) => {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (check()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error('The context was not written.');
-};
 
 function fixture(kind: Kind | null = 'claude', more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-host-branches-')));
@@ -239,9 +233,11 @@ describe('stop hook branches before extraction', () => {
 
   it('leaves a newer Kimi turn alone while the former Stop is settling', async () => {
     const c = fixture('kimi');
+    vi.useFakeTimers();
     const stopping = c.host['hook']('branches', 'stop', { last_assistant_message: 'Old hook answer' });
     const next = { ...c.agent.turn!, jobId: 'next' };
     c.agent.turn = next;
+    await vi.advanceTimersByTimeAsync(100);
     await stopping;
     expect(next.ending).toBeUndefined();
     expect(c.agent.busy).toBe(true);
@@ -297,9 +293,11 @@ describe('stop hook branches before extraction', () => {
     write(c.file(), '');
     c.agent.agyRead = agySteps();
     c.agent.tail = new LineTail(c.file());
+    vi.useFakeTimers();
     await c.host['hook']('branches', 'stop', { last_assistant_message: 'Wrong hook answer' });
     expect(c.agent.turn!.ending).toBeUndefined();
     appendFileSync(c.file(), '{"type":"PLANNER_RESPONSE","content":"Native answer"}\n');
+    await vi.advanceTimersByTimeAsync(100);
     await c.agent.settling;
     expect(await c.finished).toBe('Native answer');
   });
@@ -400,5 +398,17 @@ describe('program reports and invocation hooks', () => {
     expect(c.agent.agyCursor).toEqual({ file: 'current-recording', offset: 23 });
     expect(c.agent.typing).toBe('pending');
     expect(c.sent).toEqual([]);
+  });
+});
+
+describe('the start of a turn', () => {
+  it('starts each turn with its own sign, never one left from the last turn or none at all', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-09T12:00:00Z') });
+    const c = fixture();
+    for (const left of [0, Date.now() - 40 * 60_000]) {
+      c.agent.signAt = left;
+      c.host['beginTurn'](c.agent);
+      expect(c.agent.signAt).toBe(Date.now());
+    }
   });
 });

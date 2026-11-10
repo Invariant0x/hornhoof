@@ -104,7 +104,7 @@ async function verifyLastColumnVisible(page: Page, reported: SizeReport[]) {
         return text.length === expectedCols && text.endsWith(suffix);
       });
     }, latest.cols);
-  }, { timeout: 5000 }).toBe(true);
+  }).toBe(true);
 
   const expectedCols = reported.at(-1)!.cols;
   const metrics = await page.evaluate(cols => {

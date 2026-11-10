@@ -162,8 +162,8 @@ for (const lang of ['en', 'ru'] as const) {
         const below = of('Oleg');
         await below.focus();
         await below.evaluate(el => el.scrollIntoView({ block: 'center' }));
-        await expect.poll(async () => inFrame(frame, await box(below)), { message: 'the focused plate is on the screen', timeout: 30_000 }).toBe(true);
-        await expect.poll(() => page.locator('.tv-scroll').evaluate(el => [el.scrollLeft, el.scrollTop]), { message: 'the tree moved, its frame did not stay scrolled', timeout: 30_000 }).toEqual([0, 0]);
+        await expect.poll(async () => inFrame(frame, await box(below)), { message: 'the focused plate is on the screen' }).toBe(true);
+        await expect.poll(() => page.locator('.tv-scroll').evaluate(el => [el.scrollLeft, el.scrollTop]), { message: 'the tree moved, its frame did not stay scrolled' }).toEqual([0, 0]);
         expect.soft(inFrame(frame, await box(below)), 'the focused plate stays on the screen after the move').toBe(true);
 
         /* Show everything still fits the whole tree on the screen. */

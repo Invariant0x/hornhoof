@@ -87,6 +87,30 @@ describe('tools a skill grants', () => {
     expect(away.content[0]!.text).toContain('another department');
   });
 
+  it('let an employee answer the one who wrote to it last, in another department or the orchestrator, with one message', async () => {
+    const { app, db, acme, wendy, bruno } = await company([]);
+    const [orchestrator] = await db.select().from(agents).where(and(eq(agents.companyId, acme.id), eq(agents.kind, 'orchestrator')));
+    const client = await mcp(app, TOKEN);
+    const write = (employee: string, text: string) => call(client, 'message_employee', { employee, text });
+    /* Nobody wrote to Wendy yet: Development and the orchestrator are out of her reach. */
+    expect((await write(bruno.id, 'Your tests are green.')).content[0]!.text).toContain('another department');
+    expect((await write(orchestrator!.id, 'The node is back.')).isError).toBe(true);
+    const asks = (from: { from: 'agent'; name: string; by: string } | { from: 'orchestrator' }, text: string) =>
+      enqueueTurn(app.ctx, { companyId: acme.id, agentId: wendy.id, prompt: text, createdBy: null, message: { personId: null, text, ...from } });
+    await asks({ from: 'agent', name: 'Bruno', by: bruno.id }, 'Which machine runs my tests?');
+    await asks({ from: 'orchestrator' }, 'Is the node back?');
+    expect((await write(bruno.id, 'The built-in node runs them.')).isError).toBeFalsy();
+    expect((await write(orchestrator!.id, 'Yes, the node is back.')).isError).toBeFalsy();
+    expect(await messagesFrom(db, wendy.id)).toEqual(['The built-in node runs them.', 'Yes, the node is back.']);
+    const told = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator!.id));
+    expect(told.map(j => j.prompt)).toContainEqual(expect.stringContaining('> Yes, the node is back.'));
+    /* That was the answer: anything more waits until they write again. */
+    expect((await write(bruno.id, 'One more thing.')).content[0]!.text).toContain('another department');
+    expect((await write(orchestrator!.id, 'One more thing.')).isError).toBe(true);
+    await asks({ from: 'agent', name: 'Bruno', by: bruno.id }, 'And the browsers?');
+    expect((await write(bruno.id, 'Chromium only.')).isError).toBeFalsy();
+  });
+
   it("let a watchdog see every agent with what it holds, and nudge one in its window", async () => {
     const { app, db, bruno, task, wendy } = await company(['ops-task-watch']);
     const client = await mcp(app, TOKEN);
@@ -100,7 +124,10 @@ describe('tools a skill grants', () => {
     const nudge = await call(client, 'message_employee', { employee: bruno.id, text: 'Task #1 has had no report for an hour. Report or say what blocks you.' });
     expect(nudge.content[0]!.text).toBe("Sent to Bruno.");
     const [turn] = await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), inArray(jobs.status, ['queued', 'running'])));
-    expect(turn!.prompt).toBe('From Wendy (Reliability engineer, Operations) to Bruno (Backend engineer, Development):\n\nWendy (Reliability engineer) wrote:\n\n> Task #1 has had no report for an hour. Report or say what blocks you.');
+    expect(turn!.prompt).toBe(
+      'From Wendy (Reliability engineer, Operations) to Bruno (Backend engineer, Development):\n\nWendy (Reliability engineer) wrote:\n\n> Task #1 has had no report for an hour. Report or say what blocks you.' +
+        `\n\nIf you answer Wendy, do it with "message_employee", employee ${wendy.id}: an answer in this window does not reach Wendy.`,
+    );
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, bruno.id), eq(agentEvents.kind, 'message')));
     expect(said!.data).toMatchObject({ text: 'Task #1 has had no report for an hour. Report or say what blocks you.', from: 'agent', name: 'Wendy' });
     /* The map runs it from Operations to Development. */

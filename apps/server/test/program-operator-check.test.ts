@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { OPERATOR_PROTECTED_SCREEN, type OperatorCheck } from '@hornhoof/protocol/program-operator';
+import type { OperatorCheck } from '@hornhoof/protocol/program-operator';
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { agentEvents, attachments, jobs, machines, nodes, programOperatorCases, subscriptions } from '../src/db/schema.js';
@@ -21,7 +21,7 @@ beforeEach(() => {
 
 type Company = Awaited<ReturnType<typeof stuckPrograms>>;
 const CELLS = 'Waiting for your input\n> the words nobody sent';
-const seen = (values: Partial<OperatorCheck> = {}): OperatorCheck => ({ input: 'text', screen: { protected: false, cols: 80, rows: 24, cells: CELLS }, ...values });
+const seen = (values: Partial<OperatorCheck> = {}): OperatorCheck => ({ input: 'text', screen: { cols: 80, rows: 24, cells: CELLS }, ...values });
 const render = (cells: string, secrets: string[] = []) => renderOperatorScreen({ cells, cols: 80, rows: 24, secrets }).png;
 
 async function turnOf(c: Company, agentId = c.agent.id) {
@@ -73,7 +73,7 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   await c.db.update(subscriptions).set({ secretEnc: encryptSecret(secret, c.ctx.config.secret) }).where(eq(subscriptions.id, c.sub.id));
   const turn = await turnOf(c);
   const cells = `${CELLS} ${secret}`;
-  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { protected: false, cols: 80, rows: 24, cells } }));
+  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
   expect(Buffer.from(picture!.bytes).equals(render(cells, [secret]))).toBe(true);
   expect(Buffer.from(picture!.bytes).equals(render(cells))).toBe(false);
@@ -83,12 +83,13 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   expect((await c.caseOf(turn.id)).snapshot).toBeNull();
 });
 
-it('a protected screen becomes the protected picture, whatever the node sent', async () => {
+it('a screen of sign-in or terms is drawn as the program shows it: nothing but the values of secrets is hidden', async () => {
   const c = await stuckPrograms(true);
   const turn = await turnOf(c);
-  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { protected: true, cols: 80, rows: 24, cells: CELLS } }));
+  const cells = 'Sign in to go on\n> Accept the terms of use';
+  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells } }));
   const [picture] = await picturesOf(c, turn.id);
-  expect(Buffer.from(picture!.bytes).equals(render(OPERATOR_PROTECTED_SCREEN))).toBe(true);
+  expect(Buffer.from(picture!.bytes).equals(render(cells))).toBe(true);
 });
 
 it('the same fact sent again is the same fact: no second picture, case or notice', async () => {
@@ -109,12 +110,12 @@ it('the same fact sent again is the same fact: no second picture, case or notice
 it('a second look at the same turn goes on its case: the latest picture, and no second notice', async () => {
   const c = await stuckPrograms(true);
   const turn = await turnOf(c);
-  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { protected: false, cols: 80, rows: 24, cells: 'First look.' } }));
+  await c.unrecorded(c.agent.id, turn.id, new Date(), seen({ screen: { cols: 80, rows: 24, cells: 'First look.' } }));
   const first = await c.caseOf(turn.id);
   const later = await reserveDelivery(c.db, { companyId: c.companyId, agentId: c.agent.id, jobId: turn.id, nodeId: c.identity.nodeId, kind: 'assignment', words: 'Words again.', reference: `again:${turn.id}` });
   const instance = await c.instanceOf(c.agent.id);
   await c.record({ type: 'program.delivery', agentKey: c.agent.id, jobId: turn.id, instance, evidenceId: randomUUID(), ordinal: 0, deliveryId: later.id, deliveryOrdinal: later.ordinal, kind: 'assignment', phase: 'attempt', elapsedMs: 0, wordsDigest: wordsDigest('Words again.') });
-  await c.record({ type: 'program.operator_needed', agentKey: c.agent.id, jobId: turn.id, instance, evidenceId: randomUUID(), ordinal: 0, reason: 'assignment_unrecorded', deliveryId: later.id, evidenceKey: later.id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null, check: seen({ input: 'empty', screen: { protected: false, cols: 80, rows: 24, cells: 'Second look.' } }) });
+  await c.record({ type: 'program.operator_needed', agentKey: c.agent.id, jobId: turn.id, instance, evidenceId: randomUUID(), ordinal: 0, reason: 'assignment_unrecorded', deliveryId: later.id, evidenceKey: later.id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null, check: seen({ input: 'empty', screen: { cols: 80, rows: 24, cells: 'Second look.' } }) });
   const incident = await c.caseOf(turn.id);
   expect(incident.id).toBe(first.id);
   expect(incident.evidence).toMatchObject([{ input: 'text' }, { input: 'empty' }]);

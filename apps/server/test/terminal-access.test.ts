@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agents, jobs, people } from '../src/db/schema.js';
 import { as, invitePerson, until } from './helpers.js';
-import { company, ended, moved, next, onPlan, open, opened, state, turnOn, type Company, type Screen } from './terminal-company.js';
+import { company, ended, handled, moved, next, onPlan, open, opened, state, turnOn, type Company, type Screen } from './terminal-company.js';
 
 /* No view opened on the node since the last one read: the next it hears of is this one of the CEO's. */
 async function openedNothing(c: Company): Promise<void> {
@@ -140,6 +140,12 @@ describe('a terminal open when the right to it goes', () => {
     return { screen, termId: seen.termId };
   };
   const noAccess = { code: 4403, reason: 'no_access' };
+  /* Keys and sizes have the view look again at its rights once a second went by since its last look: the clock moves that second. */
+  const aSecondLater = () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 1000);
+  };
+  afterEach(() => vi.useRealTimers());
 
   it('closes at once when the agent moves to a plan of someone else, and tells the node', async () => {
     const c = await company();
@@ -177,7 +183,8 @@ describe('a terminal open when the right to it goes', () => {
     await next(c.node, 'term.close');
     const said = screen.frames.length;
     c.node.send({ type: 'term.data', termId, data: 'WORDS OF A CLOSED SCREEN' });
-    await new Promise(done => setTimeout(done, 100));
+    await handled(c.node);
+    await screen.closed;
     expect(screen.frames).toHaveLength(said);
   });
 
@@ -189,9 +196,10 @@ describe('a terminal open when the right to it goes', () => {
     const c = await company();
     const { screen } = await watching(c);
     await onPlan(c, c.crew.mine.id, c.plans.bob.id);
-    await new Promise(done => setTimeout(done, 1100));
+    aSecondLater();
     screen.ws.send(JSON.stringify(frame));
     expect(await screen.closed).toEqual(noAccess);
+    await handled(c.node);
     const seen: string[] = [];
     while (c.node.queued()) seen.push((await c.node.next()).type);
     expect(seen).not.toContain(heard);
@@ -212,7 +220,7 @@ describe('a terminal open when the right to it goes', () => {
   it('takes the keys of someone who may type right up to when the right goes', async () => {
     const c = await company();
     const { screen, termId } = await watching(c);
-    await new Promise(done => setTimeout(done, 1100));
+    aSecondLater();
     screen.ws.send(JSON.stringify({ type: 'input', data: 'still mine\r' }));
     expect(await next(c.node, 'term.input')).toMatchObject({ termId, data: 'still mine\r' });
   });

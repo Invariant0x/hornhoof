@@ -117,7 +117,8 @@ describe('Shell', () => {
     render(<Shell me={ME} welcome onSignOut={() => {}} />);
     await screen.findByRole('complementary', { name: 'Orchestrator' });
     await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/agents/orchestrator')).toBe(true));
-    await act(async () => { await new Promise(resolve => { setTimeout(resolve, 0); }); });
+    /* One turn of the event loop: the card's answer comes in a chain of promises with no timer, so it has been taken in. */
+    await act(async () => { await new Promise(resolve => { setImmediate(resolve); }); });
     expect(screen.getByRole('complementary', { name: 'Orchestrator' })).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();

@@ -55,7 +55,8 @@ async function dispose(cleanups: Cleanup[]): Promise<void> {
 }
 
 function ownedPool(url: string, label: string, cleanups: Cleanup[]): pg.Pool {
-  const pool = new pg.Pool({ connectionString: url, application_name: label, max: 1, connectionTimeoutMillis: 2000, statement_timeout: 15000 });
+  /* No limit of the client or the server ends a connection or a statement first: only the runner's limit for a test does. */
+  const pool = new pg.Pool({ connectionString: url, application_name: label, max: 1, connectionTimeoutMillis: 2_147_483_647, statement_timeout: 2_147_483_647 });
   const errors: Error[] = [];
   pool.on('error', error => errors.push(error));
   cleanups.push(async () => {

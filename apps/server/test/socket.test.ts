@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agentEvents, agents, departments, jobs, nodes, subscriptions } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
@@ -8,8 +8,9 @@ import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { agentProgramState } from '../src/modules/tasks/silent.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
-async function liveCompany() {
-  const { app, db } = await testApp({ NODE_PING_MS: '50' });
+/* No round of pings comes during a test unless it says so: the longest wait a timer takes. */
+async function liveCompany(pingMs = '2147483647') {
+  const { app, db } = await testApp({ NODE_PING_MS: pingMs });
   const url = await listen(app);
   onTestFinished(() => app.close());
   const ceo = await setUpCompany(app);
@@ -126,8 +127,9 @@ describe('node socket', () => {
     node.send({ type: 'agent.context', agentKey: orchestrator!.id, used: 0.9 });
     node.send({ type: 'agent.context', agentKey: '00000000-0000-4000-8000-000000000000', used: 0.9 });
     node.send({ type: 'agent.context', agentKey: bruno!.id, used: 0.42 });
+    /* The socket's messages are handled one after the other and the stream keeps their order: any of the first two would come
+       before Bruno's. */
     await until(() => stream.messages.some(m => m.type === 'context'));
-    await new Promise(r => setTimeout(r, 200));
     expect(stream.messages.filter(m => m.type === 'context')).toEqual([{ type: 'context', agentId: bruno!.id, used: 0.42 }]);
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.departments[0].employees[0]).toMatchObject({ name: 'Bruno', context: 0.42 });
@@ -135,8 +137,13 @@ describe('node socket', () => {
   });
 
   it('drops a node that stops answering pings', async () => {
-    const { app, url, ceo, subId, key } = await liveCompany();
+    /* The pings go by a clock the test moves; nothing else of the server runs on intervals this short. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const { app, url, ceo, subId, key } = await liveCompany('50');
     const node = await connectNode(url, key, { autoPong: false });
+    /* Three pings go unanswered, and the round after them drops the node. */
+    await vi.advanceTimersByTimeAsync(4 * 50);
     await node.closed;
     expect((await subOf(app, ceo, subId)).online).toBe(false);
   });

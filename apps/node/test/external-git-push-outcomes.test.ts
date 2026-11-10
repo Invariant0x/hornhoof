@@ -1,7 +1,8 @@
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { type GitRecordReply } from '../src/external-git.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { calls, commit, FakePort, head, jobOf, KEY, OPERATION_LINE, planFor, realGit, remoteRef, runShim, serve, type Stand, stand } from './external-git-helpers.js';
 
 describe('a refused push while the service recovers', () => {
@@ -11,7 +12,7 @@ describe('a refused push while the service recovers', () => {
     port.replies = [{ accepted: true, state: 'deferred', nextAttemptAt: '2026-11-06T08:00:00.000Z' }, ...extra];
     const served = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, served.env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); expect(ran.partial().stderr).toContain('2026-11-06T08:00:00.000Z'); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1 && ran.partial().stderr.includes('2026-11-06T08:00:00.000Z'));
     return { port, ran, ...served };
   }
 
@@ -111,7 +112,7 @@ describe('a refused push while the service recovers', () => {
     const { port, ran } = await refusedOnce(s);
     ran.signal('SIGTERM');
     await ran;
-    await vi.waitFor(() => { expect(port.cancelled).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.cancelled.length === 1);
     expect(calls(s, 'push')).toHaveLength(1);
   });
 
@@ -144,7 +145,7 @@ describe('a refused push while the service recovers', () => {
     const s = stand();
     const { port, ran } = await refusedOnce(s);
     port.release({ disposition: 'wait', nextAttemptAt: '2026-11-06T09:00:00.000Z' });
-    await vi.waitFor(() => { expect(ran.partial().stderr).toContain('2026-11-06T09:00:00.000Z'); }, { timeout: 5000 });
+    await eventually(() => ran.partial().stderr.includes('2026-11-06T09:00:00.000Z'));
     port.release();
     expect((await ran).code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(2);
@@ -200,7 +201,7 @@ describe('a push with an unknown outcome', () => {
     port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
     const { env } = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); expect(ran.partial().stderr).toContain('not known yet'); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1 && ran.partial().stderr.includes('not known yet'));
     expect(port.recorded[0]!.observedHead).toBeUndefined();
     port.release();
     const ended = await ran;
@@ -217,8 +218,8 @@ describe('a push with an unknown outcome', () => {
     const { env } = await serve(s, port);
     const sha = head(s);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
-    await vi.waitFor(() => { expect(ran.partial().stderr).toContain('not known yet'); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
+    await eventually(() => ran.partial().stderr.includes('not known yet'));
     port.release();
     await ran;
     const [first] = port.recorded, [read] = port.reconciled;
@@ -240,12 +241,12 @@ describe('a push with an unknown outcome', () => {
     port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
     const { env } = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     port.release();
-    await vi.waitFor(() => { expect(port.reconciled).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.reconciled.length === 1);
     expect(port.reconciled[0]).not.toHaveProperty('observedHead');
     expect(calls(s, 'push')).toHaveLength(1);
-    await vi.waitFor(() => { expect(ran.partial().stderr.match(/not known yet/g)).toHaveLength(2); }, { timeout: 5000 });
+    await eventually(() => ran.partial().stderr.match(/not known yet/g)?.length === 2);
     port.release();
     expect((await ran).code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(2);
@@ -259,7 +260,7 @@ describe('a push with an unknown outcome', () => {
     port.replies = [{ accepted: true, state: 'outcome_unknown' }];
     const { env } = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     port.recordFails = new Error('no link');
     port.release();
     const ended = await ran;
@@ -275,7 +276,7 @@ describe('a push with an unknown outcome', () => {
     port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
     const { env } = await serve(s, port);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     port.release();
     expect((await ran).code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(2);

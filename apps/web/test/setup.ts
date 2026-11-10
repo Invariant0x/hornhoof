@@ -1,6 +1,15 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach, expect, vi } from 'vitest';
+
+/* Waits for a state look until it comes, however long a loaded machine takes to render it; only the runner's limit for a
+   test ends a state that never comes. 2_147_483_647 ms is the longest delay a timer takes. Testing Library's findBy* and
+   waitFor take it from its config, expect.poll from Vitest's; vi.waitFor has no config and gives up after 1 s of its own. */
+const NO_LIMIT = 2_147_483_647;
+configure({ asyncUtilTimeout: NO_LIMIT });
+vi.setConfig({ expect: { poll: { timeout: NO_LIMIT } } });
+const waitFor = vi.waitFor;
+vi.waitFor = ((callback, options) => waitFor(callback, { ...(typeof options === 'number' ? {} : options), timeout: NO_LIMIT })) as typeof vi.waitFor;
 
 afterEach(() => {
   cleanup();

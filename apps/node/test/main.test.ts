@@ -6,10 +6,11 @@ import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
+import { DEFAULT_BACKOFF } from '../src/connection.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -56,7 +57,43 @@ async function fakeServer(grantChecks = true) {
     });
   });
   const wait = (check: () => boolean) => eventually(check);
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
+  const send = (m: object) => socket!.send(JSON.stringify(m));
+  /* Everything the node sent before it answers these words has come in: the answer follows it on the same socket. */
+  const barrier = async (ref: string) => {
+    send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref });
+    await wait(() => received.some(m => m.type === 'agent.said' && m.ref === ref));
+  };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send, drop: () => socket!.terminate(), wait, barrier };
+}
+
+/* A job's own limit that cannot run out in a test: runJob gives up a tenth of it later, 30 s at most, and setTimeout takes
+   no delay above 2_147_483_647 ms. */
+const NO_LIMIT = 2_147_483_647 - 30_000;
+/* A round of the node that no test waits for: the largest delay setTimeout takes. */
+const NEVER = 2_147_483_647;
+/* The longest pause the node takes before it connects again after a connection that worked: firstMs and a quarter more. */
+const RETRY_MS = DEFAULT_BACKOFF.firstMs * 1.25;
+
+/* The node's timeouts, and with `rounds` its intervals, on a fake clock the test moves. It goes in before the node starts:
+   the node takes setTimeout for its pause before it connects again as it first connects. */
+const fakeClock = (rounds = false) => vi.useFakeTimers({ toFake: rounds ? ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] : ['setTimeout', 'clearTimeout'] });
+/* Only the node's rounds on a fake clock: how often it reads the limits, says its load, looks at its browser. */
+const fakeRounds = () => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+/* The real clock is back before a test's node stops, so its last message leaves before its socket closes. */
+afterEach(() => { vi.useRealTimers(); });
+
+/* Drops the node's socket and waits until the node has heard of it, from its log. */
+async function dropped(server: Awaited<ReturnType<typeof fakeServer>>, logs: string[]) {
+  const closed = () => logs.filter(line => line.includes('Connection closed')).length;
+  const before = closed();
+  server.drop();
+  await server.wait(() => closed() > before);
+}
+/* Moves the fake clock past the node's pause before it connects again. */
+const comeBack = () => vi.advanceTimersByTimeAsync(RETRY_MS);
+async function dropAndReturn(server: Awaited<ReturnType<typeof fakeServer>>, logs: string[]) {
+  await dropped(server, logs);
+  await comeBack();
 }
 
 function nodeDir(server: string) {
@@ -125,12 +162,13 @@ describe('reporting the node lifecycle', () => {
   });
 
   it('sends the current log on a socket reconnect without claiming that the process ended', async () => {
-    const server = await fakeServer();
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    const server = await fakeServer(), logs: string[] = [];
+    fakeClock();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: line => logs.push(line) });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const before = server.received[0]!;
-    server.drop();
+    await dropAndReturn(server, logs);
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const after = server.received.findLast(m => m.type === 'hello')!;
     expect(after.boot).toEqual(before.boot);
@@ -162,7 +200,7 @@ describe('reporting managed programs', () => {
     expect(server.received[0]).toMatchObject({ programs: [{ id: 'claude', version: '1.0.0', updating: true, failed: false }] });
     releases[0]!();
     await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
-    server.send({ type: 'job.run', jobId: 'active-update', subscriptionId: 's1', provider: 'claude', prompt: 'finish this', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'active-update', subscriptionId: 's1', provider: 'claude', prompt: 'finish this', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => finishJob !== undefined);
     server.send({ type: 'programs.update' });
     server.send({ type: 'programs.update' });
@@ -198,16 +236,17 @@ describe('reporting managed programs', () => {
   });
 
   it('does not replay a delivered live event when its connection comes back', async () => {
-    const server = await fakeServer();
-    const node = await runNode({ dir: nodeDir(server.url), log: () => {}, adapter: {
+    const server = await fakeServer(), logs: string[] = [];
+    fakeClock();
+    const node = await runNode({ dir: nodeDir(server.url), log: line => logs.push(line), adapter: {
       ...adapter, run: async input => { input.onEvent?.({ kind: 'text', text: 'Delivered once.' }); return adapter.run(input); },
     } });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'delivered', subscriptionId: 's1', provider: 'claude', prompt: 'Say once.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'delivered', subscriptionId: 's1', provider: 'claude', prompt: 'Say once.', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'delivered'));
     expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
-    server.drop();
+    await dropAndReturn(server, logs);
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'reconnected' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'reconnected'));
@@ -218,15 +257,18 @@ describe('reporting managed programs', () => {
     const server = await fakeServer();
     let installed = 1;
     const programs = new ProgramUpdates([{ id: 'codex', readVersion: () => `${installed}.0.0`, install: async () => { installed++; } }]);
-    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    const logs: string[] = [];
+    fakeClock();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: line => logs.push(line) });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     const snapshot = [{ id: 'codex', version: '2.0.0', updating: false, failed: false }];
     expect(server.received[0]).toMatchObject({ programs: snapshot });
     for (const status of server.received.filter(m => m.type === 'status')) expect(status.programs).toEqual(snapshot);
-    server.drop();
+    await dropped(server, logs);
     await programs.update();
+    await comeBack();
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
     const hello = server.received.findLastIndex(m => m.type === 'hello');
     expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
@@ -264,16 +306,23 @@ describe('a node that runs agents in terminals', () => {
   ] as const)('keeps the runtime timeout for %s', async (_name, terminal, key) => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
-    let release!: () => void;
+    let release!: () => void, running = false;
     const pending = new Promise<void>(resolve => { release = resolve; });
     const tmux = new Tmux({ socket: `hh-program-timeout-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    const node = await runNode({ dir, log: () => {}, adapter: { ...adapter, run: async input => { await pending; return adapter.run(input); } },
+    const node = await runNode({ dir, log: () => {}, adapter: { ...adapter, run: async input => { running = true; await pending; return adapter.run(input); } },
       ...(terminal ? { terminal: { tmux, program: claudeProgram, bin: 'claude', home: join(dir, 'home'), signedOut: /not logged in/i } } : {}),
     });
     onTestFinished(() => node.stop());
     try {
       await server.wait(() => server.received.some(m => m.type === 'hello'));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       server.send({ type: 'job.run', jobId: 'runtime-timeout', subscriptionId: 's1', provider: 'claude', prompt: 'Use a runtime timeout.', sessionId: null, model: null, timeoutMs: 80, secret: null, instructions: null, toolToken: null, ...(key ? { workspace: { key, repo: null } } : {}) });
+      await server.wait(() => running);
+      /* The node gives the program a tenth of its 80 ms more, 88 ms in all, before it ends the job itself. */
+      await vi.advanceTimersByTimeAsync(87);
+      await server.barrier('before-timeout');
+      expect(server.received.some(m => m.type === 'job.done')).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
       await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'runtime-timeout'));
       expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'runtime-timeout')).toMatchObject({ ok: false, error: 'timeout' });
     } finally {
@@ -292,17 +341,18 @@ describe('a node that runs agents in terminals', () => {
     onTestFinished(() => say.mockRestore());
     const log: string[] = [];
     const tmux = new Tmux({ env: { HOME: dir } });
+    fakeClock();
     const node = await runNode({ dir, adapter, log: line => log.push(line), terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i } });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     server.send({ type: 'agent.say', agentKey: 'agent-1', text: 'Keep these words.', ref: 'offline' });
     await server.wait(() => entered);
-    server.drop();
-    await server.wait(() => log.some(line => line.includes('Connection closed')));
+    await dropped(server, log);
     receipt(true);
+    await comeBack();
     await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(server.received.filter(m => m.type === 'agent.said')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
+    await server.barrier('back');
+    expect(server.received.filter(m => m.type === 'agent.said' && m.ref !== 'back')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
   });
 
   it('learns a renewed program token between turns and gives it to an existing terminal mask', async () => {
@@ -398,7 +448,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'status', 'job.done']);
     expect(server.received[2]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
@@ -406,24 +456,25 @@ describe('runNode', () => {
   });
 
   it('sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does', async () => {
-    const server = await fakeServer();
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    const server = await fakeServer(), logs: string[] = [];
+    fakeClock();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: line => logs.push(line) });
     onTestFinished(() => node.stop());
     const hellos = () => server.received.filter(m => m.type === 'hello');
     const dones = () => server.received.filter(m => m.type === 'job.done' && m.jobId === 'j1');
     await server.wait(() => hellos().length === 1);
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => dones().length === 1);
-    server.drop();
+    await dropAndReturn(server, logs);
     await server.wait(() => dones().length === 2);
     expect(hellos()[1]).toMatchObject({ running: ['j1'] });
     expect(dones()[1]).toMatchObject({ ok: true, result: 'ready' });
 
     server.send({ type: 'job.ack', jobId: 'j1' });
-    await new Promise(r => setTimeout(r, 50));
-    server.drop();
+    await server.barrier('acknowledged');
+    await dropAndReturn(server, logs);
     await server.wait(() => hellos().length === 3);
-    await new Promise(r => setTimeout(r, 100));
+    await server.barrier('back');
     expect(hellos()[2]).toMatchObject({ running: [] });
     expect(dones()).toHaveLength(2);
   });
@@ -438,7 +489,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
   });
@@ -448,11 +499,16 @@ describe('runNode', () => {
     const seen = [0.1, 0.1, 0.25];
     let asked = 0;
     const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: seen[Math.min(asked++, seen.length - 1)]!, resetsAt: null }] });
+    fakeRounds();
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 40 });
     onTestFinished(() => node.stop());
     const readings = () => server.received.filter(m => m.type === 'status' && m.limits !== null).map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
-    await server.wait(() => readings().length >= 3);
-    expect(readings().slice(0, 3)).toEqual([0.1, 0.1, 0.25]);
+    await server.wait(() => readings().length === 1);
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => readings().length === 2);
+    await vi.advanceTimersByTimeAsync(40);
+    await server.wait(() => readings().length === 3);
+    expect(readings()).toEqual([0.1, 0.1, 0.25]);
   });
 
   it('says no limits in a status with no reading behind it, so Hornhoof does not take old ones for fresh, in a frame Hornhoof still reads', async () => {
@@ -461,10 +517,10 @@ describe('runNode', () => {
     const answers: (() => Promise<typeof reading | null>)[] = [async () => reading];
     const limits = () => (answers.shift() ?? (async () => { throw new Error('the source is down'); }))();
     const run = async (input: RunInput) => ({ ok: input.prompt !== 'signed out', sessionId: 'sess-9', result: 'ready', output: '', error: input.prompt === 'signed out' ? 'not_logged_in' as const : null, limits: null });
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 60_000 });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: NEVER });
     onTestFinished(() => node.stop());
     const statuses = () => server.received.filter(m => m.type === 'status');
-    const job = (jobId: string, prompt: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt, sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const job = (jobId: string, prompt: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt, sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => statuses().some(m => m.limits !== null));
 
     /* The reading after the job fails: the status that says the job is over knows nothing new of the limits. */
@@ -497,12 +553,17 @@ describe('runNode', () => {
       looks++;
       return null;
     };
+    fakeRounds();
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, account: async () => account, limits }, log: () => {}, limitsMs: 15 });
     onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello') && looks >= 4);
+    await server.wait(() => server.received.some(m => m.type === 'hello') && looks === 1);
+    await vi.advanceTimersByTimeAsync(45);
+    await server.wait(() => looks === 4);
+    await server.barrier('looked');
     /* A look that read nothing has nothing to say. */
     expect(server.received.filter(m => m.type === 'status')).toEqual([]);
     account = { email: 'x@y.z', tier: 'max' };
+    await vi.advanceTimersByTimeAsync(15);
     await server.wait(() => server.received.some(m => m.type === 'status'));
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ account, limits: null });
   });
@@ -513,15 +574,17 @@ describe('runNode', () => {
     let browser: string | null = 'libnss3.so missing';
     const turn = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }] };
     const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+    fakeRounds();
     const node = await runNode({ dir, adapter: { ...adapter, run }, log: () => {}, checkBrowser: async () => browser, browserCheckMs: 30 });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.filter(m => m.type === 'status').map(m => m.limits)).toEqual([turn]);
 
     /* A browser that recovers has nothing to say of the limits. */
     browser = null;
+    await vi.advanceTimersByTimeAsync(30);
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status')[1]).toMatchObject({ limits: null, browserError: null });
   });
@@ -535,35 +598,43 @@ describe('runNode', () => {
       return [{ id: 'opus', name: 'Opus' }];
     };
     const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.1, resetsAt: null }] });
+    fakeRounds();
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models, limits, account: async () => account }, log: () => {}, limitsMs: 15 });
     onTestFinished(() => node.stop());
-    await server.wait(() => server.received.filter(m => m.type === 'status' && m.limits !== null).length >= 5);
+    const readings = () => server.received.filter(m => m.type === 'status' && m.limits !== null).length;
+    await server.wait(() => readings() === 1);
+    await vi.advanceTimersByTimeAsync(60);
+    await server.wait(() => readings() === 5);
     expect(listed).toBe(1);
     expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
     account = { email: 'x@y.z', tier: 'max' };
+    await vi.advanceTimersByTimeAsync(15);
     await server.wait(() => listed === 2);
   });
 
   describe('while Hornhoof is away', () => {
     const readingOf = (m: { [k: string]: unknown }) => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization;
     const usage = (utilization: number) => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization, resetsAt: null }] });
-    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     const framesAfterHello = (received: { type: string; [k: string]: unknown }[]) => received.slice(received.findLastIndex(m => m.type === 'hello') + 1);
     const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
 
     it('keeps no reading in the queue, and says only the newest when it is back', async () => {
-      const server = await fakeServer();
+      const server = await fakeServer(), logs: string[] = [];
       let asked = 0;
       const limits = async () => usage(++asked / 100_000);
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 10 });
+      fakeClock(true);
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: line => logs.push(line), limitsMs: 10 });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
       const askedBefore = asked;
-      server.drop();
+      await dropped(server, logs);
+      /* A round each 10 ms through its pause of 750 ms or more before it connects again. */
+      await comeBack();
       await helloAgain(server);
       await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'status'));
       const first = framesAfterHello(server.received).find(m => m.type === 'status')!;
-      /* Hundreds were read while it was away; the oldest of them would come first from a queue. */
+      /* Scores were read while it was away; the oldest of them would come first from a queue. */
       expect(readingOf(first)).toBeGreaterThan((askedBefore + 5) / 100_000);
     });
 
@@ -572,15 +643,17 @@ describe('runNode', () => {
       const turn = usage(0.3);
       let end: () => void = () => {};
       const run = () => new Promise<Awaited<ReturnType<ProviderAdapter['run']>>>(done => { end = () => done({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn }); });
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => null }, log: () => {}, limitsMs: 60_000 });
+      const logs: string[] = [];
+      fakeClock();
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => null }, log: line => logs.push(line), limitsMs: NEVER });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'hello'));
       server.send(job('j1'));
       await server.wait(() => server.received.some(m => m.type === 'job.started'));
-      server.drop();
       /* The node hears of the drop, and the job ends with it away. */
-      await new Promise(r => setTimeout(r, 50));
+      await dropped(server, logs);
       end();
+      await comeBack();
       await helloAgain(server);
       await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
       const after = framesAfterHello(server.received);
@@ -600,11 +673,15 @@ describe('runNode', () => {
         return usage(0.2);
       };
       const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: null });
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      const logs: string[] = [];
+      fakeClock(true);
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: line => logs.push(line), limitsMs: 10 });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
       away = true;
-      server.drop();
+      await dropped(server, logs);
+      /* Rounds go by while it is away: the first reads, the next one fails. */
+      await comeBack();
       await helloAgain(server);
       server.send(job('j1'));
       await server.wait(() => server.received.some(m => m.type === 'job.done'));
@@ -623,17 +700,20 @@ describe('runNode', () => {
         looks++;
         return null;
       };
-      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      const logs: string[] = [];
+      fakeClock(true);
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: line => logs.push(line), limitsMs: 10 });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'hello'));
       server.send(job('j1'));
       await server.wait(() => server.received.some(m => m.type === 'job.started'));
-      server.drop();
-      await new Promise(r => setTimeout(r, 50));
+      await dropped(server, logs);
       end();
       /* A look or two after the job's end. */
       const seen = looks;
+      await vi.advanceTimersByTimeAsync(30);
       await server.wait(() => looks >= seen + 3);
+      await comeBack();
       await helloAgain(server);
       await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
       for (const status of framesAfterHello(server.received).filter(m => m.type === 'status')) expect(status).toMatchObject({ limits: null });
@@ -642,10 +722,11 @@ describe('runNode', () => {
     it('keeps a reading through a failed one while Hornhoof is there, as the status that says it is on its way', async () => {
       const server = await fakeServer();
       const turn = usage(0.3);
-      let asked = 0;
+      let asked = 0, listing = 0;
       let gate: Promise<void> = Promise.resolve();
       let open: () => void = () => {};
       const models = async () => {
+        listing++;
         await gate;
         return [{ id: 'opus', name: 'Opus' }];
       };
@@ -654,15 +735,16 @@ describe('runNode', () => {
         return null;
       };
       const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+      fakeRounds();
       const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, models, limits }, log: () => {}, limitsMs: 10 });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'hello'));
       gate = new Promise(resolve => { open = resolve; });
       server.send(job('j1'));
-      await server.wait(() => server.received.some(m => m.type === 'job.started'));
       /* The job's status waits for the models while readings fail. */
-      await new Promise(r => setTimeout(r, 20));
+      await server.wait(() => listing === 2);
       const seen = asked;
+      await vi.advanceTimersByTimeAsync(30);
       await server.wait(() => asked >= seen + 3);
       open();
       await server.wait(() => server.received.some(m => m.type === 'job.done'));
@@ -693,8 +775,11 @@ describe('runNode', () => {
       },
     });
     const agy = antigravityAdapter({ home, tools, bin, person: () => null });
+    let looks = 0;
+    const limits = async () => { try { return await agy.limits!(); } finally { looks++; } };
+    fakeRounds();
     /* Avoid spawning tmux setup checks during a non-terminal limits test. */
-    const node = await runNode({ dir, adapter: { ...agy, setupNeeded: async () => false }, log: () => {}, limitsMs: 60 });
+    const node = await runNode({ dir, adapter: { ...agy, limits, setupNeeded: async () => false }, log: () => {}, limitsMs: 60 });
     onTestFinished(() => {
       delete process.env.FAKE_LIMITS_MODE;
       node.stop();
@@ -712,18 +797,20 @@ describe('runNode', () => {
 
     /* A broken source leaves the node running and never fabricates status: rejected. */
     process.env.FAKE_LIMITS_MODE = 'fail';
-    await new Promise(r => setTimeout(r, 150));
+    const seen = looks;
+    await vi.advanceTimersByTimeAsync(60);
+    await server.wait(() => looks > seen);
+    await server.barrier('failed-look');
     expect(server.received.filter(m => m.type === 'status').every(m => (m.limits as { status?: string } | null)?.status !== 'rejected')).toBe(true);
     delete process.env.FAKE_LIMITS_MODE;
 
     /* A job updates the limits right away before reporting job.done. */
     writeFileSync(join(home, 'fake-agy-usage.json'), usageWith(0.25));
     const statusesBefore = server.received.filter(m => m.type === 'status').length;
-    server.send({ type: 'job.run', jobId: 'j-agy', subscriptionId: 's1', provider: 'antigravity', prompt: 'say ready', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j-agy', subscriptionId: 's1', provider: 'antigravity', prompt: 'say ready', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agy'));
     expect(server.received.filter(m => m.type === 'status').length).toBeGreaterThan(statusesBefore);
     const done = server.received.findIndex(m => m.type === 'job.done' && m.jobId === 'j-agy');
-    /* Among the statuses before the job's end: a reading on schedule may still come after it. */
     expect(server.received.slice(0, done).filter(m => m.type === 'status').map(m => m.limits)).toContainEqual({
       status: 'allowed',
       windows: [
@@ -742,10 +829,10 @@ describe('runNode', () => {
       { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.95, resetsAt: null }], complete: true },
     ];
     const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turns.shift()! });
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => week }, log: () => {}, limitsMs: 60_000 });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => week }, log: () => {}, limitsMs: NEVER });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 1);
-    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     server.send(job('j1'));
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
@@ -763,10 +850,10 @@ describe('runNode', () => {
     const opus = { status: 'rejected' as const, windows: [{ name: 'seven_day', utilization: 0.6, resetsAt: null }, { name: 'seven_day_opus', utilization: 1, resetsAt: '2099-11-04T00:00:00.000Z' }], complete: true };
     const turn = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }, { name: 'seven_day', utilization: 0.61, resetsAt: null }] };
     const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => opus }, log: () => {}, limitsMs: 60_000 });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => opus }, log: () => {}, limitsMs: NEVER });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 1);
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
   });
@@ -774,13 +861,15 @@ describe('runNode', () => {
   it('keeps the last fifty ends of jobs a server does not confirm', async () => {
     const server = await fakeServer();
     const run = async () => ({ ok: true, sessionId: null, result: 'ready', output: '', error: null, limits: null });
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run }, log: () => {} });
+    const logs: string[] = [];
+    fakeClock();
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run }, log: line => logs.push(line) });
     onTestFinished(() => node.stop());
     const hellos = () => server.received.filter(m => m.type === 'hello');
     await server.wait(() => hellos().length === 1);
-    for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52);
-    server.drop();
+    await dropAndReturn(server, logs);
     await server.wait(() => hellos().length === 2);
     const running = hellos()[1]!.running as string[];
     expect(running).toHaveLength(50);
@@ -789,20 +878,22 @@ describe('runNode', () => {
   });
 
   it('says in hello how it came up: the same after a dropped connection, anew once it starts again', async () => {
-    const server = await fakeServer();
+    const server = await fakeServer(), logs: string[] = [];
     const dir = nodeDir(server.url);
-    const first = await runNode({ dir, adapter, log: () => {} });
+    /* The node's clock, and the machine up for an hour under it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: Date.parse('2026-11-06T08:00:00.000Z') });
+    vi.mocked(uptime).mockReturnValueOnce(3600).mockReturnValueOnce(3600);
+    const first = await runNode({ dir, adapter, log: line => logs.push(line) });
     const hellos = () => server.received.filter(m => m.type === 'hello').map(m => m.boot as { startedAt: string; machineUpAt: string; container: string });
     await server.wait(() => hellos().length === 1);
     const [boot] = hellos();
-    expect(boot).toEqual({ startedAt: expect.any(String), machineUpAt: expect.any(String), container: hostname() });
-    expect(Math.abs(Date.parse(boot!.machineUpAt) - (Date.now() - uptime() * 1000))).toBeLessThan(5000);
-    expect(Date.parse(boot!.startedAt)).toBeGreaterThan(Date.parse(boot!.machineUpAt));
-    server.drop();
+    expect(boot).toEqual({ startedAt: '2026-11-06T08:00:00.000Z', machineUpAt: '2026-11-06T07:00:00.000Z', container: hostname() });
+    await dropAndReturn(server, logs);
     await server.wait(() => hellos().length === 2);
     expect(hellos()[1]).toEqual(boot);
     first.stop();
-    await new Promise(r => setTimeout(r, 5));
+    /* Its last message leaves and its socket closes, and a minute goes by before it starts again. */
+    await vi.advanceTimersByTimeAsync(60_000);
     const second = await runNode({ dir, adapter, log: () => {} });
     onTestFinished(() => second.stop());
     await server.wait(() => hellos().length === 3);
@@ -825,7 +916,7 @@ describe('runNode', () => {
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ type: 'hello', models });
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'codex', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'codex', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'status'));
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models });
   });
@@ -866,7 +957,7 @@ describe('runNode', () => {
     const node = await runNode({ dir, adapter: slow, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.started'));
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
@@ -884,7 +975,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: pick, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     const doneOf = (jobId: string) => server.received.find(m => m.type === 'job.done' && m.jobId === jobId);
     run('j1');
     await server.wait(() => !!doneOf('j1'));
@@ -910,7 +1001,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: talkative, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: 'Be brief.', toolToken: 'tool-token-0123456789' });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: 'Be brief.', toolToken: 'tool-token-0123456789' });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
     expect(server.received.filter(m => m.type !== 'hello' && m.type !== 'status').map(m => (m.type === 'job.event' ? `event ${m.seq}` : m.type))).toEqual([
       'job.started', 'event 0', 'event 1', 'event 2', 'job.done',
@@ -931,6 +1022,7 @@ describe('runNode', () => {
     let blockPreparation = false;
     const launches: boolean[] = [];
     const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: async () => { if (++installs > 1) await install; } }]);
+    const ready = vi.spyOn(programs, 'ready');
     const node = await runNode({ dir: nodeDir(server.url), programs, log: () => {}, adapter: {
       ...adapter,
       secrets: async () => { if (blockPreparation) { preparing = true; await preparation; } prepared++; return []; },
@@ -942,6 +1034,7 @@ describe('runNode', () => {
       await programs.ready();
       prepared = 0;
       blockPreparation = true;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       server.send({ type: 'job.run', jobId: 'late-update', subscriptionId: 's1', provider: 'claude', prompt: 'Wait for the programs.', sessionId: null, model: null, timeoutMs: 100, secret: null, instructions: null, toolToken: null });
       await server.wait(() => preparing);
       server.send({ type: 'programs.update' });
@@ -949,7 +1042,11 @@ describe('runNode', () => {
       blockPreparation = false;
       releasePreparation();
       await server.wait(() => prepared >= 2);
-      await new Promise(resolve => setTimeout(resolve, 200));
+      /* At its launch the job asks again whether the programs are ready: after the test, and as it started. */
+      await server.wait(() => ready.mock.calls.length === 3);
+      /* Its own limit of 100 ms, and the tenth more the node gives it, do not run while it waits there. */
+      await vi.advanceTimersByTimeAsync(110);
+      await server.barrier('waiting-at-launch');
       expect(server.received.some(m => m.type === 'job.done' && m.jobId === 'late-update')).toBe(false);
       expect(launches).toEqual([]);
     } finally {
@@ -973,7 +1070,7 @@ describe('runNode', () => {
     onTestFinished(() => node.stop());
     try {
       await server.wait(() => server.received.some(m => m.type === 'hello'));
-      server.send({ type: 'job.run', jobId: 'waiting-update', subscriptionId: 's1', provider: 'claude', prompt: 'Do not run this.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+      server.send({ type: 'job.run', jobId: 'waiting-update', subscriptionId: 's1', provider: 'claude', prompt: 'Do not run this.', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
       await server.wait(() => server.received.some(m => m.type === 'job.started'));
       expect(started).toEqual([]);
       server.send({ type: 'job.cancel', jobId: 'waiting-update' });
@@ -997,7 +1094,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.started'));
     server.send({ type: 'job.cancel', jobId: 'other' });
     server.send({ type: 'job.cancel', jobId: 'j1' });
@@ -1008,11 +1105,14 @@ describe('runNode', () => {
   it("says how busy its machine is in hello and every while after, with the agent jobs it runs", async () => {
     const server = await fakeServer();
     const slow: ProviderAdapter = { ...adapter, run: input => new Promise(done => input.signal?.addEventListener('abort', () => done({ ok: false, sessionId: null, result: '', output: '', error: 'agent_failed', limits: null }))) };
+    fakeRounds();
     const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {}, loadMs: 40 });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]!.load).toMatchObject({ cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 });
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.started'));
+    await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
     expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
     /* It runs no programs in terminals, so it names none. */
@@ -1048,7 +1148,7 @@ describe('runNode', () => {
     const server = await fakeServer();
     const ran: string[] = [];
     const runPart: typeof runTests = async m => (ran.push(m.partId), { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart });
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ type: 'hello', work: false, noRuns: expect.stringMatching(/user of its own/) });
@@ -1061,16 +1161,20 @@ describe('runNode', () => {
   it('runs a part of a test run, counts it in its load, sends its end until Hornhoof confirms it, and stops a part when asked', async () => {
     const server = await fakeServer();
     const given: unknown[] = [];
+    let finish = () => {};
+    /* A part ends when the test says so, or a slow one when it is stopped. */
     const runPart: typeof runTests = async (m, { signal, files }) => {
       given.push(files);
       await new Promise<void>(done => {
-        const timer = setTimeout(done, m.command === 'slow' ? 60_000 : 300);
-        signal?.addEventListener('abort', () => (clearTimeout(timer), done()));
+        if (m.command !== 'slow') finish = done;
+        signal?.addEventListener('abort', () => done());
       });
       const stopped = signal?.aborted ?? false;
       return { type: 'tests.done', partId: m.partId, ok: !stopped, exitCode: stopped ? null : 0, error: stopped ? 'cancelled' : null, commit: null, log: stopped ? 'Stopped.' : 'all passed' };
     };
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart, testUser: { uid: 20001, gid: 20001 } });
+    const logs: string[] = [];
+    fakeClock(true);
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: line => logs.push(line), loadMs: 40, runPart, testUser: { uid: 20001, gid: 20001 } });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ type: 'hello', work: true });
@@ -1078,19 +1182,21 @@ describe('runNode', () => {
     const part = { type: 'tests.run', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, part: 1, parts: 1, timeoutMs: 60000 };
     server.send({ ...part, partId: 'p1', command: 'npm test' });
     await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p1'));
+    await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'load' && m.tests === 1));
+    finish();
     await server.wait(() => server.received.some(m => m.type === 'tests.done'));
     expect(server.received.find(m => m.type === 'tests.done')).toMatchObject({ partId: 'p1', ok: true, exitCode: 0, error: null, log: 'all passed' });
     expect(given[0]).toMatchObject({ get: expect.any(Function), put: expect.any(Function) });
 
     const hellos = () => server.received.filter(m => m.type === 'hello');
-    server.drop();
+    await dropAndReturn(server, logs);
     await server.wait(() => hellos().length === 2);
     expect(hellos()[1]).toMatchObject({ tests: ['p1'] });
     await server.wait(() => server.received.filter(m => m.type === 'tests.done').length === 2);
     server.send({ type: 'tests.ack', partId: 'p1' });
-    await new Promise(r => setTimeout(r, 50));
-    server.drop();
+    await server.barrier('acknowledged');
+    await dropAndReturn(server, logs);
     await server.wait(() => hellos().length === 3);
     expect(hellos()[2]).toMatchObject({ tests: [] });
 
@@ -1149,6 +1255,7 @@ describe('runNode', () => {
     const dir = nodeDir(server.url);
     const lines: string[] = [];
     let currentError: string | null = 'libnss3.so: cannot open shared object file';
+    fakeRounds();
     const node = await runNode({
       dir,
       adapter,
@@ -1170,7 +1277,7 @@ describe('runNode', () => {
     expect(lines.some(line => line.includes('Playwright browsers could not start: libnss3.so'))).toBe(true);
     expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so: cannot open shared object file');
 
-    server.send({ type: 'job.run', jobId: 'j-agent', subscriptionId: 's1', provider: 'claude', prompt: 'hello', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send({ type: 'job.run', jobId: 'j-agent', subscriptionId: 's1', provider: 'claude', prompt: 'hello', sessionId: null, model: null, timeoutMs: NO_LIMIT, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agent'));
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j-agent')).toMatchObject({ ok: true, error: null });
 
@@ -1183,6 +1290,7 @@ describe('runNode', () => {
     });
 
     currentError = null;
+    await vi.advanceTimersByTimeAsync(40);
     await server.wait(() => server.received.some(m => m.type === 'status' && m.browserError === null));
     expect(server.received.findLast(m => m.type === 'status')).toMatchObject({
       type: 'status',
@@ -1305,7 +1413,9 @@ it('keeps a stopped part cleanup exclusive when another machine slot is granted 
   server.send({ ...part, partId: 'first' }); await server.wait(() => vi.mocked(runPart).mock.calls.length === 1);
   server.send({ type: 'tests.cancel', partId: 'first' }); await server.wait(() => cleaning);
   server.send({ ...part, partId: 'second' }); await server.wait(() => server.received.filter(frame => frame.type === 'check.acquire').length === 2);
-  await new Promise(resolve => setTimeout(resolve, 20));
+  /* The second part has its machine slot and waits for the test user. */
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.waiting' && frame.partId === 'second'));
+  await server.barrier('second-waits');
   expect(runPart).toHaveBeenCalledTimes(1);
   expect(server.received.some(frame => frame.type === 'tests.started' && frame.partId === 'second')).toBe(false);
   expect(server.received).toContainEqual({ type: 'tests.waiting', partId: 'second', position: 1 });

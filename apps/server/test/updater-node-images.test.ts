@@ -17,9 +17,9 @@ describe('updater', () => {
     const installs = (calls: string[]) => calls.filter(c => c.startsWith('installer server'));
     const asked = (calls: string[], method: string) => calls.filter(c => c.startsWith('curl') && c.includes('/api/nodes/update') && c.includes(`-X ${method}`));
 
-    it('changes nothing while their work runs, and keeps the key off the command line', () => {
+    it('changes nothing while their work runs, and keeps the key off the command line', async () => {
       const s = behind();
-      const r = runOnce(s, null, { ...running041, STUB_NODES: 'waiting' });
+      const r = await runOnce(s, null, { ...running041, STUB_NODES: 'waiting' });
       expect(r.code).toBe(0);
       expect(asked(r.calls, 'POST')).toHaveLength(1);
       expect(asked(r.calls, 'POST')[0]).toContain('http://app:8080/api/nodes/update');
@@ -30,15 +30,15 @@ describe('updater', () => {
       expect(asked(r.calls, 'DELETE')).toEqual([]);
     });
 
-    it('changes nothing either when the wait ran out, and asks on, so the update repeats by itself', () => {
+    it('changes nothing either when the wait ran out, and asks on, so the update repeats by itself', async () => {
       const s = behind();
-      expect(installs(runOnce(s, null, { ...running041, STUB_NODES: 'postponed' }).calls)).toEqual([]);
-      expect(installs(runOnce(s, null, { ...running041, STUB_NODES: 'ready' }).calls)).toHaveLength(1);
+      expect(installs((await runOnce(s, null, { ...running041, STUB_NODES: 'postponed' })).calls)).toEqual([]);
+      expect(installs((await runOnce(s, null, { ...running041, STUB_NODES: 'ready' })).calls)).toHaveLength(1);
     });
 
-    it('finishes the step from 0.6.1: the new updater replaces them through that build\'s installer once they are free, and lets go of them', () => {
+    it('finishes the step from 0.6.1: the new updater replaces them through that build\'s installer once they are free, and lets go of them', async () => {
       const s = behind();
-      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
+      const r = await runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
       expect(r.code).toBe(0);
       expect(r.calls).toContain('installer told the nodes are free');
       expect(at(r.calls, `docker create ${APP}@${DIGESTS['0.4.1']}`)).toBeGreaterThanOrEqual(0);
@@ -50,46 +50,46 @@ describe('updater', () => {
       expect(r.status).toBeNull();
     });
 
-    it('lets go of them when the installer fails, and stays up', () => {
+    it('lets go of them when the installer fails, and stays up', async () => {
       const s = behind();
-      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready', STUB_INSTALLER_FAILS: '1' });
+      const r = await runOnce(s, null, { ...running041, STUB_NODES: 'ready', STUB_INSTALLER_FAILS: '1' });
       expect(r.code).toBe(0);
       expect(asked(r.calls, 'DELETE')).toHaveLength(1);
       expect(r.out).toContain('Could not replace the nodes');
     });
 
-    it('asks nothing when the built-in node runs the image the build names', () => {
+    it('asks nothing when the built-in node runs the image the build names', async () => {
       const s = behind();
-      const r = runOnce(s, null, { STUB_RUNNING_IMAGES: `node=${APP}-node@${NODE_DIGESTS['0.4.1']}` });
+      const r = await runOnce(s, null, { STUB_RUNNING_IMAGES: `node=${APP}-node@${NODE_DIGESTS['0.4.1']}` });
       expect(asked(r.calls, 'POST')).toEqual([]);
       expect(installs(r.calls)).toEqual([]);
     });
 
-    it('asks nothing when no built-in node runs', () => {
-      const r = runOnce(behind(), null, { STUB_NO_NODE: '1' });
+    it('asks nothing when no built-in node runs', async () => {
+      const r = await runOnce(behind(), null, { STUB_NO_NODE: '1' });
       expect(asked(r.calls, 'POST')).toEqual([]);
     });
 
-    it('asks nothing for a server that install.sh did not set up, or whose .env names no node image', () => {
-      expect(asked(runOnce(stand(), null, running041).calls, 'POST')).toEqual([]);
+    it('asks nothing for a server that install.sh did not set up, or whose .env names no node image', async () => {
+      expect(asked((await runOnce(stand(), null, running041)).calls, 'POST')).toEqual([]);
     });
 
-    it('leaves them and their turns on a server from before this wait, and says why', () => {
-      const r = runOnce(behind(), null, { ...running041, STUB_NODES: 'old' });
+    it('leaves them and their turns on a server from before this wait, and says why', async () => {
+      const r = await runOnce(behind(), null, { ...running041, STUB_NODES: 'old' });
       expect(r.code).toBe(0);
       expect(installs(r.calls)).toEqual([]);
       expect(r.out).toContain('This server is from before nodes wait for their work');
     });
 
-    it.each(['down', 'refused'])('leaves them and their turns when the server is %s, and stays up', state => {
-      const r = runOnce(behind(), null, { ...running041, STUB_NODES: state });
+    it.each(['down', 'refused'])('leaves them and their turns when the server is %s, and stays up', async state => {
+      const r = await runOnce(behind(), null, { ...running041, STUB_NODES: state });
       expect(r.code).toBe(0);
       expect(installs(r.calls)).toEqual([]);
     });
 
-    it('never starts an image that is not its own from what .env names', () => {
+    it('never starts an image that is not its own from what .env names', async () => {
       const s = stand(builtOn041.replace(`${APP}@`, 'ghcr.io/acme/other@'));
-      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
+      const r = await runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
       expect(r.code).toBe(0);
       expect(asked(r.calls, 'POST')).toEqual([]);
       expect(installs(r.calls)).toEqual([]);
@@ -105,8 +105,8 @@ describe('updater', () => {
       const only = (calls: string[]) => calls.filter(c => c.startsWith('installer told only'));
       const body = (names: string[]) => JSON.stringify({ scope: 'server', nodes: names });
 
-      it('replaces the free ones at once and leaves the one with a long turn to its wait, asking of each', () => {
-        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
+      it('replaces the free ones at once and leaves the one with a long turn to its wait, asking of each', async () => {
+        const r = await runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
         expect(r.code).toBe(0);
         expect(asked(r.calls, 'POST')[0]).toContain(body(['builtin', CLAUDE, GOOGLE]));
         expect(only(r.calls)).toEqual([`installer told only builtin ${CLAUDE}`]);
@@ -114,66 +114,66 @@ describe('updater', () => {
         expect(installs(r.calls)[0]).toContain(refs('0.4.1'));
       });
 
-      it('lets go only of those it replaced, so the one that waits keeps its deadline', () => {
-        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
+      it('lets go only of those it replaced, so the one that waits keeps its deadline', async () => {
+        const r = await runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
         expect(asked(r.calls, 'DELETE')).toHaveLength(1);
         expect(asked(r.calls, 'DELETE')[0]).toContain(body(['builtin', CLAUDE]));
         expect(r.calls.indexOf(asked(r.calls, 'DELETE')[0]!)).toBeGreaterThan(r.calls.indexOf(installs(r.calls)[0]!));
       });
 
-      it('asks on about the one that waits and no more about those on the new image, which take work again', () => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: '' });
+      it('asks on about the one that waits and no more about those on the new image, which take work again', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: '' });
         expect(asked(r.calls, 'POST')[0]).toContain(body([GOOGLE]));
         expect(installs(r.calls)).toEqual([]);
         expect(asked(r.calls, 'DELETE')).toEqual([]);
       });
 
-      it('replaces a node behind though the built-in node runs the new image', () => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: GOOGLE });
+      it('replaces a node behind though the built-in node runs the new image', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: GOOGLE });
         expect(only(r.calls)).toEqual([`installer told only ${GOOGLE}`]);
       });
 
-      it('asks nothing when every node runs the image the build names', () => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, NEW), STUB_NODES: 'each' });
+      it('asks nothing when every node runs the image the build names', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(NEW, NEW), STUB_NODES: 'each' });
         expect(asked(r.calls, 'POST')).toEqual([]);
       });
 
-      it('replaces only what it found behind itself, whatever the server names', () => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, NEW), STUB_NODES: 'each', STUB_FREE: `${CLAUDE} ${GOOGLE} builtin a-plan-of-another-server ;reboot` });
+      it('replaces only what it found behind itself, whatever the server names', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(OLD, NEW), STUB_NODES: 'each', STUB_FREE: `${CLAUDE} ${GOOGLE} builtin a-plan-of-another-server ;reboot` });
         expect(only(r.calls)).toEqual([`installer told only ${CLAUDE}`]);
         expect(asked(r.calls, 'DELETE')[0]).toContain(body([CLAUDE]));
       });
 
-      it('installs nothing and lets go of nothing when the server names none, as for nodes that are not its own', () => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: '' });
+      it('installs nothing and lets go of nothing when the server names none, as for nodes that are not its own', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: '' });
         expect(r.code).toBe(0);
         expect(installs(r.calls)).toEqual([]);
         expect(asked(r.calls, 'DELETE')).toEqual([]);
       });
 
-      it('never asks about a label that is not a plain id', () => {
-        const r = runOnce(behind(), null, { ...onNew, STUB_PLAN_NODES: `hornhoof-odd-1=a;reboot=${OLD} hornhoof-claude-1=${CLAUDE}=${OLD}`, STUB_NODES: 'each', STUB_FREE: CLAUDE });
+      it('never asks about a label that is not a plain id', async () => {
+        const r = await runOnce(behind(), null, { ...onNew, STUB_PLAN_NODES: `hornhoof-odd-1=a;reboot=${OLD} hornhoof-claude-1=${CLAUDE}=${OLD}`, STUB_NODES: 'each', STUB_FREE: CLAUDE });
         expect(asked(r.calls, 'POST')[0]).toContain(body([CLAUDE]));
         expect(r.calls.join('\n')).not.toContain('reboot');
       });
 
-      it('lets go of those it tried when the installer fails, stays up, and leaves the others to their wait', () => {
-        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: 'builtin', STUB_INSTALLER_FAILS: '1' });
+      it('lets go of those it tried when the installer fails, stays up, and leaves the others to their wait', async () => {
+        const r = await runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: 'builtin', STUB_INSTALLER_FAILS: '1' });
         expect(r.code).toBe(0);
         expect(asked(r.calls, 'DELETE')).toHaveLength(1);
         expect(asked(r.calls, 'DELETE')[0]).toContain(body(['builtin']));
         expect(r.out).toContain('Could not replace the nodes');
       });
 
-      it('replaces them all together on a server from before this, which says only that all are free', () => {
-        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'ready' });
+      it('replaces them all together on a server from before this, which says only that all are free', async () => {
+        const r = await runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'ready' });
         expect(r.calls).toContain('installer told the nodes are free');
         expect(only(r.calls)).toEqual([]);
         expect(asked(r.calls, 'DELETE')[0]).toContain('{"scope":"server"}');
       });
 
-      it.each(['ready', 'waiting'])('lets go of them on a server from before this that says %s when the built-in node is on the new image: its installer would move none', state => {
-        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: state });
+      it.each(['ready', 'waiting'])('lets go of them on a server from before this that says %s when the built-in node is on the new image: its installer would move none', async state => {
+        const r = await runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: state });
         expect(r.code).toBe(0);
         expect(installs(r.calls)).toEqual([]);
         expect(asked(r.calls, 'DELETE')).toHaveLength(1);
@@ -185,39 +185,39 @@ describe('updater', () => {
   describe('the nodes during an update', () => {
     const told = 'installer told the nodes are free';
 
-    it('leaves them to the wait in a planned update', () => {
-      const r = runOnce(stand(), ask('p1'));
+    it('leaves them to the wait in a planned update', async () => {
+      const r = await runOnce(stand(), ask('p1'));
       expect(r.status).toMatchObject({ state: 'done' });
       expect(r.calls).not.toContain(told);
     });
 
-    it.each([['urgent', { urgent: true }], ['confirmed', { immediate: true }]])('replaces them with the app in an %s update', (_name, flag) => {
-      const r = runOnce(stand(), { ...ask('n1'), ...flag });
+    it.each([['urgent', { urgent: true }], ['confirmed', { immediate: true }]])('replaces them with the app in an %s update', async (_name, flag) => {
+      const r = await runOnce(stand(), { ...ask('n1'), ...flag });
       expect(r.status).toMatchObject({ state: 'done' });
       expect(r.calls.indexOf(told)).toBeGreaterThanOrEqual(0);
       expect(r.calls.indexOf(told)).toBeLessThan(at(r.calls, 'installer server'));
     });
 
-    it('still replaces them when it goes on with such an update after being stopped', () => {
+    it('still replaces them when it goes on with such an update after being stopped', async () => {
       const s = stand();
-      runOnce(s, { ...ask('n2'), urgent: true }, { STUB_STOP_IN: '0.4.1' });
+      await runOnce(s, { ...ask('n2'), urgent: true }, { STUB_STOP_IN: '0.4.1' });
       writeFileSync(s.log, '');
-      const r = runOnce(s, null);
+      const r = await runOnce(s, null);
       expect(r.status).toMatchObject({ id: 'n2', state: 'done' });
       expect(r.calls).toContain(told);
     });
 
-    it('puts the nodes from before back too when such an update goes back', () => {
-      const r = runOnce(stand(), { ...ask('n3'), urgent: true }, { STUB_BROKEN: '0.4.1' });
+    it('puts the nodes from before back too when such an update goes back', async () => {
+      const r = await runOnce(stand(), { ...ask('n3'), urgent: true }, { STUB_BROKEN: '0.4.1' });
       expect(r.status).toMatchObject({ state: 'rolled_back' });
       expect(r.calls.filter(c => c === told)).toHaveLength(2);
     });
 
-    it('does not carry that over to a later planned update', () => {
+    it('does not carry that over to a later planned update', async () => {
       const s = stand();
-      runOnce(s, { ...ask('n4'), urgent: true });
+      await runOnce(s, { ...ask('n4'), urgent: true });
       writeFileSync(s.log, '');
-      const r = runOnce(s, { ...ask('n5') });
+      const r = await runOnce(s, { ...ask('n5') });
       expect(r.status).toMatchObject({ id: 'n5', state: 'done' });
       expect(r.calls).not.toContain(told);
     });

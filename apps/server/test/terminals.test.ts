@@ -1,14 +1,15 @@
 import { UNHEARD_MS } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { decisionPrincipal, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, openTypedTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
 import { nextOf as next } from './helpers.js';
+import { handled } from './terminal-company.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -335,7 +336,7 @@ describe("an agent's live terminal", () => {
   });
 
   it('shows the node its turn runs on when the agent moved to another subscription mid-turn, and moves once the turn ends', async () => {
-    const { app, db, url, ceo, builtin, orchestratorId } = await live(true, { STREAM_PING_MS: '100' });
+    const { app, db, url, ceo, builtin, orchestratorId } = await live(true, { STREAM_PING_MS: '2147483647' });
     const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
     const [acme] = await db.select().from(companies);
     const [running] = await db
@@ -349,9 +350,16 @@ describe("an agent's live terminal", () => {
     expect((await state(app, ceo)).terminal).toBe(true);
     const screen = await watch(url, ceo);
     expect(await next(builtin, 'term.open')).toMatchObject({ agentKey: orchestratorId });
-    await new Promise(done => setTimeout(done, 400));
+    /* A size has the view look again at what it shows once a second went by since its last look: the clock moves that second. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    vi.setSystemTime(Date.now() + 1000);
+    screen.ws.send(JSON.stringify({ type: 'resize', cols: 90, rows: 30 }));
+    expect(await next(builtin, 'term.resize')).toMatchObject({ cols: 90 });
     expect(screen.ws.readyState).toBe(WebSocket.OPEN);
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, running!.id));
+    vi.setSystemTime(Date.now() + 1000);
+    screen.ws.send(JSON.stringify({ type: 'resize', cols: 91, rows: 30 }));
     expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
     expect((await state(app, ceo)).terminal).toBe(false);
   });
@@ -384,7 +392,7 @@ describe("an agent's live terminal", () => {
   });
 
   it('ends the view of a person who no longer reaches the agent at once, without waiting for the next look', async () => {
-    const { app, db, url, ceo, builtin } = await live(true, { STREAM_PING_MS: '60000' });
+    const { app, db, url, ceo, builtin } = await live(true, { STREAM_PING_MS: '2147483647' });
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
@@ -527,7 +535,7 @@ describe('starting an agent for someone who opens its window to talk', () => {
     expect((await db.select().from(jobs).where(eq(jobs.id, start.jobId)))[0]).toMatchObject({ status: 'done' });
     /* The node's own end of the start turn comes after, and changes nothing. */
     builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
-    await new Promise(r => setTimeout(r, 300));
+    await until(() => builtin.acks.includes(start.jobId));
     expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
     expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message').map((e: { data: { text: string } }) => e.data.text)).toEqual(['add a department']);
   });
@@ -539,7 +547,7 @@ describe('starting an agent for someone who opens its window to talk', () => {
     builtin.send({ type: 'agent.start', agentKey: orchestratorId });
     builtin.send({ type: 'agent.start', agentKey: 'not-an-agent' });
     builtin.send({ type: 'agent.start', agentKey: '00000000-0000-4000-8000-000000000000' });
-    await new Promise(r => setTimeout(r, 300));
+    await handled(builtin);
     expect(await db.select().from(jobs)).toHaveLength(1);
   });
 });
@@ -600,7 +608,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     await until(() => screens.every(s => s.frames.some(f => f.type === 'data' && f.data === 'Owner node connected')));
     expect(screens.every(s => s.frames.some(f => f.type === 'program' && f.running === false) && s.frames.filter(f => f.type === 'program').every(f => f.running === false))).toBe(true);
     expect(screens.every(s => !s.frames.some(f => f.type === 'data' && f.data === 'Foreign node data'))).toBe(true);
-    await expect.poll(() => back.queued()).toBe(1);
+    await until(() => back.queued() === 1);
     const start = await next(back, 'job.run');
     expect(start).toMatchObject({ prompt: '', sessionId: 'saved-history', provider });
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
@@ -650,7 +658,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     const open = await next(plan, 'term.open');
     plan.send({ type: 'term.program', termId: open.termId, running: false });
     plan.send({ type: 'agent.start', agentKey: orchestratorId });
-    await expect.poll(() => plan.queued()).toBe(1);
+    await until(() => plan.queued() === 1);
     const start = await next(plan, 'job.run');
     expect(start).toMatchObject({ prompt: '', sessionId: null });
     for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
@@ -707,7 +715,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     const open = await next(plan, 'term.open');
     plan.send({ type: 'term.program', termId: open.termId, running: false });
     plan.send({ type: 'agent.start', agentKey: orchestratorId });
-    await expect.poll(() => plan.queued()).toBe(1);
+    await until(() => plan.queued() === 1);
     const start = await next(plan, 'job.run');
     plan.send({ type: 'term.data', termId: open.termId, data: 'No conversation found with session ID: saved-history' });
     plan.send({ type: 'term.program', termId: open.termId, running: true });
@@ -874,8 +882,9 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     await next(builtin, 'term.input');
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
     const turn = await next(builtin, 'job.run');
-    /* Zed's words may have gone into the CEO's turn, so it takes no decision until a person writes to it again. */
-    await new Promise(r => setTimeout(r, 300));
+    /* Zed's words may have gone into the CEO's turn, so it takes no decision until a person writes to it again. That is
+       settled under the agent's input lock as the turn goes out: what takes the lock after it runs once that is done. */
+    await withInputLock(app.ctx, orchestratorId, async () => {});
     expect(await decisionPrincipal(db, turn.jobId)).toBeNull();
     builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Done.', tail: '', error: null });
     await until(async () => !(await state(app, ceo)).busy);

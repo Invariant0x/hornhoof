@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -63,7 +63,13 @@ describe('AgentCard', () => {
   });
 
   it('shows the latest failed turn under the state in English and Russian, with tooltip and collapsed details clipped to 300 characters', async () => {
-    const at = new Date().setHours(14, 2, 0, 0);
+    /* The card's clock stands on one day, so 14:02 is today whenever the test runs. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
     const rawText = `529 Overloaded: ${'x'.repeat(340)}`;
     const clipped = `${rawText.slice(0, 299)}…`;
     expect(clipped).toHaveLength(300);
@@ -235,10 +241,9 @@ describe('AgentCard', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Assignment' }), { target: { value: 'You build the billing API.' } });
-    await act(async () => {
-      answer();
-      await new Promise(r => setTimeout(r, 50));
-    });
+    answer();
+    /* The note comes in the same render as the saved card, so what the typing left is the answer's whole effect. */
+    expect(await screen.findByText('Applies from the next turn.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Test first' })).toHaveValue('Write it first.');
     expect(screen.getByRole('textbox', { name: 'Assignment' })).toHaveValue('You build the billing API.');
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
@@ -255,10 +260,9 @@ describe('AgentCard', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     const second = first.replace('You build the API.', 'You build the billing API.');
     fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: second } });
-    await act(async () => {
-      answer();
-      await new Promise(r => setTimeout(r, 50));
-    });
+    answer();
+    /* The note comes in the same render as the saved card, so what the typing left is the answer's whole effect. */
+    expect(await screen.findByText('Applies from the next turn.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(second);
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
@@ -408,7 +412,7 @@ describe('AgentCard', () => {
     ['ru', 'Лимиты', 'Неизвестно, последние данные от 21:44'],
   ])('shows stale Antigravity limits as unknown in the agent card in %s', async (language, heading, words) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); localStorage.removeItem('hh-lang'); });
     const antigravity = {

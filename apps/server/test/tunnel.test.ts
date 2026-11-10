@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
 import { until } from './helpers-basic.js';
 
@@ -45,38 +45,61 @@ function tunnel() {
 
 describe('the tunnel container', () => {
   it('waits while there are no settings, then starts the client with them', async () => {
-    const { keeper, write, started } = tunnel();
+    /* The keeper reads its settings when the test moves its clock. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const { keeper, write, started, lines } = tunnel();
     keeper.start();
-    await new Promise(r => setTimeout(r, 100));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(lines).toEqual([]);
     expect(started()).toEqual([]);
     write('first');
+    await vi.advanceTimersByTimeAsync(20);
     await until(() => started().length === 1);
     expect(started()[0]![0]).toBe('first');
   });
 
   it('starts the client again with new settings, and stops it when they go', async () => {
-    const { keeper, file, write, started, alive } = tunnel();
+    /* The keeper reads its settings, and would start a client that ended again, when the test moves its clock. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const { keeper, file, write, started, alive, lines } = tunnel();
     write('first');
     keeper.start();
     await until(() => started().length === 1);
     const firstPid = started()[0]![1]!;
     write('second');
+    await vi.advanceTimersByTimeAsync(20);
     await until(() => started().length === 2);
     expect(started()[1]![0]).toBe('second');
     await until(() => !alive(firstPid));
     const secondPid = started()[1]![1]!;
     rmSync(file);
+    await vi.advanceTimersByTimeAsync(20);
     await until(() => !alive(secondPid));
-    await new Promise(r => setTimeout(r, 100));
+    /* The keeper is done with the client that went: it says it waits. Past the longest pause before a start again, it
+       started nothing more. */
+    await until(() => lines.includes('No public link: the tunnel waits.'));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(lines.filter(l => l.startsWith('Carrying'))).toHaveLength(2);
     expect(started()).toHaveLength(2);
   });
 
   it('starts a client that ended again, after a pause', async () => {
+    /* The pauses before a start again go by a clock the test moves: 30 ms, then twice that. */
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const { keeper, write, started, lines } = tunnel();
+    const ends = () => lines.filter(l => l.includes('ended')).length;
     write('ends');
     keeper.start();
-    await until(() => started().length >= 3);
-    expect(lines.some(l => l.includes('ended'))).toBe(true);
+    for (const [count, pauseMs] of [[1, 30], [2, 60]] as const) {
+      await until(() => ends() === count);
+      await vi.advanceTimersByTimeAsync(pauseMs - 1);
+      expect(started()).toHaveLength(count);
+      await vi.advanceTimersByTimeAsync(1);
+      await until(() => started().length === count + 1);
+    }
   });
 
   it('keeps waiting on settings it cannot read', async () => {

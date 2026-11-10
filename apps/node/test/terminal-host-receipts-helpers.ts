@@ -11,7 +11,7 @@ import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, listsAtStart, onClock, passOnClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 /* What the tests of program receipts for live words share: an agent at work whose program, Claude, Codex or Kimi, records
@@ -19,6 +19,8 @@ import { codexPrompt } from './real-screens.js';
 
 export const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
+/* hh-hook's own deadline on a clock of its process that never moves: it runs only to the bridge and back. */
+const CLOCK = fileURLToPath(new URL('./fakes/hook-clock.cjs', import.meta.url));
 const runHook = promisify(execFile);
 export const TEXT = 'From Hornhoof:\n\nKeep these exact words.';
 export const cleanups: (() => Promise<void>)[] = [];
@@ -26,6 +28,12 @@ type Kind = 'claude' | 'codex' | 'kimi';
 type Mode = 'taken' | 'queued' | 'pasted' | 'silent' | 'lost' | 'hook' | 'bridge';
 
 export async function atWork(kind: Kind, mode: Mode) {
+  /* The host runs on the fake clock, which moves only as the test moves it: c.until, c.on and c.pass. Turns of the event
+     loop stay real, for the hook a real hh-hook sends through the bridge. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+  /* While hh-hook runs and its hook travels on real sockets, the clock stands still. */
+  let transit = 0;
+  const clocked = { held: () => transit > 0 };
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-receipts-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -68,7 +76,9 @@ export async function atWork(kind: Kind, mode: Mode) {
       } else if (kind === 'codex' && mode === 'taken') record(userMessage(text));
       else if (kind === 'kimi' && key === 'C-s' && mode !== 'silent') {
         if (mode === 'bridge') {
-          await runHook(process.execPath, [HOOK, 'queued', JSON.stringify({ prompt: [{ type: 'text', text }] })], { env: { PATH: process.env.PATH, HH_BRIDGE: host['bridge'].agent('receipt').hookUrl } });
+          transit++;
+          try { await runHook(process.execPath, ['-r', CLOCK, HOOK, 'queued', JSON.stringify({ prompt: [{ type: 'text', text }] })], { env: { PATH: process.env.PATH, HH_BRIDGE: host['bridge'].agent('receipt').hookUrl } }); }
+          finally { transit--; }
           continue;
         }
         await host['hook']('receipt', 'queued', { prompt: [{ type: 'text', text }] });
@@ -78,6 +88,7 @@ export async function atWork(kind: Kind, mode: Mode) {
     }
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], pollMs: 5, enterWaitMs: 30, openMs: 30 });
+  listsAtStart(host);
   const makeJob = kind === 'codex' ? codexJob : kind === 'kimi' ? kimiJob : job;
   if (mode === 'bridge') await host.start();
   const run = () => {
@@ -95,8 +106,8 @@ export async function atWork(kind: Kind, mode: Mode) {
     else record({ type: 'turn.ended', reason: 'completed' });
     drain();
   };
-  cleanups.push(async () => { alive.mockResolvedValue(false); finish(); await running; await host.stop(); rmSync(home, { recursive: true, force: true }); });
-  await until(() => host['agents'].get('receipt')?.took === true);
+  cleanups.push(async () => { alive.mockResolvedValue(false); finish(); await onClock(running, clocked); await onClock(host.stop(), clocked); rmSync(home, { recursive: true, force: true }); });
+  await untilOnClock(() => host['agents'].get('receipt')?.took === true, clocked);
   keys.mockClear();
   const expire = () => {
     const now = Date.now();
@@ -104,21 +115,24 @@ export async function atWork(kind: Kind, mode: Mode) {
     drain(); drain();
   };
   const unheard = () => sent.filter(m => m.type === 'agent.unheard');
-  return { host, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input };
+  return { host, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input,
+    until: (check: () => boolean | Promise<boolean>) => untilOnClock(check, clocked),
+    on: <T>(promise: Promise<T>) => onClock(promise, clocked),
+    pass: (ms: number) => passOnClock(ms, clocked) };
 }
 
 export async function atTypedWork(kind: 'claude' | 'codex', mode: Mode) {
   const c = await atWork(kind, mode);
-  c.finish(); await c.running;
+  c.finish(); await c.on(c.running);
   const prompt = kind === 'claude' ? c.host['hook']('receipt', 'prompt', { prompt: 'A typed question.' }) : Promise.resolve();
   if (kind === 'codex') {
     c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'typed' } });
     c.record(userMessage('A typed question.', 'typed'));
     c.drain();
   }
-  await until(() => c.sent.some(m => m.type === 'turn.open'));
+  await c.until(() => c.sent.some(m => m.type === 'turn.open'));
   c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'typed', toolToken: 'token' });
-  await prompt;
+  await c.on(prompt);
   const end = async () => {
     if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Typed answer.' });
     else {

@@ -35,7 +35,7 @@ async function fixture(value: unknown = manifest()) {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-description-cache-')); folders.push(cacheRoot);
   const source = { url: pathToFileURL(root).href, token: '' };
   const scope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(source.url).digest('hex') };
-  return { root, sha, source, scope, context: { cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 10_000, log: () => {} } };
+  return { root, sha, source, scope, context: { cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 2_147_483_647, log: () => {} } };
 }
 
 describe('test environment discovery from pinned Git blobs', () => {

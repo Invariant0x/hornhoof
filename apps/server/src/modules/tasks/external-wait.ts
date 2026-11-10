@@ -139,10 +139,12 @@ function requireHolder(task: Task, agentId: string): void {
   refusePaused(task);
 }
 
-/* The recipient holds the task, or the sender acts on it or oversees it as orchestrator or head of its department. */
-function requireMessageTask(task: Task, recipientId: string, sender: Sender | undefined): void {
+/* The recipient holds the task, or the sender acts on it or oversees it as orchestrator or head of its department. An
+   employee also writes on any task to the orchestrator, which oversees them all, as when it answers what it was asked. */
+function requireMessageTask(task: Task, recipient: Sender | undefined, sender: Sender | undefined): void {
   if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is ${task.status}.`);
-  if (task.assigneeAgentId !== recipientId && !senderMayWrite(task, sender)) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
+  const toOrchestrator = Boolean(sender && recipient?.kind === 'orchestrator');
+  if (task.assigneeAgentId !== recipient?.id && !toOrchestrator && !senderMayWrite(task, sender)) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
   if (task.paused) throw refuse(409, 'task_paused', `#${task.number} is paused, so a message about it wakes nobody. Send it without the task, or resume the task first.`);
 }
 
@@ -206,10 +208,10 @@ async function restoreWait(ctx: Ctx, resumed: ResumedWait, actor: Actor): Promis
 async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn, required: boolean): Promise<QueuedMessage> {
   const task = await taskByRef(ctx, input.companyId, input.task);
   if (!task) throw refuse(404, 'task_unknown', `There is no task ${input.task} you can message.`);
-  const [sender] = input.actor.agentId
-    ? await ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, input.actor.agentId))
-    : [];
-  requireMessageTask(task, input.agentId, sender);
+  const party = (id: string) => ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, id));
+  const [sender] = input.actor.agentId ? await party(input.actor.agentId) : [];
+  const [recipient] = await party(input.agentId);
+  requireMessageTask(task, recipient, sender);
   const id = await insertOrDeliverTurn(ctx, { ...turn, ...await taskTurn(ctx, task, input.agentId, turn.message) }, required);
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true }, markRecord(task.externalWait, 'check_back'));

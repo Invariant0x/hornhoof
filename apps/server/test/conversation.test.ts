@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -41,10 +42,26 @@ async function finish(node: FakeNode, run: Run, sessionId = 'sess-1') {
   node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: 'ok', tail: '', error: null });
 }
 
+/* Everything the server sent the node before has come, and what the node said before is handled: a mark the node sends comes
+   back after both, as one socket keeps their order. */
+async function marked(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: 'mark', result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
+
+/* How many messages came to the node that nobody took, of all the server sent it by now. */
 const quiet = async (node: FakeNode) => {
-  await new Promise(r => setTimeout(r, 150));
+  await marked(node);
   return node.queued();
 };
+
+/* The server's clock stands still from here, so a time it gives is the time it was told, to the millisecond. */
+function stillClock(): number {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+  return Date.now();
+}
 
 describe('the orchestrator\'s conversation', () => {
   it('sends a personal message before a report whose combining window is still open', async () => {
@@ -487,16 +504,15 @@ describe('the orchestrator\'s conversation', () => {
   it('waits quietly for a limit that starts over in more than 24 days, too long for one timer', async () => {
     const { app, ceo, mac } = await onMac('0.3.0');
     await until(async () => (await state(app, ceo)).ready);
-    const overflows: string[] = [];
-    const warned = (w: Error) => w.name === 'TimeoutOverflowWarning' && overflows.push(w.message);
-    process.on('warning', warned);
-    onTestFinished(() => void process.off('warning', warned));
+    /* Node fires a timer longer than it holds at once after a millisecond: Hornhoof asks for the longest it holds, no more. */
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timers.mockRestore());
     const resetsAt = new Date(Date.now() + 40 * 24 * 3600_000).toISOString();
     mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'seven_day', utilization: 1, resetsAt }] } });
     await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
     expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
-    await new Promise(r => setTimeout(r, 300));
-    expect(overflows).toEqual([]);
+    expect(timers.mock.calls.some(([, delay]) => delay === 2_147_483_647)).toBe(true);
+    expect(timers.mock.calls.filter(([, delay]) => Number(delay) > 2_147_483_647)).toEqual([]);
     expect((await state(app, ceo)).queued).toBe(1);
   });
 
@@ -507,12 +523,11 @@ describe('the orchestrator\'s conversation', () => {
     const first = await nextRun(mac);
     await say(app, ceo, 'Second');
     const tail = "Error: [provider.api_error] 429 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.\n\u276f ";
+    const now = stillClock();
     mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-k', result: '', tail, error: 'agent_failed' });
     await until(async () => (await state(app, ceo)).limitUntil !== null);
-    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
     /* Kimi says no time: Hornhoof tries again in a quarter of an hour. */
-    expect(wait).toBeGreaterThan(14 * 60_000);
-    expect(wait).toBeLessThanOrEqual(15 * 60_000);
+    expect((await state(app, ceo)).limitUntil).toBe(new Date(now + 15 * 60_000).toISOString());
     expect(await quiet(mac)).toBe(0);
     expect((await state(app, ceo)).queued).toBe(1);
     const [sub] = await app.ctx.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.provider, 'kimi'));
@@ -528,11 +543,10 @@ describe('the orchestrator\'s conversation', () => {
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
     await say(app, ceo, 'Second');
+    const now = stillClock();
     mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-k', result: '', tail, error: 'agent_failed' });
     await until(async () => (await state(app, ceo)).limitUntil !== null);
-    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
-    expect(wait).toBeGreaterThan(14 * 60_000);
-    expect(wait).toBeLessThanOrEqual(15 * 60_000);
+    expect((await state(app, ceo)).limitUntil).toBe(new Date(now + 15 * 60_000).toISOString());
     expect(await quiet(mac)).toBe(0);
     expect((await state(app, ceo)).queued).toBe(1);
   });
@@ -546,11 +560,10 @@ describe('the orchestrator\'s conversation', () => {
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
     const tail = "ERROR: You've hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.";
+    const now = stillClock();
     mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: null, result: '', tail, error: 'agent_failed' });
     await until(async () => (await state(app, ceo)).limitUntil !== null);
-    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
-    expect(wait).toBeGreaterThan(124 * 60_000);
-    expect(wait).toBeLessThanOrEqual(125 * 60_000);
+    expect((await state(app, ceo)).limitUntil).toBe(new Date(now + 125 * 60_000).toISOString());
     expect(heard).toContain('org');
   });
 
@@ -612,7 +625,7 @@ describe('the orchestrator\'s conversation', () => {
     const url = await listen(app);
     const ceo = await setUpCompany(app);
     const builtin = await connectNode(url, NODE_KEY);
-    await new Promise(r => setTimeout(r, 100));
+    await marked(builtin);
     expect(await state(app, ceo)).toMatchObject({ ready: false, reason: 'machine_offline' });
     expect((await start(app, ceo)).json()).toEqual({ started: false });
     builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });

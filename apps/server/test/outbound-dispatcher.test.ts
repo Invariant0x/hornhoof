@@ -14,6 +14,7 @@ import { stopByPerson } from '../src/modules/outbound/policies.js';
 import { PASSWORD } from './outbound-receivers.js';
 import { QUIET, aCertifiedCheck, allowed, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 import { sha } from './outbound-fixture.js';
+import { until } from './helpers.js';
 
 /* The dispatcher against a transport that records what it was handed and says what a test tells it to. The real wire is in the
    adapters' tests and outbound-live.integration.test.ts. */
@@ -24,7 +25,9 @@ const later = () => new Date(Date.now() + 6 * 60_000);
 
 type Sent = { attemptId: string; recipient: string; subject: string; text: string; settings: SmtpSettings };
 
-function senders(say: () => Promise<SendOutcome> = async () => ACCEPTED, ask: () => Promise<ReconcileOutcome> = async () => ({ kind: 'pending' }), deadlineMs = 5000) {
+/* The wait for a transport's answer runs out during a test only when the test moves a clock: by default it is the longest wait
+   a timer takes. */
+function senders(say: () => Promise<SendOutcome> = async () => ACCEPTED, ask: () => Promise<ReconcileOutcome> = async () => ({ kind: 'pending' }), deadlineMs = 2_147_483_647) {
   const sent: Sent[] = [];
   const asked: string[] = [];
   const smtp: Senders['smtp'] = {
@@ -136,8 +139,18 @@ describe('sending what is due', () => {
   it('stops waiting for a transport that never answers, and calls that unknown', async () => {
     const w = await ready();
     const { messageId } = await w.submit();
-    const { use } = senders(() => new Promise(() => {}), undefined, 20);
-    await dispatchDue(w.ctx, new Date(), use);
+    const { sent, use } = senders(() => new Promise(() => {}), undefined, 5000);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let ended = false;
+    const round = dispatchDue(w.ctx, new Date(), use).then(() => { ended = true; });
+    /* The transport has the message, so the wait for its answer has begun. */
+    await until(() => sent.length === 1);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(ended).toBe(false);
+    expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'sending' }]);
+    await vi.advanceTimersByTimeAsync(1);
+    await round;
     expect(await attemptsOf(w, messageId)).toMatchObject([{ status: 'unknown', safeCode: 'timeout' }]);
   });
 
@@ -500,9 +513,9 @@ describe('finding out how an attempt ended', () => {
     const w = await ready();
     const { messageId } = await w.submit();
     let answer: (outcome: SendOutcome) => void = () => {};
-    const { sent, use } = senders(() => new Promise(resolve => { answer = resolve; }), undefined, 60_000);
+    const { sent, use } = senders(() => new Promise(resolve => { answer = resolve; }));
     const worker = dispatchDue(w.ctx, new Date(), use);
-    await expect.poll(() => sent.length).toBe(1);
+    await until(() => sent.length === 1);
     await reconcileOutbound(w.ctx, later(), use);
     await stopByPerson(w.ctx, w.channel.id);
     answer(ACCEPTED);
@@ -660,7 +673,7 @@ describe('the server\'s minute', () => {
     const started = Fastify();
     startTimers(started, w.ctx);
     await started.ready();
-    await expect.poll(async () => (await attemptsOf(w, messageId))[0]!.status).toBe('unknown');
+    await until(async () => (await attemptsOf(w, messageId))[0]!.status === 'unknown');
     await started.close();
   });
 });

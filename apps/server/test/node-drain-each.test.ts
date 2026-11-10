@@ -2,13 +2,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { agentState, enqueueTurn, orchestratorOf } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn, orchestratorOf, pump } from '../src/modules/conversation/queue.js';
 import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
-import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, listen, nextOf, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { gets } from './test-runs-company.js';
 
 const NODE_KEY = 'builtin-each-key-0123456789abcdef';
 const HOST_KEY = 'each-host-machine-key';
@@ -16,8 +17,14 @@ const headers = { authorization: `Bearer ${NODE_KEY}` };
 const BOOT = { startedAt: '2026-11-05T10:00:00.000Z', machineUpAt: '2026-11-05T09:00:00.000Z', container: 'first' };
 const NEW_BOOT = { ...BOOT, startedAt: '2026-11-05T11:00:00.000Z', container: 'second' };
 
-/* A server on its computer: the built-in node, and the plans a test puts on that computer or on another. */
+/* The server looks at the nodes that wait once a second, unless a wait or a retry is set shorter. */
+const ROUND = 1000;
+
+/* A server on its computer: the built-in node, and the plans a test puts on that computer or on another. Its clock and its
+   rounds go only as far as the test moves them; they go back after the app has stopped. */
 async function computer(env: NodeJS.ProcessEnv = {}) {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  onTestFinished(() => { vi.useRealTimers(); });
   const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-node-each-')), HORNHOOF_HOST_ID: hashToken(`hornhoof-host:${HOST_KEY}`), ...env });
   const ceo = await setUpCompany(app);
   const url = await listen(app);
@@ -48,23 +55,14 @@ async function computer(env: NodeJS.ProcessEnv = {}) {
     (await db.insert(jobs).values({ companyId: company!.id, subscriptionId: agent.subscriptionId!, agentId: agent.id, nodeId, kind: 'conversation', prompt: 'A long one', status: 'running', startedAt: new Date(), timeoutMs: 9_000_000 }).returning())[0]!;
   const turnFor = (agentId: string, prompt = 'Your turn') => enqueueTurn(app.ctx, { companyId: company!.id, agentId, prompt, createdBy: null });
   const statusOf = async (jobId: string) => (await db.select({ status: jobs.status, nodeId: jobs.nodeId, error: jobs.error }).from(jobs).where(eq(jobs.id, jobId)))[0]!;
+  /* Whether a node got a turn of this agent: the agent's turns go out one pump at a time, so once a pump of its own has run,
+     every earlier one has sent what it would. */
+  const gotTurnOf = async (agentId: string, node: Parameters<typeof gets>[1]) => {
+    await pump(app.ctx, agentId);
+    return gets(app.ctx, node, 'job.run');
+  };
   const server = (method: 'POST' | 'DELETE', names?: string[]) => app.inject({ method, url: '/api/nodes/update', headers, payload: { scope: 'server', ...(names ? { nodes: names } : {}) } });
-  return { app, db, ceo, url, company: company!, person: person!, apiKey: apiKey!, host: host!, dept: dept!, online, plan, nodeOf, hire, longTurn, turnFor, statusOf, server };
-}
-
-/* The next turn a node gets, past what else it hears; null when none comes in time. It looks at what has arrived rather
-   than waiting on next(), which would swallow the message after a timeout. */
-async function nextTurn(node: FakeNode, ms = 3000): Promise<{ jobId: string } | null> {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (!node.queued()) {
-      await new Promise(done => setTimeout(done, 15));
-      continue;
-    }
-    const m = await node.next();
-    if (m.type === 'job.run') return m as { type: 'job.run'; jobId: string };
-  }
-  return null;
+  return { app, db, ceo, url, company: company!, person: person!, apiKey: apiKey!, host: host!, dept: dept!, online, plan, nodeOf, hire, longTurn, turnFor, statusOf, gotTurnOf, server };
 }
 
 describe('each node on the server computer is replaced on its own', () => {
@@ -117,7 +115,9 @@ describe('each node on the server computer is replaced on its own', () => {
     const late = await f.plan('antigravity');
     const busy = await f.plan('claude');
     await f.longTurn(await f.hire('Dev', 'worker', late.plan, late.nodeId), late.nodeId);
-    await until(async () => (await f.server('POST', [late.plan])).json().drain.state === 'postponed');
+    await f.server('POST', [late.plan]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await f.server('POST', [late.plan])).json().drain.state).toBe('postponed');
     await f.longTurn(await f.hire('Bob', 'worker', busy.plan, busy.nodeId), busy.nodeId);
 
     const answer = (await f.server('POST', [late.plan, busy.plan])).json();
@@ -136,11 +136,11 @@ describe('each node on the server computer is replaced on its own', () => {
 
     expect((await f.server('POST')).json().free).toEqual(['builtin']);
     const job = await f.turnFor(orchestrator.id);
-    expect(await nextTurn(builtin, 200)).toBeNull();
+    expect(await f.gotTurnOf(orchestrator.id, builtin)).toBe(false);
 
     builtin.send({ type: 'hello', version: '0.7.1', loggedIn: true, running: [], boot: NEW_BOOT });
 
-    expect(await nextTurn(builtin)).toMatchObject({ jobId: job });
+    expect(await nextOf(builtin, 'job.run')).toMatchObject({ jobId: job });
     expect(await f.statusOf(long.id)).toMatchObject({ status: 'running', error: null });
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting' });
   });
@@ -207,18 +207,22 @@ describe('the orchestrator and the heads while their node waits', () => {
     const worker = await f.hire('Bob', 'worker', google.plan, google.nodeId);
     const long = await f.longTurn(dev, google.nodeId);
     await f.server('POST');
-    const from = Date.now();
 
     const waiting = await f.turnFor(worker.id, 'A worker turn');
     const led = await f.turnFor(head.id, 'A head turn');
     expect((await f.statusOf(led)).status).toBe('queued');
+    /* Just short of the limit, the head still waits. */
+    await vi.advanceTimersByTimeAsync(HOLD - 1);
+    expect(await f.gotTurnOf(head.id, node)).toBe(false);
+    expect((await f.statusOf(led)).status).toBe('queued');
 
-    const run = await nextTurn(node);
+    /* The server's next look past the limit lets it in. */
+    await vi.advanceTimersByTimeAsync(ROUND - HOLD + 1);
+    const run = await nextOf(node, 'job.run');
 
     expect(run).toMatchObject({ jobId: led });
-    expect(Date.now() - from).toBeGreaterThanOrEqual(HOLD - 50);
     expect(await f.statusOf(long.id)).toMatchObject({ status: 'running', error: null });
-    expect(await nextTurn(node, 300)).toBeNull();
+    expect(await f.gotTurnOf(worker.id, node)).toBe(false);
     expect((await f.statusOf(waiting)).status).toBe('queued');
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })?.state).toBe('waiting');
     /* The watchdog goes on seeing that the worker waits for the update, and that the head does not. */
@@ -239,7 +243,8 @@ describe('the orchestrator and the heads while their node waits', () => {
     const job = await f.turnFor(orchestrator.id);
 
     expect((await f.statusOf(job)).status).toBe('queued');
-    expect(await nextTurn(node)).toMatchObject({ jobId: job });
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect(await nextOf(node, 'job.run')).toMatchObject({ jobId: job });
   });
 
   it('holds a head on the built-in node up to the limit too, when the company key runs it', async () => {
@@ -251,7 +256,8 @@ describe('the orchestrator and the heads while their node waits', () => {
     await f.server('POST');
     const job = await f.turnFor(head.id);
     expect((await f.statusOf(job)).status).toBe('queued');
-    expect(await nextTurn(builtin)).toMatchObject({ jobId: job });
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect(await nextOf(builtin, 'job.run')).toMatchObject({ jobId: job });
   });
 
   it('sends a head that holds a task to another machine of its plan past the limit, not onto the node that waits', async () => {
@@ -269,10 +275,11 @@ describe('the orchestrator and the heads while their node waits', () => {
 
     const job = await f.turnFor(head.id);
     expect((await f.statusOf(job)).status).toBe('queued');
+    await vi.advanceTimersByTimeAsync(ROUND);
 
-    expect(await nextTurn(there)).toMatchObject({ jobId: job });
+    expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: job });
     expect(await f.statusOf(job)).toMatchObject({ nodeId: other.nodeId });
-    expect(await nextTurn(here, 100)).toBeNull();
+    expect(await f.gotTurnOf(head.id, here)).toBe(false);
     expect((await f.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
   });
 
@@ -291,9 +298,10 @@ describe('the orchestrator and the heads while their node waits', () => {
     for (const key of [google.key, other.key]) await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
 
     const job = await f.turnFor(head.id);
+    await vi.advanceTimersByTimeAsync(ROUND);
 
-    expect(await nextTurn(own)).toMatchObject({ jobId: job });
-    expect(await nextTurn(first, 100)).toBeNull();
+    expect(await nextOf(own, 'job.run')).toMatchObject({ jobId: job });
+    expect(await f.gotTurnOf(head.id, first)).toBe(false);
   });
 
   it('starts the limit over when the node waits again after its update was put off', async () => {
@@ -303,12 +311,20 @@ describe('the orchestrator and the heads while their node waits', () => {
     const node = { kind: 'node' as const, nodeId: google.nodeId };
     const ask = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
     await ask();
-    await until(() => nodeHeldLong(f.app.ctx, node));
-    await until(async () => (await ask()).json().drain.state === 'postponed');
+    await vi.advanceTimersByTimeAsync(299);
     expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await until(async () => (await ask()).json().drain.state === 'waiting');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(true);
+    await vi.advanceTimersByTimeAsync(300);
+    expect((await ask()).json().drain.state).toBe('postponed');
     expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
-    await until(() => nodeHeldLong(f.app.ctx, node));
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await ask()).json().drain.state).toBe('waiting');
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(true);
   });
 
   it('never sends a head onto a node that restarts, however long it takes: it goes to another machine of its plan', async () => {
@@ -325,9 +341,10 @@ describe('the orchestrator and the heads while their node waits', () => {
 
     const job = await f.turnFor(head.id);
     expect((await f.statusOf(job)).status).toBe('queued');
+    await vi.advanceTimersByTimeAsync(ROUND);
 
-    expect(await nextTurn(there)).toMatchObject({ jobId: job });
-    expect(await nextTurn(here, 100)).toBeNull();
+    expect(await nextOf(there, 'job.run')).toMatchObject({ jobId: job });
+    expect(await f.gotTurnOf(head.id, here)).toBe(false);
   });
 
   it('keeps a head waiting on a node that restarts when its plan has no other machine', async () => {
@@ -338,8 +355,9 @@ describe('the orchestrator and the heads while their node waits', () => {
     const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
     await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
     const job = await f.turnFor(head.id);
-    /* Longer than the look at the waits that lets the leaders in, at most a second apart. */
-    expect(await nextTurn(node, 1500)).toBeNull();
+    /* Past the limit and past the look at the waits that lets the leaders in. */
+    await vi.advanceTimersByTimeAsync(ROUND);
+    expect(await f.gotTurnOf(head.id, node)).toBe(false);
     expect((await f.statusOf(job)).status).toBe('queued');
   });
 });

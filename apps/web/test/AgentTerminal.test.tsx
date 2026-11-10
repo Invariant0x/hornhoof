@@ -43,6 +43,7 @@ type FakeTerminal = {
   resized(cols: number, rows: number): void;
   disposed: boolean;
   focused: number;
+  pending: number;
 };
 
 vi.mock('@xterm/xterm', () => ({
@@ -54,6 +55,8 @@ vi.mock('@xterm/xterm', () => ({
     selection = '';
     disposed = false;
     focused = 0;
+    /* xterm's own timers set and not come yet. */
+    pending = 0;
     /* The history above the screen, and the line the view starts at: at the bottom when they are equal. */
     /* Rows that go on the line above them, as xterm wraps a line longer than the terminal is wide. */
     wrapped = new Set<number>();
@@ -103,6 +106,7 @@ vi.mock('@xterm/xterm', () => ({
     /* xterm syncs its scroll area on a timer once it opens and on the next frame after a reset, and does not cancel them. */
     open(parent?: HTMLElement) {
       parent?.appendChild(this.element);
+      this.pending++;
       setTimeout(() => this.synced('open'));
     }
     focus() {
@@ -165,9 +169,11 @@ vi.mock('@xterm/xterm', () => ({
     }
     reset() {
       this.written = [];
+      this.pending++;
       requestAnimationFrame(() => this.synced('reset'));
     }
     private synced(after: string) {
+      this.pending--;
       if (this.disposed) late.push(after);
     }
     write(data: string, onWritten?: () => void) {
@@ -301,6 +307,20 @@ const socket = async () => {
   await waitFor(() => expect(FakeSocket.all.length).toBeGreaterThan(0));
   return FakeSocket.all.at(-1)!;
 };
+
+/* The view connects again after a pause of its own, 500 ms once a socket it had opened is lost; a fake clock lets that pause
+   pass at once. lost: what closes the socket, and what the person does while the view is away. */
+function reconnects(lost: () => void) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    lost();
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 beforeEach(() => {
   terms.length = 0;
@@ -496,8 +516,8 @@ describe("an agent's live terminal in its window", () => {
     const first = await socket();
     first.opened();
     first.screen('old screen');
-    first.ended(4410, 'node_offline');
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    reconnects(() => first.ended(4410, 'node_offline'));
+    expect(FakeSocket.all).toHaveLength(2);
     FakeSocket.all[1]!.opened();
     FakeSocket.all[1]!.screen('new screen');
     expect(terms[0]!.written).toEqual(['new screen']);
@@ -569,11 +589,13 @@ describe("an agent's live terminal in its window", () => {
     open();
     const first = await socket();
     first.opened();
-    first.ended(4410, 'node_offline');
-    terms[0]!.type('first question');
-    terms[0]!.type('\r');
-    terms[0]!.resized(90, 30);
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    reconnects(() => {
+      first.ended(4410, 'node_offline');
+      terms[0]!.type('first question');
+      terms[0]!.type('\r');
+      terms[0]!.resized(90, 30);
+    });
+    expect(FakeSocket.all).toHaveLength(2);
     const again = FakeSocket.all[1]!;
     again.opened();
     expect(again.sent.filter(m => (m as { type: string }).type === 'input')).toEqual([
@@ -590,13 +612,15 @@ describe("an agent's live terminal in its window", () => {
     const first = await socket();
     first.opened();
     terms[0]!.type('went\r');
-    first.ended(4410, 'node_offline');
-    terms[0]!.type('kept\r');
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    reconnects(() => {
+      first.ended(4410, 'node_offline');
+      terms[0]!.type('kept\r');
+    });
+    expect(FakeSocket.all).toHaveLength(2);
     FakeSocket.all[1]!.opened();
     expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'kept\r' }]);
-    FakeSocket.all[1]!.ended(4410, 'node_offline');
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(3), { timeout: 3000 });
+    reconnects(() => FakeSocket.all[1]!.ended(4410, 'node_offline'));
+    expect(FakeSocket.all).toHaveLength(3);
     FakeSocket.all[2]!.opened();
     expect(FakeSocket.all[2]!.sent).toEqual([]);
   });
@@ -614,9 +638,11 @@ describe("an agent's live terminal in its window", () => {
     open();
     const first = await socket();
     first.opened();
-    first.ended(4410, 'node_offline');
-    terms[0]!.type('hi\r');
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    reconnects(() => {
+      first.ended(4410, 'node_offline');
+      terms[0]!.type('hi\r');
+    });
+    expect(FakeSocket.all).toHaveLength(2);
     FakeSocket.all[1]!.opened(false);
     expect(FakeSocket.all[1]!.sent).toEqual([]);
   });
@@ -722,8 +748,8 @@ describe("an agent's live terminal in its window", () => {
       await user.click(screen.getByRole('button', { name: 'Terminal' }));
       await waitFor(() => expect(FakeSocket.all).toHaveLength(i + 2));
     }
-    await waitFor(() => expect(terms.slice(0, 5).every(term => term.disposed)).toBe(true));
-    await new Promise(r => setTimeout(r, 50));
+    /* Each closed terminal is gone and every timer xterm set for it has come. */
+    await waitFor(() => expect(terms.slice(0, 5).every(term => term.disposed && term.pending === 0)).toBe(true));
     expect(late).toEqual([]);
   });
 
@@ -932,10 +958,12 @@ describe("an agent's live terminal in its window", () => {
     open();
     const first = await socket();
     first.opened();
-    first.ended(4410, 'node_offline');
-    terms[0]!.type('hello\r');
-    terms[0]!.type('/login\r');
-    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    reconnects(() => {
+      first.ended(4410, 'node_offline');
+      terms[0]!.type('hello\r');
+      terms[0]!.type('/login\r');
+    });
+    expect(FakeSocket.all).toHaveLength(2);
     FakeSocket.all[1]!.opened(false, true);
     expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'hello\r' }]);
     expect(await screen.findByText("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.")).toHaveAttribute('role', 'alert');

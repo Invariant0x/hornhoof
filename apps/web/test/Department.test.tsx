@@ -231,6 +231,11 @@ describe('Department view', () => {
   });
 
   it('draws a yellow result on the real employee-to-head path without a gate return', async () => {
+    /* The page's steady clock stands still, so the result 4.5 minutes old stays inside its five yellow minutes. */
+    vi.useFakeTimers({ toFake: ['performance'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
     const now = Date.now();
@@ -1246,12 +1251,13 @@ describe("what an agent's program does, and the server's alarms about its turn",
     ['a silent node', now => ({ program: program(now, 'tool', 45, 'Bash'), alarm: { reason: 'node_silent', since: ago(now, 31) } }), 'node silent 31 min', 'нода молчит 31 мин', true],
   ];
   const stateOf = (where: HTMLElement) => where.querySelector('.ast');
+  /* Every clock of the page moves only when the test moves it. Testing Library's findBy* and userEvent wait on a timer of
+     that clock, so the test clicks with fireEvent and looks with vi.waitFor, which moves the clock 50 ms a look. */
   function heldClock() {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     onTestFinished(() => {
       vi.useRealTimers();
     });
-    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   }
   const bruno = () => within(screen.getByRole('region', { name: /^(Members|Сотрудники)$/ })).getByRole('button', { name: /Bruno/ });
   const lane = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip .schip')].find(b => b.textContent!.includes('Bruno'))!;
@@ -1303,12 +1309,13 @@ describe("what an agent's program does, and the server's alarms about its turn",
   });
 
   it('counts the minutes on without a reload, keeps a long wait for input calm, and follows the server when it says the company changed', async () => {
-    const user = heldClock();
+    heldClock();
     const stream = fakeStream();
     const now = Date.now();
     let org = live(now, { program: program(now, 'thinking', 12), alarm: null }, DEV_ORG);
     shell({ 'GET /api/org': async () => [200, org] });
-    await flyIn(user);
+    fireEvent.click(await vi.waitFor(() => screen.getByRole('button', { name: /Development/ })));
+    await vi.waitFor(() => screen.getByRole('heading', { level: 2, name: 'Development' }));
     expect(stateOf(bruno())).toHaveTextContent('thinking 12 min');
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(stateOf(bruno())).toHaveTextContent('thinking 13 min');
@@ -1331,6 +1338,11 @@ describe("what an agent's program does, and the server's alarms about its turn",
   ])("shows it on the agent's card opened from the department, in %s", async (lang, card, text) => {
     localStorage.setItem('hh-lang', lang);
     onTestFinished(() => localStorage.removeItem('hh-lang'));
+    /* The page's steady clock stands still, so 34 minutes stay what they are while the test runs. */
+    vi.useFakeTimers({ toFake: ['performance'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const user = userEvent.setup();
     const now = Date.now();
     const routes = { 'GET /api/agents/b1': [200, { ...CARD, state: 'working' }], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] };

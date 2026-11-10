@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { expect, it } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
-import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorActions, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
@@ -11,13 +11,12 @@ import { afterRestart, afterRestartOutsideTask } from '../src/modules/tasks/rest
 import { recordJobProgram } from '../src/modules/tasks/silent.js';
 import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
-import { adoptOperatorOwnerTurn } from '../src/modules/program-operator/recovery.js';
+import { adoptOperatorOwnerTurn, continueRecovery } from '../src/modules/program-operator/recovery.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
-import { readProgramScreen, sendProgramKey } from '../src/modules/program-operator/tools.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { listen, mcp } from './helpers.js';
+import { listen, mcp, until } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 
 const MINUTE = 60_000;
@@ -76,6 +75,24 @@ it('goes on by itself only once for its words, and then waits for a person or Op
   expect((await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, second!.id)))[0]).toMatchObject({ recoveryHold: true });
   expect(await again(true)).toBe(true);
   expect(await c.db.select().from(jobs).where(eq(jobs.continueOf, child!.id))).toHaveLength(1);
+});
+
+it('goes on by itself once along all the turns its words went on in, also after Operations let them through between', async () => {
+  const c = await held();
+  await c.ready(false);
+  const [child] = await c.children();
+  /* Each turn the words go on in is lost the same way, on the same program: its own case and hold. */
+  const lost = async (job: string) => {
+    await c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: new Date(), nodeId: c.identity.nodeId, subscriptionId: c.sub.id }).where(eq(jobs.id, job));
+    return (await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.agent.id, jobId: job, nodeId: c.identity.nodeId, instance: c.fact.instance, reason: 'assignment_unrecorded', evidenceKey: job, deliveryId: c.delivery.id, capability: randomUUID(), evidence: [], status: 'escalated', deadlineAt: new Date(), escalatedAt: new Date(), recoveryHold: true }).returning())[0]!;
+  };
+  const second = await lost(child!.id);
+  await continueRecovery(c.ctx, second, { outcome: 'released', text: 'Rob of Operations released the hold; the original words continue once.' });
+  const [grandchild] = await c.db.select().from(jobs).where(eq(jobs.continueOf, child!.id));
+  const third = await lost(grandchild!.id);
+  await acceptOperatorEvidence(c.ctx, c.identity, { type: 'program.recovery_ready', agentKey: c.agent.id, jobId: grandchild!.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 100, case: third.id, owner: false }, new Date());
+  expect(await c.db.select().from(jobs).where(eq(jobs.continueOf, grandchild!.id))).toEqual([]);
+  expect((await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, third.id)))[0]).toMatchObject({ recoveryHold: true });
 });
 
 it('still lets an owner through who said so without the new field', async () => {
@@ -170,7 +187,7 @@ it('ends the hold as stopped when somebody stopped the turn its words went on in
 
 it('ends the hold of an agent that was removed, runs nothing for it and calls nobody about it', async () => {
   const c = await held();
-  const rob = await hire(c, 'Rob', 'worker', 'OPS-FIX');
+  const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM');
   await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.agent.id));
   await c.ready(true);
   expect(await c.children()).toEqual([]);
@@ -272,9 +289,9 @@ it('does not hold words whose own delivery showed the program at work', async ()
 const turnsWith = async (c: Held, agentId: string, word: string) =>
   (await c.db.select().from(jobs).where(eq(jobs.agentId, agentId)).orderBy(asc(jobs.createdAt))).filter(job => job.prompt.includes(word) && job.prompt.includes('program_recovery_release'));
 
-it('calls the reliability engineer once for a hold of more than five minutes', async () => {
+it('calls the program operator once for a hold of more than five minutes, with the way to see the program and release it', async () => {
   const c = await held();
-  const rob = await hire(c, 'Rob', 'worker', 'OPS-FIX');
+  const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM');
   const since = +(await c.row()).escalatedAt!;
   await checkOperatorHealth(c.ctx, new Date(since + 5 * MINUTE));
   expect(await turnsWith(c, rob.id, c.incident.id)).toEqual([]);
@@ -284,21 +301,24 @@ it('calls the reliability engineer once for a hold of more than five minutes', a
   expect(calls).toHaveLength(1);
   expect(calls[0]!.prompt).toContain('program_recovery_release');
   expect(calls[0]!.prompt).toContain('Never free a hold any other way');
+  expect(calls[0]!.prompt).toContain(`program_screen for employee ${c.agent.id}`);
   expect((await c.row()).recoveryHold).toBe(true);
 });
 
-it('calls the head of Operations when the reliability engineer is off', async () => {
+it('calls the head of Operations when the program operator is off, and never the reliability engineer', async () => {
   const c = await held();
-  const rob = await hire(c, 'Rob', 'worker', 'OPS-FIX'), olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
+  const fixer = await hire(c, 'Fay', 'worker', 'OPS-FIX');
+  const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM'), olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
   await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, rob.id));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   expect(await turnsWith(c, rob.id, c.incident.id)).toEqual([]);
+  expect(await turnsWith(c, fixer.id, c.incident.id)).toEqual([]);
   expect(await turnsWith(c, olga.id, c.incident.id)).toHaveLength(1);
 });
 
 it('never calls the agent that is on hold about itself, nor one that waits on a hold of its own', async () => {
   const c = await held();
-  await c.db.update(agents).set({ roleKey: 'OPS-FIX', departmentId: c.watcher.departmentId }).where(eq(agents.id, c.agent.id));
+  await c.db.update(agents).set({ roleKey: 'OPS-PROGRAM', departmentId: c.watcher.departmentId }).where(eq(agents.id, c.agent.id));
   const olga = await hire(c, 'Olga', 'head', 'OPS-HEAD');
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   expect(await turnsWith(c, c.agent.id, c.incident.id)).toEqual([]);
@@ -313,13 +333,15 @@ it('calls the orchestrator when all of Operations is off, and only once', async 
   expect(await turnsWith(c, orchestrator!.id, c.incident.id)).toHaveLength(1);
 });
 
-it('tells the orchestrator only Operations can release it, and still calls Operations once it can take it', async () => {
+it('tells the orchestrator to see the program and release it itself, and still calls Operations once it can take it', async () => {
   const c = await held();
   const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
   const [told] = await turnsWith(c, orchestrator!.id, c.incident.id);
-  expect(told!.prompt).toMatch(/only .*Operations/i);
-  const rob = await hire(c, 'Rob', 'worker', 'OPS-FIX');
+  expect(told!.prompt).toContain('Neither the program operator nor the head of Operations can take this now');
+  expect(told!.prompt).toContain(`program_screen for employee ${c.agent.id}`);
+  expect(told!.prompt).toContain('release the hold with program_recovery_release');
+  const rob = await hire(c, 'Rob', 'worker', 'OPS-PROGRAM');
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 7 * MINUTE));
   await checkOperatorHealth(c.ctx, new Date(Date.now() + 8 * MINUTE));
   expect(await turnsWith(c, rob.id, c.incident.id)).toHaveLength(1);
@@ -339,7 +361,7 @@ it('calls only who can release it: never the head of a part of Operations in pla
 const FREE: Omit<OperatorRecoveryState, 'type' | 'agentKey' | 'jobId' | 'instance' | 'request'> = { program: 'here', current: null, generation: 7, input: 'empty', wait: null, runningTool: false, retrying: false, busy: false };
 
 /* The tool of Operations, with the node answering what it sees right now. */
-async function release(facts: Partial<typeof FREE> | null = {}, roleKey = 'OPS-FIX', kind: 'worker' | 'head' = 'worker') {
+async function release(facts: Partial<typeof FREE> | null = {}, roleKey = 'OPS-PROGRAM', kind: 'worker' | 'head' = 'worker') {
   const c = await held();
   const rob = await hire(c, 'Rob', kind, roleKey);
   const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: rob.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Look at the hold.', timeoutMs: 1000, status: 'running' }).returning();
@@ -359,15 +381,15 @@ it('lets Operations release a hold and deliver its saved words once, and records
   const children = await c.children();
   expect(children).toHaveLength(1);
   expect(await c.row()).toMatchObject({ recoveryHold: false, continuationJobId: children[0]!.id, resolution: { outcome: 'released', actor: { id: c.rob.id, name: 'Rob' } } });
-  expect(await c.audits()).toEqual([expect.objectContaining({ actor: { id: c.rob.id, name: 'Rob', role: 'OPS-FIX' }, reason: 'The program stands ready and the words wait.', at: expect.any(String), result: 'released', action: 'release_and_deliver', job: c.job.id, instance: c.program.instance, generation: 7, input: 'empty', continuation: children[0]!.id })]);
+  expect(await c.audits()).toEqual([expect.objectContaining({ actor: { id: c.rob.id, name: 'Rob', role: 'OPS-PROGRAM' }, reason: 'The program stands ready and the words wait.', at: expect.any(String), result: 'released', action: 'release_and_deliver', job: c.job.id, instance: c.program.instance, generation: 7, input: 'empty', continuation: children[0]!.id })]);
   expect(await c.call()).toMatchObject({ result: 'no_hold', continuation: children[0]!.id });
   expect(await c.children()).toHaveLength(1);
 });
 
 it.each<[string, string, 'worker' | 'head', boolean]>([
-  ['the reliability engineer', 'OPS-FIX', 'worker', true],
+  ['a program operator', 'OPS-PROGRAM', 'worker', true],
   ['the head of Operations', 'OPS-HEAD', 'head', true],
-  ['a program operator', 'OPS-PROGRAM', 'worker', false],
+  ['the reliability engineer', 'OPS-FIX', 'worker', false],
   ['a developer', 'DEV-BE', 'worker', false],
 ])('offers the tool to %s: %s', async (_name, roleKey, kind, offered) => {
   const c = await held();
@@ -382,6 +404,27 @@ it.each<[string, string, 'worker' | 'head', boolean]>([
 it('lets the head of Operations do the same', async () => {
   const c = await release({}, 'OPS-HEAD', 'head');
   expect(await c.call()).toMatchObject({ result: 'released' });
+});
+
+it('lets the orchestrator do the same, and writes its name', async () => {
+  const c = await release();
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: orchestrator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Look at the hold.', timeoutMs: 1000, status: 'running' }).returning();
+  expect(await releaseRecoveryHold(c.ctx, { id: turn!.id, companyId: c.companyId, agentId: orchestrator!.id }, { case: c.incident.id, reason: 'Nothing may stand still.' })).toMatchObject({ result: 'released' });
+  expect(await c.audits()).toEqual([expect.objectContaining({ actor: { id: orchestrator!.id, name: orchestrator!.name, role: null }, result: 'released' })]);
+});
+
+it('refuses the reliability engineer, who is no longer the one to release', async () => {
+  const c = await release({}, 'OPS-FIX');
+  await expect(c.call()).rejects.toMatchObject({ status: 403 });
+  expect(await c.children()).toEqual([]);
+});
+
+it("releases a hold whose input holds only Hornhoof's own words that never went: the saved words take their place once", async () => {
+  const c = await release({ input: 'hornhoof' });
+  expect(await c.call()).toMatchObject({ result: 'released', continuation: expect.any(String) });
+  expect(await c.children()).toHaveLength(1);
+  expect(await c.audits()).toEqual([expect.objectContaining({ result: 'released', input: 'hornhoof' })]);
 });
 
 it('releases a hold whose program is gone', async () => {
@@ -409,7 +452,16 @@ it.each<[string, Partial<typeof FREE>, string]>([
 
 it('refuses when the node does not answer, with no guess about its program', async () => {
   const c = await release(null);
-  expect(await c.call()).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
+  /* The server waits three seconds for the node's answer: on the test's clock. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+  let ended = false;
+  const answer = c.call().finally(() => { ended = true; });
+  await until(() => c.sent.mock.calls.some(([, frame]) => frame.type === 'program.recovery_state_get'));
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await answer).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
   expect(await c.children()).toEqual([]);
 });
 
@@ -501,10 +553,10 @@ it('refuses to release the hold of an agent that was removed, and sends it nothi
   expect(await c.children()).toEqual([]);
 });
 
-it('refuses a reliability engineer who is the one on hold', async () => {
+it('refuses a program operator who is the one on hold', async () => {
   const c = await release();
   const own = { id: c.turn.id, companyId: c.companyId, agentId: c.agent.id };
-  await c.db.update(agents).set({ roleKey: 'OPS-FIX', departmentId: c.watcher.departmentId }).where(eq(agents.id, c.agent.id));
+  await c.db.update(agents).set({ roleKey: 'OPS-PROGRAM', departmentId: c.watcher.departmentId }).where(eq(agents.id, c.agent.id));
   await c.db.update(jobs).set({ agentId: c.agent.id }).where(eq(jobs.id, c.turn.id));
   await expect(releaseRecoveryHold(c.ctx, own, { case: c.incident.id, reason: 'Me.' })).rejects.toMatchObject({ status: 403 });
 });
@@ -564,11 +616,7 @@ it('keeps queue, start and deadline apart for one operator of two nodes: no acti
   await pump(c.ctx, c.operator!.id);
   const started = await c.jobOf(notice.id);
   expect(started.status).toBe('running');
-  const caller = { id: notice.id, companyId: c.companyId, agentId: c.operator!.id };
-  await expect(readProgramScreen(c.ctx, caller, { employee: a.agent.id, case: caseA.id })).rejects.toMatchObject({ status: 403 });
-  await expect(sendProgramKey(c.ctx, caller, { employee: a.agent.id, case: caseA.id, snapshot: randomUUID(), key: 'Enter', reason: 'Too late.' })).rejects.toMatchObject({ status: 403 });
-  expect(await c.db.select().from(programOperatorActions)).toEqual([]);
-  expect(c.sent.mock.calls.filter(([, frame]) => frame.type === 'program.key_send' || frame.type === 'program.screen_get')).toEqual([]);
+  expect(c.sent.mock.calls.filter(([, frame]) => frame.type === 'program.input_send' || frame.type === 'program.view_get')).toEqual([]);
 
   /* The words stay and go once on each node, however the late answers come in, and no node answers for the other. */
   const endWithTimeout = (side: typeof a | typeof b, id: string) => c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', failure: { kind: 'unknown', text: `Program operator recovery ended: operator_timeout; case ${id}.`, retryable: false }, finishedAt: late }).where(eq(jobs.id, side.job.id));

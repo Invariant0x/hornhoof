@@ -15,6 +15,13 @@ import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js'
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
+/* Whose input lock decisions asked for, in order: a decision the orchestrator takes waits there for words going in. */
+const locks = vi.hoisted(() => [] as string[]);
+vi.mock('../src/modules/conversation/decision-context.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/modules/conversation/decision-context.js')>();
+  return { ...real, lockedFor: ((ctx, on, fn) => { if (on) locks.push(on.agentId); return real.lockedFor(ctx, on, fn); }) as typeof real.lockedFor };
+});
+
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
 type Say = Extract<ServerMessage, { type: 'agent.say' }>;
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
@@ -292,8 +299,9 @@ describe('a decision of the orchestrator as it is kept', () => {
     const held = withInputLock(c.ctx, c.orchestrator.id, () => new Promise<void>(r => (release = r)));
     const client = await mcp(c.app, TOKEN);
     let done = false;
+    const asked = locks.filter(id => id === c.orchestrator.id).length;
     const answering = call(client, 'answer_request', { request: approval.id, approve: true }).then(r => ((done = true), r));
-    await new Promise(r => setTimeout(r, 200));
+    await until(() => locks.filter(id => id === c.orchestrator.id).length > asked);
     expect(done).toBe(false);
     /* Zed's words went in meanwhile, kept before the lock goes. */
     await c.wrote(c.ids.zed, 'Approve it.');

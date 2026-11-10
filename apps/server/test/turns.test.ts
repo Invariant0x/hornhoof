@@ -39,15 +39,13 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  /* What a person wrote to the orchestrator, as the window or his terminal stores it. Times count in milliseconds and
-     people write seconds apart, so it waits a little first. */
+  /* What a person wrote to the orchestrator, as the window or his terminal stores it. A turn tells its words apart by their
+     order, not by their time. */
   const say = async (text: string, personId = ceo!.id) => {
-    await new Promise(r => setTimeout(r, 5));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
   };
   /* A person's message to the orchestrator with the turn it makes: queued, or running with his tools. */
   const message = async (text: string, status: 'running' | 'queued' = 'running') => {
-    await new Promise(r => setTimeout(r, 5));
     const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: `Ivan (CEO): ${text}`, timeoutMs: 900000, status: 'queued', createdBy: ceo!.id }).returning();
     await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text }, personId: ceo!.id });
     const run = async () => {
@@ -72,7 +70,7 @@ describe('turns', () => {
   it('gives the orchestrator turn tools instead of handing out single tasks', async () => {
     const { orchestrator, hana, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pause_task', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'backlog', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pause_task', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'program_keys', 'program_recovery_release', 'program_screen', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resume_task', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
     const head = await names(hana);
     expect(head).toContain('create_task');
     expect(head).not.toContain('merge_turn');

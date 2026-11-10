@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent, socketOf, type Peer } from '../src/terminal/peer.js';
 import { procFixture } from './terminal-proc-fixture.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 type Rejection = { key: string | null; event: string; reason: string };
 const close: (() => void)[] = [];
@@ -67,7 +68,7 @@ describe('hook delivery through the bridge', () => {
     let release!: () => void;const waiting = new Promise<void>(r => release = r);let calls = 0;
     const b = await opened(async () => { calls++;await waiting;return 'accepted'; });
     const first = post(b.url);const second = post(b.url);
-    try { await vi.waitFor(() => expect(calls).toBeGreaterThan(0));expect(calls).toBe(1); }
+    try { await eventually(() => calls > 0);expect(calls).toBe(1); }
     finally { release(); }
     expect(await (await first).text()).toBe('accepted');
     expect(await (await second).text()).toBe('accepted');
@@ -94,7 +95,8 @@ describe('hook delivery through the bridge', () => {
     expect(await socketOf(fixture.proc, proof)).toBeNull();
     expect(await fromAgent(async () => [process.pid], fixture.proc)('agent-1', proof)).toBe(false);
     finish();
-    await vi.waitFor(() => expect(heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]));
+    await eventually(() => heard.length > 0);
+    expect(heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]);
   });
 
   it('rejects a real caller claiming the pid of another agent, including retries', async () => {

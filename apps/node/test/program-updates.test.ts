@@ -58,7 +58,8 @@ describe('node-owned program updates', () => {
     const waiting = updates.ready(stop.signal).then(() => { stopped = true; });
     stop.abort();
     try {
-      await vi.waitFor(() => expect(stopped).toBe(true), { timeout: 150 });
+      await waiting;
+      expect(stopped).toBe(true);
       expect(updates.snapshot()).toEqual([{ id: 'claude', version: '1.0.0', updating: true, failed: false }]);
       expect(updates.ready()).toBe(batch);
     } finally {

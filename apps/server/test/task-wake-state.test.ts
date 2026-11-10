@@ -187,7 +187,7 @@ describe('task wake policy in the database', () => {
       { next: { assigneeAgentId: c.head.id }, allowed: false },
       { route: { stage: 'review' }, allowed: false },
       { route: { candidateId: randomUUID() }, allowed: false },
-      { next: { externalWait: { reason: 'Registry', since: new Date().toISOString(), until: new Date(Date.now() + 1000).toISOString() } }, allowed: false },
+      { next: { externalWait: { reason: 'Registry', since: new Date().toISOString(), until: new Date(Date.now() + 60_000).toISOString() } }, allowed: false },
     ];
     for (const test of cases) {
       const task = await c.task();

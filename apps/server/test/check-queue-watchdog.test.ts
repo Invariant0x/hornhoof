@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -14,6 +14,9 @@ describe('machine check waiting and the watchdog', () => {
   it('excludes queue time from silence and resumes alarms after a normal quiet interval', async () => {
     const c = await failureCompany();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'check', createdBy: null });
+    /* The check queue reads the clock itself when a check ends: it stands still, so the end is at now to the millisecond. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     const now = Date.now(), stale = now - 121 * 60_000;
     let loadAt = now;
     vi.spyOn(c.ctx.hub, 'loadOf').mockImplementation(() => ({ cpus: 1, load: 0, tests: 0, jobs: 1, memFree: 1e9, memTotal: 2e9, at: loadAt }));
