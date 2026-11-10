@@ -92,7 +92,7 @@ for (const lang of ['en', 'ru'] as const) {
     await page.getByRole('button', { name: t.backlog.schedule(2), exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: t.backlog.scheduled(4, '#31, #32') })).toBeVisible();
     await expect.poll(() => titles(items)).toEqual(['Gift cards', 'Pay in parts']);
-    expect(served.calls.at(-1)).toEqual({ method: 'POST', path: '/api/departments/d2/backlog/schedule', body: { ids: ['i3', 'i4'] } });
+    expect(served.calls.at(-1)).toEqual({ method: 'POST', path: '/api/departments/d2/backlog/schedule', body: { ids: ['i3', 'i4'], mode: 'echelons' } });
     await capture(page, info, `scheduled-${lang}`);
 
     /* Removing an item asks the server to take it out. */
