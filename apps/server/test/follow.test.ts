@@ -105,6 +105,10 @@ describe("following the server's build", () => {
     const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: plan, nodeId: node!.id, kind: 'conversation', status: 'running', prompt: 'work', timeoutMs: 1000 }).returning();
     expect((await c.view(w2)).go).toBeNull();
     await c.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    /* A check of the plan that went out to the machine and has not begun there yet counts as work on it too. */
+    const [check] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: plan, nodeId: node!.id, prompt: 'check', timeoutMs: 1000 }).returning();
+    expect((await c.view(w2)).go).toBeNull();
+    await c.db.update(jobs).set({ status: 'failed' }).where(eq(jobs.id, check!.id));
     expect((await c.view(w2)).go).toMatchObject({ commit: COMMIT });
   });
 
@@ -216,6 +220,11 @@ describe("following the server's build", () => {
     expect((await c.view(w)).go).not.toBeNull();
     expect(await c.db.transaction(tx => holdsMachine(tx, nodeId))).toBe(true);
     expect(await machineInstalls(c.db, nodeId)).toBe(true);
+    /* A check of the plan is not sent there, and says why. */
+    const check = await c.app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(c.ceo) });
+    expect(check.statusCode).toBe(409);
+    expect((check.json() as { error: { reason: string } }).error.reason).toBe('machine_updating');
+    expect(await c.db.select().from(jobs)).toEqual([]);
     /* A turn that comes now waits, and a part of a test run finds no place there. */
     expect((await c.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'hello' }, ...as(c.ceo) })).statusCode).toBeLessThan(300);
     const queued = () => c.db.select().from(jobs).where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued')));

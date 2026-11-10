@@ -1376,6 +1376,7 @@ export const en = {
     code_used: 'This install command was already used or has expired. Get a new one in Hornhoof.',
     machine_unknown: 'This machine is no longer connected. Reload the page.',
     machine_offline: 'The machine for this subscription is offline. Start it and try again.',
+    machine_updating: 'The machine for this subscription is installing a new build of Hornhoof. Try again in a few minutes.',
     programs_unavailable: 'Programs cannot be updated on this machine right now.',
     needs_login: 'Sign in to this subscription on its machine first.',
     needs_setup: "Finish the first setup of this subscription's program on its machine first.",

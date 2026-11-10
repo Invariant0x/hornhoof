@@ -88,7 +88,9 @@ export async function tryGrant(tx: Db, machineId: string, build: LeaderBuild, no
   if (row.failedCommit === build.commit && within(row.failedAt, FOLLOW_RETRY_MS, now)) return false;
   const others = await tx.select().from(machines).where(and(isNull(machines.revokedAt), eq(machines.role, 'worker'), or(isNotNull(machines.goCommit), eq(machines.updateState, 'installing'))));
   if (others.some(other => installs(other, now))) return false;
-  const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), eq(jobs.status, 'running'))).limit(1);
+  /* A check of a plan is on its machine from the moment it is made; a turn that waits is on none yet. */
+  const onIt = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
+  const [turn] = await tx.select({ id: jobs.id }).from(jobs).innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(nodes.machineId, machineId), onIt)).limit(1);
   const [part] = await tx.select({ id: testParts.id }).from(testParts).where(and(eq(testParts.machineId, machineId), eq(testParts.status, 'running'))).limit(1);
   if (turn || part) return false;
   await tx.update(machines).set({ goCommit: build.commit, goAt: now }).where(eq(machines.id, machineId));

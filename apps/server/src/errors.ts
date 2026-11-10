@@ -50,6 +50,7 @@ export type ErrorReason =
   | 'code_used'
   | 'machine_unknown'
   | 'machine_offline'
+  | 'machine_updating'
   | 'programs_unavailable'
   | 'other_machine'
   | 'already_on_machine'
