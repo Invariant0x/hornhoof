@@ -13,7 +13,7 @@ export type SelfSignedOptions = { days?: number; serial?: string; now?: Date };
 export type CertInfo = { names: string[]; notBefore: Date; notAfter: Date; fingerprint256: string };
 
 // The library's PEM text has no final newline, and two such texts joined into a chain do not load in TLS.
-function toPem(label: string, der: ArrayBuffer): string {
+export function toPem(label: string, der: ArrayBuffer): string {
   return `${x509.PemConverter.encode(der, label)}\n`;
 }
 
