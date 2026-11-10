@@ -64,6 +64,8 @@ Run `tsc` for each part you changed. After a change in `packages/protocol`, rebu
 
 `npm run test:real` needs Docker and runs the tests against Pebble and against Postgres 17.11, the image compose's `db` runs.
 
+`npm run test:lab` needs a Docker that may run privileged containers and about 20 GB of free disk. It builds the app, node and updater images from the checkout, starts two computers with a Docker of their own, installs a server on one with `install.sh`, joins the other with the command from Machines and disconnects it. `HH_LAB_BUILT=1` reuses the images of a run before, and `HH_LAB_KEEP=1` leaves the machines to look at; everything the lab makes carries the label `hornhoof.lab`.
+
 Coverage for crapper is `npx vitest run --coverage` in the part's folder, on the dependencies its harness put there or after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
 
 What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:

@@ -9,6 +9,7 @@
     "pretest": "npm run build -w @hornhoof/protocol",
     "test": "vitest run",
     "test:real": "sh test/real/run.sh",
+    "test:lab": "vitest run --config vitest.lab.config.ts",
     "lint:part": "eslint"
   },
   "dependencies": {
