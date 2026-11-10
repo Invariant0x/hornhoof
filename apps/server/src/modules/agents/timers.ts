@@ -144,34 +144,43 @@ async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) =>
   ]);
 }
 
+/* How many ticks in a row may find the same sweep still running before it is taken for one that will never end. */
+const PATIENCE_TICKS = 5;
+
 /* A leading app's sweeps, one at a time: those of the way in, then a round on each tick. A tick that finds a sweep still
-   running is dropped, since the next one does what it would have. Entering waits for no sweep; leaving stops the ticks
-   and waits for what runs, so nothing of this writes once the app has left lead. */
-export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS): { enter: () => void; leave: () => Promise<void> } {
+   running is dropped, since the next one does what it would have. A sweep that five ticks in a row find running waits for
+   something that does not answer: stalled hears of it, and the rounds go on without it, so one step that hangs does not
+   stop every round after it. Entering waits for no sweep; leaving stops the ticks and waits for what runs, so nothing of
+   this writes once the app has left lead. */
+export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS, stalled: (ticks: number) => void = () => {}): { enter: () => void; leave: () => Promise<void> } {
   let timer: NodeJS.Timeout | null = null;
-  let running: Promise<void> | null = null;
-  const alone = (sweep: () => Promise<void>) => {
-    if (running) return;
-    running = sweep().finally(() => {
-      running = null;
-    });
+  let running: { ended: Promise<void>; ticks: number } | null = null;
+  const start = (sweep: () => Promise<void>) => {
+    const mine = { ticks: 0, ended: sweep().finally(() => { if (running === mine) running = null; }) };
+    running = mine;
+  };
+  const tick = () => {
+    if (running && ++running.ticks < PATIENCE_TICKS) return;
+    if (running) stalled(running.ticks);
+    start(round);
   };
   return {
     enter() {
-      alone(entry);
-      timer = setInterval(() => alone(round), everyMs);
+      start(entry);
+      timer = setInterval(tick, everyMs);
       timer.unref();
     },
     async leave() {
       if (timer) clearInterval(timer);
       timer = null;
-      await running;
+      await running?.ended;
     },
   };
 }
 
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed));
+  const stalled = (ticks: number) => app.log.error(`A round of Hornhoof's minute checks has not ended after ${ticks} more were due: a step of it waits for something that does not answer. The rounds go on without it.`);
+  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed), TICK_MS, stalled);
   ctx.mode.whenLead(enter, leave);
 }

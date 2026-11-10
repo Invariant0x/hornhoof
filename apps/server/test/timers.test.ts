@@ -589,7 +589,8 @@ describe('the sweeps of a leading app', () => {
       started[kind]++;
       return new Promise<void>(done => (end = done));
     };
-    return { started, endSweep: () => end(), ...leadSweeps(running('entry'), running('tick'), EVERY_MS) };
+    const stalled: number[] = [];
+    return { started, stalled, endSweep: () => end(), ...leadSweeps(running('entry'), running('tick'), EVERY_MS, ticks => stalled.push(ticks)) };
   }
   /* Tells whether a promise has ended by now, after everything already due has run. */
   async function ended(promise: Promise<unknown>): Promise<boolean> {
@@ -632,6 +633,27 @@ describe('the sweeps of a leading app', () => {
     expect(await ended(leaving)).toBe(false);
     endSweep();
     expect(await ended(leaving)).toBe(true);
+  });
+
+  it('gives up waiting for a round that has not ended after five ticks, says so once, and goes on with the next', async () => {
+    const { started, stalled, endSweep, enter, leave } = sweeps();
+    enter();
+    endSweep();
+    await vi.advanceTimersByTimeAsync(EVERY_MS);
+    expect(started.tick).toBe(1);
+    /* That round never ends. Four ticks find it running and start nothing. */
+    await vi.advanceTimersByTimeAsync(4 * EVERY_MS);
+    expect(started.tick).toBe(1);
+    expect(stalled).toEqual([]);
+    await vi.advanceTimersByTimeAsync(EVERY_MS);
+    expect(stalled).toEqual([5]);
+    expect(started.tick).toBe(2);
+    /* Leaving waits for the round that runs now, and no longer for the one given up. */
+    const leaving = leave();
+    expect(await ended(leaving)).toBe(false);
+    endSweep();
+    expect(await ended(leaving)).toBe(true);
+    expect(stalled).toEqual([5]);
   });
 
   it('starts no round once it has left', async () => {
