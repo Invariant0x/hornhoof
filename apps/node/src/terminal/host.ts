@@ -2732,7 +2732,8 @@ export class TerminalHost {
     a.tail = this.tailFor(a);
     const scratch = this.opts.tmux.scratch();
     this.beginProgramRestart(a, jobId);
-    await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, { ...lasting(job.input.env), ...spec.env }), outputDir: scratch }));
+    const env = { ...(await this.testShare(a)), ...lasting(job.input.env), ...spec.env };
+    await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
     this.operator?.launch(a.key, 'started');
     if (!(await this.ready(a, { ...job, operatorDelivery: undefined }))) throw new Error('The restarted program did not become ready.');
     this.programIs(a, true);
