@@ -37,7 +37,6 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 /* New defaults and the operation id of an open wait, while retaining every preexisting field. */
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
-  if (table === 'jobs') return rows.map(row => ({ row: { ...row.row, assignment_epoch: 0, workspace_id: null, workspace_spec_version: null } }));
   /* Every head and member gets the speed skill its role lists. */
   if (table === 'agents') return rows.map(({ row }) => ({ row: ['head', 'worker'].includes(row.kind as string) ? { ...row, skills: [...(row.skills as string[]), 'hh-work-fast'] } : row }));
   /* Migration 0094 keeps the numbers the company gave: its one task, and no turn. */
@@ -46,7 +45,7 @@ function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[]
   /* Migration 0088 removes the gate columns; the required route replaces them. Migration 0089 adds the pause, empty. */
   const GATE_COLUMNS = ['gates', 'panel', 'stage', 'merging', 'bounces'];
   return rows.map(({ row }) => ({ row: {
-    ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), assignment_epoch: 0, paused: null,
+    ...Object.fromEntries(Object.entries(row).filter(([column]) => !GATE_COLUMNS.includes(column))), paused: null,
     ...(row.external_wait ? { external_wait: { ...(row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } : {}),
   } }));
 }

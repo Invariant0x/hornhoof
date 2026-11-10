@@ -21,15 +21,12 @@ const OUTBOUND = [
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-const WORKSPACES = ['workspace_repositories', 'task_workspaces', 'author_workspace_slots', 'task_area_locks', 'task_workspace_operations', 'task_workspace_submissions', 'task_workspace_sessions', 'task_workspace_merge_receipts'];
-const STAGING = ['staging_plans', 'staging_batches', 'staging_trials', 'staging_operations'];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'computer_access_intents', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, ...WORKSPACES, ...STAGING, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'computer_access_intents', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
-  jobs: ['tool_token_hash', 'assignment_epoch', 'workspace_id', 'workspace_spec_version'],
-  tasks: ['assignment_epoch'],
+  jobs: ['tool_token_hash'],
   subscriptions: ['secret_enc'],
   nodes: ['key_hash', 'account'],
   machines: ['machine_key'],
