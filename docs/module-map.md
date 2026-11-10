@@ -120,6 +120,9 @@ Checked by searching for importers outside tests.
 - A nudge from the watchdog is a turn on the task; three such turns without a move raise the task as stuck.
 - The quiet department notice gets a new key each time the head answers, so it comes again every 15 minutes.
 - The node types words again after 15 quiet seconds even when the program took them and its log is late.
+- A wait declared at the same moment as a message on its task sometimes stays, though the message should end it
+  (`tasks/external-wait.ts`, `placeWait`). Its test fails 1 run in 20 on 0.18.0 and 5 in 20 on the branch `refactor`,
+  where the timing differs. Not fixed.
 
 Checked and not a fault: a wake that is not queued leaves the outbox only when a turn already waits on the task or its
 agent is gone or has no plan, and the minute round wakes a holder that became available again.
