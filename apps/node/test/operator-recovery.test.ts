@@ -16,9 +16,11 @@ function fixture() {
   const make = () => new OperatorRuntime({ dir, now: () => 0, connected: () => true, send: frame => { sent.push(frame); return true; } }, {
     current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, ...source }),
     capture: async () => ({ cols: 80, rows: 24, cells: '' }),
+    facts: async () => null,
+    paste: async () => {},
     press: async () => {},
     secrets: () => [],
-    recovery: async () => ({ alive: true, input: '', busy: false }),
+    recovery: async () => ({ alive: true, input: '', own: false, busy: false }),
     inputLine: () => 'unknown',
   });
   const key = randomUUID();

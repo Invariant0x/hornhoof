@@ -32,9 +32,9 @@ export class Bridge {
   private readonly listing = new Map<string, Set<(asked: number) => void>>();
   /* When each agent's program last asked for the list of its tools that the bridge then handed it. */
   private readonly listedAt = new Map<string, number>();
-  /* When each agent's program was last turned away as it connected to its tools, with no turn open: an MCP client then
-     keeps no tools for the rest of its session. */
-  private readonly turnedAway = new Map<string, number>();
+  /* When each agent's program last connected to its tools and was turned away, as no turn ran and the node knew no answer
+     for Hornhoof: it does not try again, and keeps no tools for the rest of its session. */
+  private readonly refusedAt = new Map<string, number>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
@@ -53,7 +53,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; refused?: HookRejected } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; unowned?: (key: string, event: string) => void; refused?: HookRejected } = {},
   ) {
     this.failures = new HookFailures(options.rejected);
     this.refusals = new HookFailures(options.refused);
@@ -129,10 +129,10 @@ export class Bridge {
     return (this.listedAt.get(key) ?? -Infinity) >= since;
   }
 
-  /* Whether the agent's program was turned away as it connected to its tools since then, and has listed none after. */
-  lostTools(key: string, since: number): boolean {
-    const at = this.turnedAway.get(key);
-    return at !== undefined && at >= since && !this.listedSince(key, at);
+  /* Whether the agent's program was turned away as it connected to its tools since then, and has not listed them since. */
+  toolsRefusedSince(key: string, since: number): boolean {
+    const refused = this.refusedAt.get(key) ?? -Infinity;
+    return refused >= since && !this.listedSince(key, refused);
   }
 
   /* Resolves true once the agent's program has listed its tools through the bridge, asking for them since the time given
@@ -214,7 +214,10 @@ export class Bridge {
        caller closing its socket; it is never applied until ownership succeeds. */
     const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
     void reading.catch(() => {});
-    if (!(await owned)) return this.refused(req, res, 403, 'owner check failed');
+    if (!(await owned)) {
+      if (kind === 'hook' && event) this.options.unowned?.(key, event);
+      return this.refused(req, res, 403, 'owner check failed');
+    }
     const body = await reading;
     if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
@@ -250,7 +253,7 @@ export class Bridge {
   /* A call the node cannot answer for Hornhoof with no turn open: a tool call gets words the agent reads, and a program
      turned away as it connects keeps no tools until it starts again. Each refusal goes to the node's log. */
   private noTools(res: ServerResponse, key: string, body: Buffer, asked: number): void {
-    if (asks(body, 'initialize') || asks(body, 'tools/list')) this.turnedAway.set(key, asked);
+    if (asks(body, 'initialize') || asks(body, 'tools/list')) this.refusedAt.set(key, asked);
     if (noTurn(res, body)) this.refusals.reject(key, messages(body).map(m => String(m?.method)).join(', '), 'no Hornhoof turn is running');
   }
 

@@ -202,13 +202,13 @@ describe("the node's bridge to Hornhoof's tools", () => {
     const since = Date.now();
     const post = (method: string) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method }) });
     await post('tools/call');
-    expect(bridge.lostTools('agent-1', since)).toBe(false);
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(false);
     expect(await (await post('initialize')).json()).toMatchObject({ error: { code: -32001 } });
-    expect(bridge.lostTools('agent-1', since)).toBe(true);
-    expect(bridge.lostTools('agent-1', Date.now() + 1)).toBe(false);
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(true);
+    expect(bridge.toolsRefusedSince('agent-1', Date.now() + 1)).toBe(false);
     bridge.setToken('agent-1', 'tok-turn');
     await post('tools/list');
-    expect(bridge.lostTools('agent-1', since)).toBe(false);
+    expect(bridge.toolsRefusedSince('agent-1', since)).toBe(false);
   });
 
   it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {

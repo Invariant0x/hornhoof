@@ -25,6 +25,8 @@ import { registerImprovementTools, registerOrchestratorImprovementTools } from '
 import { registerOutboundTools } from '../outbound/tools.js';
 import { registerOutboundControlTools } from '../outbound/tools-control.js';
 import { registerAssignmentTools } from '../agents/assignment.js';
+import { registerProgramAccessTools } from '../program-operator/tools.js';
+import { registerReleaseTool } from '../program-operator/release.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -141,6 +143,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   registerApprovalControlTools(server, ctx, app, job);
   registerOutboundControlTools(server, ctx, app, job);
   registerComputerTools(server, ctx, job);
+  /* The orchestrator answers for nothing standing still anywhere: it sees any employee's program, types into it and releases
+     its recovery hold, as Operations do. */
+  registerProgramAccessTools(server, ctx, job);
+  registerReleaseTool(server, ctx, job);
   registerDatabaseTool(server, ctx, job, 'write');
   registerOrchestratorImprovementTools(server, ctx, job);
   return server;

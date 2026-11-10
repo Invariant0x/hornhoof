@@ -81,6 +81,11 @@ export function wrote(author: { name: string; title: string }, text: string): st
   return `${author.title ? `${author.name} (${author.title})` : author.name} wrote:\n\n${quote(text)}`;
 }
 
+/* Below an agent's message to another: an answer in the window reaches only people, so it would stay there. */
+export function answerBy(author: { id: string; name: string }): string {
+  return `If you answer ${author.name}, do it with "message_employee", employee ${author.id}: an answer in this window does not reach ${author.name}.`;
+}
+
 const PREFACE_EVENTS = 20;
 /* The prompt goes to the agent program as one command-line argument, which Linux caps at 128 KiB. */
 const PREFACE_BYTES = 48 * 1024;

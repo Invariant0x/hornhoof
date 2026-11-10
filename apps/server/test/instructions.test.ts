@@ -273,12 +273,13 @@ describe('renderInstructions', () => {
     }
   });
 
-  it("tells employees and the orchestrator that Claude Code's SendMessage reaches no one in Hornhoof", () => {
+  it("tells employees and the orchestrator that Claude Code's SendMessage and an answer in the window reach no agent", () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const told = [renderInstructions(shipped, agent(), PLACE).text, renderInstructions(shipped, agent({ kind: 'head', roleKey: 'SAL-HEAD' }), PLACE).text, orchestratorSteady(shipped).text];
     for (const text of told) {
       expect(text).toContain('When you run in Claude Code, never answer with its SendMessage tool: what it sends reaches no one in Hornhoof.');
-      expect(text).toContain("Answer in your reply or with Hornhoof's tools.");
+      expect(text).toContain("Answer people in your reply and agents with Hornhoof's tools.");
+      expect(text).toContain('The orchestrator and other employees write into this conversation too, but your reply here never reaches them, only people.');
     }
   });
 

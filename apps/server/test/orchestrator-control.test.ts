@@ -110,11 +110,14 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   });
 
   it('writes to an employee as itself', async () => {
-    const { app, db, bruno } = await company();
+    const { app, db, bruno, orchestrator } = await company();
     const res = await call(await mcp(app, TOKEN), 'message_employee', { employee: bruno.id, text: 'Please look at the checkout bug first.' });
     expect(res.isError).toBeFalsy();
     const [turn] = await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), isNull(jobs.taskId)));
-    expect(turn!.prompt).toBe('From Orchestrator to Bruno (Backend engineer, Development):\n\nOrchestrator: Please look at the checkout bug first.');
+    expect(turn!.prompt).toBe(
+      'From Orchestrator to Bruno (Backend engineer, Development):\n\nOrchestrator: Please look at the checkout bug first.' +
+        `\n\nIf you answer Orchestrator, do it with "message_employee", employee ${orchestrator.id}: an answer in this window does not reach Orchestrator.`,
+    );
     expect(turn!.createdBy).toBeNull();
     const [said] = await db.select().from(agentEvents).where(eq(agentEvents.agentId, bruno.id));
     expect(said).toMatchObject({ kind: 'message', personId: null, data: { text: 'Please look at the checkout bug first.', from: 'orchestrator' } });

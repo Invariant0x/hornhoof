@@ -5,11 +5,10 @@ it.each(['AskUserQuestion', 'ExitPlanMode'])('keeps %s work decisions outside op
   expect(operatorQuestion({ tool_name, tool_input: { question: 'Approve this approach?' } }, [])).toMatchObject({ kind: 'work' });
 });
 
-it('withholds known protected question content before its evidence leaves the node', () => {
+it('keeps a sign-in question as the program asks it, of its own kind, for the orchestrator and Operations to answer', () => {
   const question = operatorQuestion({ tool_name: 'Login', tool_input: { device_code: 'fresh-482917' } }, []);
   expect(question.kind).toBe('protected');
-  expect(JSON.stringify(question)).not.toContain('fresh-482917');
-  expect(question.text).toContain('[hidden]');
+  expect(question.text).toBe('{"tool":"Login","request":{"device_code":"fresh-482917"}}');
 });
 
 it('masks known credentials in every question field before clipping and keeps a repeated event identity', () => {

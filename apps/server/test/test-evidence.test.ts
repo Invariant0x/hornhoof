@@ -5,7 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, testRuns, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, submit, type Task } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { commitProof } from '../src/modules/testruns/commit-proof.js';
+import { commitProof, proofLine } from '../src/modules/testruns/commit-proof.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 
 const NEW_COMMIT = 'b'.repeat(40);
@@ -359,7 +359,39 @@ describe('an approval of a commit', () => {
     expect(request.text).toContain('Test run 1 (make test) passed on this commit.');
     const seen = (await c.read()).requests.find(r => r.kind === 'approval')!;
     expect(seen.commit).toBe(TEST_COMMIT);
-    expect(seen.proof).toEqual({ commit: TEST_COMMIT, run: 1, command: 'make test', failedRun: null, other: null });
+    expect(seen.proof).toEqual({ commit: TEST_COMMIT, run: 1, command: 'make test', scope: null, failedRun: null, other: null });
+  });
+
+  /* A product run as its environment described it: the everyday profile leaves out what only the profiles of a release run. */
+  const productRun = (profile: string, kept = 0, candidate = false) => ({
+    command: '',
+    environmentRequest: { version: 1, repositoryScope: { companyId: c0, repositoryOwnerId: c0, repoUrlHash: 'a'.repeat(64) }, requestId: null, nodeId: null, builtin: false, sentAt: null, attempts: 1, problem: null } as never,
+    environmentSnapshot: { profile, ...(candidate ? { candidate: { baseCommit: OLD_COMMIT, baseFingerprints: [], fingerprints: [] } } : {}), description: { manifest: {
+      defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['server'] }, { id: 'final', requiredSuiteIds: ['server', 'server-postgres', 'browser'] }, { id: 'full', requiredSuiteIds: ['server', 'server-postgres', 'browser', 'browser-matrix'] }],
+      suites: ['server', 'server-postgres', 'browser', 'browser-matrix'].map(id => ({ id })), execution: { version: 2, fullRun: { everyTurns: 5, replaces: 'final', profile: 'full' } } } } } as never,
+    fileCache: { mode: kept ? 'cached' : 'full', turn: 4, mainLine: false, fingerprints: [], reused: kept, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] } as never,
+  });
+  const c0 = '00000000-0000-4000-8000-000000000001';
+
+  it('says what the passed product run of the commit left out, and names a run of every suite anew before a newer narrower one', async () => {
+    const c = await company();
+    await c.aRun(productRun('fast', 113));
+    const { res, request } = await asked(c);
+    const narrow = 'Test run 1 passed on this commit with profile fast, which left out the suites server-postgres, browser and browser-matrix, and took the green result of an earlier run for 113 test files instead of running them. Only a run of profile full with no suite and no candidate runs every suite and every test file anew.';
+    expect(res.text).toContain(narrow);
+    expect(request.text).toContain(narrow);
+    await c.aRun(productRun('full'));
+    await c.aRun(productRun('final', 4));
+    const proof = await commitProof(c.db, c.task, TEST_COMMIT);
+    expect(proof).toMatchObject({ run: 2, scope: { profile: 'full', leftOut: [], kept: 0, since: null } });
+    expect(proofLine(proof)).toContain('Test run 2 passed on this commit with profile full: every suite and every test file ran anew.');
+    expect(proofLine(proof)).not.toContain('()');
+  });
+
+  it('says a candidate run checked only what changed since its base', async () => {
+    const c = await company();
+    await c.aRun(productRun('full', 0, true));
+    expect(proofLine(await commitProof(c.db, c.task, TEST_COMMIT))).toContain(`Test run 1 passed on this commit with profile full, which checked only the test files that changed since ${OLD_COMMIT}. Only a run of profile full with no suite and no candidate runs every suite and every test file anew.`);
   });
 
   it('does not take a run on another commit for proof of this one, and says so', async () => {
@@ -371,7 +403,7 @@ describe('an approval of a commit', () => {
       expect(said).toContain(`Test run 1 passed on ${TEST_COMMIT}, which proves nothing about this one.`);
     }
     const seen = (await c.read()).requests.find(r => r.kind === 'approval')!;
-    expect(seen.proof).toEqual({ commit: NEW_COMMIT, run: null, command: null, failedRun: null, other: { run: 1, commitSha: TEST_COMMIT } });
+    expect(seen.proof).toEqual({ commit: NEW_COMMIT, run: null, command: null, scope: null, failedRun: null, other: { run: 1, commitSha: TEST_COMMIT } });
   });
 
   it('names no run from before commits were pinned as a run on another commit', async () => {
@@ -432,7 +464,7 @@ describe('an approval of a commit', () => {
     const c = await company();
     await c.aRun();
     const elsewhere = '00000000-0000-4000-8000-000000000000';
-    expect(await commitProof(c.db, { ...c.task, companyId: elsewhere }, TEST_COMMIT)).toEqual({ commit: TEST_COMMIT, run: null, command: null, failedRun: null, other: null });
+    expect(await commitProof(c.db, { ...c.task, companyId: elsewhere }, TEST_COMMIT)).toEqual({ commit: TEST_COMMIT, run: null, command: null, scope: null, failedRun: null, other: null });
   });
 
   it('tells the one who releases, as the approval comes, which run proves the approved commit', async () => {

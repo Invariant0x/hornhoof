@@ -12,7 +12,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
-import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
+import { answerBy, FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
 import { terminalRights } from '../terminals/access.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -26,7 +26,7 @@ const MessageBody = z
 function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[]) {
   if (me.via) return {
     actor: { agentId: me.via },
-    turn: { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
+    turn: { prompt: `${turnPrompt({ name: 'Orchestrator', title: '' }, text)}\n\n${answerBy({ id: me.via, name: 'Orchestrator' })}`, createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
   return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }

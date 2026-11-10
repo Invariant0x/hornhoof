@@ -445,6 +445,26 @@ describe('reusing green test results', () => {
     expect(marks).toEqual([]);
   });
 
+  /* The check of a release: whatever is green at these fingerprints, it runs every file again, and its end marks the commit. */
+  it('runs every file of a release branch in a full run, though each is green at its fingerprint, and marks its commit', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({ profile: 'final' }, undefined, 'main'));
+    expect((await f.greenRows()).map(row => row.file)).toEqual(FILES);
+    const marks = marked(f), id = await f.start({ profile: 'full' }, undefined, 'release-1.2.3');
+    expect((await f.runOf(id)).fileCache).toMatchObject({ mode: 'full', mainLine: false, reused: 0 });
+    expect(await f.ranFiles(id)).toEqual(FILES);
+    await f.finish(id);
+    expect(marks).toEqual([{ commit: TEST_COMMIT, state: 'success' }]);
+  });
+
+  it('tells the agent of a run that stands for no whole product that it leaves no mark', async () => {
+    const f = await fixture();
+    marked(f);
+    await f.finish(await f.start({}, undefined, 'release-1.2.3'));
+    await until(async () => (await f.told()).includes('Test run 1 passed'));
+    expect(await f.told()).toContain('It leaves no hornhoof/tests on its commit: only a run of the whole product, with no one suite, of profile final or full, does.');
+  });
+
   it('tells the agent on the task that GitHub now shows the mark', async () => {
     const f = await fixture();
     marked(f);

@@ -39,6 +39,21 @@ describe('hh-hook', () => {
     expect(c.errors()).not.toContain('http://');
   });
 
+  /* A busy node may check the caller of a start longer than a short wait: a caller gone by then is refused, and the node
+     never hears that its program started. */
+  it('waits for a start as long as for a stop and tries it three times', async () => {
+    const c = await client(() => 'timeout', cleanups, 'start');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await vi.waitFor(() => expect(c.calls).toHaveLength(attempt));
+      await c.clock.advance(14_999);
+      expect(c.calls).toHaveLength(attempt);
+      await c.clock.advance(1);
+    }
+    await c.closed;
+    expect(c.calls).toHaveLength(3);
+    expect(new Set(c.calls.map(call => call.headers['x-hh-call'])).size).toBe(1);
+  });
+
   it('reports an owner refusal without retrying a permanent HTTP error', async () => {
     const c = await client(() => 'forbidden', cleanups);
     await vi.waitFor(() => expect(c.errors()).toContain('403'));
