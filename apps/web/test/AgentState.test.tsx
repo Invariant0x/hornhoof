@@ -143,8 +143,8 @@ describe('AgentState', () => {
       program: program('thinking', 12, { signAt: NOW - QUIET_SIGN_MS - 1 }),
       alarm: null,
     };
-    expect(shown('en', pastBoundary)?.textContent).toBe('thinking 12 min, no sign 10 min');
-    expect(shown('ru', pastBoundary)?.textContent).toBe('думает 12 мин, без признаков 10 мин');
+    expect(shown('en', pastBoundary)?.textContent).toBe('thinking 12 min, no sign 5 min');
+    expect(shown('ru', pastBoundary)?.textContent).toBe('думает 12 мин, без признаков 5 мин');
 
     /* An older node sends signAt: null and keeps today's line. */
     const olderNode: AgentLive = {

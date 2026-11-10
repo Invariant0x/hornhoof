@@ -10,11 +10,11 @@ export const RETURN_MS = 300_000;
 /* A gate sent work back to its executor; distinct from a result handed to the head. */
 export const REWORK_MS = 600_000;
 /* The map says a thinking or retrying program gave no sign for this long. */
-export const QUIET_SIGN_MS = 600_000;
-/* A thinking or retrying program with no sign for this long is an alarm. */
-export const QUIET_ALARM_MS = 1_800_000;
+export const QUIET_SIGN_MS = 300_000;
+/* A thinking or retrying program with no sign for this long is an alarm: someone who sees its screen looks at it. */
+export const QUIET_ALARM_MS = 600_000;
 /* A running tool with no sign for this long is an alarm: tests and builds run long. */
-export const TOOL_QUIET_ALARM_MS = 7_200_000;
+export const TOOL_QUIET_ALARM_MS = 1_800_000;
 /* How long a thinking or retrying program may give no sign before Operations may restart it: past the program's own way
    out. Claude Code ends a dead wait itself after its retries, about 66 minutes; Codex never does; Kimi Code logs every
    retry, so half an hour without one is past its own; Antigravity's run ends by itself. */

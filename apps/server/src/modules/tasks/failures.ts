@@ -104,7 +104,7 @@ export async function headOf(ctx: Ctx, agent: typeof agents.$inferSelect) {
   return head && head.id !== agent.id ? head : orchestratorOf(ctx, agent.companyId);
 }
 
-/* Use the silence watch's Operations selection and keep the case in its message across server restarts. */
+/* Operations hear of a failed turn, a free task watchdog before the head, and the case stays in its message across server restarts. */
 export async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: string, options: { tellHead?: boolean; waitForWatcher?: boolean } = {}): Promise<void> {
   const tellHead = options.tellHead === true;
   if (!job.agentId) return;

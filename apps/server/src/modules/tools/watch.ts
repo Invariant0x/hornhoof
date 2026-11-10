@@ -76,10 +76,12 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
   return { withMessage, told };
 }
 
+const seesPrograms = (job: ToolJob) => Boolean(job.roleKey) && OPERATIONS_ROLES[job.roleKey!] === job.agentKind;
+
 /* Operations see and type into any employee's program and release its recovery hold, along with what their skills grant; the
    program operator also reports the case it was given. Each call checks the role again. */
 function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
-  if (job.roleKey && OPERATIONS_ROLES[job.roleKey] === job.agentKind) {
+  if (seesPrograms(job)) {
     registerProgramAccessTools(server, ctx, job);
     registerReleaseTool(server, ctx, job);
   }
@@ -101,9 +103,10 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
   const roleTitle = (roleKey: string | null) => (roleKey && ctx.templates.roles.get(roleKey)?.title.en) || null;
 
-  if (grants.has('restart_program')) {
+  /* The watchdog has it by its skill, and whoever Hornhoof calls to a quiet program by its role. */
+  if (grants.has('restart_program') || seesPrograms(job)) {
     server.registerTool('restart_program', {
-      description: 'Restart a program that has stopped giving signs of life, in the same session. Hornhoof checks its state, the time without a sign, its node and session, and allows only one restart per turn. Read agents first.',
+      description: 'Restart a program that has stopped giving signs of life, in the same session. Hornhoof checks its state, the time without a sign, its node and session, and allows only one restart per turn. Read agents or program_screen first.',
       inputSchema: { employee: z.uuid().describe("The agent's id from agents.") },
     }, async ({ employee }) => {
       const result = await restartProgram(ctx, job.companyId, employee);

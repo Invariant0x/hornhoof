@@ -224,7 +224,7 @@ describe('timers', () => {
     expect(afterCard.alarm).toBeNull();
   });
 
-  it('gives no alarm while the program thinks or runs a tool with a changing screenAt, then raises one alarm with reason program_stalled after 30 minutes without state or screen changes and keeps the turn running', async () => {
+  it('gives no alarm while the program thinks or runs a tool with a changing screenAt, then raises an alarm with reason program_stalled after 10 minutes without state or screen changes, tells the head of Operations and not the watchdog, calls again only each time the quiet has doubled, and keeps the turn running', async () => {
     const { app, db, ceo, wandaId, orchestrator } = await company();
     const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
     const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
@@ -266,7 +266,7 @@ describe('timers', () => {
       .returning();
     await keepTaskWake(db, task!, bruno!.id, turn!.id);
 
-    /* While thinking or running a tool with changing screenAt, even past 30 minutes from since, no alarm fires. */
+    /* While thinking or running a tool with changing screenAt, even past 10 minutes from since, no alarm fires. */
     await handleNodeMessage(
       app.ctx,
       BUILTIN,
@@ -285,58 +285,63 @@ describe('timers', () => {
     await minuteRound(app.ctx, at(36), () => () => {});
     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
 
-    /* Now the node keeps reporting, but neither state (since at +5m) nor screen (screenAt at +36m) changes for 30 minutes (+66m). */
+    /* Now the node keeps reporting, but neither state (since at +5m) nor screen (screenAt at +36m) changes for 10 minutes (+46m). */
     await handleNodeMessage(
       app.ctx,
       BUILTIN,
       { type: 'job.program', jobId: turn!.id, state: 'tool', since: at(5).getTime(), tool: 'Bash', screenAt: at(36).getTime() },
-      at(65),
+      at(45),
     );
-    await minuteRound(app.ctx, at(65), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+    await minuteRound(app.ctx, at(45), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
 
     await handleNodeMessage(
       app.ctx,
       BUILTIN,
       { type: 'job.program', jobId: turn!.id, state: 'tool', since: at(5).getTime(), tool: 'Bash', screenAt: at(36).getTime() },
-      at(66),
+      at(46),
     );
-    await minuteRound(app.ctx, at(66), () => () => {});
+    await minuteRound(app.ctx, at(46), () => () => {});
     expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
-    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
-    expect(waltTurns).toHaveLength(1);
-    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', 'tool (Bash)', at(36).toISOString(), 'program_stalled']) {
-      expect(waltTurns[0]!.prompt).toContain(part);
+    /* No program operator is hired, so the head of Operations is told; the watchdog never is. */
+    const wandaTurns = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurns).toHaveLength(1);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', 'tool (Bash)', at(36).toISOString(), 'program_stalled', `Read program_screen for employee ${bruno!.id}`, 'restart_program']) {
+      expect(wandaTurns[0]!.prompt).toContain(part);
     }
 
     const card = (await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(ceo) })).json();
     expect(card.alarm).toEqual({ reason: 'program_stalled', since: at(36).getTime() });
 
-    /* One alarm per turn: even after Walt finishes his alarm turn, further minute rounds (including past 2 hours) send no second alarm and do not wake the orchestrator. */
-    await db.update(jobs).set({ status: 'done', finishedAt: at(67) }).where(eq(jobs.id, waltTurns[0]!.id));
+    /* One call when the quiet begins (+46m, 10 minutes of quiet) and one more each time it has doubled (20, 40, 80 minutes: +56m, +76m, +116m), never in between, and the orchestrator is not woken. */
     const orchBefore = (await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id))).length;
-    await handleNodeMessage(
-      app.ctx,
-      BUILTIN,
-      { type: 'job.program', jobId: turn!.id, state: 'tool', since: at(5).getTime(), tool: 'Bash', screenAt: at(36).getTime() },
-      at(70),
-    );
-    await minuteRound(app.ctx, at(70), () => () => {});
-    await handleNodeMessage(
-      app.ctx,
-      BUILTIN,
-      { type: 'job.program', jobId: turn!.id, state: 'tool', since: at(5).getTime(), tool: 'Bash', screenAt: at(36).getTime() },
-      at(160),
-    );
-    await minuteRound(app.ctx, at(160), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
+    const quietRound = async (minute: number) => {
+      await db.update(jobs).set({ status: 'done', finishedAt: at(minute) }).where(and(eq(jobs.agentId, wandaId), eq(jobs.status, 'running')));
+      await handleNodeMessage(
+        app.ctx,
+        BUILTIN,
+        { type: 'job.program', jobId: turn!.id, state: 'tool', since: at(5).getTime(), tool: 'Bash', screenAt: at(36).getTime() },
+        at(minute),
+      );
+      await minuteRound(app.ctx, at(minute), () => () => {});
+      return (await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).length;
+    };
+    expect(await quietRound(47)).toBe(1);
+    expect(await quietRound(55)).toBe(1);
+    expect(await quietRound(56)).toBe(2);
+    expect(await quietRound(75)).toBe(2);
+    expect(await quietRound(76)).toBe(3);
+    expect(await quietRound(115)).toBe(3);
+    expect(await quietRound(116)).toBe(4);
+    expect(await quietRound(160)).toBe(4);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id))).toHaveLength(orchBefore);
     expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
   });
 
-  it('raises one alarm with reason node_silent after 30 minutes without a message from the node and keeps the turn running', async () => {
-    const { app, db, ceo, orchestrator } = await company();
+  it('raises an alarm with reason node_silent after 10 minutes without a message from the node, tells the head of Operations and not the watchdog, calls again only when the quiet has doubled, and keeps the turn running', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
     const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
     const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
     const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
@@ -384,23 +389,30 @@ describe('timers', () => {
       at(10),
     );
 
-    await minuteRound(app.ctx, at(25), () => () => {});
-    await minuteRound(app.ctx, at(39), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+    await minuteRound(app.ctx, at(15), () => () => {});
+    await minuteRound(app.ctx, at(19), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
 
-    await minuteRound(app.ctx, at(40), () => () => {});
+    await minuteRound(app.ctx, at(20), () => () => {});
     expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
-    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
-    expect(waltTurns).toHaveLength(1);
-    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', 'thinking', at(10).toISOString(), 'node_silent']) {
-      expect(waltTurns[0]!.prompt).toContain(part);
+    /* No program operator is hired, so the head of Operations is told; the watchdog never is. */
+    const wandaTurns = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurns).toHaveLength(1);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', 'thinking', at(10).toISOString(), 'node_silent', `Read program_screen for employee ${bruno!.id}`, 'restart_program']) {
+      expect(wandaTurns[0]!.prompt).toContain(part);
     }
 
     const card = (await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(ceo) })).json();
     expect(card.alarm).toEqual({ reason: 'node_silent', since: at(10).getTime() });
 
-    await minuteRound(app.ctx, at(45), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
+    /* One more call each time the quiet has doubled (20 minutes of quiet: +30m), none in between. */
+    await minuteRound(app.ctx, at(25), () => () => {});
+    await minuteRound(app.ctx, at(29), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(1);
+    await minuteRound(app.ctx, at(30), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(2);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
   });
 
   it("sends the 30-minute alarm to the head of Operations when the task watchdog's own turn is silent, or when the watchdog is busy, off, or removed, without closing the watchdog's turn", async () => {
@@ -486,8 +498,8 @@ describe('timers', () => {
     expect(wandaTurns3[2]!.prompt).toContain(turn3!.id);
   });
 
-  it('retries the 30-minute alarm on the next minute round when saving the alarm fails once, then deduplicates it', async () => {
-    const { app, db, ceo, orchestrator } = await company();
+  it('retries the 10-minute alarm on the next minute round when saving the alarm fails once, then deduplicates it', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
     const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
     const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
     const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
@@ -532,16 +544,19 @@ describe('timers', () => {
     }) as typeof db.insert;
 
     const errors: unknown[] = [];
-    await minuteRound(app.ctx, at(30), () => err => errors.push(err));
+    await minuteRound(app.ctx, at(10), () => err => errors.push(err));
     expect(errors).toHaveLength(1);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
+
+    /* No program operator is hired, so the head of Operations is told; the watchdog never is. */
+    await minuteRound(app.ctx, at(11), () => () => {});
+    const wandaTurns = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurns).toHaveLength(1);
+    expect(wandaTurns[0]!.prompt).toContain(turn!.id);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
 
-    await minuteRound(app.ctx, at(31), () => () => {});
-    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
-    expect(waltTurns).toHaveLength(1);
-    expect(waltTurns[0]!.prompt).toContain(turn!.id);
-
-    await minuteRound(app.ctx, at(32), () => () => {});
-    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
+    await minuteRound(app.ctx, at(12), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(1);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
   });
 });

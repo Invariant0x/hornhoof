@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
 import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
+import { operationsStaff } from '../program-operator/access.js';
 import { headOf } from './failures.js';
 import { sameProgram } from './program-history.js';
 import { programRestartStatus } from './program-restarts.js';
@@ -269,10 +270,11 @@ function programLabel(program: TurnProgram | null): string {
   return program.tool ? `${program.state} (${program.tool})` : program.state;
 }
 
+const QUIET_MINUTES = SILENT_TURN_MS / 60_000;
 const reasonLabel = (reason: TurnAlarmReason) =>
   reason === 'program_stalled'
-    ? 'program_stalled (program state and screen unchanged for 30 minutes)'
-    : 'node_silent (node has not reported for 30 minutes)';
+    ? `program_stalled (program state and screen unchanged for ${QUIET_MINUTES} minutes)`
+    : `node_silent (node has not reported for ${QUIET_MINUTES} minutes)`;
 
 async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<string> {
   const who = agentLabel(ctx, s.agent);
@@ -285,7 +287,8 @@ async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<stri
   const sign = signAt === null ? 'unreported by this node' : program!.signAt === 0 ? `none since the turn started at ${new Date(start).toISOString()}` : new Date(signAt).toISOString();
   const retry = program?.retry ? `${program.retry.attempt} of ${program.retry.max ?? 'an unknown maximum'}, next at ${program.retry.nextAt === null ? 'an unknown time' : new Date(program.retry.nextAt).toISOString()}` : 'none reported';
   const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
-  const action = restart.allowed ? 'Use restart_program now to resume this session safely.' : `restart_program is not allowed now: ${restart.reason} Tell the head these facts if the program stays silent.`;
+  const restartLine = restart.allowed ? 'restart_program is allowed now, for a wait the screen shows dead.' : `restart_program is not allowed now: ${restart.reason}`;
+  const action = `Read program_screen for employee ${s.agent.id} and do at its screen what it needs to go on. ${restartLine} When nothing you may do helps, tell your head what the screen shows.`;
   return (
     `Hornhoof: ${who} triggered a turn alarm in turn ${s.job.id} (${where}). ` +
     `Program state: ${programLabel(program)}, since ${stateSince}. Last change: ${when(iso)} (${iso}). ` +
@@ -321,9 +324,25 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
     if (to && to.id !== s.agent.id) await dispatchAlarm(ctx, s, to, now, `${s.job.id}:after_restart`);
     return;
   }
-  const able = await operationsWatchers(ctx, s.job.companyId);
-  const opsTo = pickOpsRecipient(able, s.agent.id, unavailable);
-  if (opsTo) await dispatchAlarm(ctx, s, opsTo, now);
+  const to = await screenReader(ctx, s, unavailable);
+  if (to) await dispatchAlarm(ctx, s, to, now, quietCase(s, now));
+}
+
+/* Whoever hears of a quiet program must see its screen: a free program operator, or else the head of Operations, or else
+   an operator at work. */
+async function screenReader(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<string>): Promise<Agent | null> {
+  const staff: Agent[] = [];
+  for (const a of await operationsStaff(ctx, s.job.companyId)) if (a.id !== s.agent.id && await liveSubscription(ctx, a.id)) staff.push(a);
+  const operators = staff.filter(a => a.kind === 'worker');
+  return operators.find(a => !unavailable.has(a.id)) ?? staff.find(a => a.kind === 'head') ?? operators[0] ?? null;
+}
+
+/* One call when the quiet begins and one more each time it doubles, so a program nobody brought back is looked at again.
+   The quiet is counted in the wait that raised the alarm: the longer one only for a tool of a node that tells its signs. */
+function quietCase(s: SilentTurn, now: Date): string {
+  const threshold = s.alarm.reason === 'program_stalled' && s.program?.state === 'tool' && s.program.signAt !== null ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
+  const doubled = Math.floor(Math.log2(Math.max(1, (now.getTime() - s.alarm.since) / threshold)));
+  return doubled ? `${s.job.id}:quiet:${doubled}` : s.job.id;
 }
 
 export function checkSilentTurns(ctx: Ctx, now = new Date()): Promise<void> {

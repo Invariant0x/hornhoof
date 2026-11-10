@@ -35,5 +35,5 @@ export async function failureCompany(env: NodeJS.ProcessEnv = {}) {
   const turnsOf = (id = agent.id) => db.select().from(jobs).where(eq(jobs.agentId, id)).orderBy(asc(jobs.createdAt));
   const fail = (id: string, failure?: Failure, now = new Date()) => handleNodeMessage(ctx, BUILTIN, { type: 'job.done', jobId: id, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Failed.', result: '', ...(failure ? { failure } : {}) }, now);
   const log = (id: string) => db.select().from(taskEvents).where(eq(taskEvents.taskId, id));
-  return { app, db, ctx, ceo, sub: sub!, companyId, dev: dev!, agent, head, watcher, sent, fail, jobOf, turnsOf, log, as };
+  return { app, db, ctx, ceo, sub: sub!, companyId, dev: dev!, agent, head, watcher, ops: ops!, hire, sent, fail, jobOf, turnsOf, log, as };
 }

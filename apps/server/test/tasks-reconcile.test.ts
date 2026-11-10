@@ -149,7 +149,8 @@ describe('turns on a machine that went away', () => {
   it('fails a running conversation after five minutes away and continues through the failed-turn path once', async () => {
     const c = await company();
     const task = await c.task({ status: 'working' });
-    const job = await c.job({ taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + MIN) });
+    /* A turn young enough that its machine going away is all that happens to it: no quiet alarm falls due meanwhile. */
+    const job = await c.job({ taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + 9 * MIN) });
     c.ready.mockReturnValue(false);
     await handleNodeClose(c.ctx, BUILTIN);
     const away = c.ctx.hub.awaySince(BUILTIN)!;

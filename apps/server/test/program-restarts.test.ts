@@ -17,6 +17,7 @@ type Result = { content: { text: string }[]; isError?: boolean };
 type Handler = (args: { employee: string }) => Promise<Result>;
 async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'codex') {
   const c = await failureCompany();
+  const operator = await c.hire('Olga', 'worker', 'OPS-PROGRAM', c.ops.id);
   await c.db.update(subscriptions).set({ provider, kind: 'personal' }).where(eq(subscriptions.id, c.sub.id));
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'mac-12345', hostname: 'Mac' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, version: '0.5.0', status: 'ready', keyHash: 'node-key-hash' }).returning();
@@ -47,7 +48,7 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
       return true;
     });
   };
-  return { ...c, id, node: node!, identity, task, report, run, answer, registered };
+  return { ...c, operator, id, node: node!, identity, task, report, run, answer, registered };
 }
 
 describe('restart_program', () => {
@@ -57,14 +58,14 @@ describe('restart_program', () => {
     const { agentProgramState, checkSilentTurns } = await import('../src/modules/tasks/silent.js');
     await checkSilentTurns(c.ctx);
     expect(agentProgramState(c.ctx, { id: c.id }).alarm).toMatchObject({ reason: 'program_stalled' });
-    const notices = await c.turnsOf(c.watcher.id);
+    const notices = await c.turnsOf(c.operator.id);
     expect(notices).toHaveLength(1);
     expect(notices[0]!.prompt).toContain('restart_program is not allowed');
     expect((await c.run()).isError).toBe(true);
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(false);
     expect((await c.jobOf(c.id)).status).toBe('running');
     await checkSilentTurns(c.ctx);
-    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.operator.id)).toHaveLength(1);
   });
 
   it('stops an obsolete native agy turn with a lost successful Stop instead of alerting Operations', async () => {

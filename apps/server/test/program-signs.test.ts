@@ -1,7 +1,7 @@
 import type { ProgramState } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { jobs, tasks } from '../src/db/schema.js';
+import { agents, jobs, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -11,8 +11,13 @@ import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
 
 const MIN = 60_000;
+/* The company with a program operator in Operations, who sees the screens. */
+async function company() {
+  const c = await failureCompany();
+  return { ...c, operator: await c.hire('Olga', 'worker', 'OPS-PROGRAM', c.ops.id) };
+}
 /* A working task with its required route, and a turn that carries the wake state a real assignment leaves. */
-async function taskTurn(c: Awaited<ReturnType<typeof failureCompany>>) {
+async function taskTurn(c: Awaited<ReturnType<typeof company>>) {
   const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
   await c.db.transaction(tx => createRoute(tx, task!, {}));
   const taskWake = taskWakeOf(task!, { why: 'go_on' }, routeSnapshot(await routeOf(c.db, task!), task!.assigneeAgentId));
@@ -21,7 +26,7 @@ async function taskTurn(c: Awaited<ReturnType<typeof failureCompany>>) {
 }
 describe('silence measured by signs of life', () => {
   it.each(['done', 'cancelled'] as const)('stops silent work on a %s task before it can call Operations', async status => {
-    const c = await failureCompany();
+    const c = await company();
     const { task, id } = await taskTurn(c);
     const now = Date.now();
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: now - 31 * MIN, screenAt: now, signAt: now - 31 * MIN }, new Date(now));
@@ -34,7 +39,7 @@ describe('silence measured by signs of life', () => {
   });
 
   it('keeps the last program evidence and redacted 200-line tail when running work becomes stale', async () => {
-    const c = await failureCompany();
+    const c = await company();
     const { task, id } = await taskTurn(c);
     const now = Date.now();
     const signAt = now - 121 * MIN;
@@ -62,7 +67,7 @@ describe('silence measured by signs of life', () => {
   });
 
   it('says when a running stale turn never reported its program state or a sign of life', async () => {
-    const c = await failureCompany();
+    const c = await company();
     const { task, id } = await taskTurn(c);
     const now = Date.now();
     await c.db.update(jobs).set({ startedAt: new Date(now - 31 * MIN) }).where(eq(jobs.id, id));
@@ -76,8 +81,8 @@ describe('silence measured by signs of life', () => {
     expect(stale.failure!.text).toContain('Last sign of life: no data');
   });
 
-  it.each<[ProgramState, number]>([['thinking', 30], ['retrying', 30], ['idle', 30], ['tool', 120]])('%s alarms at %i minutes since the sign, even while the screen changes', async (state, minutes) => {
-    const c = await failureCompany();
+  it.each<[ProgramState, number]>([['thinking', 10], ['retrying', 10], ['idle', 10], ['tool', 30]])('%s alarms at %i minutes since the sign, even while the screen changes, and whoever sees its screen is told', async (state, minutes) => {
+    const c = await company();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
     const signAt = Date.now();
     const report = (now: number, lastSign = signAt) => handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state, since: signAt - MIN, screenAt: now, signAt: lastSign, ...(state === 'retrying' ? { retry: { attempt: 2, max: 5, nextAt: null } } : {}), ...(state === 'tool' ? { tool: 'Bash' } : {}) }, new Date(now));
@@ -87,19 +92,20 @@ describe('silence measured by signs of life', () => {
     await report(signAt + minutes * MIN);
     await checkSilentTurns(c.ctx, new Date(signAt + minutes * MIN));
     expect(agentProgramState(c.ctx, { id }).alarm).toEqual({ reason: 'program_stalled', since: signAt });
-    const notices = await c.turnsOf(c.watcher.id);
+    const notices = await c.turnsOf(c.operator.id);
     expect(notices).toHaveLength(1);
-    for (const fact of [state, new Date(signAt).toISOString(), 'Last sign', 'restart_program', 'outside any task']) expect(notices[0]!.prompt).toContain(fact);
+    for (const fact of [state, new Date(signAt).toISOString(), 'Last sign', `program_screen for employee ${c.agent.id}`, 'restart_program', 'outside any task']) expect(notices[0]!.prompt).toContain(fact);
     if (state === 'retrying') expect(notices[0]!.prompt).toContain('2 of 5');
     await checkSilentTurns(c.ctx, new Date(signAt + minutes * MIN + 1));
-    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.operator.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
     await report(signAt + minutes * MIN + 2, signAt + minutes * MIN + 2);
     await checkSilentTurns(c.ctx, new Date(signAt + minutes * MIN + 2));
     expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
   });
 
   it('counts the quiet from the turn start while the program gave no sign yet', async () => {
-    const c = await failureCompany();
+    const c = await company();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
     const job = await c.jobOf(id);
     const start = (job!.startedAt ?? job!.createdAt).getTime();
@@ -107,18 +113,51 @@ describe('silence measured by signs of life', () => {
     await report(start + 2000);
     await checkSilentTurns(c.ctx, new Date(start + 2000));
     expect(agentProgramState(c.ctx, { id }).alarm).toBeNull();
-    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
-    await report(start + 30 * MIN);
-    await checkSilentTurns(c.ctx, new Date(start + 30 * MIN));
+    expect(await c.turnsOf(c.operator.id)).toEqual([]);
+    await report(start + 10 * MIN);
+    await checkSilentTurns(c.ctx, new Date(start + 10 * MIN));
     expect(agentProgramState(c.ctx, { id }).alarm).toEqual({ reason: 'program_stalled', since: start });
-    const notices = await c.turnsOf(c.watcher.id);
+    const notices = await c.turnsOf(c.operator.id);
     expect(notices).toHaveLength(1);
     expect(notices[0]!.prompt).not.toContain('1970');
     expect(notices[0]!.prompt).toContain(`Last sign: none since the turn started at ${new Date(start).toISOString()}`);
   });
 
+  it('tells again each time the quiet doubles, and nothing in between', async () => {
+    const c = await company();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    const signAt = Date.now();
+    const quietFor = async (minutes: number) => {
+      const now = signAt + minutes * MIN;
+      await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
+      await checkSilentTurns(c.ctx, new Date(now));
+      return (await c.turnsOf(c.operator.id)).length;
+    };
+    expect([await quietFor(10), await quietFor(19), await quietFor(20), await quietFor(39), await quietFor(40)]).toEqual([1, 1, 2, 2, 3]);
+  });
+
+  it('tells the head of Operations while the program operator is at work, and an operator at work when there is no head', async () => {
+    const c = await company();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
+    await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.operator.id, prompt: 'Another program', createdBy: null });
+    const signAt = Date.now();
+    const quietFor = async (minutes: number) => {
+      const now = signAt + minutes * MIN;
+      await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'thinking', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
+      await checkSilentTurns(c.ctx, new Date(now));
+    };
+    await quietFor(10);
+    expect(await c.turnsOf(c.operator.id)).toHaveLength(2);
+    const [opsHead] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Hugo', kind: 'head', roleKey: 'OPS-HEAD', departmentId: c.ops.id, subscriptionId: c.sub.id, model: '' }).returning();
+    await quietFor(20);
+    /* The operator's own quiet turn is told to the head too: only the call about the developer counts here. */
+    expect((await c.turnsOf(opsHead!.id)).filter(turn => turn.prompt.includes(c.agent.id))).toHaveLength(1);
+    expect(await c.turnsOf(c.operator.id)).toHaveLength(2);
+    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
+  });
+
   it('never calls a live node asking a person silent, even after two hours without a sign', async () => {
-    const c = await failureCompany();
+    const c = await company();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
     const now = Date.now();
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'asking', since: now - 180 * MIN, screenAt: now - 180 * MIN, signAt: now - 180 * MIN }, new Date(now));
@@ -129,7 +168,7 @@ describe('silence measured by signs of life', () => {
   });
 
   it('keeps the older node screen rule exactly, including an asking state', async () => {
-    const c = await failureCompany();
+    const c = await company();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
     const now = Date.now();
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'asking', since: now - 31 * MIN, screenAt: now - 30 * MIN }, new Date(now));

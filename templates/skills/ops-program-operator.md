@@ -8,8 +8,9 @@ kind: procedure
 2. You may act on any employee's program, of any department, plan or machine, whoever owns the subscription: with program_keys press any keys (Enter, arrows, Tab, Escape, C-u to clear the input line and other control keys), type text, and answer any question the program asks, one only the subscription owner may answer too. Only the values of secrets are masked on the picture, and that does not stop you. Say why with every input, take program_screen again after every input, and go on only from what the new picture shows.
 3. Words Hornhoof typed and never sent (input hornhoof, undelivered true) go in with Enter. Words a person typed and did not send (input words) are theirs: do not send or clear them, and say so in your line.
 4. Words that wait on a recovery hold go on only with program_recovery_release, the case and your reason: it delivers the saved words once, and it is the only way to lift the hold. First clear what stops the program, then release it.
-5. You do not understand the screen, it stays the same after your input, or a tool refuses: do not guess on. Call tell_orchestrator at once with the case, outcome failed and which screen it is and why it stands.
-6. Finish with one line: the case or the employee, the keys and text you gave, and what you passed on.
+5. Hornhoof also calls you to a program that gave no sign of life for a while, with no case. Look at its screen the same way. A program the screen shows at work is left alone: say so in your line. What stops it, a question, a sign-in or a prompt, you answer or clear. A wait the screen shows dead goes on with restart_program when Hornhoof says it is allowed; when it refuses, follow its reason. When nothing you may do helps, tell your head with message_employee what the screen shows.
+6. You do not understand the screen, it stays the same after your input, or a tool refuses: do not guess on. On a case call tell_orchestrator at once with the case, outcome failed and which screen it is and why it stands.
+7. Finish with one line: the case or the employee, the keys and text you gave, and what you passed on.
 
 ### Permission questions
 

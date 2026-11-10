@@ -110,7 +110,8 @@ describe('the Task watchdog and a machine waiting for an update', () => {
     const [turn] = await f.db.insert(jobs).values({ companyId: f.acme.id, subscriptionId: f.sub.id, agentId: f.bruno.id, kind: 'conversation', prompt: 'Go on', timeoutMs: 7_200_000, status: 'running', startedAt }).returning();
     if (waits) await f.waitForUpdate();
     await checkSilentTurns(f.app.ctx);
-    const alarms = await f.db.select().from(agentEvents).where(sql`${agentEvents.data}->>'silentJob' = ${turn!.id}`);
+    /* Seen first at twice the quiet that raises it, the call is the one of the first doubling. */
+    const alarms = await f.db.select().from(agentEvents).where(sql`${agentEvents.data}->>'silentJob' = ${`${turn!.id}:quiet:1`}`);
     expect(alarms.map(a => a.agentId)).toEqual([f.odin.id]);
     expect(alarms[0]!.data).toMatchObject({ silentReason: 'node_silent' });
   });
