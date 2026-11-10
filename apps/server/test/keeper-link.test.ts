@@ -23,6 +23,7 @@ import { newAccountKey } from '../src/modules/tls/acme.js';
 import { linkMode, readLinkMode, saveTls, servedCertificate, updateTls } from '../src/modules/tls/store.js';
 import { certInfo, selfSigned } from '../src/modules/tls/x509.js';
 import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { fakeLease } from './fake-lease.js';
 import { visitorHeader } from './proxy-v2.js';
 
 const MACHINE_ID = `ab12cd34${'0'.repeat(24)}`;
@@ -90,6 +91,8 @@ async function keeperOn(db: Db, env: NodeJS.ProcessEnv = {}, extra: Partial<Keep
   const keeper = new Keeper({
     config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: dir, HORNHOOF_MACHINE_ID: MACHINE_ID, ACME_DIRECTORY: 'off', ...env }),
     db,
+    /* A lease that always holds, as on a healthy machine, unless the test gives another. */
+    lease: fakeLease(),
     app: NOWHERE,
     frontHost: null,
     log: line => lines.push(line),

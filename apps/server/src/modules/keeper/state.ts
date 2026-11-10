@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 export const KEEPER_FILE = 'keeper.json';
-const FRESH_MS = 10_000;
+export const FRESH_MS = 10_000;
 
 export const MODES = ['lead', 'read', 'maintenance', 'off'] as const;
 export type Mode = (typeof MODES)[number];

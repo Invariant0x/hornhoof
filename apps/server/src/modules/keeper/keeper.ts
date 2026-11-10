@@ -10,6 +10,10 @@ import { TunnelKeeper, type Client, type TunnelSettings } from '../link/tunnel.j
 import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
 import { servedCertificate } from '../tls/store.js';
 import { certInfo } from '../tls/x509.js';
+import type { Term } from '../../db/net.js';
+import { LeaseHolder } from './lease-holder.js';
+import type { LeaseStore } from './lease-store.js';
+import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
 import { updaterBusy } from './updater-status.js';
 
@@ -33,6 +37,10 @@ export type KeeperOptions = {
   linkEveryMs?: number;
   /* What runs the link's traffic; frpc unless a test says otherwise. */
   clientFor?: (settings: TunnelSettings, clientId: string, local: FrpcLocal) => Client;
+  /* Where this machine's lease is held. Null: it holds none, and the app never leads on its word. */
+  lease: LeaseStore | null;
+  now?: () => Clocks;
+  pruneEveryMs?: number;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -54,12 +62,6 @@ const MAINTENANCE_JSON = JSON.stringify({
   error: { code: 'unavailable', message: 'Hornhoof is installing an update and takes no changes until it ends.', reason: 'maintenance' },
 });
 const MAINTENANCE_TEXT = 'Hornhoof is installing an update. Try again in a few minutes.\nHornhoof ставит обновление. Попробуйте через несколько минут.\n';
-
-/* A status the keeper cannot tell anything from keeps the mode it has, so a torn file never ends a maintenance. */
-function modeAfter(busy: boolean | null, was: Mode): Mode {
-  if (busy === null) return was;
-  return busy ? 'maintenance' : 'lead';
-}
 
 /* startingAnswer already decides who gets JSON and who gets a page, so the two answers cannot split differently. */
 function maintenanceAnswer(req: http.IncomingMessage): Refusal {
@@ -140,11 +142,12 @@ function closeWithin(server: http.Server, ms: number): Promise<void> {
   });
 }
 
-/* Sets the app's mode, runs the public link's frpc as its child, ends the link's TLS, and carries what comes in from front
-   and the link to the app. */
+/* Holds this machine's lease and sets the app's mode by it, runs the public link's frpc as its child, ends the link's TLS,
+   and carries what comes in from front and the link to the app. */
 export class Keeper {
-  private current: Mode = 'lead';
+  private readonly holder: LeaseHolder;
   private timer: NodeJS.Timeout | null = null;
+  private fencesTimer: NodeJS.Timeout | null = null;
   private certificateTimer: NodeJS.Timeout | null = null;
   private doors: http.Server[] = [];
   /* A word that cannot be written is said once in the log, not once a second. */
@@ -157,20 +160,31 @@ export class Keeper {
   constructor(private readonly opts: KeeperOptions) {
     const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
     this.listener = new LinkListener({ server: this.door(visitorFromTls), log });
+    this.holder = new LeaseHolder({ lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log });
   }
 
   mode(): Mode {
-    return this.current;
+    return this.holder.mode();
+  }
+
+  /* The term this machine holds, while its lease stands. */
+  term(): Term | null {
+    return this.holder.term();
   }
 
   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
-    const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, db } = this.opts;
+    const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, linkEveryMs = LINK_EVERY_MS, db } = this.opts;
     const at = { ...DOOR_PORTS, ...ports };
+    /* The lease and the fences come before the first word, so a healthy machine leads from it. */
+    const tick = oneAtATime(() => this.holder.tick().then(() => this.giveWord()));
+    await this.holder.tick();
+    await this.holder.look();
     this.giveWord();
     const front = await this.open(visitorFromFront(frontHost), at.front, host);
     const linkHttp = await this.open(visitorFromLink, at.linkHttp, LINK_HOST);
     const linkTls = await this.listener.listen(at.linkTls);
-    this.timer = setInterval(() => this.giveWord(), everyMs);
+    this.timer = setInterval(() => void tick(), everyMs);
+    this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
     if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     return { front, linkHttp, linkTls };
   }
@@ -178,16 +192,17 @@ export class Keeper {
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     if (this.certificateTimer) clearInterval(this.certificateTimer);
-    this.timer = this.certificateTimer = null;
+    if (this.fencesTimer) clearInterval(this.fencesTimer);
+    this.timer = this.certificateTimer = this.fencesTimer = null;
     await Promise.all([this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    await this.opts.lease?.close().catch(() => undefined);
   }
 
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */
   private giveWord(): void {
     const dir = this.opts.config.controlDir;
-    this.current = modeAfter(updaterBusy(dir), this.current);
     try {
-      writeKeeperState(dir, { mode: this.current, at: new Date().toISOString(), link: this.link });
+      writeKeeperState(dir, { mode: this.mode(), at: new Date().toISOString(), link: this.link });
       this.wordFails = false;
     } catch (err) {
       if (!this.wordFails) this.opts.log(`The keeper could not write its word to the app: ${err instanceof Error ? err.message : String(err)}`);
@@ -206,7 +221,7 @@ export class Keeper {
   }
 
   private appIsDown(req: http.IncomingMessage): Refusal {
-    return this.current === 'maintenance' ? maintenanceAnswer(req) : startingAnswer(req);
+    return this.mode() === 'maintenance' ? maintenanceAnswer(req) : startingAnswer(req);
   }
 
   /* The certificate is followed also without a machine id: the app goes by the keeper's word on it either way. */

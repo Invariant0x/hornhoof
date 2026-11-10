@@ -70,7 +70,6 @@ describe('the lease the keeper holds in the database', () => {
   it('names each fence that does not hold', async () => {
     const s = await store();
     const role = agentRole('postgres');
-    // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- The file runs on databases of its own.
     await s.run.query(`ALTER TABLE companies DISABLE TRIGGER net_journal; ALTER TABLE net.journal DISABLE TRIGGER net_fence;
       GRANT EXECUTE ON FUNCTION net.attach_journal() TO PUBLIC; GRANT SELECT ON net_local.lease TO "${role}"; GRANT pg_signal_backend TO "${role}"`);
     expect(await s.lease.problems()).toEqual([

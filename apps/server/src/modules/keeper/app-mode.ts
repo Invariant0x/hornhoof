@@ -1,6 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import { ApiError, loggable } from '../../errors.js';
-import { freshState, type Mode } from './state.js';
+import { FRESH_MS, freshState, type KeeperState, type Mode } from './state.js';
 
 const CHECK_EVERY_MS = 1000;
 
@@ -33,6 +33,8 @@ export class AppMode {
   private stay: LeadStay = { entered: [], over: true };
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
+  /* When the keeper gave its last fresh word. */
+  private heardAt: number | null = null;
   /* Hook runs, one after another, so a quick lead, read, lead never overlaps its own work. */
   private pending: Promise<void> = Promise.resolve();
 
@@ -65,9 +67,22 @@ export class AppMode {
 
   async check(): Promise<void> {
     if (this.stopped) return;
-    const word = this.opts.fromKeeper ? freshState(this.opts.dir, (this.opts.now ?? Date.now)(), this.opts.staleMs) : null;
-    if (word) this.change(word.mode);
+    const now = (this.opts.now ?? Date.now)();
+    const word = this.opts.fromKeeper ? freshState(this.opts.dir, now, this.opts.staleMs) : null;
+    if (word) this.heard(word);
+    else if (this.keeperWentSilent(now)) this.change('read');
     await this.pending;
+  }
+
+  private heard(word: KeeperState): void {
+    this.heardAt = Date.parse(word.at);
+    this.change(word.mode);
+  }
+
+  /* A keeper that stopped speaking renews no lease either, so the database refuses this app's changes within the same
+     ten seconds: the app says so itself and serves what it can read. Any other mode stays until the keeper's next word. */
+  private keeperWentSilent(now: number): boolean {
+    return this.opts.fromKeeper && this.mode === 'lead' && this.heardAt !== null && now - this.heardAt > (this.opts.staleMs ?? FRESH_MS);
   }
 
   /* Entered after whatever is pending, so a hook never starts ahead of or beside the ones registered before it. */

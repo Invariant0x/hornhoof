@@ -93,6 +93,35 @@ describe('AppMode', () => {
     expect(mode.current()).toBe('maintenance');
   });
 
+  it('stops leading once the keeper has said nothing fresh for ten seconds, and leads again on its next word', async () => {
+    const dir = folder();
+    let now = NOW;
+    const { mode, lines } = modeIn(dir, { now: () => now });
+    writeKeeperState(dir, stateOf('lead'));
+    await mode.check();
+    now = NOW + 10_000;
+    await mode.check();
+    expect(mode.current()).toBe('lead');
+    now = NOW + 10_001;
+    await mode.check();
+    expect(mode.current()).toBe('read');
+    expect(lines.at(-1)).toBe('Hornhoof now runs in read mode.');
+    writeKeeperState(dir, stateOf('lead', now));
+    await mode.check();
+    expect(mode.current()).toBe('lead');
+  });
+
+  it('keeps a maintenance the keeper stopped speaking of: only its word ends one', async () => {
+    const dir = folder();
+    let now = NOW;
+    const { mode } = modeIn(dir, { now: () => now });
+    writeKeeperState(dir, stateOf('maintenance'));
+    await mode.check();
+    now = NOW + 60_000;
+    await mode.check();
+    expect(mode.current()).toBe('maintenance');
+  });
+
   it("keeps its mode when the keeper's word is stale or unreadable", async () => {
     const dir = folder();
     const { mode } = modeIn(dir);

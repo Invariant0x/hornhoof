@@ -19,6 +19,7 @@ import { updaterBusy } from '../src/modules/keeper/updater-status.js';
 import { LINK_TLS_PORT } from '../src/modules/tls/listener.js';
 import type { Target } from '../src/net/proxy.js';
 import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+import { fakeLease } from './fake-lease.js';
 
 const FAST = { everyMs: 50 };
 const MAINTENANCE_MESSAGE = 'Hornhoof is installing an update and takes no changes until it ends.';
@@ -72,6 +73,8 @@ async function keeperOn(app: Target, extra: Partial<KeeperOptions> = {}, dir: st
     config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: dir }),
     db: null,
     app,
+    /* A lease that always holds, as on a healthy machine, unless the test gives another. */
+    lease: fakeLease(),
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
@@ -199,8 +202,7 @@ describe('the keeper', () => {
     const { front, lines } = await keeperOn(await echoHeaders(), { everyMs: 20 }, dir);
     expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
     await sleep(150);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/could not write/);
+    expect(lines.filter(line => /could not write/.test(line))).toHaveLength(1);
     mkdirSync(dir);
     await until(() => wordIn(dir) === 'lead');
   });
@@ -396,7 +398,8 @@ describe('the keeper container', () => {
     ]);
     expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
     expect(said.find(word => word.target)?.target).toEqual({ host: 'app', port: 8080 });
-    expect(wordIn(dir)).toBe('lead');
+    /* It was started with no machine id, so it holds no lease, and without one the app never leads on its word. */
+    expect(wordIn(dir)).toBe('read');
     child.kill(signal);
     expect(await exit).toEqual([0, null]);
   });
