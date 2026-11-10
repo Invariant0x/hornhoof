@@ -16,8 +16,8 @@ export type WakeCause = {
 
 type ActionNote = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; automatic?: NotificationSource };
 const ACTIONS: Partial<Record<TaskEventKind, string>> = {
-  created: 'assigned work', assigned: 'assigned work', submitted: 'handed in work', cancelled: 'cancelled work',
-  blocked: 'blocked work', updated: 'rewrote work', comment: 'commented', asked: 'asked people',
+  created: 'assigned work', assigned: 'assigned work', submitted: 'handed in work', report: 'reported work done', cancelled: 'cancelled work',
+  blocked: 'blocked work', updated: 'rewrote work', comment: 'commented', verdict: 'reviewed work', asked: 'asked people',
 };
 const AUTOMATIC = new Set(['reminder', 'go_on', 'wait_ended', 'tests', 'work', 'turn']);
 
@@ -28,19 +28,11 @@ function answerAction(note: ActionNote): string {
   return 'answered';
 }
 
-function verdictAction(note: ActionNote): string {
-  if (note.data?.pass !== false) return 'reviewed work';
-  return note.data.wrongGoal === true ? 'escalated work' : 'kept work for repair';
-}
-
-function reportAction(note: ActionNote): string {
-  return note.data?.done === false ? 'reported blocked work' : 'reported work done';
-}
-
-const DECIDED: Partial<Record<TaskEventKind, (note: ActionNote) => string>> = { answered: answerAction, verdict: verdictAction, report: reportAction };
-
 function actionOf(note: ActionNote): string | undefined {
-  return DECIDED[note.kind]?.(note) ?? ACTIONS[note.kind];
+  if (note.kind === 'answered') return answerAction(note);
+  if (note.kind === 'verdict' && note.data?.pass === false) return note.data.wrongGoal === true ? 'escalated work' : 'kept work for repair';
+  if (note.kind === 'report' && note.data?.done === false) return 'reported blocked work';
+  return ACTIONS[note.kind];
 }
 
 function waitCause(task: Task): WakeCause['wait'] {
