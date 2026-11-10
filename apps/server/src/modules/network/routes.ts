@@ -30,7 +30,12 @@ type Holder = { id: string; role: MachineRole };
    runs on, or a peer machine the keeper's peer door named by its certificate. */
 export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config } = ctx;
-  const asker = async (req: FastifyRequest): Promise<Asker> => (await askerOf(req, config)) ?? (() => { throw notKeeper(); })();
+  /* Every route here asks this first: who is not the keeper gets no further. */
+  const requireKeeper = async (req: FastifyRequest): Promise<Asker> => {
+    const who = await askerOf(req, config);
+    if (!who) throw notKeeper();
+    return who;
+  };
   const leading = () => ctx.mode.current() === 'lead';
   /* The database holds one company, the one this app serves. */
   const companyId = async (): Promise<string> => {
@@ -55,7 +60,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* An older certificate of the machine is not revoked: it ends by itself. */
   app.post('/api/network/certificate', async req => {
-    const who = await asker(req);
+    const who = await requireKeeper(req);
     const { signKey } = CertificateBody.parse(req.body);
     const holder = await holderOf(who, signKey);
     const authority = await makeAuthorityOnce(db, config, await companyId());
@@ -89,7 +94,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   app.get('/api/network/peers', async req => {
-    const machine = await machineOf(await asker(req));
+    const machine = await machineOf(await requireKeeper(req));
     const authority = await authorityOf(db, config);
     const revoked = await revokedSerials(db);
     /* Only the leader signs, so only it uses the authority's key. */
@@ -98,7 +103,7 @@ export function networkRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.post('/api/network/report', async (req, reply) => {
-    const who = await asker(req);
+    const who = await requireKeeper(req);
     const said = ReportBody.parse(req.body ?? {});
     const machine = await machineOf(who);
     if (machine) await db.update(machines).set({ ...said, reportAt: new Date() }).where(eq(machines.id, machine.id));

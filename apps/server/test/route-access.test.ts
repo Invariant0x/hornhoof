@@ -48,6 +48,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'targets', path: /^\/api\/nodes\/update$/, rule: 'node key and builtin scope for server updates' },
   { name: 'identify', path: /^\/api\/nodes\/socket$/, rule: 'node key before websocket upgrade' },
   { name: 'nodeOf', path: /^\/api\/harness\/(?:claim|:key\/(?:done|failed|bundle|parts\/:index))$/, rule: 'node key, and a build of that node or of a product whose tests it may take' },
+  { name: 'requireKeeper', path: /^\/api\/network\/(?:certificate|peers|report)$/, rule: "this machine's keeper alone: its address together with the header no door lets through" },
   { name: 'partOf', path: /^\/api\/parts\/:id\/files\/:name$/, rule: 'node key and active owned work part' },
 ];
 
