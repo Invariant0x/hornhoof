@@ -11,14 +11,22 @@ const holding = (kind: LeaseKind, sent: Clocks = t0): Held => ({ term: { number:
 const normalLease = holding('normal');
 const maintenanceLease = holding('maintenance');
 
-const take = (kind: LeaseKind): LeaseStep => ({ do: 'take', kind });
-const fence = (why: string): LeaseStep => ({ do: 'fence', why });
-const renew = (kind: LeaseKind, endSessions = false): LeaseStep => ({ do: 'renew', kind, endSessions });
+type PlanStep = { do: 'take'; kind: LeaseKind } | { do: 'fence'; why: string } | { do: 'renew'; kind: LeaseKind; endSessions: boolean };
 
-type Row = [name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: LeaseStep];
+const take = (kind: LeaseKind): PlanStep => ({ do: 'take', kind });
+const fence = (why: string): Extract<LeaseStep, { do: 'fence' }> => ({ do: 'fence', why });
+const renew = (kind: LeaseKind, endSessions = false): PlanStep => ({ do: 'renew', kind, endSessions });
 
-const picksThisStep = (_name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: LeaseStep) => {
-  expect(nextLeaseStep({ now, last, held, maintenance })).toEqual(step);
+/* Plan 3's table says nothing of proofs and entries: left out, the proof is now and a take is sent now under no given term. */
+const withNewInputsLeftOut = (step: PlanStep, now: Clocks): LeaseStep => {
+  if (step.do === 'take') return { ...step, sent: now, term: null };
+  return step.do === 'renew' ? { ...step, sent: now } : step;
+};
+
+type Row = [name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: PlanStep];
+
+const picksThisStep = (_name: string, held: Held | null, last: Clocks | null, now: Clocks, maintenance: boolean, step: PlanStep) => {
+  expect(nextLeaseStep({ now, last, held, maintenance })).toEqual(withNewInputsLeftOut(step, now));
 };
 
 describe('leaseValid', () => {
@@ -105,4 +113,39 @@ describe('nextLeaseStep', () => {
   ];
 
   it.each(others)('%s', picksThisStep);
+});
+
+describe('nextLeaseStep with proofs', () => {
+  const lastRenewal = at(1000);
+  const held = holding('normal', lastRenewal);
+  const onTime = { now: at(2000), last: at(1000), held, maintenance: false };
+  const entry = { sent: at(1500), term: { number: 8, machine: 'a', split: false } };
+
+  const rows: [name: string, inputs: Parameters<typeof nextLeaseStep>[0], step: LeaseStep][] = [
+    ['a proof sent 0.5 s after the last renewal', { ...onTime, proof: at(1500) }, { do: 'renew', kind: 'normal', endSessions: false, sent: at(1500) }],
+    ['a proof sent 1 ms after the last renewal', { ...onTime, proof: at(1001) }, { do: 'renew', kind: 'normal', endSessions: false, sent: at(1001) }],
+    ['a proof sent when the last renewal was', { ...onTime, proof: at(1000) }, { do: 'none' }],
+    ['a proof sent before the last renewal', { ...onTime, proof: at(500) }, { do: 'none' }],
+    ['no proof', { ...onTime, proof: null }, { do: 'none' }],
+    /* Only the monotonic clock decides what came after what: the wall clock can be corrected between the two. */
+    ['a proof later on the wall clock alone', { ...onTime, proof: at(1500, 1000) }, { do: 'none' }],
+    ['a proof later on the monotonic clock alone', { ...onTime, proof: at(500, 1500) }, { do: 'renew', kind: 'normal', endSessions: false, sent: at(500, 1500) }],
+    ['10 s after the last renewal with no newer proof', { now: at(11000), last: at(10000), held, maintenance: false, proof: null }, fence('no renewal for 10 s')],
+    ['10 s after the last renewal, even with a newer proof', { now: at(11000), last: at(10000), held, maintenance: false, proof: at(10500) }, fence('no renewal for 10 s')],
+    ['a late tick, even with a newer proof', { now: at(9000), last: at(2000), held, maintenance: false, proof: at(8500) }, fence('a tick came 7 s after the one before')],
+    ['another machine at the link, whatever its time', { ...onTime, proof: at(1500), ended: 'another machine answers at the link' }, fence('another machine answers at the link')],
+    ['another machine at the link names that over a late tick', { now: at(9000), last: at(2000), held, maintenance: false, ended: 'a term above its own' }, fence('a term above its own')],
+    ['ended with nothing held has nothing to fence', { now: at(2000), last: at(1000), held: null, maintenance: false, entry, ended: 'a term above its own' }, { do: 'take', kind: 'normal', ...entry }],
+    ['no lease and no entry', { now: at(2000), last: at(1000), held: null, maintenance: false, entry: null }, { do: 'none' }],
+    ['an entry with its term', { now: at(2000), last: at(1000), held: null, maintenance: false, entry }, { do: 'take', kind: 'normal', ...entry }],
+    ['a split take', { now: at(2000), last: at(1000), held: null, maintenance: false, split: true, entry }, { do: 'take', kind: 'split', ...entry }],
+    ['a split renewal', { ...onTime, split: true, proof: at(1500) }, { do: 'renew', kind: 'split', endSessions: false, sent: at(1500) }],
+    ['maintenance over split on a take', { now: at(2000), last: at(1000), held: null, maintenance: true, split: true, entry }, { do: 'take', kind: 'maintenance', ...entry }],
+    ['maintenance over split on a renewal', { ...onTime, maintenance: true, split: true, proof: at(1500) }, { do: 'renew', kind: 'maintenance', endSessions: true, sent: at(1500) }],
+    ['maintenance going on ends no session', { ...onTime, held: maintenanceLease, maintenance: true, proof: at(1500) }, { do: 'renew', kind: 'maintenance', endSessions: false, sent: at(1500) }],
+  ];
+
+  it.each(rows)('renews only on a proof sent after the last renewal: %s', (_name, inputs, step) => {
+    expect(nextLeaseStep(inputs)).toEqual(step);
+  });
 });
