@@ -47,6 +47,8 @@ export async function atWork(kind: Kind, mode: Mode) {
   const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n${codexPrompt(input)}`
     : kimiScreen(input);
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  /* No other agent's program runs on the node: tmux is not asked, so no real process runs while the clock moves. */
+  vi.spyOn(tmux, 'livePrograms').mockResolvedValue([]);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
     mkdirSync(dirname(file), { recursive: true });
     if (kind === 'codex') record({ type: 'session_meta', payload: { id: SESSION, cwd: workDir } });

@@ -19,8 +19,10 @@ function fixture(operator = true) {
   const key = randomUUID(), jobId = randomUUID();
   const frames: OperatorNodeMessage[] = [];
   const tmux = new Tmux({ env: { HOME: home }, recordingsDir: join(home, 'recordings') });
+  /* The machine names its own Vitest workers, so the program starts with its launch settings alone and tmux is not asked
+     which programs run beside it, whatever the environment of the test run. */
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], readyMs: 100, pollMs: 5, cols: 120, rows: 40,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], readyMs: 100, pollMs: 5, cols: 120, rows: 40, env: { VITEST_MAX_WORKERS: '2' },
     ...(operator ? { operator: { dir: join(home, 'operator'), now: () => Date.now(), connected: () => true, send: (frame: OperatorNodeMessage) => { frames.push(frame); return true; } } } : {}),
   });
   cleanups.push(() => { clearInterval(host['operatorTimer']!); rmSync(home, { recursive: true, force: true }); });

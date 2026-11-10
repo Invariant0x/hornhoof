@@ -28,6 +28,8 @@ export async function atWork(takePrompt = true) {
   let initial = true;
   const record = (payload: object) => appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
+  /* No other agent's program runs on the node: tmux is not asked, so no real process runs while the clock moves. */
+  vi.spyOn(tmux, 'livePrograms').mockResolvedValue([]);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
     mkdirSync(logs, { recursive: true });
     appendFileSync(log, JSON.stringify({ type: 'session_meta', payload: { id: SESSION, cwd: workDir } }) + '\n');
