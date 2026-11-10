@@ -26,8 +26,8 @@ export type SubView = {
   limitsUpdatedAt: string | null;
   budget: number | null;
   isOrchestrator: boolean;
-  /* The account each machine's program is signed in to: the address only for the plan's owner and people who see the
-     whole company. tier when all machines say the same one; accountsDiffer when they are on different ones. */
+  /* The account each machine's program is signed in to: the address only for the plan's owner and the CEO.
+     tier when all machines say the same one; accountsDiffer when they are on different ones. */
   accounts: PlanAccount[];
   tier: string | null;
   accountsDiffer: boolean;
@@ -39,7 +39,7 @@ export type SubView = {
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
-/* Who asks for the view: the address of a plan's account goes to its owner and to people who see the whole company. */
+/* Who asks for the view: the address of a plan's account goes to its owner and to the CEO. */
 export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string };
 
 /* The tier all these accounts are on, and whether they are on different accounts or tiers. */

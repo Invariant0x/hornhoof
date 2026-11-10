@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
-import type { NodeIdentity } from '../nodes/hub.js';
+import { keyOf, type NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
 import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
@@ -17,7 +17,6 @@ type Saved = z.infer<typeof Saved>;
 type Drain = { node: NodeIdentity; view: MachineDrain };
 /* By the config, which a transaction's copy of the context shares with the context itself. */
 const states = new WeakMap<Ctx['config'], NodeDrains>();
-const keyOf = (node: NodeIdentity) => node.kind === 'builtin' ? 'builtin' : node.nodeId;
 const nodeOf = (key: string): NodeIdentity => key === 'builtin' ? { kind: 'builtin' } : { kind: 'node', nodeId: key };
 /* An installer that disappeared must not hold a node forever. Restarting gets longer for image/container startup. */
 const REQUEST_LEASE_MS = 2 * 60_000;

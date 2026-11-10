@@ -2,13 +2,12 @@ import type { CheckQueueRequest, NodeMessage } from '@hornhoof/protocol';
 import { and, desc, eq, like, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, nodes, machines, testParts } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { BUILTIN, keyOf, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { z } from 'zod';
 import { hashToken } from '../../crypto/tokens.js';
 import { CheckCoordinator } from './check-slots-queue.js';
 
 const queues = new WeakMap<Ctx, CheckCoordinator>();
-const keyOf = (id: NodeIdentity) => id.kind === 'builtin' ? 'builtin' : id.nodeId;
 
 function queueFor(ctx: Ctx): CheckCoordinator {
   let queue = queues.get(ctx);

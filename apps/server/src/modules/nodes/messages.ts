@@ -21,7 +21,7 @@ import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
-import { interruptionValue, type RestartCut } from './restart-evidence.js';
+import { interruptionValue, type Hello, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
 import { programsLive } from './program-room.js';
@@ -123,8 +123,6 @@ async function jobStarted(ctx: Ctx, id: NodeIdentity, jobId: string, now: Date):
 
 /* How the turn's program ended, as the node saw it; a node from before says nothing of it. */
 const exitOf = (exit?: { code: number | null; signal: string | null }) => ({ exitCode: exit?.code ?? null, exitSignal: exit?.signal ?? null });
-
-type Hello = Extract<NodeMessage, { type: 'hello' }>;
 
 /* What a node says of its plan's program: signed out, signed in but waiting for a first setup only the plan's owner may
    pass, or ready. */

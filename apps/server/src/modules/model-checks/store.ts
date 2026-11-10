@@ -176,7 +176,7 @@ async function finishRun(ctx: Pick<Ctx, 'db' | 'templates'>, run: RunRow, outcom
   });
 }
 
-/* What a passed run leads to beyond its check being on: #317 holds a certificate of it. */
+/* What a passed run leads to beyond its check being on: the minute round gives it the certifier. */
 type PassedRun = (evaluation: Evaluation) => Promise<void>;
 const NOTHING_MORE: PassedRun = async () => {};
 
@@ -212,7 +212,7 @@ export async function weeklyRound(ctx: Pick<Ctx, 'db'>, now: Date): Promise<void
 
 const rounds = new WeakSet<object>();
 
-/* One round at a time, however long its model takes: the server's minute goes on meanwhile. With no model yet every run ends
+/* One round at a time, however long its model takes: the server's minute goes on meanwhile. With no call given every run ends
    as no result, which leaves its check off. */
 export async function modelCheckRound(ctx: Pick<Ctx, 'db' | 'config' | 'templates'>, now: Date, call: RunModelCheck = NO_MODEL_YET, passed: PassedRun = NOTHING_MORE): Promise<void> {
   if (rounds.has(ctx)) return;

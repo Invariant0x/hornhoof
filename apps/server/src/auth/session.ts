@@ -106,3 +106,10 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
 export function requireCompanyScope(person: Person): void {
   if (person.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only people with access to the whole company can do this.', 'company_scope_only');
 }
+
+/* A signed-in person who sees the whole company. */
+export async function requireCompanyPerson(req: FastifyRequest, db: Db): Promise<Person> {
+  const me = await requirePerson(req, db);
+  requireCompanyScope(me);
+  return me;
+}

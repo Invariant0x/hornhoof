@@ -29,7 +29,7 @@ export async function acceptOperatorEvidence(ctx: Ctx, node: NodeIdentity, input
   return accepted;
 }
 
-/* A screen in a signal becomes the picture any program_screen gives, drawn outside the transaction. Its cells stop here, as
+/* A screen in a signal becomes the picture of its case, drawn outside the transaction. Its cells stop here, as
    they hold what the picture masks. A screen that cannot be drawn costs the picture, never the signal. */
 async function drawnCheck(ctx: Ctx, nodeId: string, frame: OperatorEvidence): Promise<{ fact: OperatorEvidence; png: Buffer | null }> {
   if (frame.type !== 'program.operator_needed' || !frame.check?.screen) return { fact: frame, png: null };

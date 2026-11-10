@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requireCompanyScope, requirePerson } from '../../auth/session.js';
+import { requireCompanyPerson, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
@@ -57,12 +57,6 @@ const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.l
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { version, commit, migrations } = ctx.config;
   let waiting: Waiting | null = null;
-
-  async function companyPerson(req: FastifyRequest) {
-    const me = await requirePerson(req, ctx.db);
-    requireCompanyScope(me);
-    return me;
-  }
 
   async function view(companyId: string) {
     const state = ctx.updates.state();
@@ -134,17 +128,17 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.get('/api/updates', async req => {
-    return view((await companyPerson(req)).companyId);
+    return view((await requireCompanyPerson(req, ctx.db)).companyId);
   });
 
   app.post('/api/updates/check', async req => {
-    const me = await companyPerson(req);
+    const me = await requireCompanyPerson(req, ctx.db);
     await ctx.updates.now();
     return view(me.companyId);
   });
 
   app.post('/api/updates', async (req, reply) => {
-    const me = await companyPerson(req);
+    const me = await requireCompanyPerson(req, ctx.db);
     const body = UpdateBody.parse(req.body);
     if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
     requireFreeUpdater(ctx);
@@ -156,7 +150,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.delete('/api/updates', async (req, reply) => {
-    await companyPerson(req);
+    await requireCompanyPerson(req, ctx.db);
     callOff();
     return reply.code(204).send();
   });

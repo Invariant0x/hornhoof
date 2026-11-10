@@ -27,8 +27,6 @@ export type Waited = RunResult | 'running' | 'gone';
 type Settings = { untilSec: number | null; until: string | null; asked: Asked | null };
 const CLOSED: Settings = { untilSec: null, until: null, asked: null };
 
-/* Access to the computer the server runs on, kept in the control folder the app shares with the updater. The updater
-   runs the orchestrator's commands there while it is open, and checks that itself too. */
 /* The hostname of the company's machine the server runs on, when that computer joined as a machine; the CEO sees it
    on the access card and in the log, so it is plain which machine the access is to. */
 export async function serverMachine(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string): Promise<string | null> {
@@ -42,6 +40,8 @@ export const canViewComputer = (me: { scopeKind: string; via?: string }): boolea
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
 
+/* Access to the computer the server runs on, kept in the control folder the app shares with the updater. The updater
+   runs the orchestrator's commands there while it is open, and checks that itself too. */
 export class ComputerAccess {
   readonly waitMs: number;
 

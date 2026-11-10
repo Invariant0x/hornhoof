@@ -3,10 +3,10 @@ import type { Dataset } from './dataset.js';
 import { bindingDigest } from './lifecycle.js';
 import { decide, scoreCases, type Counts, type Decision, type Scored, type Thresholds } from './score.js';
 
-/* The port of a fresh, independent model call: #446 gives the call and #447 the evaluator. */
+/* The port of a fresh, independent model call: the minute round gives it the evaluator. */
 export type RunModelCheck = (binding: CheckBinding, input: CheckInput) => Promise<CheckReceipt | CheckUnavailable>;
 
-/* What a run has until those land: no model. Nothing it says can pass a run, so no check can turn on without a real call. */
+/* What a run has when no call is given: no model. Nothing it says can pass a run, so no check can turn on without a real call. */
 export const NO_MODEL_YET: RunModelCheck = async () => ({ kind: 'unavailable', code: 'unavailable' });
 
 export type Evaluation = Omit<Scored, 'missedDevCases'> & { bindingDigest: string; reportId: string; datasetHash: string; evaluatedAt: string };

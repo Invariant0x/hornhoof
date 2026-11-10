@@ -111,7 +111,7 @@ async function callOperator(ctx: Ctx, row: Case, now: Date): Promise<void> {
 async function caseForJob(ctx: Ctx, signal: Signal, jobId: string): Promise<Case | undefined> {
   const [existing] = await ctx.db.select().from(programOperatorCases).where(and(scope({ agentId: signal.agentKey, instance: signal.instance }), eq(programOperatorCases.status, 'open')));
   if (existing && existing.jobId !== jobId) {
-    await resolveCase(ctx, existing, { outcome: 'superseded', text: 'A newer turn owns this program. The previous operator capability was revoked.', image: existing.pictureId });
+    await resolveCase(ctx, existing, { outcome: 'superseded', text: 'A newer turn owns this program.', image: existing.pictureId });
     return;
   }
   return existing;
@@ -247,7 +247,7 @@ async function openEscalation(ctx: Ctx, row: Case): Promise<void> {
   if (ofOrchestrator) await tellPeople(ctx, row, target.name);
   const to = await escalationRecipient(ctx, row, target);
   if (!to?.subscriptionId) return;
-  /* The head of Operations hears of the orchestrator's program, and may not look at it: people have its picture. */
+  /* The head of Operations hears of the orchestrator's program without its picture, which people have. */
   const escalationJobId = await queueNotice(ctx, ofOrchestrator ? { ...row, pictureId: null } : row, to.id, true);
   await ctx.db.update(programOperatorCases).set({ escalationJobId }).where(eq(programOperatorCases.id, row.id));
 }
@@ -288,7 +288,7 @@ async function operationsHead(ctx: Ctx, present: ReturnType<typeof and>) {
   return head?.agent;
 }
 
-/* Replayed evidence restores persisted capabilities and wakes, without creating another turn or replaying a key. */
+/* Replayed evidence sends each case's state to its node again and pumps its queued notices, without creating another turn. */
 export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Date()): Promise<void> {
   const rows = await ctx.db.select().from(programOperatorCases).where(eq(programOperatorCases.agentId, agentId));
   for (const row of rows) {

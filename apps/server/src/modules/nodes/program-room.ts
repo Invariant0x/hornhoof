@@ -1,7 +1,7 @@
 import type { NodeLoad } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import { availableMemory } from '../testruns/capacity.js';
-import type { NodeHub, NodeIdentity } from './hub.js';
+import { keyOf, type NodeHub, type NodeIdentity } from './hub.js';
 
 /* An agent program with the tools it runs takes up to about a gigabyte, its helpers inside it, and a Vitest worker of its
    tests about as much. */
@@ -21,7 +21,6 @@ const STARTING_MS = 2 * 60_000;
 type Room = { live: Set<string> | null; starting: Map<string, number>; waiting: Set<string> };
 
 const rooms = new WeakMap<NodeHub, Map<string, Room>>();
-const keyOf = (node: NodeIdentity) => (node.kind === 'builtin' ? 'builtin' : node.nodeId);
 
 function roomOf(ctx: Ctx, node: NodeIdentity): Room {
   const all = rooms.get(ctx.hub) ?? new Map<string, Room>();
