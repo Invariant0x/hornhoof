@@ -118,12 +118,14 @@ describe('turnkey work', () => {
     }
   });
 
-  it('teaches heads and the orchestrator the two modes of a turn, and that work outside a turn has no echelons', () => {
+  it('teaches heads and the orchestrator the two modes of a turn, and that work outside a turn and a quick fix go to a turnkey team', () => {
     for (const id of ['hh-lead-tasks', 'dev-lead', 'orch-plan-turn', 'orch-company']) {
       expect(body(id), id).toMatch(/turn runs in echelons[^.]*or turnkey[^.]*one member of a turnkey team/);
-      expect(body(id), id).toMatch(/work outside a turn goes through no echelons[^.]*its holder does it end to end alone/);
-      expect(body(id), id).not.toMatch(/outside a turn[^.]*turnkey team/);
+      expect(body(id), id).toMatch(/Code work outside a turn, and a small, quick fix[^.]*goes to a member of a turnkey team[^.]*members who work in the echelons take neither/);
+      expect(body(id), id).toMatch(/no turnkey team, such work waits for a turn/);
+      expect(body(id), id).not.toMatch(/its holder does it end to end alone/);
     }
+    expect(body('hh-lead-tasks')).toMatch(/small, quick fix on its own goes to a member of a turnkey team/);
   });
 
   it('tells the orchestrator never to start a turn without its mode, which is fixed once the turn starts', () => {
