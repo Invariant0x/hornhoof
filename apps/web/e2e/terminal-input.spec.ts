@@ -29,6 +29,9 @@ async function openTerminal(page: Page, options: Options) {
   const inputs: string[] = [];
   const errors: string[] = [];
   let uploads = 0;
+  /* The upload is answered when the test says so, once it has seen the page wait for it. */
+  let answer = () => {};
+  const answered = new Promise<void>(resolve => { answer = resolve; });
   await page.setViewportSize({ width: options.width, height: 900 });
   await page.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
@@ -42,7 +45,7 @@ async function openTerminal(page: Page, options: Options) {
   await serveAgentWindow(page, live);
   await page.route('**/api/agents/b1/pictures?*', async route => {
     uploads++;
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await answered;
     const status = options.pictureStatus ?? 201;
     const body = status === 201
       ? options.legacyPicture ? { id: 'p1', name: 'screen.png' } : { id: 'p1', name: 'screen.png', insert: "'/home/agent/screen.png' " }
@@ -65,7 +68,7 @@ async function openTerminal(page: Page, options: Options) {
   const window = page.getByRole('complementary', { name: /^Bruno,/ });
   const textarea = window.locator('.xterm-helper-textarea');
   await expect(window.locator('.xterm-rows')).toContainText('TERMINAL-READY');
-  return { window, textarea, inputs, errors, uploads: () => uploads };
+  return { window, textarea, inputs, errors, uploads: () => uploads, answer };
 }
 
 async function pasteText(page: Page, text: string) {
@@ -103,6 +106,7 @@ for (const options of [
     const terminal = await openTerminal(page, options);
     await pictureEvent(page, options.width === 375 ? 'drop' : 'paste');
     await expect(terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploading })).toBeVisible();
+    terminal.answer();
     const uploaded = terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploaded });
     await expect(uploaded).toBeVisible();
     await expectInsideTerminal(terminal.window, uploaded);
@@ -147,6 +151,7 @@ test('read-only access sends neither keys nor pictures', async ({ page }) => {
 test('a refused picture shows the reason and inserts no partial input', async ({ page }, info) => {
   const terminal = await openTerminal(page, { lang: 'en', theme: 'dark', width: 1440, message: true, pictureStatus: 413 });
   await pictureEvent(page, 'drop');
+  terminal.answer();
   await expect(terminal.window.getByRole('alert')).toHaveText(COPY.en.denied);
   expect(terminal.inputs).toEqual([]);
   expect(terminal.uploads()).toBe(1);

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import ts from 'typescript';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
@@ -13,6 +13,7 @@ import { Bridge } from '../src/terminal/bridge.js';
 import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { eventually } from '../../../test-support/eventually.mjs';
 
 /* The runner never runs a command as root. A run of these tests as root, as in a plain node image, hands the commands to an
    unprivileged user of the machine and the folders they use to that user. */
@@ -132,10 +133,8 @@ describe('check command bridge', () => {
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
       method: 'POST', body: JSON.stringify({ command: ['/bin/bash', '-c', 'sleep 60 & echo leader-exiting; exit 0'], cwd: '/tmp', env: { PATH: process.env.PATH } }),
     });
-    const output = response.text();
-    const result = await Promise.race([output.then(text => ({ ended: true, text })), new Promise<{ ended: boolean; text: string }>(resolve => setTimeout(() => resolve({ ended: false, text: '' }), 15_000))]);
-    expect(result.ended).toBe(true);
-    expect(result.text).toContain('"type":"exit","code":0');
+    /* It ends although the leader's child still holds the pipe: one that waited for the pipe would never end. */
+    expect(await response.text()).toContain('"type":"exit","code":0');
     expect(released).toBe(true);
   });
 
@@ -161,18 +160,26 @@ describe('check command bridge', () => {
     client.online(true); setCheckClient(client);
     const bridge = new Bridge('http://127.0.0.1:1', () => {}); await bridge.start(); bridge.setToken(key, 'turn');
     onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); });
-    const command = 'process.on("SIGTERM",()=>{});process.stdout.write(String(process.pid));setInterval(()=>{},1000)';
+    const scratch = mkdtempSync(join(tmpdir(), 'hh-check-term-')), termed = join(scratch, 'termed');
+    giveToUser(scratch);
+    onTestFinished(() => { rmSync(scratch, { recursive: true, force: true }); });
+    const command = `process.on("SIGTERM",()=>{require("fs").writeFileSync(${JSON.stringify(termed)},"yes")});process.stdout.write(String(process.pid));setInterval(()=>{},1000)`;
     const child = spawn(process.execPath, [cli, '--', process.execPath, '-e', command], {
       cwd: '/tmp', env: { PATH: process.env.PATH, HH_BRIDGE: bridge.agent(key).hookUrl }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     onTestFinished(() => { child.kill('SIGKILL'); });
     const pid = Number(await new Promise<string>(resolve => child.stdout.once('data', chunk => resolve(String(chunk)))));
-    const started = performance.now();
+    /* The grace runs on a clock the test moves: once the command has had TERM, just short of 5 s and then to them. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
     child.kill('SIGTERM');
     await new Promise(resolve => child.once('close', resolve));
+    await eventually(() => existsSync(termed));
+    await vi.advanceTimersByTimeAsync(4999);
     expect(released).toBe(false);
-    while (!released) await new Promise(resolve => setTimeout(resolve, 20));
-    expect(performance.now() - started).toBeGreaterThanOrEqual(4500);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
+    await eventually(() => released);
     expect(() => process.kill(pid, 0)).toThrow();
   });
 });

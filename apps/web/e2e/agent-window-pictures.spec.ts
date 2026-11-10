@@ -233,7 +233,7 @@ test.describe('a picture for an agent', () => {
     const big = await picture(page, 'big.png', 'image/png', true);
     expect(await big.evaluate(t => t.files[0]!.size)).toBeGreaterThan(PICTURE_BYTES);
     await window.locator('.t-xterm').dispatchEvent('drop', { dataTransfer: big });
-    await expect.poll(() => server.keys, { timeout: 15_000 }).toEqual(['big.jpg: hh-fetch message pic1']);
+    await expect.poll(() => server.keys).toEqual(['big.jpg: hh-fetch message pic1']);
     const sent = server.uploads[0]!;
     expect(sent.name).toBe('big.jpg');
     expect(sent.bytes.length).toBeLessThanOrEqual(PICTURE_BYTES);

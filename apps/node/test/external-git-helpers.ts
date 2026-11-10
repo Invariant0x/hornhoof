@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, onTestFinished, vi } from 'vitest';
 import { GitAdapter, type GitGrant, type GitJob, type GitOperationPort, type GitReconciliation, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { listenIn } from '../../../test-support/ports.mjs';
 
 /* What the tests of hh-git and of the git adapter of the node share: a real repository with a bare remote, behind a stand-in
@@ -67,10 +68,13 @@ export function commit(work: string, name: string): string {
 export const head = (s: Stand) => realGit(s.work, 'rev-parse', 'HEAD');
 export const remoteRef = (s: Stand, ref: string) => spawnSync('/usr/bin/git', ['rev-parse', '--verify', '--quiet', ref], { cwd: s.remote, encoding: 'utf8' }).stdout.trim();
 export const planFor = (s: Stand, plan: Record<string, unknown[]>) => writeFileSync(join(s.dir, 'plan.json'), JSON.stringify(plan));
+/* A git that hangs says so once it is in place, with any stop it ignores. */
+export const hanging = (s: Stand) => existsSync(join(s.dir, 'hanging'));
 export const calls = (s: Stand, command: string): Array<{ argv: string[]; token: string | null; nested: string | null }> => {
   const file = join(s.dir, 'log.ndjson');
   if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; argv: string[]; token: string | null; nested: string | null }).filter(call => call.command === command);
+  /* Whole lines only: the fake git may be writing the next one. */
+  return readFileSync(file, 'utf8').split('\n').slice(0, -1).map(line => JSON.parse(line) as { command: string; argv: string[]; token: string | null; nested: string | null }).filter(call => call.command === command);
 };
 
 export function runShim(args: string[], cwd: string, env: Env): Promise<Ran> & { partial: () => Ran; signal: (name: NodeJS.Signals) => void } {
@@ -148,8 +152,24 @@ export class FakePort implements GitOperationPort {
 
 type Served = { adapter: GitAdapter; env: Env; server: Server; hits: () => number };
 
+/* The longest delay a timer takes: the node's graces for a child never run out in a test that does not drive them. */
+const NEVER = 2_147_483_647;
+
+/* The node's graces for a child, on a clock the test moves. */
+export function graceClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+}
+
+/* The signals the node sends to the process groups of its children, which still reach them. */
+export function killed(): () => string[] {
+  const kill = vi.spyOn(process, 'kill');
+  onTestFinished(() => { kill.mockRestore(); });
+  return () => kill.mock.calls.filter(([pid]) => Number(pid) < 0).map(([, signal]) => String(signal));
+}
+
 export async function serve(s: Stand, port: GitOperationPort | null, bound = true, options: Partial<ConstructorParameters<typeof GitAdapter>[0]> = {}): Promise<Served> {
-  const adapter = new GitAdapter({ port, git: s.bin, ...options });
+  const adapter = new GitAdapter({ port, git: s.bin, exitGraceMs: NEVER, stopGraceMs: NEVER, ...options });
   if (bound) adapter.bind(KEY, jobOf(s));
   let hits = 0;
   const server = createServer((req, res: ServerResponse) => {
@@ -181,9 +201,11 @@ export async function scriptedBridge(s: Stand, frames: unknown[], ending: 'end' 
   const server = createServer((req, res) => {
     req.resume();
     res.writeHead(200);
-    for (const frame of frames) res.write(typeof frame === 'string' ? frame : `${JSON.stringify(frame)}\n`);
-    if (ending === 'end') res.end();
-    else setTimeout(() => res.destroy(), 20);
+    const texts = frames.map(frame => (typeof frame === 'string' ? frame : `${JSON.stringify(frame)}\n`));
+    /* A connection that breaks does so once the frames are on their way. */
+    if (ending === 'destroy') return void res.write(texts.join(''), () => res.destroy());
+    for (const text of texts) res.write(text);
+    res.end();
   });
   await listenIn(server);
   onTestFinished(() => { server.closeAllConnections(); server.close(); });
@@ -258,6 +280,6 @@ export async function refusedFirst(s: Stand, work: string, args: string[] = ['fe
   port.replies = [...replies];
   const served = await serve(s, port);
   const ran = runShim(args, work, served.env);
-  await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); expect(ran.partial().stderr).toContain('keeps waiting'); }, { timeout: 5000 });
+  await eventually(() => port.recorded.length === 1 && ran.partial().stderr.includes('keeps waiting'));
   return { port, ran, ...served };
 }

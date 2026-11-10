@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, eq, inArray } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import { claimFinalReview, endSourceWait, operationSourceKey, replanWait, syncSo
 import { checkTestTimes, startRun } from '../../src/modules/testruns/runs.js';
 import { ApiError } from '../../src/errors.js';
 import { backendPid, privatePostgres, runFixture } from './helpers.js';
+import { eventually } from '../../../../test-support/eventually.mjs';
 
 const HOUR = 3_600_000;
 const after = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -41,7 +43,7 @@ it('waits for whoever holds the task and commits once they let go', async () => 
     await locker.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [c.one.task.id]);
     const owner = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
     pending = c.one.ctx.db.transaction(tx => syncSourceWaits(tx, c.source));
-    await expect.poll(() => c.blockers(pid)).toEqual([owner]);
+    await eventually(async () => isDeepStrictEqual(await c.blockers(pid), [owner]));
     expect(await c.rows()).toEqual([]);
     await locker.query('COMMIT');
     await pending;
@@ -65,10 +67,10 @@ it('takes the task, then the wait: a second writer queues on the task and nobody
     const owner = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
     const replanned = c.one.ctx.db.transaction(tx => replanWait(tx, { waitId: wait.id, expectedGeneration: 1, plan: c.plan({ ownerDueAt: after(HOUR / 2) }), reason: 'Sooner.', actor: { agentId: c.head.id } }));
     pending.push(replanned);
-    await expect.poll(() => c.blockers(firstPid)).toEqual([owner]);
+    await eventually(async () => isDeepStrictEqual(await c.blockers(firstPid), [owner]));
     const ended = c.two.ctx.db.transaction(tx => endSourceWait(tx, { taskId: c.one.task.id, kind: 'external', sourceKey: c.key, sourceRevision: 1, outcome: 'resolved', proofRef: 'proof-1', actor: { agentId: c.head.id } }));
     pending.push(ended);
-    await expect.poll(() => c.blockers(secondPid)).toEqual([firstPid]);
+    await eventually(async () => isDeepStrictEqual(await c.blockers(secondPid), [firstPid]));
     await locker.query('COMMIT');
     expect(await replanned).toMatchObject({ generation: 2, state: 'active' });
     expect(await ended).toMatchObject({ generation: 2, state: 'resolved', proofRef: 'proof-1' });
@@ -141,7 +143,7 @@ it('tells the result once and refuses the wait built before it, with no wake at 
     const waiting = waitFor(c.one.ctx, c.one.job.agentId, c.one.task.id, { reason: 'The run', until }).then(() => 'placed', (error: unknown) => (error as ApiError).reason);
     await atBarrier;
     await checkTestTimes(c.two.ctx, new Date(Date.now() + 2 * 24 * HOUR));
-    await expect.poll(async () => (await c.pg.db.select().from(testRuns))[0]!.status).toBe('failed');
+    await eventually(async () => (await c.pg.db.select().from(testRuns))[0]!.status === 'failed');
     resume();
     expect(await waiting).toBe('task_changed');
     const [task] = await c.pg.db.select().from(tasks).where(eq(tasks.id, c.one.task.id));
@@ -169,7 +171,7 @@ it('takes the task before the run when a run ends, leaving the run row free unti
     await locker.query('SELECT id FROM tasks WHERE id = $1 FOR UPDATE', [c.one.task.id]);
     const owner = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
     pending = checkTestTimes(c.two.ctx, new Date(Date.now() + 2 * 24 * HOUR));
-    await expect.poll(() => c.blockers(pid)).toEqual([owner]);
+    await eventually(async () => isDeepStrictEqual(await c.blockers(pid), [owner]));
     const free = await c.pg.admin.query('SELECT id, status FROM test_runs WHERE id = $1 FOR UPDATE NOWAIT', [run!.id]);
     expect(free.rows[0]).toMatchObject({ status: 'running' });
     await locker.query('COMMIT');

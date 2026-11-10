@@ -1,9 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
 import { fetchTarget } from '../src/external-git.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { baseEnv, BINDING, calls, type Env, FakePort, head, inProcess, JOB, planFor, realGit, refusingBridge, remoteRef, REPOSITORY, runShim, scriptedBridge, serve, SHIM, shim, type Stand, stand } from './external-git-helpers.js';
 
 describe('hh-git as plain git', () => {
@@ -53,8 +54,8 @@ describe('hh-git as plain git', () => {
     const s = stand();
     planFor(s, { status: [{ do: 'hang' }] });
     const ran = runShim(['status'], s.work, baseEnv(s));
-    await vi.waitFor(() => { expect(calls(s, 'status')).toHaveLength(1); }, { timeout: 5000 });
-    await vi.waitFor(() => { expect(ran.partial().stderr).toContain('still working'); }, { timeout: 5000 });
+    await eventually(() => calls(s, 'status').length === 1);
+    await eventually(() => ran.partial().stderr.includes('still working'));
     ran.signal('SIGTERM');
     const ended = await ran;
     expect(ended.code).toBe(143);
@@ -421,7 +422,7 @@ describe('an ordinary push through the node', () => {
     chmodSync(join(bin, 'git'), 0o755);
     const child = spawn('/bin/sh', ['-c', `git push origin task-1 && echo suffix >> '${log}'`], { cwd: s.work, env: { ...env, PATH: `${bin}:${process.env.PATH}` } as NodeJS.ProcessEnv, stdio: 'ignore' });
     const ended = new Promise<number | null>(resolve => child.once('close', resolve));
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     expect(existsSync(log)).toBe(false);
     port.release();
     expect(await ended).toBe(0);
@@ -455,7 +456,7 @@ describe('an ordinary push through the node', () => {
     const { env } = await serve(s, port);
     const sha = head(s);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     port.release();
     await ran;
     const pushes = calls(s, 'push').map(call => call.argv);
@@ -486,7 +487,7 @@ describe('an ordinary fetch through the node', () => {
     port.replies = [{ accepted: true, state: 'deferred', nextAttemptAt: null }];
     const { env } = await serve(s, port);
     const ran = runShim(['fetch', 'origin', 'main'], s.work, env);
-    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await eventually(() => port.recorded.length === 1);
     expect(port.recorded[0]!.observedHead).toBeUndefined();
     realGit(s.work, 'push', '--quiet', 'origin', 'task-1:main');
     const moved = remoteRef(s, 'refs/heads/main');

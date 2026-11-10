@@ -18,7 +18,7 @@ type Evidence = { run: number; status: string; branch: string | null; command: s
 /* Development works in a repository in turn 4: Bruno builds the checkout, Rita reviews code. Sales has a repository of its
    own, whose branches may be named the same. */
 async function company() {
-  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '50' });
+  const { app, db } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' });
   const url = await listen(app);
   const ceoToken = await setUpCompany(app);
   const ctx = app.ctx;

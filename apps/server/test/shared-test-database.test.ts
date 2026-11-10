@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { agentRole, grantsFor, readerRole } from '../src/db/agent-sql.js';
 import { agentEvents, agents, companies } from '../src/db/schema.js';
+import { until } from './helpers-basic.js';
 
 /* A database left open at the end of a file is a whole Postgres in memory, and a file that leaves them grows until it is
    killed. Hooks run last first, so this one looks after the one helpers-db.ts adds as it loads below. */
@@ -329,7 +330,8 @@ describe('work a test leaves behind', { shuffle: false }, () => {
       running = db.transaction(async tx => {
         await tx.insert(companies).values({ name: 'Running' });
         begun();
-        await new Promise(wait => setTimeout(wait, 100));
+        /* It goes on once its test has let go of the database, so it still runs when the test ends. */
+        await until(() => db.$client.closed);
         await tx.update(companies).set({ name: 'Still running' });
       });
     });

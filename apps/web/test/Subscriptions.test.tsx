@@ -37,7 +37,7 @@ describe('Subscriptions', () => {
     ['ru', 'До ', ', еще 2 ч 10 мин. До тех пор ее агенты ждут.', 'до сброса 2 ч 10 мин', 'Ivan, лимит исчерпан до ', 'Встроенная нода', 'идет вместе с сервером'],
   ])('uses the quoted state, meter and machine-list wording in %s', async (language, until, sentence, reset, localState, builtin, comesWith) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 130 * 60_000).toISOString() }] };
@@ -197,7 +197,7 @@ describe('Subscriptions', () => {
   });
 
   it('keeps refreshed subscription values in place while a card is open, then sorts after the last closes', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     onTestFinished(() => { vi.useRealTimers(); });
     let count = 0;
     lists({ 'GET /api/subscriptions': () => [200, { subscriptions: [SUBS[0]!, { ...SUBS[1]!, status: ++count > 1 ? 'ready' : 'needs_login' }] }] });
@@ -282,7 +282,7 @@ describe('Subscriptions', () => {
   });
 
   it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['antigravity', 'Antigravity']])('shows an expired rejection as unknown with its last data time for %s', async (provider, label) => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }], complete: true };
@@ -297,7 +297,7 @@ describe('Subscriptions', () => {
 
   it('shows a stale rejection as unknown instead of exhausted, in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
     onTestFinished(() => { vi.useRealTimers(); });
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' }] };
@@ -360,7 +360,7 @@ describe('Subscriptions', () => {
   });
 
   it('refreshes on its own, so a node that signs in turns Ready without a reload', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     onTestFinished(() => {
       vi.useRealTimers();
     });
@@ -419,11 +419,15 @@ describe('Subscriptions', () => {
           : [200, { job: { ...job, status: 'done', result: 'ready', startedAt: '2026-10-29T10:00:00.500Z', finishedAt: '2026-10-29T10:00:03.700Z' } }];
       },
     });
-    const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Run a test on Claude' }));
-    expect(await screen.findByText('Answered "ready" in 3.2 s on ivan-mbp.', {}, { timeout: 4000 })).toBeInTheDocument();
+    const run = await screen.findByRole('button', { name: 'Run a test on Claude' });
+    /* The screen asks about the test once a second, on a clock the test moves; userEvent would wait on a timer of it. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    await act(async () => { fireEvent.click(run); });
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByText('Answered "ready" in 3.2 s on ivan-mbp.')).toBeInTheDocument();
     expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(2);
   });
 
@@ -473,11 +477,15 @@ describe('Subscriptions', () => {
   it('explains a failed test and keeps the output folded', async () => {
     const job = { id: 'j2', status: 'failed', result: '', tail: 'Error: something broke', error: 'agent_failed', machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: '2026-10-29T10:00:01.000Z' };
     lists({ 'POST /api/subscriptions/s-claude/test': [201, { job: { ...job, status: 'queued' } }], 'GET /api/jobs/j2': [200, { job }] });
-    const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
-    await user.click(await screen.findByRole('button', { name: 'Run a test on Claude' }));
-    expect(await screen.findByText('The agent stopped with an error.', {}, { timeout: 4000 })).toBeInTheDocument();
+    const run = await screen.findByRole('button', { name: 'Run a test on Claude' });
+    /* The screen asks about the test a second on, on a clock the test moves. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    await act(async () => { fireEvent.click(run); });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText('The agent stopped with an error.')).toBeInTheDocument();
     expect(screen.getByText('Show the output')).toBeInTheDocument();
     expect(screen.getByText('Error: something broke')).not.toBeVisible();
   });

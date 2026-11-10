@@ -68,6 +68,6 @@ it('shows a program between turns to whoever looks, at rest and on no turn', asy
   const key = t.host['agents'].keys().next().value as string;
   const during = await look(t, sent, key);
   t.finish();
-  expect(await t.running).toMatchObject({ ok: true });
+  expect(await t.on(t.running)).toMatchObject({ ok: true });
   expect(await look(t, sent, key)).toMatchObject({ result: 'ok', jobId: null, instance: during.instance, state: 'idle', question: null, input: 'empty' });
 });

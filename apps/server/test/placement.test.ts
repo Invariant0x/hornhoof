@@ -207,9 +207,9 @@ describe('agents of one plan on several machines', () => {
     await db.insert(jobs).values({ companyId: bruno.companyId, subscriptionId: plan, agentId: bruno.id, kind: 'conversation', prompt: 'Go on with the checkout', timeoutMs: 900000, status: 'queued' });
     const [own] = await db.select({ machineId: nodeRows.machineId }).from(nodeRows).where(eq(nodeRows.id, nodes.mac.nodeId));
     expect((await app.inject({ method: 'POST', url: `/api/machines/${own!.machineId}/disconnect`, ...as(ceo) })).statusCode).toBe(204);
-    const run = await Promise.race([nextRun(lap), new Promise<null>(r => setTimeout(() => r(null), 3000))]);
-    expect(run?.prompt).toContain('Go on with the checkout');
-    expect(run?.sessionId).toBeNull();
+    const run = await nextRun(lap);
+    expect(run.prompt).toContain('Go on with the checkout');
+    expect(run.sessionId).toBeNull();
   });
 
   it('waits while no machine of the plan can take a turn, and goes out on the first that can', async () => {

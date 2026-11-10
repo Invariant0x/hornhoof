@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { expect, it } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
@@ -16,7 +16,7 @@ import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { listen, mcp } from './helpers.js';
+import { listen, mcp, until } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 
 const MINUTE = 60_000;
@@ -452,7 +452,16 @@ it.each<[string, Partial<typeof FREE>, string]>([
 
 it('refuses when the node does not answer, with no guess about its program', async () => {
   const c = await release(null);
-  expect(await c.call()).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
+  /* The server waits three seconds for the node's answer: on the test's clock. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  onTestFinished(() => { vi.useRealTimers(); });
+  let ended = false;
+  const answer = c.call().finally(() => { ended = true; });
+  await until(() => c.sent.mock.calls.some(([, frame]) => frame.type === 'program.recovery_state_get'));
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(ended).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await answer).toMatchObject({ result: 'refused', reason: 'node_unavailable' });
   expect(await c.children()).toEqual([]);
 });
 

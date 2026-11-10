@@ -4,9 +4,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { readCommit, REFS_MAX_BYTES } from '../src/modules/testruns/refs.js';
 import { listenIn, testPort } from '../../../test-support/ports.mjs';
+import { until } from './helpers-basic.js';
 
 const ADVERTISEMENT = 'application/x-git-upload-pack-advertisement';
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' } }).trim();
@@ -201,8 +202,17 @@ describe('reading a commit from a repository', () => {
   });
 
   it('gives up on a repository that does not answer in time', async () => {
-    const url = await serve(() => undefined);
-    expect(await readCommit({ url, token: '' }, { branch: 'main' }, 50)).toEqual({ problem: expect.stringContaining('did not answer') });
+    const seen: IncomingMessage[] = [];
+    const url = await serve(req => void seen.push(req));
+    /* The time it may take runs out when the test says, once the repository has the ask and gives no answer. */
+    const timeUp = new AbortController(), asked: number[] = [];
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => { asked.push(ms); return timeUp.signal; });
+    onTestFinished(() => { timeout.mockRestore(); });
+    const reading = readCommit({ url, token: '' }, { branch: 'main' }, 50);
+    await until(() => seen.length === 1);
+    expect(asked).toEqual([50]);
+    timeUp.abort();
+    expect(await reading).toEqual({ problem: expect.stringContaining('did not answer within 50 ms') });
   });
 
   it('says so when the repository cannot be reached', async () => {

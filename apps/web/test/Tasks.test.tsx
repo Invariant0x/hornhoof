@@ -196,7 +196,8 @@ describe('the tracker', () => {
     await waitFor(() => expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita'));
     await act(async () => {
       late();
-      await new Promise(r => setTimeout(r, 50));
+      /* One turn of the event loop: the older answer's promise chain has no timer in it, so it has run its course. */
+      await new Promise(r => setImmediate(r));
     });
     expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Rita');
     expect(screen.getByRole('row', { name: /#11/ })).toHaveTextContent('Review');

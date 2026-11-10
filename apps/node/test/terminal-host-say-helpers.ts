@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { Tmux } from '../src/terminal/tmux.js';
-import { codexJob, listsAtStart, until } from './terminal-host-helpers.js';
+import { codexJob, listsAtStart, onClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 /* What the tests of words typed into a running turn share: a Codex terminal at work, its log and its screen. */
@@ -12,8 +12,10 @@ import { codexPrompt } from './real-screens.js';
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 export const cleanups: (() => Promise<void>)[] = [];
 
-/* The screen and log move independently, as when a program takes Enter before its log is read. */
+/* The screen and log move independently, as when a program takes Enter before its log is read. The clock moves only as
+   the test moves it. */
 export async function atWork(takePrompt = true) {
+  vi.useFakeTimers();
   const home = mkdtempSync(join(tmpdir(), 'hh-say-'));
   const workDir = join(home, 'work');
   const logs = join(home, 'sessions', '2026', '11', '02');
@@ -54,11 +56,11 @@ export async function atWork(takePrompt = true) {
   cleanups.push(async () => {
     alive.mockResolvedValue(false);
     finish();
-    await Promise.all(turns);
-    await host.stop();
+    await onClock(Promise.all(turns));
+    await onClock(host.stop());
     rmSync(home, { recursive: true, force: true });
   });
-  await until(() => keys.mock.calls.some(([, key]) => key === 'Enter'));
+  await untilOnClock(() => keys.mock.calls.some(([, key]) => key === 'Enter'));
   paste.mockClear();
   keys.mockClear();
   screen.mockClear();

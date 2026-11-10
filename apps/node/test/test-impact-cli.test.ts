@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,13 +55,18 @@ describe('standalone replay reporting with real Git and Python AST', () => {
     expect(output.status).toBe(2);
     expect(output.report.status).toBe('observed-misses');
   });
-  it.each(['cancelled', 'timed_out', 'unknown', undefined])('keeps incomplete JSON comparator status %s unavailable', status => {
+  it.each(['cancelled', 'timed_out', 'unknown', undefined])('keeps incomplete JSON comparator status %s unavailable', async status => {
     const { root, git, environment } = project();
     const request = join(root, 'request.json');
     writeFileSync(request, JSON.stringify({ environment, projectSuites: {}, comparator: {
       commit: git('rev-parse', 'HEAD'), run: 50, part: 1, status, inventory: environment.inventory, failedUnits: [environment.inventory[1]],
     } }));
-    const output = spawnSync(process.execPath, [fileURLToPath(new URL('../../../scripts/test/replay-impact.mjs', import.meta.url)), request], { cwd: root, encoding: 'utf8', timeout: 15000 });
+    /* The replay runs to its end, however long that takes: the runner's limit for the test is the only limit. */
+    const child = spawn(process.execPath, [fileURLToPath(new URL('../../../scripts/test/replay-impact.mjs', import.meta.url)), request], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = { status: null as number | null, stdout: '', stderr: '' };
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { output.stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { output.stderr += chunk; });
+    [output.status] = await once(child, 'close') as [number | null];
     expect(output.status, output.stderr).toBe(0);
     const report = JSON.parse(output.stdout);
     expect(report.rows[0].comparison).toEqual({ status: 'unavailable', reason: 'full_comparator_invalid' });

@@ -10,6 +10,7 @@ import { registerWatchTools } from '../src/modules/tools/watch.js';
 import { createRoute, routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { failureCompany } from './failure-company.js';
+import { until } from './helpers-basic.js';
 
 const MIN = 60_000;
 type Result = { content: { text: string }[]; isError?: boolean };
@@ -226,8 +227,7 @@ describe('restart safety after the request', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     onTestFinished(() => { vi.useRealTimers(); });
     const result = c.run();
-    for (let n = 0; !c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart') && n < 2000; n++) await new Promise<void>(r => setImmediate(r));
-    expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(true);
+    await until(() => c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart'));
     await vi.advanceTimersByTimeAsync(15_000);
     expect((await result).content[0]!.text).toContain('may have happened');
     const reason = ok ? null : 'A tool started before the restart.';
@@ -263,8 +263,7 @@ describe('restart safety after the request', () => {
     onTestFinished(() => { vi.useRealTimers(); });
     const result = c.run();
     /* Real immediate turns let the database finish before advancing the reply deadline. */
-    for (let n = 0; !c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart') && n < 2000; n++) await new Promise<void>(r => setImmediate(r));
-    expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(true);
+    await until(() => c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart'));
     await vi.advanceTimersByTimeAsync(15_000);
     expect((await result).content[0]!.text).toContain('may have happened');
     expect((await c.jobOf(c.id)).restartedAt).not.toBeNull();

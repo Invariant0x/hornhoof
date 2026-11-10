@@ -519,7 +519,8 @@ describe('a look at the program before telling of a turn', () => {
     observer.attempt(identity, { id: deliveryId, ordinal: 1 }, 'assignment', 'exact words');
     return { ...c, observer, look };
   };
-  const settled = () => new Promise(done => setTimeout(done, 0));
+  /* A turn of the event loop: the look and what follows it are promise steps, all done before it. */
+  const settled = () => new Promise(done => setImmediate(done));
 
   it('looks once, and tells afterwards, with what it saw', async () => {
     const c = looking();

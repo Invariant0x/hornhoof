@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import WebSocket from 'ws';
 import { agents, jobs, subscriptions } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
-import { as, connectNode, until } from './helpers.js';
+import { as, connectNode, until, type FakeNode } from './helpers.js';
 
 export { nextOf as next } from './helpers.js';
 
@@ -35,9 +36,10 @@ export const opened = async (url: string, token: string, agentId: string): Promi
   return screen;
 };
 
-/* The company of #398 on the built-in node, whose API key plans let an agent move between plans on one machine. */
+/* The company of #398 on the built-in node, whose API key plans let an agent move between plans on one machine. An open
+   view looks again at its rights on its own only when a test asks for that pace. */
 export async function company(env: NodeJS.ProcessEnv = {}) {
-  const c = await aclCompany({ NODE_KEY, STREAM_PING_MS: '60000', ...env });
+  const c = await aclCompany({ NODE_KEY, STREAM_PING_MS: '2147483647', ...env });
   await c.db.update(subscriptions).set({ kind: 'api_key', targetKind: 'any' });
   const node = await connectNode(c.url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
@@ -45,6 +47,14 @@ export async function company(env: NodeJS.ProcessEnv = {}) {
   return { ...c, node, nodeIdentity: BUILTIN };
 }
 export type Company = Awaited<ReturnType<typeof company>>;
+
+/* The node's mark comes back once the server handled all the node sent before it, and after all the server sent the node
+   by then, as one socket keeps their order: no clock decides it. */
+export async function handled(node: FakeNode): Promise<void> {
+  const jobId = randomUUID();
+  node.send({ type: 'job.done', jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+  await until(() => node.acks.includes(jobId));
+}
 
 export const onPlan = (c: AclCompany, agentId: string, planId: string) => c.db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, agentId));
 export const moved = (c: AclCompany, agentId: string, planId: string) => c.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, payload: { subscription: planId }, ...as(c.tokens.ceo) });

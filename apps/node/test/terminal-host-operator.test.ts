@@ -9,13 +9,14 @@ import { TerminalHost } from '../src/terminal/host.js';
 import { codexProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
-import { job, until } from './terminal-host-helpers.js';
+import { job, onClock, untilOnClock } from './terminal-host-helpers.js';
 import { codexPrompt } from './real-screens.js';
 
 const stops: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.restoreAllMocks(); });
+afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 it.each([['stable', false, false], ['changing', true, false], ['cancelled', false, true]] as const)('keeps an unknown pane and guards its assignment paste through %s recovery', async (_mode, changes, cancelled) => {
+  vi.useFakeTimers();
   const home = mkdtempSync(join(tmpdir(), 'hh-operator-start-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID(), sessionId = randomUUID();
   const workDir = join(home, 'work');
@@ -53,13 +54,13 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true, now: () => now },
   });
   const running = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
-  stops.push(async () => { ready = true; record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'work', last_agent_message: 'Done.' } }); await host.stop(); await running; rmSync(home, { recursive: true, force: true }); });
-  await until(() => sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
+  stops.push(async () => { ready = true; record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'work', last_agent_message: 'Done.' } }); await onClock(host.stop()); await onClock(running); rmSync(home, { recursive: true, force: true }); });
+  await untilOnClock(() => sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
   expect(paste).not.toHaveBeenCalled();
   now = 59999; host.operatorTick();
   expect(sent.filter(frame => frame.type === 'program.operator_needed')).toEqual([]);
   now = 60000; host.operatorTick(); host.operatorTick();
-  await until(() => sent.some(frame => frame.type === 'program.operator_needed'));
+  await untilOnClock(() => sent.some(frame => frame.type === 'program.operator_needed'));
   host.operatorTick();
   const needed = sent.filter(frame => frame.type === 'program.operator_needed');
   expect(needed).toHaveLength(1);
@@ -79,19 +80,19 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
   await host.operatorMessage({ type: 'program.operator_case', ...identity, case: caseId, capability, disposition: 'open', remainingMs: 600000, revision: 1 });
   await press();
   if (changes) {
-    await until(() => changed);
-    await new Promise(done => setTimeout(done, 600));
+    await untilOnClock(() => changed);
+    await vi.advanceTimersByTimeAsync(600);
     expect(paste).not.toHaveBeenCalled();
     now += 1001;
     await press();
   }
   if (cancelled) {
-    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await onClock(running)).toMatchObject({ ok: false, error: 'cancelled' });
     expect(paste).not.toHaveBeenCalled();
     expect(sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', deliveryId, phase: 'cancelled' }));
     return;
   }
-  expect(await running).toMatchObject({ ok: true });
+  expect(await onClock(running)).toMatchObject({ ok: true });
   expect(paste.mock.calls.map(([, text]) => text)).toEqual(['Check the checkout.']);
   expect(keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(changes ? 3 : 2);
   expect(sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', deliveryId, phase: 'taken' }));
@@ -99,6 +100,9 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
 
 /* A busy node may check who sends Claude Code's start only after the caller gave up waiting, and then refuses it. */
 it('types the words into a Claude Code whose start the node could not prove came from it, once its input shows', async () => {
+  /* The host runs on the fake clock, which moves only as the test moves it; turns of the event loop stay real, for the
+     socket of the bridge. */
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
   const home = mkdtempSync(join(tmpdir(), 'hh-operator-unproven-'));
   const agentKey = randomUUID(), jobId = randomUUID(), words = 'Check the checkout.';
   const tmux = new Tmux({ env: { HOME: home } });
@@ -117,13 +121,18 @@ it('types the words into a Claude Code whose start the node could not prove came
   });
   await host.start();
   const starts: number[] = [];
+  /* The start reaches the bridge on a real socket: while it is on its way there and back, the clock stands still. */
+  let transit = 0;
+  const clocked = { held: () => transit > 0 };
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
-    starts.push((await fetch(`${host['bridge'].agent(agentKey).hookUrl}/start`, { method: 'POST', body: '{}' })).status);
+    transit++;
+    try { starts.push((await fetch(`${host['bridge'].agent(agentKey).hookUrl}/start`, { method: 'POST', body: '{}' })).status); }
+    finally { transit--; }
   });
   const abort = new AbortController();
   const running = host.run({ ...job(agentKey, words, { jobId, workDir: join(home, 'work'), signal: abort.signal }), home, operatorDelivery: { id: randomUUID(), ordinal: 1 } });
-  stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
-  await until(() => paste.mock.calls.length > 0);
+  stops.push(async () => { abort.abort(); await onClock(host.stop(), clocked); await onClock(running.catch(() => {}), clocked); rmSync(home, { recursive: true, force: true }); });
+  await untilOnClock(() => paste.mock.calls.length > 0, clocked);
   expect(starts).toEqual([403]);
   expect(paste.mock.calls.map(([, text]) => text)).toEqual([words]);
 });

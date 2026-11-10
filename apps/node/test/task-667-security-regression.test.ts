@@ -32,6 +32,8 @@ vi.mock('node:fs', async original => {
   } }) };
 });
 let root: string | undefined;
+/* The longest a timer waits: a stop grace and a deadline that never run out in a test. */
+const NEVER_MS = 2_147_483_647;
 afterEach(() => { vi.restoreAllMocks(); if (root) rmSync(root, { recursive: true, force: true }); });
 
 it('never publishes node-only bytes when the job swaps a checked source ancestor before copying', async () => {
@@ -48,12 +50,12 @@ it('never publishes node-only bytes when the job swaps a checked source ancestor
   const definitions: ServiceDefinitions = { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['final'], options: {
     start: { program: process.execPath, args: [server], cwd: '.' },
     readiness: { program: process.execPath, args: ['-e', "const fs=require('node:fs'),p=require('node:path');setInterval(()=>{if(fs.existsSync(p.join(process.env.HH_SERVICE_STATE,'data/nested/private.txt')))process.exit(0)},5)"], cwd: '.' },
-    /* Room for a slow or loaded machine only: the server stops at once. */
-    stop: { signal: 'SIGTERM', graceMs: 10_000 }, statePaths: ['data/nested'],
+    /* The server stops at once; its grace never runs out. */
+    stop: { signal: 'SIGTERM', graceMs: NEVER_MS }, statePaths: ['data/nested'],
   } }] };
   const artifacts = await prepareServiceArtifacts(definitions, root, { nodeOwner: { uid: 0, gid: 0 }, jobUser: { uid, gid },
     cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64),
-    signal: new AbortController().signal, deadline: Date.now() + 15_000, log: () => {}, registerSecrets: () => {},
+    signal: new AbortController().signal, deadline: Date.now() + NEVER_MS, log: () => {}, registerSecrets: () => {},
   });
   expect(race.fired).toBe(true);
   const published = readFileSync(join(artifacts.paths.worker!, 'data', 'nested', 'private.txt'), 'utf8');

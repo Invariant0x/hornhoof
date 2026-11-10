@@ -15,7 +15,7 @@ afterEach(async () => { await Promise.all(folders.splice(0).map(folder => rm(fol
 
 it("makes a stored file the node's, whoever built it, as the builder's next run has it linked in", async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-owner-')); folders.push(cacheRoot);
-  const context = { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} }, source = join(cacheRoot, 'source');
+  const context = { cacheRoot, deadline: Date.now() + 2_147_483_647, signal: new AbortController().signal, log: () => {} }, source = join(cacheRoot, 'source');
   await mkdir(join(source, 'deps'), { recursive: true }); await writeFile(join(source, 'deps', 'file'), 'built');
   vi.mocked(chown).mockClear();
   await prepareCache(join(cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), context, async () => ({ root: source, paths: ['deps'] }));

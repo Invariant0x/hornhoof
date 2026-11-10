@@ -1,7 +1,7 @@
 import { API_MODELS } from '@hornhoof/protocol';
 import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, requests, tasks, teams } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -9,7 +9,14 @@ import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/e
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, invitePerson, setUpCompany, testApp, ownPlan } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan, until } from './helpers.js';
+
+/* Which employees' lanes were asked for, in order: a change to an employee waits in its lane while another is written. */
+const lanes = vi.hoisted(() => [] as string[]);
+vi.mock('../src/modules/conversation/queue.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/modules/conversation/queue.js')>();
+  return { ...real, onAgent: ((ctx, agentId, fn) => { lanes.push(agentId); return real.onAgent(ctx, agentId, fn); }) as typeof real.onAgent };
+});
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
 async function company() {
@@ -239,14 +246,17 @@ describe('the employee card', () => {
 
   it('keeps both of two changes sent at once', async () => {
     const { app, ceo, brunoId } = await company();
-    /* The first change waits before it writes, so the second reads the card before the first lands. */
+    /* The first change holds its write until the second asked for the employee's lane, so the second would read the card
+       before the first lands if the lane let it in. */
     const db = app.ctx.db;
     const transaction = db.transaction.bind(db);
+    const asked = () => lanes.filter(id => id === brunoId).length;
+    const before = asked();
     let held = false;
     db.transaction = (async (...args: Parameters<typeof transaction>) => {
       if (!held) {
         held = true;
-        await new Promise(r => setTimeout(r, 100));
+        await until(() => asked() >= before + 2);
       }
       return transaction(...args);
     }) as typeof db.transaction;

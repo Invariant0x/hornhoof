@@ -740,7 +740,8 @@ describe('what only the CEO may ask for', () => {
     const woke = await newest(db, orchestrator.id, 'tool-token-woke-0123456789abcdef0123');
     vi.spyOn(app.ctx.hub, 'hasTerminals').mockReturnValue(true);
     vi.spyOn(app.ctx.hub, 'send').mockImplementation((node, m) => {
-      if (m.type === 'agent.say') setTimeout(() => said(app.ctx, node, m.ref, true), 10);
+      /* The node types the words and says so once the message has gone. */
+      if (m.type === 'agent.say') queueMicrotask(() => said(app.ctx, node, m.ref, true));
       return true;
     });
     const told = await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Yes, disable her.' }, ...as(ceo) });

@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writ
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 const ids = vi.hoisted(() => ({ jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000, chowned: [] as string[], handedOver: [] as { path: string; dependencies: boolean }[] }));
 import type { HarnessClaim, HarnessUnit, ServerMessage, TestEnvironmentV1 } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
@@ -27,6 +27,19 @@ import { runTests, syncHarness, worktreeHarness, type Worktree } from '../src/te
 import { eventually } from '../../../test-support/eventually.mjs';
 
 const roots: string[] = [];
+/* Times that never run out: the longest a timer waits, and a part's, whose output may still take a minute past it. */
+const NEVER_MS = 2_147_483_647, NEVER_PART_MS = NEVER_MS - 60_000;
+/* A clock that moves only when the test moves it, for the timers, the time and the waits that end at a moment, which Node's
+   own AbortSignal.timeout would keep on the real clock. */
+function fakeClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+    const timer = new AbortController();
+    setTimeout(() => { timer.abort(new DOMException('The operation timed out.', 'TimeoutError')); }, ms);
+    return timer.signal;
+  });
+  onTestFinished(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+}
 afterEach(async () => { for (const root of roots.splice(0)) { await rm(root, { recursive: true, force: true }); } });
 const sh = (code: string) => ({ program: 'node', args: ['-e', code], cwd: '.' });
 const INSTALL = (log: string) => `const f=require('fs');f.appendFileSync(${JSON.stringify(log)},'x');f.mkdirSync('node_modules/.bin',{recursive:true});f.writeFileSync('node_modules/ready','dep');f.writeFileSync('node_modules/.bin/tool','#!/bin/sh\\n',{mode:0o755})`;
@@ -79,10 +92,10 @@ function registry() {
 }
 const machine = (f: Fixture, name: string, harness?: HarnessRemote) => ({ dir: join(f.root, name), proc: join(f.root, 'proc'), user: { uid: ids.jobUid, gid: ids.jobUid }, hidden: [], prepareRepoBrowser: async () => {}, ...(harness ? { harness } : {}) });
 async function productPart(f: Fixture, options: ReturnType<typeof machine>, commitSha = f.head()): Promise<Extract<ServerMessage, { type: 'tests.run' }>> {
-  const description = await readTestEnvironment(f.repo, f.repositoryScope, commitSha, { cacheRoot: join(options.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
-  return { type: 'tests.run', partId: randomUUID(), repo: f.repo, repositoryScope: f.repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 20_000, environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test.js'] } } };
+  const description = await readTestEnvironment(f.repo, f.repositoryScope, commitSha, { cacheRoot: join(options.dir, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
+  return { type: 'tests.run', partId: randomUUID(), repo: f.repo, repositoryScope: f.repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: NEVER_PART_MS, environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test.js'] } } };
 }
-const manualPart = (f: Fixture, command: string): Extract<ServerMessage, { type: 'tests.run' }> => ({ type: 'tests.run', partId: randomUUID(), repo: f.repo, repositoryScope: f.repositoryScope, commitSha: f.head(), branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 20_000 });
+const manualPart = (f: Fixture, command: string): Extract<ServerMessage, { type: 'tests.run' }> => ({ type: 'tests.run', partId: randomUUID(), repo: f.repo, repositoryScope: f.repositoryScope, commitSha: f.head(), branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: NEVER_PART_MS });
 const asked = (f: Fixture, commitSha = f.head()): Extract<ServerMessage, { type: 'tests.harness' }> => ({ type: 'tests.harness', requestId: randomUUID(), repositoryScope: f.repositoryScope, repo: f.repo, commitSha });
 
 describe('a harness that reaches every machine', () => {
@@ -116,7 +129,7 @@ describe('a harness that reaches every machine', () => {
     const f = await fixture(), shared = registry();
     const one = machine(f, 'one', shared.remote('one')), two = machine(f, 'two', shared.remote('two'));
     await syncHarness(asked(f), one); await syncHarness(asked(f), two);
-    const before = shared.builds.size, version = harnessVersion(await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(one.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} }));
+    const before = shared.builds.size, version = harnessVersion(await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(one.dir, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} }));
     await writeFile(f.installs, '');
     const next = await f.commit('package-lock.json', '{"lockfileVersion":3,"changed":true}');
     const [a, b] = [await syncHarness(asked(f, next), one), await syncHarness(asked(f, next), two)];
@@ -157,7 +170,7 @@ describe('a harness that reaches every machine', () => {
   });
 
   it('builds each architecture its own, under one version', async () => {
-    const f = await fixture(), description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const f = await fixture(), description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
     const other = { ...description, runtimeCapabilities: description.runtimeCapabilities.map(runtime => ({ ...runtime, fingerprint: 'a'.repeat(64) })) };
     expect(harnessVersion(other)).toBe(harnessVersion(description));
     expect(dependencyCacheKey(other)).not.toBe(dependencyCacheKey(description));
@@ -166,7 +179,7 @@ describe('a harness that reaches every machine', () => {
   it('builds each architecture its own whatever program builds it, as nothing else in a key need name the machine', async () => {
     const plain = (code: string) => ({ program: 'sh', args: ['-c', code], cwd: '.' });
     const f = await fixture(manifest => { manifest.runtimes = []; manifest.dependencies.install = [plain('mkdir node_modules')]; manifest.prepare[0]!.commands = [plain('mkdir template')]; });
-    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
     const other = { ...description, runtimeCapabilities: description.runtimeCapabilities.map(runtime => ({ ...runtime, fingerprint: 'a'.repeat(64) })) };
     expect(harnessVersion(other)).toBe(harnessVersion(description));
     expect(dependencyCacheKey(other)).not.toBe(dependencyCacheKey(description));
@@ -177,7 +190,7 @@ describe('a harness that reaches every machine', () => {
     const line = (code: string) => ({ program: 'sh', args: ['-c', code], cwd: '.' });
     const keys = async (code: string) => {
       const f = await fixture(manifest => { manifest.runtimes = []; manifest.prepare[0]!.commands = [line(code)]; });
-      const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+      const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
       const newer = (id: string) => ({ ...description, runtimeCapabilities: [...description.runtimeCapabilities.filter(runtime => runtime.id !== id), { id, version: '99.0.0', fingerprint: 'a'.repeat(64) }] });
       return { node: environmentCacheKey(newer('node'), 'schema', 'k') !== environmentCacheKey(description, 'schema', 'k'), python: environmentCacheKey(newer('python'), 'schema', 'k') !== environmentCacheKey(description, 'schema', 'k') };
     };
@@ -322,7 +335,7 @@ describe('a project whose tools come with its harness', () => {
   });
 
   it('builds again when what names them changes, as what it builds may depend on it', async () => {
-    const f = await fixture(tools), a = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const f = await fixture(tools), a = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
     const moved = { ...a, manifest: { ...a.manifest, dependencies: { ...a.manifest.dependencies, bin: ['.tools'] } } };
     expect(dependencyCacheKey(moved)).not.toBe(dependencyCacheKey(a));
     const named = { ...a, manifest: { ...a.manifest, dependencies: { ...a.manifest.dependencies, env: { OTHER_HOME: '.tools' } } } };
@@ -407,8 +420,6 @@ function noted(remote: HarnessRemote, turn: ReturnType<typeof heldTurn>) {
   };
 }
 const until = (check: () => boolean) => eventually(check);
-const STILL_WAITING = 'still waiting';
-const settled = <T>(work: Promise<T>, ms: number) => Promise.race([work, new Promise<string>(resolve => { setTimeout(resolve, ms, STILL_WAITING); })]);
 
 describe("an agent's worktree", () => {
   it('gets the dependencies of its commit before its program starts, built once and taken by every other machine and by test runs', async () => {
@@ -420,7 +431,7 @@ describe("an agent's worktree", () => {
     for (const tree of [mine, theirs]) expect(await readFile(join(tree.checkout, 'node_modules', 'ready'), 'utf8')).toBe('dep');
     expect(await installed(f)).toBe(1);
     /* The key of a test run of the same commit, so a part there takes the same build. */
-    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(two.dir, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(two.dir, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
     expect(new Set(shared.keysSeen)).toEqual(new Set([dependencyCacheKey(description)]));
     const part = await runTests(await productPart(f, two), two);
     expect(part, part.log).toMatchObject({ ok: true, environmentReceipt: { dependencies: { hit: true } } });
@@ -498,7 +509,8 @@ describe("an agent's worktree", () => {
     const piped = await worktree(f, one, 'f'.repeat(40)), helper = agentFs({ uid: process.getuid!(), gid: process.getgid!() });
     await rm(manifest(piped)); execFileSync('mkfifo', [manifest(piped)]);
     try {
-      expect(await settled(worktreeHarness({ ...piped, fs: helper }, one).catch((error: unknown) => String(error)), 5_000)).not.toBe(STILL_WAITING);
+      /* It ends, whatever it says; one that waited on the pipe would never end, nor the test with it. */
+      await worktreeHarness({ ...piped, fs: helper }, one).catch((error: unknown) => String(error));
     } finally { helper.stop(); }
   });
 
@@ -509,8 +521,8 @@ describe("an agent's worktree", () => {
     const turn = heldTurn();
     try {
       /* Another machine downloads it, and this one has it already. */
-      expect(await settled(worktreeHarness(await worktree(f, two), { ...two, slot: turn.slot }), 5_000)).toMatch(PLACED);
-      expect(await settled(worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot }), 5_000)).toMatch(PLACED);
+      expect(await worktreeHarness(await worktree(f, two), { ...two, slot: turn.slot })).toMatch(PLACED);
+      expect(await worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot })).toMatch(PLACED);
     } finally { turn.release(); }
     expect(turn.asked.count).toBe(0);
     expect(await installed(f)).toBe(1);
@@ -518,9 +530,11 @@ describe("an agent's worktree", () => {
 
   it("builds them only in the machine's turn for heavy work, and shares them then", async () => {
     const f = await fixture(), shared = registry(), one = machine(f, 'one', shared.remote('one')), turn = heldTurn();
-    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot });
-    expect(await settled(placing, 500)).toBe(STILL_WAITING);
-    expect(turn.asked.count).toBe(1);
+    let placed = false;
+    const placing = worktreeHarness(await worktree(f, one), { ...one, slot: turn.slot }).finally(() => { placed = true; });
+    /* It waits for the turn it asked for, which the test part holds. */
+    await until(() => turn.asked.count === 1);
+    expect(placed).toBe(false);
     expect(await installed(f)).toBe(0);
     turn.release();
     expect(await placing).toMatch(PLACED);
@@ -571,10 +585,19 @@ describe("an agent's worktree", () => {
 
   it('waits only so long for another machine', async () => {
     const f = await fixture(), shared = registry();
-    const busy: HarnessRemote = { ...shared.remote('one'), claim: async () => ({ state: 'wait', afterMs: 5 }) };
-    const one = { ...machine(f, 'one', busy), limitMs: 300 }, started = Date.now();
-    await expect(worktreeHarness(await worktree(f, one), one)).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(10_000);
+    let claims = 0;
+    const busy: HarnessRemote = { ...shared.remote('one'), claim: async () => { claims++; return { state: 'wait', afterMs: 5 }; } };
+    /* The machine's runtimes are known already, so nothing on the way to the registry runs on the real clock. */
+    const runtimes = (await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} })).runtimeCapabilities;
+    const one = { ...machine(f, 'one', busy), limitMs: 300, runtimes }, tree = await worktree(f, one);
+    fakeClock();
+    let ended = false;
+    const placing = worktreeHarness(tree, one).finally(() => { ended = true; }), refused = expect(placing).rejects.toThrow();
+    await until(() => claims > 0);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await refused;
     expect(await installed(f)).toBe(0);
   });
 
@@ -607,7 +630,7 @@ describe('what a machine keeps', () => {
     return names;
   };
   const HOUR = 3_600_000;
-  const context = (dir: string) => ({ cacheRoot: dir, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+  const context = (dir: string) => ({ cacheRoot: dir, deadline: Date.now() + NEVER_MS, signal: new AbortController().signal, log: () => {} });
 
   it('keeps the ones used last, and whatever a running part may still read', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hh-prune-')); roots.push(root); await chmod(root, 0o700);

@@ -10,6 +10,7 @@ import { runNode } from '../src/main.js';
 import { claudeAdapter } from '../src/providers/claude.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
 
 const FAKE_CLAUDE = fileURLToPath(new URL('./fakes/claude', import.meta.url));
@@ -61,15 +62,11 @@ describe('the account a plan runs on', () => {
     };
     const running = await runNode({ dir, adapter, log: () => {} });
     onTestFinished(() => running.stop());
-    const until = async (check: () => boolean) => {
-      for (const end = Date.now() + 3000; !check() && Date.now() < end; ) await new Promise(r => setTimeout(r, 10));
-      expect(check()).toBe(true);
-    };
-    await until(() => received.some(m => m.type === 'hello'));
+    await eventually(() => received.some(m => m.type === 'hello'));
     expect(received.find(m => m.type === 'hello')).toMatchObject({ account: { email: 'x@y.z', tier: 'pro' } });
     account = { email: 'x@y.z', tier: 'max' };
     const [socket] = [...server.clients];
     socket!.send(JSON.stringify({ type: 'cred.drop', kind: 'claude_token' }));
-    await until(() => received.some(m => m.type === 'status' && (m.account as { tier?: string } | undefined)?.tier === 'max'));
+    await eventually(() => received.some(m => m.type === 'status' && (m.account as { tier?: string } | undefined)?.tier === 'max'));
   });
 });

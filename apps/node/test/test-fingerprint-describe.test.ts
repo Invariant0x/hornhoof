@@ -45,7 +45,7 @@ async function repository() {
   const source = { url: pathToFileURL(root).href, token: '' };
   const scope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(source.url).digest('hex') };
   const commit = async (path: string, text: string) => { await write(root, path, text); git(root, 'add', '.'); git(root, 'commit', '--quiet', '-m', 'More'); return git(root, 'rev-parse', 'HEAD'); };
-  return { root, source, scope, cacheRoot, head: git(root, 'rev-parse', 'HEAD'), commit, context: { cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 20_000, log: () => {}, runtimes: [{ id: 'node', version: '22.1.0', fingerprint: 'a'.repeat(64) }] } };
+  return { root, source, scope, cacheRoot, head: git(root, 'rev-parse', 'HEAD'), commit, context: { cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 2_147_483_647, log: () => {}, runtimes: [{ id: 'node', version: '22.1.0', fingerprint: 'a'.repeat(64) }] } };
 }
 const printsOf = async (f: Awaited<ReturnType<typeof repository>>, sha: string) => {
   const { fingerprints } = await describeTestEnvironment(f.source, f.scope, sha, f.context);
