@@ -53,7 +53,10 @@ export type Role = {
   body: string;
   hash: string;
 };
-export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; roster(key: TemplateKey): Role[] };
+/* A sub-unit a department's template brings with it: its members by role, and whether each of them does a task whole,
+   with no stage after it. */
+export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; description: Lang; turnkey: boolean; urgentOnly: boolean; members: { role: string; count: number }[] };
+export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; teams: Map<string, TeamTemplate>; roster(key: TemplateKey): Role[]; teamsOf(key: TemplateKey): TeamTemplate[] };
 
 /* Every employee has these, locked on: what working in Hornhoof takes, whatever the department. */
 export const CORE_SKILLS = ['hh-hornhoof', 'hh-tasks', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope', 'hh-run-checks'] as const;
@@ -196,6 +199,41 @@ function loadRoles(dir: string, skills: ReadonlyMap<string, Skill>): { roles: Ma
   return { roles, order };
 }
 
+const TeamHead = z
+  .object({
+    id: z.string().regex(/^[A-Z]{3}-[A-Z0-9]+$/),
+    department: z.enum(TEMPLATE_KEYS),
+    title: z.object({ en: z.string().min(1), ru: z.string().min(1) }).strict(),
+    description: z.object({ en: z.string().min(1), ru: z.string().min(1) }).strict(),
+    turnkey: z.boolean().default(false),
+    urgentOnly: z.boolean().default(false),
+    members: z.array(z.object({ role: z.string(), count: z.number().int().min(1).max(5).default(1) }).strict()).min(1).max(10),
+  })
+  .strict();
+
+/* A team's members are members of its own department, and its id is no role's. */
+function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string, Role>): TeamTemplate {
+  const team = parsed(TeamHead, file, readParts(file).head);
+  if (team.department !== key) throw new Error(`${file} is in ${key} but says ${team.department}.`);
+  if (roles.has(team.id)) throw new Error(`${file}: ${team.id} is the id of a role.`);
+  for (const { role } of team.members) {
+    const known = roles.get(role);
+    if (!known || known.department !== key || known.kind !== 'member') throw new Error(`${file}: ${role} is not a member role of ${key}.`);
+  }
+  return team;
+}
+
+function loadTeams(dir: string, roles: ReadonlyMap<string, Role>): Map<string, TeamTemplate> {
+  const teams = new Map<string, TeamTemplate>();
+  for (const key of TEMPLATE_KEYS) {
+    for (const f of markdown(join(dir, 'teams', key))) {
+      const team = parseTeamFile(join(dir, 'teams', key, f), key, roles);
+      teams.set(team.id, team);
+    }
+  }
+  return teams;
+}
+
 /* The head first, then default members, then optional ones, each by its order. */
 const roleRank = (r: Role): number => (r.kind === 'head' ? 0 : r.inDefault ? 1 : 2);
 
@@ -208,8 +246,8 @@ function sortDepartmentRoster(roles: Iterable<Role>, order: ReadonlyMap<string, 
 /* The order of the roles of each roster as their files give it, kept for copies of the templates. */
 const orders = new WeakMap<Templates, ReadonlyMap<string, number>>();
 
-function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, order: ReadonlyMap<string, number>): Templates {
-  const templates: Templates = { roles, skills, roster: key => sortDepartmentRoster(roles.values(), order, key) };
+function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams: Map<string, TeamTemplate>, order: ReadonlyMap<string, number>): Templates {
+  const templates: Templates = { roles, skills, teams, roster: key => sortDepartmentRoster(roles.values(), order, key), teamsOf: key => [...teams.values()].filter(team => team.department === key) };
   orders.set(templates, order);
   return templates;
 }
@@ -217,11 +255,11 @@ function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, order
 export function loadTemplates(dir: string): Templates {
   const skills = loadSkills(dir);
   const { roles, order } = loadRoles(dir, skills);
-  return templatesOf(roles, skills, order);
+  return templatesOf(roles, skills, loadTeams(dir, roles), order);
 }
 
 /* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the
    templates it came from do not see. A test file reads the templates once for all the servers it builds. */
 export function copyTemplates(templates: Templates): Templates {
-  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), orders.get(templates)!);
+  return templatesOf(structuredClone(templates.roles), structuredClone(templates.skills), structuredClone(templates.teams), orders.get(templates)!);
 }

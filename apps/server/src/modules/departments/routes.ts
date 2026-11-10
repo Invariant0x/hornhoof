@@ -19,7 +19,7 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
-import { planFor, rosterOf, templateRoster } from './roster.js';
+import { planFor, rosterOf, teamRoster, templateRoster } from './roster.js';
 import { checkStaff, departmentOf, HireLine, requiredState, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
@@ -239,7 +239,14 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const waiting: string[] = [];
       /* A new department asked for with its people gets those of its template, as the staff card would start with. */
       const hireTemplate = async (inside: Tx, dept: typeof departments.$inferSelect): Promise<Hired[]> => {
-        const { lines } = await linesToHire(ctx, inside, dept, await rosterOf({ db: inside, templates: ctx.templates }, me.companyId, dept), false);
+        const within = { db: inside, templates: ctx.templates };
+        const { lines } = await linesToHire(ctx, inside, dept, await rosterOf(within, me.companyId, dept), false);
+        /* Each team of the template becomes a sub-unit with its members. */
+        const serving = await servingSubscriptions(within, me.companyId, spotIn(dept));
+        for (const team of dept.templateKey ? ctx.templates.teamsOf(dept.templateKey) : []) {
+          const [made] = await inside.insert(teams).values({ companyId: me.companyId, departmentId: dept.id, name: team.title.en, about: team.description.en, turnkey: team.turnkey, urgentOnly: team.urgentOnly }).returning({ id: teams.id });
+          lines.push(...teamRoster(within, team, made!.id, serving));
+        }
         const out: Hired[] = [];
         for (const line of lines) out.push(await hireEmployee(ctx, inside, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
         waiting.push(...lines.filter(line => !line.subscription).map(line => line.name));

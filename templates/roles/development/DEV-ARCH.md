@@ -7,7 +7,7 @@ description: { en: "Designs the target structure of new features and changes tha
 tier: top
 effort: xhigh
 perProduct: false
-default: false
+default: true
 order: 10
 schema: before_work
 skills: [dev-task-flow, dev-testing-policy, dev-gates, dev-plan-review, dev-api-design, { id: dev-write-plan, on: false }, hh-work-fast]
