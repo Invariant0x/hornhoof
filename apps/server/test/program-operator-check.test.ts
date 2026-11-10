@@ -80,7 +80,6 @@ it('keeps the screen only as its masked picture, and keeps no way to press keys 
   const stored = await c.db.select({ data: agentEvents.data }).from(agentEvents).where(eq(agentEvents.jobId, turn.id));
   expect(JSON.stringify(stored)).not.toContain('the words nobody sent');
   expect(JSON.stringify(stored)).not.toContain(secret);
-  expect((await c.caseOf(turn.id)).snapshot).toBeNull();
 });
 
 it('a screen of sign-in or terms is drawn as the program shows it: nothing but the values of secrets is hidden', async () => {

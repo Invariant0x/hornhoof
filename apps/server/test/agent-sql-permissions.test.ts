@@ -16,7 +16,6 @@ it.each([
   'program_instances',
   'program_deliveries',
   'program_operator_cases',
-  'program_operator_actions',
   'program_operator_signals',
   'wait_notices',
   'person_changes',

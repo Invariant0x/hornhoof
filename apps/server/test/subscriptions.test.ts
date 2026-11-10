@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, people, personAccess, programDeliveries, programInstances, programOperatorActions, programOperatorCases, programOperatorSignals, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, people, personAccess, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 import { createRoute } from '../src/modules/tasks/echelons-store.js';
 
@@ -40,11 +40,10 @@ async function programHistory(db: Db, node: typeof nodes.$inferSelect) {
   const [delivery] = await db.insert(programDeliveries).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, ordinal: 1, reference: 'past-work', kind: 'assignment', digest: 'past-work', outcome: 'taken' }).returning();
   const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, deliveryId: delivery!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, capability: randomUUID(), status: 'resolved', deadlineAt: new Date() }).returning();
   const [signal] = await db.insert(programOperatorSignals).values({ companyId, agentId: agent!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, caseId: incident!.id }).returning();
-  const [action] = await db.insert(programOperatorActions).values({ id: randomUUID(), companyId, caseId: incident!.id, operatorAgentId: agent!.id, operatorJobId: job!.id, actorName: agent!.name, agentId: agent!.id, jobId: job!.id, instance: instance!.id, snapshot: 'past-screen', generation: 1, key: 'Enter', reason: 'Continue setup', digest: 'past-action', result: 'applied' }).returning();
   const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
   const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: screenshot, size: screenshot.length }).returning();
   const [shownCase] = await db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id)).returning();
-  return { agent: agent!, job: job!, instance: instance!, delivery: delivery!, incident: shownCase!, signal: signal!, action: action!, picture: picture! };
+  return { agent: agent!, job: job!, instance: instance!, delivery: delivery!, incident: shownCase!, signal: signal!, picture: picture! };
 }
 
 describe('POST /api/subscriptions/connect', () => {
@@ -156,7 +155,6 @@ describe('POST /api/subscriptions/connect', () => {
     expect(await db.select().from(programDeliveries)).toEqual([other.delivery]);
     expect(await db.select().from(programOperatorCases)).toEqual([other.incident]);
     expect(await db.select().from(programOperatorSignals)).toEqual([other.signal]);
-    expect(await db.select().from(programOperatorActions)).toEqual([other.action]);
     expect((await db.select().from(attachments).where(eq(attachments.id, old.picture.id)))[0]).toEqual({ ...old.picture, operatorCaseId: null });
     expect((await db.select().from(attachments).where(eq(attachments.id, other.picture.id)))[0]).toEqual(other.picture);
     expect((await db.select().from(jobs).where(eq(jobs.id, old.job.id)))[0]).toEqual({ ...old.job, nodeId: null });

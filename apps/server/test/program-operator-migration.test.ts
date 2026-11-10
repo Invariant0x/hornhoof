@@ -53,7 +53,7 @@ it('preserves existing company, job, event and attachment data when adding empty
   expect((await client.query('select operator_case_id from attachments')).rows).toEqual([{ operator_case_id: null }, { operator_case_id: null }]);
   expect((await client.query('select limits_updated_at from subscriptions')).rows).toEqual([{ limits_updated_at: null }]);
   expect((await client.query("select person_id, job_id, size, encode(bytes, 'hex') as payload from attachments where job_id is null")).rows).toEqual([{ person_id: '00000000-0000-4000-8000-000000000005', job_id: null, size: 3, payload: '040506' }]);
-  for (const table of ['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals', 'program_operator_actions']) {
+  for (const table of ['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals']) {
     expect((await client.query(`select * from ${table}`)).rows, table).toEqual([]);
   }
   expect(await readFile(join(MIGRATIONS, `${operator.tag}.sql`), 'utf8')).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE|GRANT|REVOKE|DROP)\b/im);

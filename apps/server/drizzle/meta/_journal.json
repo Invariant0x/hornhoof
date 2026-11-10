@@ -666,6 +666,13 @@
       "when": 1794303511792,
       "tag": "0095_drop_unused_workspace_and_staging",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1794305863501,
+      "tag": "0096_drop_tables_without_code",
+      "breakpoints": true
     }
   ]
 }

@@ -48,9 +48,6 @@ describe('canonical private question storage', () => {
     for (const table of ['requests', 'proposals']) {
       expect((await client.query(`SELECT audience,question_revision,source_key,source_job_id,source_sequence,triage_agent_id,route_revision,classification FROM ${table}`)).rows).toEqual([]);
     }
-    expect((await client.query('SELECT id,source_key,question_revision,route_revision FROM computer_access_intents')).rows).toEqual([]);
-    const columns = await client.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_name='computer_access_intents'");
-    expect(columns.rows.map(row => row.column_name)).not.toContain('task_id');
   });
 
   it('preserves valid legacy answers, exact approval commits and private material history in its fixture', async () => {
@@ -72,20 +69,6 @@ describe('canonical private question storage', () => {
     for (const name of names) {
       for (const column of columns.split(',')) await expect(run(name, `SELECT ${column} FROM ${table}`)).rejects.toThrow(/permission denied/);
       expect((await run(name, `SELECT id,status FROM ${table}`))[0]!.rows).toEqual([]);
-    }
-  });
-
-  it('hides the actual ASK source from both roles and creates no access grant', async () => {
-    const { $client: client } = await createTestDb();
-    expect((await client.query('SELECT * FROM computer_access_intents')).rows).toEqual([]);
-    const { names, run } = await roles(client);
-    for (const name of names) {
-      for (const statement of [
-        'SELECT * FROM computer_access_intents',
-        'INSERT INTO computer_access_intents(id) SELECT id FROM computer_access_intents WHERE false',
-        'UPDATE computer_access_intents SET id=id WHERE false',
-        'DELETE FROM computer_access_intents WHERE false',
-      ]) await expect(run(name, statement)).rejects.toThrow(/permission denied/);
     }
   });
 
@@ -129,36 +112,6 @@ describe('canonical private question storage', () => {
     for (const name of names) {
       await expect(run(name, 'SELECT technical_text,executor_instruction,recovery_intent FROM request_internal')).rejects.toThrow(/permission denied/);
     }
-  });
-
-  it('reserves every fixed apply fence before an unknown outcome and requires readback time for granted metadata', async () => {
-    const { $client: client } = await createTestDb();
-    await client.exec(LEGACY);
-    await client.query('SELECT apply_operation_id,apply_revision,apply_route_revision,apply_control_revision,apply_target_until,applied_at FROM computer_access_intents');
-    const intent = '00000000-0000-4000-8000-000000000030';
-    await client.exec(`INSERT INTO computer_access_intents(id,company_id,agent_id,source_key,technical_text)
-      VALUES ('${intent}','${COMPANY}','00000000-0000-4000-8000-000000000003','fixture:ask','Private access question')`);
-    for (const fields of ["status='granted'", "status='apply_unknown'", "apply_operation_id='00000000-0000-4000-8000-000000000031'", 'applied_at=now()']) {
-      await expect(client.exec(`UPDATE computer_access_intents SET ${fields} WHERE id='${intent}'`)).rejects.toThrow(/check constraint/);
-    }
-    await client.exec(`UPDATE computer_access_intents SET status='apply_unknown',
-      apply_operation_id='00000000-0000-4000-8000-000000000031',apply_revision=3,apply_route_revision=2,
-      apply_control_revision=0,apply_target_until='2026-11-07T00:00:00Z' WHERE id='${intent}'`);
-    for (const fields of ['apply_control_revision=-1', 'apply_revision=0', 'apply_route_revision=0', 'apply_target_until=null', 'applied_at=now()', "status='open'", "status='resolved_internal'"]) {
-      await expect(client.exec(`UPDATE computer_access_intents SET ${fields} WHERE id='${intent}'`)).rejects.toThrow(/check constraint/);
-    }
-    expect((await client.query('SELECT status,apply_revision,apply_route_revision,apply_control_revision,applied_at FROM computer_access_intents')).rows).toEqual([
-      { status: 'apply_unknown', apply_revision: 3, apply_route_revision: 2, apply_control_revision: 0, applied_at: null },
-    ]);
-    for (const status of ['declined', 'withdrawn']) {
-      await client.exec(`UPDATE computer_access_intents SET status='${status}' WHERE id='${intent}'`);
-      expect((await client.query('SELECT status,apply_operation_id FROM computer_access_intents')).rows).toEqual([
-        { status, apply_operation_id: '00000000-0000-4000-8000-000000000031' },
-      ]);
-    }
-    await client.exec(`UPDATE computer_access_intents SET status='granted',applied_at='2026-11-06T12:00:00Z' WHERE id='${intent}'`);
-    expect((await client.query('SELECT status FROM computer_access_intents')).rows).toEqual([{ status: 'granted' }]);
-    // A synthetic database row is not a native access/file grant or a readback proof.
   });
 });
 

@@ -21,7 +21,7 @@ const OUTBOUND = [
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'computer_access_intents', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -49,7 +49,7 @@ export const SECRET: Record<string, string[]> = {
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
-  'program_operator_cases', 'program_operator_actions', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
+  'program_operator_cases', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
   'turn_snapshots', 'test_part_timings', 'test_file_results', 'test_suite_memory', 'harness_builds', 'harness_products', 'approval_policies',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by

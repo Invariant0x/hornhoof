@@ -1,8 +1,8 @@
 import type { EchelonsSnapshot } from '@hornhoof/protocol/echelons';
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
+import type { QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
-import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
+import type { OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { BindingPart } from '../modules/model-checks/lifecycle.js';
 import type { UnitFingerprint } from '@hornhoof/protocol';
@@ -595,7 +595,6 @@ export const turns = pgTable(
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
     startedBy: uuid('started_by').references(() => people.id),
     createdByAgentId: uuid('created_by_agent_id').references((): AnyPgColumn => agents.id),
-    closedBy: uuid('closed_by').references(() => people.id),
     createdAt: createdAt(),
     openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
@@ -867,38 +866,6 @@ export const requestInternal = pgTable('request_internal', {
   check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
 ]);
 
-/* The ASK source only. computer.json remains authoritative for native access and control revision. */
-export const computerAccessIntents = pgTable('computer_access_intents', {
-  id: id(),
-  companyId: companyId(),
-  agentId: uuid('agent_id').notNull().references(() => agents.id),
-  ...questionColumns(),
-  technicalText: text('technical_text').notNull(),
-  ...internalResolutionColumns(),
-  status: text('status', { enum: ['open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown'] }).notNull().default('open'),
-  applyOperationId: uuid('apply_operation_id'),
-  applyRevision: bigint('apply_revision', { mode: 'number' }),
-  applyRouteRevision: bigint('apply_route_revision', { mode: 'number' }),
-  applyControlRevision: bigint('apply_control_revision', { mode: 'number' }),
-  applyTargetUntil: timestamp('apply_target_until', { withTimezone: true }),
-  appliedAt: timestamp('applied_at', { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-}, t => [
-  ...questionChecks('computer_access_intents', t),
-  ...resolutionChecks('computer_access_intents', t),
-  check('computer_access_intents_status', sql`${t.status} IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')`),
-  check('computer_access_intents_apply_whole', sql`num_nonnulls(${t.applyOperationId}, ${t.applyRevision}, ${t.applyRouteRevision}, ${t.applyControlRevision}, ${t.applyTargetUntil}) IN (0, 5)`),
-  check('computer_access_intents_apply_started', sql`${t.applyOperationId} IS NULL OR ${t.status} IN ('apply_unknown', 'granted', 'declined', 'withdrawn')`),
-  check('computer_access_intents_apply_revision', safeRevision(t.applyRevision)),
-  check('computer_access_intents_apply_route_revision', safeRevision(t.applyRouteRevision)),
-  check('computer_access_intents_apply_control_revision', safeSequence(t.applyControlRevision)),
-  check('computer_access_intents_apply_outcome', sql`
-    (${t.status} NOT IN ('apply_unknown', 'granted') OR ${t.applyOperationId} IS NOT NULL)
-    AND (${t.status} <> 'granted' OR ${t.appliedAt} IS NOT NULL)
-    AND (${t.appliedAt} IS NULL OR ${t.status} = 'granted')`),
-]);
-
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
    an agent on a task put on it, of any kind, which every agent of the company downloads by its name. */
 export const attachments = pgTable(
@@ -959,7 +926,6 @@ export const programDeliveries = pgTable('program_deliveries', {
 }, t => [unique('program_deliveries_ordinal').on(t.agentId, t.ordinal), unique('program_deliveries_reference').on(t.agentId, t.reference), index('program_deliveries_job_id').on(t.jobId)]);
 
 export type OperatorCaseEvidence = { reason: OperatorReason; evidenceKey: string; deliveryId: string | null; input?: OperatorInputLine };
-export type OperatorCaseSnapshot = { token: string; generation: number; at: string; keysAllowed: boolean; state: string; cols: number; rows: number };
 
 /* One investigation per physical program; its original deadline never moves after a read or key. */
 export const programOperatorCases = pgTable('program_operator_cases', {
@@ -986,7 +952,6 @@ export const programOperatorCases = pgTable('program_operator_cases', {
   resolution: jsonb('resolution').$type<{ outcome: string; text: string; image: string | null; actor?: MessageParty; question?: OperatorQuestion; holdCall?: { job: string; to: string; at: string; operations: boolean } }>(),
   recoveryHold: boolean('recovery_hold').notNull().default(false),
   continuationJobId: uuid('continuation_job_id').references(() => jobs.id),
-  snapshot: jsonb('snapshot').$type<OperatorCaseSnapshot>(),
   pictureId: uuid('picture_id').references((): AnyPgColumn => attachments.id),
 }, t => [unique('program_operator_case_evidence').on(t.companyId, t.agentId, t.instance, t.reason, t.evidenceKey), uniqueIndex('program_operator_case_open').on(t.agentId, t.instance).where(sql`${t.status} = 'open'`), index('program_operator_case_deadline').on(t.deadlineAt).where(sql`${t.status} = 'open'`), index('program_operator_case_hold').on(t.agentId).where(sql`${t.recoveryHold}`)]);
 
@@ -999,28 +964,6 @@ export const programOperatorSignals = pgTable('program_operator_signals', {
   evidenceKey: text('evidence_key').notNull(),
   caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
 }, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
-
-/* An uncertain key stays unknown. Neither reconnect nor a repeated tool call resends an execution intent. */
-export const programOperatorActions = pgTable('program_operator_actions', {
-  id: uuid('id').primaryKey(),
-  companyId: companyId(),
-  caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
-  operatorAgentId: uuid('operator_agent_id').notNull().references(() => agents.id),
-  operatorJobId: uuid('operator_job_id').notNull().references(() => jobs.id),
-  actorName: text('actor_name').notNull(),
-  agentId: uuid('agent_id').notNull().references(() => agents.id),
-  jobId: uuid('job_id').notNull().references(() => jobs.id),
-  instance: uuid('program_instance_id').notNull().references(() => programInstances.id),
-  snapshot: text('snapshot').notNull(),
-  generation: integer('generation').notNull(),
-  key: text('key').notNull(),
-  reason: text('reason').notNull(),
-  digest: text('digest').notNull(),
-  result: text('result', { enum: ['requested', 'applied', 'refused', 'unknown'] }).notNull(),
-  error: text('error').$type<OperatorError>(),
-  requestedAt: createdAt(),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-}, t => [index('program_operator_actions_case_id').on(t.caseId)]);
 
 export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
 
@@ -2033,119 +1976,4 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   check('model_check_certificates_validity', sql`${t.validUntil} > ${t.evaluatedAt}`),
   check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
   isDigest('model_check_certificates_binding', t.bindingDigest),
-]);
-
-/* Server-only coordination beside canonical jobs and test parts. A live scope
-   has one episode; closing it permits a later outage with a new identity. */
-export const externalRecoveryCases = pgTable('external_recovery_cases', {
-  id: id(),
-  companyId: companyId(),
-  scopeDigest: text('scope_digest').notNull(),
-  adapter: text('adapter', { enum: ['git'] }).notNull(),
-  endpointDigest: text('endpoint_digest').notNull(),
-  credentialRevision: integer('credential_revision').notNull(),
-  failureFamily: text('failure_family', { enum: ['transport', 'temporary', 'rate_limit'] }).notNull(),
-  generation: integer('generation').notNull().default(1),
-  firstFailureAt: timestamp('first_failure_at', { withTimezone: true }).notNull().defaultNow(),
-  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
-  opsDeadlineAt: timestamp('ops_deadline_at', { withTimezone: true }).notNull(),
-  policyRevision: integer('policy_revision').notNull(),
-  ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
-  claimOperationId: uuid('claim_operation_id'),
-  claimUntil: timestamp('claim_until', { withTimezone: true }),
-  releaseRevision: integer('release_revision').notNull().default(0),
-  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
-  createdAt: createdAt(),
-}, t => [
-  unique('external_cases_company_identity').on(t.id, t.companyId),
-  uniqueIndex('external_cases_open_scope').on(t.companyId, t.scopeDigest).where(sql`${t.resolvedAt} IS NULL`),
-  index('external_cases_due').on(t.nextAttemptAt).where(sql`${t.resolvedAt} IS NULL`),
-  index('external_cases_ops_due').on(t.opsDeadlineAt).where(sql`${t.resolvedAt} IS NULL`),
-  check('external_cases_scope', sql`${t.scopeDigest} ~ '^[a-f0-9]{64}$' AND ${t.endpointDigest} ~ '^[a-f0-9]{64}$'`),
-  check('external_cases_adapter', sql`${t.adapter} = 'git'`),
-  check('external_cases_family', sql`${t.failureFamily} IN ('transport','temporary','rate_limit')`),
-  check('external_cases_revisions', sql`${t.credentialRevision} > 0 AND ${t.policyRevision} > 0 AND ${t.generation} > 0 AND ${t.releaseRevision} >= 0`),
-  check('external_cases_deadline', sql`${t.opsDeadlineAt} >= ${t.firstFailureAt}`),
-  check('external_cases_claim_pair', sql`(${t.claimOperationId} IS NULL) = (${t.claimUntil} IS NULL)`),
-]);
-
-/* Intent/consumer data is sealed by the authenticated producer, never copied
-   from a public task event or a command's stdout marker. */
-export const externalOperations = pgTable('external_operations', {
-  id: id(),
-  companyId: companyId(),
-  intentDigest: text('intent_digest').notNull(),
-  intent: jsonb('intent').$type<ExternalGitIntent>().notNull(),
-  consumer: jsonb('consumer').$type<ExternalConsumer>().notNull(),
-  state: text('state', { enum: ['ready', 'executing', 'deferred', 'outcome_unknown', 'satisfied', 'failed_permanent', 'cancelled'] }).notNull().default('ready'),
-  generation: integer('generation').notNull().default(1),
-  currentAttemptId: uuid('current_attempt_id'),
-  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
-  postconditionSha: text('postcondition_sha'),
-  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
-  finishedAt: timestamp('finished_at', { withTimezone: true }),
-  createdAt: createdAt(),
-}, t => [
-  unique('external_operations_company_identity').on(t.id, t.companyId),
-  index('external_operations_state').on(t.companyId, t.state),
-  check('external_operations_digest', sql`${t.intentDigest} ~ '^[a-f0-9]{64}$'`),
-  check('external_operations_generation', sql`${t.generation} > 0`),
-  check('external_operations_state', sql`${t.state} IN ('ready','executing','deferred','outcome_unknown','satisfied','failed_permanent','cancelled')`),
-  check('external_operations_intent_bound', sql`jsonb_typeof(${t.intent}) = 'object' AND octet_length(${t.intent}::text) <= 16384`),
-  check('external_operations_consumer_bound', sql`jsonb_typeof(${t.consumer}) = 'object' AND octet_length(${t.consumer}::text) <= 4096`),
-  check('external_operations_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
-  check('external_operations_postcondition', sql`${t.postconditionSha} IS NULL OR ${t.postconditionSha} ~ '^[a-f0-9]{40}$'`),
-]);
-
-export const externalRecoveryMembers = pgTable('external_recovery_members', {
-  companyId: companyId(),
-  caseId: uuid('case_id').notNull(),
-  operationId: uuid('operation_id').notNull(),
-  releaseRevision: integer('release_revision').notNull().default(0),
-  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
-  endedAt: timestamp('ended_at', { withTimezone: true }),
-}, t => [
-  primaryKey({ columns: [t.caseId, t.operationId] }),
-  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
-  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
-  index('external_members_operation').on(t.operationId),
-  check('external_members_release_revision', sql`${t.releaseRevision} >= 0`),
-]);
-
-/* Attempts retain old identities and receipts after replacement. A new fence
-   alone is never evidence that the previous remote child stopped. */
-export const externalRecoveryAttempts = pgTable('external_recovery_attempts', {
-  id: id(),
-  companyId: companyId(),
-  operationId: uuid('operation_id').notNull(),
-  generation: integer('generation').notNull(),
-  producerNodeId: uuid('producer_node_id').references(() => nodes.id),
-  producerLinkId: uuid('producer_link_id'),
-  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
-  settlement: jsonb('settlement').$type<ExternalPreparationSettlement>(),
-  receiptDigest: text('receipt_digest'),
-  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
-  settledAt: timestamp('settled_at', { withTimezone: true }),
-}, t => [
-  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
-  unique('external_attempts_generation').on(t.operationId, t.generation),
-  check('external_attempts_generation_positive', sql`${t.generation} > 0`),
-  check('external_attempts_receipt', sql`${t.receiptDigest} IS NULL OR ${t.receiptDigest} ~ '^[a-f0-9]{64}$'`),
-  check('external_attempts_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
-  check('external_attempts_settlement_bound', sql`${t.settlement} IS NULL OR (jsonb_typeof(${t.settlement}) = 'object' AND octet_length(${t.settlement}::text) <= 4096)`),
-]);
-
-/* The coordinator reserves and enqueues the same logical notification in one
-   transaction. No delivery or release is inferred from a reservation alone. */
-export const externalRecoveryNotices = pgTable('external_recovery_notices', {
-  id: id(),
-  companyId: companyId(),
-  caseId: uuid('case_id').notNull(),
-  noticeKind: text('notice_kind', { enum: ['operations'] }).notNull(),
-  notificationId: uuid('notification_id').notNull(),
-  createdAt: createdAt(),
-}, t => [
-  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
-  unique('external_notices_one_logical_signal').on(t.companyId, t.caseId, t.noticeKind),
-  check('external_notices_kind', sql`${t.noticeKind} = 'operations'`),
 ]);

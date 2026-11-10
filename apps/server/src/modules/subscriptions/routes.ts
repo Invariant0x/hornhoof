@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorActions, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
@@ -88,7 +88,6 @@ async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
   const goneCases = tx.select({ id: programOperatorCases.id }).from(programOperatorCases).where(inArray(programOperatorCases.nodeId, goneNodes));
   const goneDeliveries = tx.select({ id: programDeliveries.id }).from(programDeliveries).where(inArray(programDeliveries.nodeId, goneNodes));
-  await tx.delete(programOperatorActions).where(inArray(programOperatorActions.caseId, goneCases));
   await tx.delete(programOperatorSignals).where(inArray(programOperatorSignals.caseId, goneCases));
   /* Keep conversation pictures after their physical program's investigation is gone. */
   await tx.update(attachments).set({ operatorCaseId: null }).where(inArray(attachments.operatorCaseId, goneCases));
