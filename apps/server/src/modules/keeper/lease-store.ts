@@ -19,7 +19,8 @@ export type LeaseStore = {
   endSessions(): Promise<number>;
   /* What keeps this machine from leading, a line each; none when every fence holds. */
   problems(): Promise<string[]>;
-  /* How many journal rows older than a week it removed, while this machine keeps the data alone and nobody reads them. */
+  /* How many rows older than a week it removed, of the journal, the sources and the kept answers of tool calls, while this
+     machine keeps the data alone and nobody reads them. */
   prune(batch?: number): Promise<number>;
   close(): Promise<void>;
 };
@@ -47,10 +48,24 @@ const FENCE = `UPDATE net_local.lease SET until = '-infinity'`;
 const END_SESSIONS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))::int AS ended FROM pg_stat_activity
   WHERE datname = current_database() AND pid <> pg_backend_pid() AND (application_name = $1 OR usename = ANY($2::text[]))`;
 
-const PRUNE = `WITH gone AS (
-    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE at < now() - interval '7 days' ORDER BY at LIMIT $1)
-      AND (SELECT sync FROM net_local.lease) = 'alone' RETURNING 1
-  ) SELECT count(*)::int AS pruned FROM gone`;
+/* One statement, so that all three go or none: journal rows, the steps of sources, and the kept answers of tool calls whose
+   job no longer runs, each older than a week and a batch at most, and only while nobody else reads them. */
+const ALONE = `(SELECT sync FROM net_local.lease) = 'alone'`;
+const OLD = `at < now() - interval '7 days'`;
+const PRUNE = `WITH journal_gone AS (
+    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE ${OLD} ORDER BY at LIMIT $1) AND ${ALONE} RETURNING 1
+  ), sources_gone AS (
+    DELETE FROM public.applied WHERE source IN (SELECT source FROM public.applied WHERE ${OLD} ORDER BY at LIMIT $1) AND ${ALONE} RETURNING 1
+  ), calls_gone AS (
+    DELETE FROM public.tool_calls WHERE id IN (
+      SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE c.${OLD} AND j.status <> 'running' ORDER BY c.at LIMIT $1
+    ) AND ${ALONE} RETURNING 1
+  ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned`;
+
+/* Any right on a table at all. */
+const TABLE_RIGHTS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].join(', ');
+/* The tables of public that say where a change came from: an agent that could write them could make a retry run twice. */
+const SOURCE_TABLES = ['applied', 'tool_calls'];
 
 /* Every fence, in the order a person would mend them. A trigger counts only as Hornhoof leaves it: enabled the ordinary
    way, and the fence deferred to the commit. */
@@ -71,8 +86,9 @@ const PROBLEMS = `SELECT line FROM (
       WHERE r.rolname = ANY($2::text[]) AND pg_has_role(r.oid, 'pg_signal_backend', 'MEMBER')
     UNION ALL
     SELECT 6, format('%s may reach %s.%s', r.rolname, n.nspname, c.relname) FROM pg_roles r, pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE r.rolname = ANY($2::text[]) AND n.nspname IN ('net', 'net_local') AND c.relkind = 'r'
-        AND has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+      WHERE r.rolname = ANY($2::text[]) AND c.relkind = 'r'
+        AND (n.nspname IN ('net', 'net_local') OR (n.nspname = 'public' AND c.relname = ANY($3::text[])))
+        AND has_table_privilege(r.oid, c.oid, '${TABLE_RIGHTS}')
     UNION ALL
     SELECT 7, format('%s may run %s', r.rolname, p.oid::regprocedure) FROM pg_roles r, pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE r.rolname = ANY($2::text[]) AND n.nspname = 'net' AND p.proname <> 'assert_lease' AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
@@ -105,7 +121,7 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     },
     fence,
     endSessions,
-    problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles()])).rows.map(row => row.line),
+    problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(), SOURCE_TABLES])).rows.map(row => row.line),
     prune: async (batch = PRUNE_BATCH) => (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned,
     close: async () => sql.close?.(),
   };

@@ -481,3 +481,44 @@ describe('migration 0099, the fences and the journal', () => {
     await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/too long/);
   });
 });
+
+describe('migrations 0100 and 0101, where each change came from', () => {
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    return { client, db };
+  }
+
+  it('keeps the base of each step, with the indexes pruning reads by', async () => {
+    const { db } = await fullyMigrated();
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'applied' order by 1`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(['at', 'base', 'source']);
+    const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where schemaname = 'public' and indexname in ('applied_base', 'applied_at', 'tool_calls_at') order by 1`);
+    expect(indexes.rows.map(row => row.indexname)).toEqual(['applied_at', 'applied_base', 'tool_calls_at']);
+  });
+
+  it('gives every event of a task a name that holds across machines', async () => {
+    const { db } = await fullyMigrated();
+    const column = await db.execute(sql`select is_nullable, column_default from information_schema.columns where table_name = 'task_events' and column_name = 'uuid'`);
+    expect(column.rows).toEqual([{ is_nullable: 'NO', column_default: 'gen_random_uuid()' }]);
+  });
+
+  it('records a database call in the lease check, and nothing for a check without a call', async () => {
+    const { client, db } = await fullyMigrated();
+    const lease = `'net.assert_lease(interval, uuid, uuid, jsonb)'::regprocedure`;
+    expect((await db.execute(sql.raw(`select has_function_privilege('public', ${lease}, 'EXECUTE') as may`))).rows).toEqual([{ may: false }]);
+    const INVOCATION = '00000000-0000-4000-8000-0000000000aa';
+    const JOB = '00000000-0000-4000-8000-0000000000bb';
+    /* No job stands behind this call, which the check of that is told to let pass. */
+    await client.exec(`SET session_replication_role = replica`);
+    await client.exec(`SELECT net.assert_lease('2 s', NULL, '${JOB}', '{"ok":true}')`);
+    expect((await db.execute(sql`select 1 from tool_calls`)).rows).toEqual([]);
+    expect((await db.execute(sql`select 1 from applied`)).rows).toEqual([]);
+
+    await client.exec(`SELECT net.assert_lease('2 s', '${INVOCATION}', '${JOB}', '{"ok":true}')`);
+    expect((await db.execute(sql`select id, job_id, answer from tool_calls`)).rows).toEqual([{ id: INVOCATION, job_id: JOB, answer: { ok: true } }]);
+    expect((await db.execute(sql`select source, base from applied`)).rows).toEqual([{ source: `tool:${INVOCATION}:0`, base: `tool:${INVOCATION}` }]);
+  });
+});

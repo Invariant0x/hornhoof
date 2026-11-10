@@ -9,6 +9,7 @@ import pg from 'pg';
 import { confirmCommits, keepErrors, logTimeouts } from './confirm.js';
 import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS, FENCED, JOURNAL_NEEDS_PUTTING_BACK } from './net.js';
 import * as schema from './schema.js';
+import { recordSources } from './sources.js';
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -58,9 +59,10 @@ export function openPool(url: string, onDropped: (err: Error) => void, name: str
 
 const warnDropped = (err: Error) => console.warn(`Lost a database connection, will open another: ${err.message}`);
 
-/* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. */
+/* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. Inside the work of a
+   node message, a page's request or a tool call, every commit lists where it came from (sources.ts). */
 export function openDb(url: string, name: string, opts: PoolOptions = {}): Db {
-  return drizzle(openPool(url, warnDropped, name, opts), { schema });
+  return recordSources(drizzle(openPool(url, warnDropped, name, opts), { schema }));
 }
 
 /* Runs on a pool with no timeouts, since a migration may take as long as it needs. Answers how many migrations the
@@ -95,11 +97,16 @@ async function applyMigrations(pool: pg.Pool, db: MigratingDb, config: Migration
   });
 }
 
-/* With nothing to apply the journal stays on and no table is locked, as a by-hand start over a live company runs this too. */
-async function healJournal(pool: pg.Pool): Promise<void> {
-  const { rows } = await pool.query<{ needed: boolean }>(JOURNAL_NEEDS_PUTTING_BACK);
+const JOURNAL_FUNCTION_IS_THERE = `SELECT to_regprocedure('net.attach_journal()') IS NOT NULL AS needed`;
+
+/* Puts the journal back when the question, one row with one boolean named needed, answers yes. */
+async function putJournalBackWhen(pool: pg.Pool, question: string): Promise<void> {
+  const { rows } = await pool.query<{ needed: boolean }>(question);
   if (rows[0]!.needed) await pool.query(AFTER_MIGRATIONS);
 }
+
+/* With nothing to apply the journal stays on and no table is locked, as a by-hand start over a live company runs this too. */
+const healJournal = (pool: pg.Pool): Promise<void> => putJournalBackWhen(pool, JOURNAL_NEEDS_PUTTING_BACK);
 
 /* The journal goes back also after a failed run, whose failure stays what the caller gets. A failure to put it back after a
    good run is thrown too: the company must not go on without it. If it cannot go back after a failed run, the journal stays
@@ -114,10 +121,7 @@ async function withJournalBackAfter(pool: pg.Pool, migrations: () => Promise<voi
   await putJournalBack(pool);
 }
 
-async function putJournalBack(pool: pg.Pool): Promise<void> {
-  const { rows } = await pool.query<{ there: boolean }>(`SELECT to_regprocedure('net.attach_journal()') IS NOT NULL AS there`);
-  if (rows[0]!.there) await pool.query(AFTER_MIGRATIONS);
-}
+const putJournalBack = (pool: pg.Pool): Promise<void> => putJournalBackWhen(pool, JOURNAL_FUNCTION_IS_THERE);
 
 /* What no row records yet: drizzle's run applies those above its newest record, applyMissingMigrations those below it. */
 async function unappliedMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<MigrationMeta[]> {

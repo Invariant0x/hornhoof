@@ -23,6 +23,7 @@ import { openTestDb, timed } from './helpers-db.js';
 import { TEST_SECRET } from './helpers-basic.js';
 import { templatesFor } from './templates-once.js';
 import { listenAt } from '../../../test-support/ports.mjs';
+import { recordSources } from '../src/db/sources.js';
 export { createTestDb, fixture, ownDatabases, statements } from './helpers-db.js';
 export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
@@ -91,7 +92,7 @@ const markedInTest: CommitMarker = async () => ({ ok: true });
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
-  const db = drizzle(client, { schema }) as unknown as Db;
+  const db = recordSources(drizzle(client, { schema }) as unknown as Db);
   /* Tests never reach the real registry or a real CA unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
   const app = await timed('setupMs', () => buildApp({ db, config, logger, templates: templatesFor(config), agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest, readCompare: async () => ({ complete: true, baseSha: TEST_COMMIT, headSha: TEST_COMMIT, paths: [], diff: '' }), readTree: async () => ({ complete: false, reason: 'no-repository-in-tests' }) }));

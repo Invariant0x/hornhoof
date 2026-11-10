@@ -35,7 +35,7 @@ afterAll(async () => {
 
 /* Each test leaves the lease as the fixture gives it, so the next one starts under a lease that holds. */
 afterEach(async () => {
-  await real.admin.query('DELETE FROM net_local.lease; DELETE FROM net_local.state; DELETE FROM net.journal');
+  await real.admin.query('DELETE FROM net_local.lease; DELETE FROM net_local.state; DELETE FROM applied; DELETE FROM net.journal');
   await real.admin.query(ENDLESS_LEASE);
 });
 
@@ -189,6 +189,16 @@ describe("the keeper's lease on real Postgres", () => {
     await lease.fence();
     expect(await lease.renew(term, 'normal', FAR, false)).toBe(false);
     expect(await leaseEnded()).toBe(true);
+  });
+
+  it('prunes old sources as the keeper', async () => {
+    const { lease } = keeper();
+    await lease.take('normal', FAR);
+    await real.admin.query(`INSERT INTO applied (source, base, at) VALUES ('web:old:0', 'web:old', now() - interval '8 days'), ('web:new:0', 'web:new', now())`);
+    expect(await lease.prune()).toBe(1);
+    expect((await real.admin.query<{ source: string }>('SELECT source FROM applied')).rows).toEqual([{ source: 'web:new:0' }]);
+    /* The step's going is a change like any other, and a copy would hear of it. */
+    expect((await real.admin.query(`SELECT 1 FROM net.journal WHERE tbl = 'applied' AND op = 'delete'`)).rowCount).toBe(1);
   });
 
   it('prunes as the keeper after the lease ended', async () => {

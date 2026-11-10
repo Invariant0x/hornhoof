@@ -14,13 +14,14 @@ import { aclCompanyOn } from './agent-view-fixture.js';
 import { TEST_SECRET } from './helpers-basic.js';
 import { migratedPgliteDump, readPgliteTemplate } from './prepare-environment.js';
 import { listenAt, listenIn } from '../../../test-support/ports.mjs';
+import { recordSources } from '../src/db/sources.js';
 
 const key = 'k'.repeat(40);
 const template = process.env.HH_PGLITE_TEMPLATE;
 const dump = template ? readPgliteTemplate(template) : await migratedPgliteDump();
 if (!dump) throw new Error('Invalid HH_PGLITE_TEMPLATE for the browser access server');
 const client = new PGlite({ loadDataDir: new Blob([new Uint8Array(dump)]) });
-const db = drizzle(client, { schema }) as unknown as Db;
+const db = recordSources(drizzle(client, { schema }) as unknown as Db);
 const app = await buildApp({ db, config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', NODE_KEY: key, STREAM_PING_MS: '100', WEB_DIST: process.env.WEB_DIST }) });
 const origin = await listenAt(port => app.listen({ host: '127.0.0.1', port }));
 const c = await aclCompanyOn(app, db, origin.replace('http://', 'ws://') + '/api/nodes/socket');

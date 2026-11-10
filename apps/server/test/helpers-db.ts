@@ -5,6 +5,7 @@ import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/p
 import { afterAll, inject, onTestFailed, onTestFinished, TestRunner, vi } from 'vitest';
 import * as schema from '../src/db/schema.js';
 import { FENCED } from '../src/db/net.js';
+import { recordSources } from '../src/db/sources.js';
 
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
 type Shared = { client: PGlite; shape: string; planner: string; pointedAtBy: ReadonlyMap<string, readonly string[]> };
@@ -311,7 +312,7 @@ export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
      under the first fence. PGlite applies no ALTER DATABASE or ALTER ROLE setting when it loads a dump, and the discard
      that empties a shared one forgets it, so each test says it for itself. */
   await client.exec(`SET ${FENCED} = 'on'`);
-  const db = drizzle(client, { schema });
+  const db = recordSources(drizzle(client, { schema }));
   return { client, db };
 }
 

@@ -72,13 +72,15 @@ describe('the lease the keeper holds in the database', () => {
     const s = await store();
     const role = agentRole('postgres');
     await s.run.query(`ALTER TABLE companies DISABLE TRIGGER net_journal; ALTER TABLE net.journal DISABLE TRIGGER net_fence;
-      GRANT EXECUTE ON FUNCTION net.attach_journal() TO PUBLIC; GRANT SELECT ON net_local.lease TO "${role}"; GRANT pg_signal_backend TO "${role}"`);
+      GRANT EXECUTE ON FUNCTION net.attach_journal() TO PUBLIC; GRANT SELECT ON net_local.lease TO "${role}"; GRANT pg_signal_backend TO "${role}"; GRANT SELECT ON applied, tool_calls TO "${role}"`);
     expect(await s.lease.problems()).toEqual([
       'public.companies has no journal trigger',
       'net.journal has no fence trigger',
       'PUBLIC may still run net.attach_journal()',
       `${role} may signal other sessions`,
       `${role} may reach net_local.lease`,
+      `${role} may reach public.applied`,
+      `${role} may reach public.tool_calls`,
       `${role} may run net.attach_journal()`,
       /* What PUBLIC may run, every role may. */
       `${readerRole('postgres')} may run net.attach_journal()`,
@@ -100,6 +102,33 @@ describe('the lease the keeper holds in the database', () => {
     await s.db.execute(sql`UPDATE net.journal SET at = now() - interval '8 days'`);
     await s.run.query(`UPDATE net_local.lease SET sync = 'copy'`);
     expect(await s.lease.prune()).toBe(0);
+  });
+
+  it('prunes old sources and the old calls of jobs that ended, while this machine keeps the data alone', async () => {
+    const s = await store();
+    await s.lease.take('normal', FAR);
+    const RUNNING = '00000000-0000-4000-8000-000000000001';
+    const ENDED = '00000000-0000-4000-8000-000000000002';
+    /* Rows as a week of work leaves them, written past the checks that a company, a plan and an agent stand behind a job. */
+    await s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
+      INSERT INTO jobs (id, company_id, subscription_id, prompt, timeout_ms, status) VALUES
+        ('${RUNNING}', gen_random_uuid(), gen_random_uuid(), 'x', 1000, 'running'), ('${ENDED}', gen_random_uuid(), gen_random_uuid(), 'x', 1000, 'done');
+      INSERT INTO applied (source, base, at) VALUES ('web:old:0', 'web:old', now() - interval '8 days'), ('web:old:1', 'web:old', now() - interval '8 days'), ('web:new:0', 'web:new', now());
+      INSERT INTO tool_calls (id, job_id, at) VALUES
+        (gen_random_uuid(), '${ENDED}', now() - interval '8 days'), (gen_random_uuid(), '${RUNNING}', now() - interval '8 days'), (gen_random_uuid(), '${ENDED}', now());
+      COMMIT`);
+    const left = async () => (await s.run.query<{ sources: number; calls: number }>(`SELECT (SELECT count(*)::int FROM applied) AS sources, (SELECT count(*)::int FROM tool_calls) AS calls`)).rows[0];
+
+    await s.run.query(`UPDATE net_local.lease SET sync = 'copy'`);
+    expect(await s.lease.prune()).toBe(0);
+    expect(await left()).toEqual({ sources: 3, calls: 3 });
+
+    await s.run.query(`UPDATE net_local.lease SET sync = 'alone'`);
+    expect(await s.lease.prune(1)).toBe(2);
+    expect(await left()).toEqual({ sources: 2, calls: 2 });
+    expect(await s.lease.prune()).toBe(1);
+    expect(await left()).toEqual({ sources: 1, calls: 2 });
+    expect((await s.run.query(`SELECT 1 FROM tool_calls WHERE job_id = '${RUNNING}'`)).rows).toHaveLength(1);
   });
 
   it('ends no session where the app and the agents have none', async () => {

@@ -23,7 +23,8 @@ const RULES: Rule[] = [
     allowedIn: LOOSE_COMMIT_ALLOWED,
     sample: 'SET LOCAL synchronous_commit = local',
   },
-  { name: 'TRUNCATE writes no journal row', matches: has(/\bTRUNCATE\b/i), sample: 'TRUNCATE tasks' },
+  /* The statement, which names what it empties; the right of that name in a list of rights is no statement. */
+  { name: 'TRUNCATE writes no journal row', matches: has(/\bTRUNCATE\s+["\w$]/i), sample: 'TRUNCATE tasks' },
   // eslint-disable-next-line hornhoof/no-ddl-on-shared-database -- A sample of text for the lint to read: no database runs it.
   { name: 'DISABLE TRIGGER takes the journal off', matches: has(/DISABLE TRIGGER/i), sample: 'ALTER TABLE tasks DISABLE TRIGGER net_journal' },
   { name: 'PREPARE TRANSACTION commits later, past the fence', matches: has(/PREPARE TRANSACTION/i), sample: "PREPARE TRANSACTION 'x'" },
@@ -52,6 +53,12 @@ function violationsIn(path: string): string[] {
 }
 
 describe('the lint of the fences', () => {
+  it('takes the right to truncate, named in a list of rights, for no TRUNCATE', () => {
+    expect(brokenBy('src/modules/x.ts', "has_table_privilege(r.oid, c.oid, 'DELETE, TRUNCATE, REFERENCES')")).toBeUndefined();
+    expect(brokenBy('src/modules/x.ts', 'truncate table "tasks" cascade')?.name).toBe('TRUNCATE writes no journal row');
+    expect(brokenBy('src/modules/x.ts', 'TRUNCATE ${table}')?.name).toBe('TRUNCATE writes no journal row');
+  });
+
   it("keeps the app's code from getting past a fence", () => {
     expect(tsFilesUnder(SRC).flatMap(violationsIn)).toEqual([]);
   });

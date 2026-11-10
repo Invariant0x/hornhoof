@@ -733,6 +733,8 @@ export const taskEvents = pgTable(
   'task_events',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /* What names this event across machines, where the serial id of each differs. */
+    uuid: uuid('uuid').notNull().defaultRandom().unique(),
     companyId: companyId(),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     kind: text('kind', { enum: TASK_EVENT_KINDS }).notNull(),
@@ -2024,3 +2026,30 @@ export const linkTls = pgTable('link_tls', {
   httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* Where a change came from: a step of a node message, of a page's request or of a tool call, written in the change's own
+   transaction, so a retry finds its source listed. The base is the source without its step. */
+export const applied = pgTable(
+  'applied',
+  {
+    source: text('source').primaryKey(),
+    base: text('base'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('applied_base').on(t.base), index('applied_at').on(t.at)],
+);
+
+/* A tool call by its invocation id, with the answer it gave, so a call sent again after a lost answer gets that answer
+   and never a second run. */
+export const toolCalls = pgTable(
+  'tool_calls',
+  {
+    id: uuid('id').primaryKey(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id),
+    answer: jsonb('answer'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('tool_calls_at').on(t.at)],
+);
