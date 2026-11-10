@@ -66,7 +66,7 @@ describe('the account a plan runs on', () => {
     expect(received.find(m => m.type === 'hello')).toMatchObject({ account: { email: 'x@y.z', tier: 'pro' } });
     account = { email: 'x@y.z', tier: 'max' };
     const [socket] = [...server.clients];
-    socket!.send(JSON.stringify({ type: 'cred.drop', kind: 'claude_token' }));
+    socket!.send(JSON.stringify({ type: 'cred.lease', hold: false }));
     await eventually(() => received.some(m => m.type === 'status' && (m.account as { tier?: string } | undefined)?.tier === 'max'));
   });
 });

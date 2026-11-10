@@ -645,10 +645,9 @@ describe('plans on any machine', () => {
     expect(parseNodeMessage(JSON.stringify({ ...done, error: 'x'.repeat(301) }))).toBeNull();
   });
 
-  it('send sealed sign-ins, ask a node to seal what it holds, start and stop a sign-in and hand the Codex lease', () => {
+  it('send a sealed sign-in, ask a node to seal what it holds, start and stop a sign-in and hand the Codex lease', () => {
     const msgs: ServerMessage[] = [
       { type: 'cred.put', kind: 'kimi_key', version: 1, sealed: SEALED },
-      { type: 'cred.drop', kind: 'codex_auth' },
       { type: 'cred.seal', kind: 'claude_token', version: 2, recipients: [{ nodeId: 'node-2', publicKey: KEY }] },
       { type: 'login.start', fresh: true },
       { type: 'login.stop' },
@@ -656,9 +655,9 @@ describe('plans on any machine', () => {
     ];
     for (const m of msgs) expect(parseServerMessage(JSON.stringify(m))).toEqual(m);
     expect(parseServerMessage(JSON.stringify({ ...msgs[0], kind: 'other' }))).toBeNull();
-    expect(parseServerMessage(JSON.stringify({ ...msgs[2], version: 0 }))).toBeNull();
-    expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: [{ nodeId: 'node-2', publicKey: 'nope' }] }))).toBeNull();
-    expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: Array.from({ length: 21 }, (_, i) => ({ nodeId: `n-${i}`, publicKey: KEY })) }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[1], version: 0 }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[1], recipients: [{ nodeId: 'node-2', publicKey: 'nope' }] }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[1], recipients: Array.from({ length: 21 }, (_, i) => ({ nodeId: `n-${i}`, publicKey: KEY })) }))).toBeNull();
   });
 
   it('name the four kinds of sign-in a plan can carry', () => {

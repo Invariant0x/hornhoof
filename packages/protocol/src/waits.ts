@@ -26,9 +26,6 @@ export const WAIT_OUTCOMES = ['resolved', 'cancelled', 'superseded'] as const;
 export const WaitOutcome = z.enum(WAIT_OUTCOMES);
 export type WaitOutcome = z.infer<typeof WaitOutcome>;
 
-/* How far above its owner a wait went: nobody yet, its owner, the head, the department's owner. */
-export const WAIT_LEVELS = { normal: 0, owner: 1, head: 2, department: 3 } as const;
-
 /* Each kind of source has its own way of naming one source. It is stable across a restart and never made up by a sweep. */
 const SOURCE_KEYS: Record<WaitSourceKind, RegExp> = {
   after: new RegExp(`^task:${UUID}$`),

@@ -438,7 +438,6 @@ it.each<[string, Partial<typeof FREE>, string]>([
   ['an input it cannot read', { input: 'unknown' }, 'input_not_proven'],
   ['a protected question', { wait: 'protected' }, 'protected_screen'],
   ['a permission question', { wait: 'permission' }, 'input_not_proven'],
-  ['a menu', { wait: 'menu' }, 'input_not_proven'],
   ['a tool at work', { runningTool: true }, 'program_busy'],
   ['a retry at work', { retrying: true }, 'program_busy'],
   ['a program at work', { busy: true }, 'program_busy'],

@@ -101,15 +101,6 @@ describe('a sign-in Hornhoof hands a node', () => {
     await expect(unseal(sealed.envelopes[0]!.sealed, three!.identity)).rejects.toThrow();
     await expect(unseal(sealed.envelopes[1]!.sealed, one!.identity)).rejects.toThrow();
   });
-
-  it('is thrown out when Hornhoof drops it', async () => {
-    const { server, home, me } = await node();
-    server.send({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: await seal(bytes(TOKEN), [me.recipient]) });
-    const file = join(home, 'claude-oauth-token');
-    await server.wait(() => existsSync(file));
-    server.send({ type: 'cred.drop', kind: 'claude_token' });
-    await server.wait(() => !existsSync(file));
-  });
 });
 
 describe('applying a sign-in', () => {

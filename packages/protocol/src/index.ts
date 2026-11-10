@@ -3,7 +3,6 @@ export * from './external-operations.js';
 import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
-export { WorkspaceCommitSha, NodeRef, TaskWorkspaceBinding, RepoRelativeArea, IntegrationTarget, TaskWorkspaceSpec, WorkspaceProblemCode, WorkspaceProblem, type VerifiedWorkspace } from './task-workspace.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
@@ -12,8 +11,6 @@ export * from './pipeline-report.js';
 export * from './model-check.js';
 export * from './outbound.js';
 export * from './test-terminals.js';
-export { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
-import { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { mutationResultMatches, MutationResult, mutationSelectionMatches, CandidateMutation, MutationDelta, MutationFunction, MutationSelection, candidateTestUnits, runtimeVersionMatches, requiredTestRuntimes, runsInClass, runtimeClass, supportsTestProfile, EnvironmentProblem, FileNote, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, RuntimePlatform, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
@@ -73,7 +70,6 @@ export type RunKind = (typeof RUN_KINDS)[number];
 /* What a machine of the company is. A computer runs parts of runs in a shell; a phone or a browser will take work of its
    own kind once a node for it exists. */
 export const MACHINE_KINDS = ['computer', 'phone', 'browser'] as const;
-export type MachineKind = (typeof MACHINE_KINDS)[number];
 /* The most task files a part of work takes in, and the most files one part puts on the task. */
 export const MAX_RUN_FILES = 20;
 /* The biggest file a part puts on the task, as big as any task file may be. */
@@ -103,7 +99,6 @@ const LimitWindow = z.object({
   name: z.string().min(1).max(40),
   utilization: z.number().min(0).max(1).nullable(),
   resetsAt: z.string().max(40).nullable(),
-  resetSource: ResetSource.optional(),
 });
 
 /* Usage windows as the provider reports them, for example five hours and seven days. A complete list names every window
@@ -437,7 +432,6 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  HandoffMessage,
   CheckAcquire, CheckRelease, TestsDescribed, HarnessSynced,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -612,7 +606,6 @@ export const Repo = z.object({
     .nullable()
     .optional(),
 });
-export type RepoAuthor = NonNullable<z.infer<typeof Repo>['author']>;
 /* repositoryScope: the repository as the company's registry of what is built knows it, so the agent's worktree can take the
    dependencies a machine built for its commit. */
 const Workspace = z.object({ key: Id, repo: Repo.nullable(), repositoryScope: RepositoryScope.optional() });
@@ -635,7 +628,6 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  HandoffControlMessage,
   CheckQueueReply,
   z.object({
     type: z.literal('job.run'),
@@ -662,10 +654,6 @@ const ServerMessage = z.discriminatedUnion('type', [
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
     skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
-    taskId: Id.optional(),
-    workspaceId: Id.optional(),
-    assignmentEpoch: z.number().int().min(0).optional(),
-    handoff: HandoffAssignment.optional(),
   }),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
@@ -674,7 +662,6 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('remove') }),
   /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
   z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),
-  z.object({ type: z.literal('cred.drop'), kind: CredKind }),
   /* Seal the sign-in this node holds for these nodes of the same plan and send it back as cred.sealed under version. */
   z.object({ type: z.literal('cred.seal'), kind: CredKind, version: z.number().int().min(1), recipients: z.array(z.object({ nodeId: Id, publicKey: AgeRecipient })).max(MAX_ENVELOPES) }),
   /* Open the plan's sign-in in the login terminal; fresh signs the program out first, for another account. */

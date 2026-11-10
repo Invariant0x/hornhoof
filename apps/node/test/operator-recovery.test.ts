@@ -6,7 +6,7 @@ import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { expect, it, onTestFinished } from 'vitest';
 import { OperatorRuntime } from '../src/terminal/operator-runtime.js';
 
-type Source = { runningTool: boolean; retrying: boolean; wait: { id: string; kind: 'permission' | 'menu' | 'protected' | 'work' | 'unknown' } | null };
+type Source = { runningTool: boolean; retrying: boolean; wait: { id: string; kind: 'permission' | 'protected' | 'work' } | null };
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'hh-recovery-'));
@@ -104,7 +104,6 @@ it('says nothing of a program that is not at its empty prompt', async () => {
 it.each<[string, Partial<Source>]>([
   ['a protected question', { wait: { id: randomUUID(), kind: 'protected' } }],
   ['a permission question', { wait: { id: randomUUID(), kind: 'permission' } }],
-  ['a menu', { wait: { id: randomUUID(), kind: 'menu' } }],
   ['a question about the work', { wait: { id: randomUUID(), kind: 'work' } }],
   ['a tool at work', { runningTool: true }],
   ['a retry of its model', { retrying: true }],

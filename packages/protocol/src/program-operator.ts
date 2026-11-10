@@ -21,7 +21,7 @@ export const ProgramKey = z.string().regex(new RegExp(`^(?:[CMS]-)*(?:${KEY_NAME
 export type ProgramKey = z.infer<typeof ProgramKey>;
 export const OperatorReason = z.enum(['assignment_unrecorded', 'recorded_no_activity', 'live_words_not_taken', 'startup_exit', 'question_waiting']);
 export type OperatorReason = z.infer<typeof OperatorReason>;
-export const OperatorError = z.enum(['operator_forbidden', 'case_closed', 'program_busy', 'input_not_proven', 'snapshot_stale', 'node_unavailable', 'unsupported_node', 'no_program', 'protected_screen', 'action_unknown']);
+export const OperatorError = z.enum(['operator_forbidden', 'program_busy', 'input_not_proven', 'snapshot_stale', 'node_unavailable', 'no_program', 'protected_screen', 'action_unknown']);
 export type OperatorError = z.infer<typeof OperatorError>;
 export const OperatorDelivery = z.object({ id: z.uuid(), ordinal: z.number().int().positive() }).strict();
 export type OperatorDelivery = z.infer<typeof OperatorDelivery>;
@@ -32,7 +32,7 @@ const count = z.number().int().nonnegative();
 const opaque = z.string().min(16).max(128);
 const identity = { agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.uuid() };
 const evidence = { ...identity, evidenceId: z.uuid(), ordinal: count };
-export const OperatorQuestion = z.object({ id: z.uuid(), kind: z.enum(['permission', 'menu', 'protected', 'work', 'unknown']), tool: z.string().max(100).nullable(), text: z.string().max(4096), callId: z.string().max(128).nullable() }).strict();
+export const OperatorQuestion = z.object({ id: z.uuid(), kind: z.enum(['permission', 'protected', 'work']), tool: z.string().max(100).nullable(), text: z.string().max(4096), callId: z.string().max(128).nullable() }).strict();
 export type OperatorQuestion = z.infer<typeof OperatorQuestion>;
 export const OperatorExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() }).strict();
 const screenCells = { cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) };

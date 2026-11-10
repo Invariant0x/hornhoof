@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HandoffControlMessage, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -19,7 +19,7 @@ import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
-import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
+import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
@@ -426,12 +426,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return host?.release(m.agentKey, m.jobId);
       case 'cred.put':
         return inOrder(() => putCredential(m.kind, m.sealed));
-      case 'cred.drop':
-        return inOrder(() => {
-          if (!holdsSignIn) return;
-          dropCredential(credHome, m.kind, credUser);
-          return signedInNow();
-        });
       case 'cred.seal':
         return inOrder(() => sealCredential(m.kind, m.version, m.recipients));
       /* A Codex plan runs on one of its machines at a time: the one that holds its lease keeps its sign-in. */
@@ -680,7 +674,7 @@ function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessa
   return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
 }
 
-function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> | HandoffControlMessage {
+function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
   if (message.type === 'job.ack') {
     jobs.delete(message.jobId);
     return true;
@@ -689,7 +683,7 @@ function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, te
     tests.delete(message.partId);
     return true;
   }
-  return HandoffControlMessage.safeParse(message).success;
+  return false;
 }
 
 function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
