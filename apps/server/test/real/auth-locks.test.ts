@@ -12,7 +12,6 @@ import { poolOf, realDatabase, sessionsWaitingOnALock, type RealDatabase } from 
 
 /* PGlite has one connection, so what these locks are for shows only here. Nothing rests on timing: a transaction on a
    client of its own holds a lock open, and the test goes on when the database itself says the others wait behind it. */
-const LOCK_WAIT_LIMIT_MS = 30_000;
 const SESSION_ROW = 'SELECT 1 FROM sessions WHERE token_hash = $1 FOR UPDATE';
 
 let real: RealDatabase;

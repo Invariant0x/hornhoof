@@ -27,8 +27,6 @@ const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-/* A busy machine may take a while to end a pass, and only a failure waits this long. */
-const PASS_MS = 20 * SECOND;
 
 type Used = Parameters<Served['use']>;
 

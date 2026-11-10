@@ -15,7 +15,6 @@ import { realDatabase, sessionsWaitingOnALock, type RealDatabase } from './pg.js
 const END_LEASE = `UPDATE net_local.lease SET until = '-infinity'`;
 const A_NOTE = `INSERT INTO notebook_notes (company_id, number, text) SELECT id, (SELECT count(*) + 1 FROM notebook_notes), 'A note' FROM companies`;
 const FENCED_OPTION = `-c ${FENCED}=on`;
-const LOCK_WAIT_LIMIT_MS = 30_000;
 
 /* A migrated database of its own with a company, under the lease every test database holds. */
 async function leasedDatabase(): Promise<RealDatabase> {
