@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runMigrate } from '../src/migrate.js';
+import { migrateWhenAlone, runMigrate } from '../src/migrate.js';
 
 async function migrateWith(env: NodeJS.ProcessEnv) {
   const lines: string[] = [];
@@ -27,5 +27,16 @@ describe('the migrate entry point', () => {
     const { code, lines } = await migrateWith({ DATABASE_URL: 'postgres://hornhoof@localhost:1/hornhoof' });
     expect(code).toBe(1);
     expect(lines[0]).toContain('ECONNREFUSED');
+  });
+});
+
+describe('an app that starts with no keeper beside it', () => {
+  it('brings the database up itself, and leaves that to the migrate service where a keeper runs', async () => {
+    const asked: string[] = [];
+    const migrate = async (url: string) => asked.push(url);
+    await migrateWhenAlone({ keeper: true }, 'postgres://db/kept', migrate);
+    expect(asked).toEqual([]);
+    await migrateWhenAlone({ keeper: false }, 'postgres://db/alone', migrate);
+    expect(asked).toEqual(['postgres://db/alone']);
   });
 });

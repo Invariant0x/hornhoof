@@ -30,6 +30,12 @@ export async function runMigrate(env: NodeJS.ProcessEnv, print: (line: string) =
   }
 }
 
+/* Where a keeper runs, the migrate service has brought the database up before the app starts. An app started alone, as
+   the image run by hand is, has nobody to do that for it, so it does it itself, as it did before there was a keeper. */
+export async function migrateWhenAlone(config: { keeper: boolean }, url: string, migrate: (url: string) => Promise<unknown> = migrateDb): Promise<void> {
+  if (!config.keeper) await migrate(url);
+}
+
 const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
   process.exit(await runMigrate(process.env, line => console.log(line)));

@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { openAgentSql } from './db/agent-sql.js';
 import { APP_NAME, openDb } from './db/client.js';
 import { loggable } from './errors.js';
+import { migrateWhenAlone } from './migrate.js';
 import { KeeperServed } from './modules/keeper/served.js';
 import { publicUrl } from './modules/link/link.js';
 import { setupLink } from './modules/setup/code.js';
@@ -14,6 +15,7 @@ function requireDbUrl(url: string | undefined): string {
 
 const config = loadConfig(process.env);
 const url = requireDbUrl(config.databaseUrl);
+await migrateWhenAlone(config, url);
 const db = openDb(url, APP_NAME, { fenced: config.keeper });
 const app = await buildApp({
   db,
