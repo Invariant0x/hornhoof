@@ -39,6 +39,12 @@
 # the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
 # computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
 #
+# With HORNHOOF_ROLE=worker it runs on a machine that keeps none of the company's data. There the keeper writes
+# request.json for the build the company server runs. This downloads it, says so with the step wait, and installs once
+# the keeper passes on the server's word in go.json {id, commit, until}: the request's id, its tag, and the second the
+# word ends. It takes no copy of a database and puts none back. With HORNHOOF_HOST_OS=linux it also writes the machine's
+# own addresses to addresses.json {at, addresses} once a minute, for the keeper to report.
+#
 #   updater.sh nodes <server> <image> <host> [--once]   move that server's nodes on this computer to the server's build
 #   updater.sh start-nodes <server> <image> <host>      start the one updater of that server's nodes here, on <image>
 #
@@ -74,6 +80,16 @@ NODES_RETRY=300
 INSTALLER="${HORNHOOF_INSTALLER:-/usr/local/share/hornhoof/install.sh}"
 # The image commands on the computer run in: the updater's own, which compose names.
 COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
+# worker: this machine keeps none of the company's data. Its updater follows the company server's build: it downloads
+# the build its keeper asks for, waits until the keeper passes on the server's word that it is this machine's turn, and
+# installs then. It saves and restores no database, since it has none.
+ROLE="${HORNHOOF_ROLE:-}"
+# How long a worker waits for its turn, in seconds: a day.
+TURN_WAIT="${HORNHOOF_TURN_WAIT:-86400}"
+# linux: this reads the machine's own addresses, which only a container on the host's network sees, once a minute.
+HOST_OS="${HORNHOOF_HOST_OS:-}"
+ADDRESSES_EVERY=60
+ADDRESSES_AT=0
 # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
 COMPUTER_MAX=1800
 COMPUTER_OUTPUT=30000
@@ -234,8 +250,23 @@ same_node() {
   return 1
 }
 
+worker() { [ "$ROLE" = worker ]; }
+
+# The service whose container is the build that runs here: the app on a server, the keeper on a worker, which has no app.
+main_service() { if worker; then printf keeper; else printf app; fi; }
+
+# compose_files <compose file>: FILES is what names that build to compose: its file, and on a worker the overlay beside
+# it, which leaves the services that keep data out.
+compose_files() {
+  FILES=(-f "$1")
+  if worker && [ -f "${1%compose.yaml}compose.worker.yaml" ]; then FILES+=(-f "${1%compose.yaml}compose.worker.yaml"); fi
+}
+
 # The services a compose file names, one per line; none when compose cannot read it.
-services_of() { docker compose --project-directory "$SERVER_DIR" -f "$1" config --services 2> /dev/null || true; }
+services_of() {
+  compose_files "$1"
+  docker compose --project-directory "$SERVER_DIR" "${FILES[@]}" config --services 2> /dev/null || true
+}
 
 # names_service <compose file> <service>
 names_service() {
@@ -330,6 +361,11 @@ unpack() {
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
   fi
+  # A worker also needs the overlay that names what it does not run.
+  if worker && ! docker cp "$cid:/app/compose.worker.yaml" "$dir/compose.worker.yaml" > /dev/null; then
+    docker rm "$cid" > /dev/null 2>&1 || true
+    return 1
+  fi
   docker rm "$cid" > /dev/null 2>&1 || true
 }
 
@@ -341,10 +377,13 @@ pull_images() {
     services=$(services_without_node "$WORK/$TAG/compose.yaml")
     [ -n "$services" ] || return 1
   fi
+  compose_files "$WORK/$TAG/compose.yaml"
   # shellcheck disable=SC2086 # services is a space-separated list of compose service names, or empty for all of them.
   HORNHOOF_VERSION="$TAG" HORNHOOF_APP_REF="$IMAGE@$DIGEST" HORNHOOF_NODE_REF="$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" \
     HORNHOOF_UPDATER_REF="$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")" \
-    docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull $services >> "$WORK/install.log" 2>&1
+    docker compose --project-directory "$SERVER_DIR" "${FILES[@]}" pull $services >> "$WORK/install.log" 2>&1 || return 1
+  # A worker's nodes are no service of its compose file, so their image comes by itself, for the installer to start.
+  if worker && [ -n "$NODE_DIGEST" ]; then docker pull "$NODE_IMAGE@$NODE_DIGEST" >> "$WORK/install.log" 2>&1 || return 1; fi
 }
 
 # The containers of this server, one per line: id and service. .env names the compose project; a server set up before
@@ -374,8 +413,11 @@ remove_unnamed() {
 run_installer() {
   local tag=$1 dir="$WORK/$1"
   HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_UPDATER_REV="$UPDATER_REV" HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1
+    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" "$(install_mode)" >> "$WORK/install.log" 2>&1
 }
+
+# What the installer is run as: a server's, or a worker's.
+install_mode() { if worker; then printf worker; else printf server; fi; }
 
 # install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and
 # they start exactly these images. They are on this computer already: the new build's came before the database was
@@ -392,8 +434,11 @@ install() {
 # it. compose removes the containers of services its file does not name; db runs already, so nothing else changes. A
 # file without the updater would take this updater for one of them, so then nothing goes.
 drop_orphans() {
+  local runs=db
+  # A worker has no db: its keeper runs already, and naming it starts nothing else.
+  if worker; then runs=keeper; fi
   if names_service "$SERVER_DIR/compose.yaml" updater; then
-    compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names."
+    compose up -d --no-build --remove-orphans "$runs" >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names."
   fi
 }
 
@@ -468,10 +513,10 @@ update() {
 
   # The build to go back to: the one running now, by its commit, or the one .env pins; and the images it runs, by the
   # digests Docker keeps for them, or by that build's tag.
-  PREVIOUS=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -q app 2> /dev/null || true)" 2> /dev/null || true)
+  PREVIOUS=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -q "$(main_service)" 2> /dev/null || true)" 2> /dev/null || true)
   [ -n "$PREVIOUS" ] || PREVIOUS=$(env_value HORNHOOF_VERSION)
   [ -n "$PREVIOUS" ] || PREVIOUS=latest
-  BACK_APP=$(running app "$IMAGE")
+  BACK_APP=$(running "$(main_service)" "$IMAGE")
   [ -n "$BACK_APP" ] || BACK_APP="$IMAGE:$PREVIOUS"
   BACK_NODE=$(running node "$NODE_IMAGE")
   [ -n "$BACK_NODE" ] || BACK_NODE="$NODE_IMAGE:$PREVIOUS"
@@ -493,6 +538,12 @@ update() {
   TARGET=$(commit_of "$IMAGE@$DIGEST")
   note
 
+  if worker; then
+    wait_turn || return 0
+    step install "Installing $VERSION."
+    install_new
+    return 0
+  fi
   step backup "Saving the database."
   BEFORE=$(applied)
   backup || {
@@ -502,6 +553,38 @@ update() {
   note
   step install "Installing $VERSION."
   install_new
+}
+
+# Whether the keeper passed on the company server's word for this very request, and the word still stands.
+told_to_go() {
+  local id commit until
+  id=$(jq -r '.id // empty' "$CONTROL/go.json" 2> /dev/null || true)
+  commit=$(jq -r '.commit // empty' "$CONTROL/go.json" 2> /dev/null || true)
+  until=$(jq -r '.until // 0 | floor' "$CONTROL/go.json" 2> /dev/null || true)
+  case "$until" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$id" = "$ID" ] && [ "$commit" = "$TAG" ] && [ "$until" -gt "$(date +%s)" ]
+}
+
+# A worker installs only in its turn, so the company's machines go one at a time and none while a turn runs on it. The
+# build is here already. A word left from before this wait is for another request and goes first. The wait ends with
+# the word, with a newer request, which the next pass takes, or after a day.
+wait_turn() {
+  local waited=0
+  rm -f "$CONTROL/go.json"
+  step wait "Waiting for its turn to install."
+  while true; do
+    if told_to_go; then return 0; fi
+    if [ "$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)" != "$ID" ]; then
+      stop_with failed "A newer build came first, so this one was left." finished
+      return 1
+    fi
+    if [ "$waited" -ge "$TURN_WAIT" ]; then
+      stop_with failed "The company server did not give this machine its turn within a day." finished
+      return 1
+    fi
+    waited=$((waited + 2))
+    sleep 2
+  done
 }
 
 # The new build goes in and has to answer; otherwise the build from before goes back.
@@ -527,8 +610,10 @@ check_new() {
 
 go_back() {
   local back="Hornhoof runs the build from before the update again. The database was saved before it."
+  # A worker has no database to put back.
+  if worker; then back="This machine runs the build from before the update again."; fi
   step rollback "Going back to $PREVIOUS."
-  if [ "$(applied)" != "$BEFORE" ]; then
+  if ! worker && [ "$(applied)" != "$BEFORE" ]; then
     say "$VERSION changed the database, so it goes back to the copy saved before the update."
     keep_link
     restore || {
@@ -606,7 +691,7 @@ go_on() {
   say "The updater stopped during the update and goes on with it."
   [ "$STEP" != backup ] || start_app "$(compose ps -aq app 2> /dev/null || true)"
   case "$STEP" in
-    backup | pull) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
+    backup | pull | wait) update "$TAG" "$DIGEST" "$NODE_DIGEST" "$UPDATER_DIGEST" ;;
     install)
       step install "Installing $VERSION."
       install_new
@@ -708,6 +793,8 @@ act_on_nodes() {
 # this stops asking.
 catch_up_nodes() {
   local now code answer poll behind
+  # A worker holds no key to ask the company server with: the installer moves its nodes when it installs.
+  if worker; then return 0; fi
   now=$(date +%s)
   [ "$now" -ge "$NODES_AT" ] || return 0
   NODES_AT=$((now + NODES_CHECK))
@@ -994,6 +1081,22 @@ start_nodes() {
     -v /var/run/docker.sock:/var/run/docker.sock "$2" nodes "$1" "$2" "$3" > /dev/null
 }
 
+# The machine's own addresses on its local networks, for the keeper to report: where the other machines of the company
+# dial this one. A container sees only Docker's own network, so one on the host's network reads them, on Linux alone;
+# the interfaces Docker and its bridges made are left out. Written whole and then moved, and a look that failed leaves
+# what was there.
+write_addresses() {
+  local now out list
+  [ "$HOST_OS" = linux ] || return 0
+  now=$(date +%s)
+  [ "$now" -ge "$ADDRESSES_AT" ] || return 0
+  ADDRESSES_AT=$((now + ADDRESSES_EVERY))
+  out=$(docker run --rm --network host --entrypoint ip "$COMPUTER_IMAGE" -4 -o addr show scope global 2> /dev/null) || return 0
+  list=$(printf '%s\n' "$out" | awk '$2 !~ /^(docker|br-|veth|virbr)/ && $3 == "inet" { split($4, a, "/"); print a[1] }' | jq -Rnc '[inputs | select(length > 0)]' 2> /dev/null) || return 0
+  jq -cn --argjson at "$now" --argjson addresses "$list" '{at: $at, addresses: $addresses}' > "$CONTROL/addresses.json.new" 2> /dev/null || return 0
+  mv "$CONTROL/addresses.json.new" "$CONTROL/addresses.json"
+}
+
 case "${1:-}" in
   nodes) nodes_mode "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
   start-nodes)
@@ -1010,6 +1113,7 @@ mkdir -p "$CONTROL"
 touch "$CONTROL/alive"
 interrupted
 if [ "${1:-}" = --once ]; then
+  write_addresses
   handle_request
   catch_up_nodes
   computer_runs
@@ -1026,6 +1130,7 @@ done) &
 RUNS=$!
 trap 'kill $ALIVE $RUNS 2> /dev/null || true' EXIT
 while true; do
+  write_addresses || true
   handle_request
   catch_up_nodes || printf 'Could not look at the nodes.\n'
   sleep 2

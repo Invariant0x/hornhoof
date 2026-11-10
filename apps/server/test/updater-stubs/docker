@@ -61,7 +61,7 @@ case "$1 $2" in
       *) for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
     esac ;;
   'compose ps')
-    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' keeper '*) echo keepercid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
   # The container of front holds the web port until it goes. STUB_RM_FAILS names containers that cannot be removed.
   # A command that runs on the computer ends as its container goes.
   'rm -f')
@@ -104,7 +104,7 @@ case "$1 $2" in
           *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
         esac ;;
       *.Config.Image*) printf '%s\n' "${STUB_NODES_UPDATER_IMAGE:-}" ;;
-      *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
+      *) case "${!#}" in appcid | keepercid) printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;; esac ;;
     esac ;;
   *)
     case "$1" in
@@ -150,6 +150,13 @@ case "$1 $2" in
           rm -f "$STUB_STATE/computer-removed" "$STUB_STATE/computer-runs"
         fi
         exit "${STUB_COMPUTER_EXIT:-0}" ;;
+      # The host's own interfaces, as a container on the host's network reads them: STUB_IP, or a failure with STUB_IP=fail.
+      run)
+        case " $* " in
+          *' --entrypoint ip '*)
+            [ "${STUB_IP:-}" != fail ] || exit 1
+            printf '%s\n' "${STUB_IP:-}" ;;
+        esac ;;
       # The container goes, and a command that runs in it ends.
       rm) [ ! -p "$STUB_STATE/computer-removed" ] || echo removed > "$STUB_STATE/computer-removed" ;;
       cp)
@@ -193,6 +200,10 @@ SCRIPT
             ;;
           # The build's name in a comment, so services_in can tell whose file it is.
           *:/app/compose.yaml) printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
+          # The overlay a worker adds. STUB_NO_OVERLAY names builds that have none.
+          *:/app/compose.worker.yaml)
+            case " ${STUB_NO_OVERLAY:-} " in *" $tag "*) exit 1 ;; esac
+            printf '# build %s\nservices: {}\n' "$tag" > "$3" ;;
         esac ;;
     esac ;;
 esac

@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
-/* The old build works on while images download, so the pull is not among these. */
+/* The old build works on while images download, and while a worker that has them waits for its turn to install, so
+   neither the pull nor the wait is among these. */
 const BUSY_STEPS = new Set<unknown>(['backup', 'install', 'health', 'rollback']);
 
 const StatusShape = z.object({ state: z.string(), step: z.unknown().optional() });

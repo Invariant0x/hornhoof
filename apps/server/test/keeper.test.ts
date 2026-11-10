@@ -125,6 +125,8 @@ describe('updaterBusy', () => {
 
   it.each([
     ['running', 'pull'],
+    /* A worker that has the build and waits for its turn still serves. */
+    ['running', 'wait'],
     ['done', 'finished'],
     ['failed', 'install'],
     ['rolled_back', 'rollback'],
