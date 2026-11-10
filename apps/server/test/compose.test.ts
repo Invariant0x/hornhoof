@@ -159,6 +159,18 @@ describe('the built-in node', () => {
     });
   });
 
+  it('reaches the server through front, as the key of its machine', () => {
+    const { node } = compose.services;
+    expect(node!.environment!.HORNHOOF_SERVER).toBe('http://front:8080');
+    expect(filled(node!, FULL_ENV).HORNHOOF_MACHINE_ID).toBe(FULL_ENV.HORNHOOF_MACHINE_ID);
+    expect(filled(node!, REQUIRED).HORNHOOF_MACHINE_ID).toBe('');
+    expect(node!.depends_on).toEqual(['front']);
+  });
+
+  it('is known to the app by the same machine id', () => {
+    expect(filled(app!, FULL_ENV).HORNHOOF_MACHINE_ID).toBe(FULL_ENV.HORNHOOF_MACHINE_ID);
+  });
+
   /* Docker's AppArmor profile on newer Linux, as Debian 13, keeps the node from stopping the programs of its jobs. */
   it('runs outside AppArmor, and still gains no new privileges', () => {
     expect(compose.services.node!.security_opt).toEqual(['no-new-privileges:true', 'apparmor:unconfined']);

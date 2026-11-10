@@ -22,7 +22,7 @@ import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } 
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
-import { nodeIdentity, seal, unseal } from './keys.js';
+import { builtinKey, nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
@@ -939,7 +939,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   const testUser = userFor(dir, 'tests');
   const verifyUser = testUser || agentUser();
   const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
-  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
+  const signIn = builtinKey(key, process.env.HORNHOOF_MACHINE_ID || null);
+  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key: signIn }, log, testUser, build, checkBrowser });
 }
 
 /* What the node's updater and its machine's setup call, or the usage for anything else. */

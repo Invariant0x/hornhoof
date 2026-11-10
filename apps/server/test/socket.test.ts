@@ -7,6 +7,8 @@ import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
 import { agentProgramState } from '../src/modules/tasks/silent.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { createHmac } from 'node:crypto';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
 
 /* No round of pings comes during a test unless it says so: the longest wait a timer takes. */
 async function liveCompany(pingMs = '2147483647') {
@@ -34,6 +36,28 @@ describe('node socket', () => {
   it('refuses a wrong key', async () => {
     const { url } = await liveCompany();
     await expect(connectNode(url, 'not-a-key')).rejects.toThrow(/401/);
+  });
+
+  it("takes the built-in node's machine key, and the bare key of a node from before", async () => {
+    const NODE_KEY = 'k'.repeat(40);
+    const { app } = await testApp({ NODE_KEY, NODE_PING_MS: '2147483647' });
+    const url = await listen(app);
+    const machine = 'a1b2c3d4'.repeat(4);
+    const signed = (id: string, key = NODE_KEY) => createHmac('sha256', key).update(`hornhoof builtin node ${id}`).digest('hex');
+    const builtinNow = () => app.ctx.hub.isOnline(BUILTIN);
+
+    const byMachine = await connectNode(url, `builtin.${machine}.${signed(machine)}`);
+    expect(builtinNow()).toBe(true);
+    byMachine.close();
+    await byMachine.closed;
+    const bare = await connectNode(url, NODE_KEY);
+    expect(builtinNow()).toBe(true);
+    bare.close();
+
+    const other = 'f'.repeat(32);
+    const flipped = signed(machine).replace(/^./, first => (first === '0' ? '1' : '0'));
+    for (const key of [`builtin.${machine}.${flipped}`, `builtin.${other}.${signed(machine)}`, `builtin.${machine}.${signed(machine, 'another-key')}`, `builtin.short.${signed('short')}`])
+      await expect(connectNode(url, key), key).rejects.toThrow(/401/);
   });
 
   it('follows the login state and shows the node online while connected', async () => {

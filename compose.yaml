@@ -86,6 +86,8 @@ services:
       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
       # writes, so the pool counts that computer once when it joined as a machine too.
       HORNHOOF_HOST_ID: ${HORNHOOF_HOST_ID:-}
+      # The machine this app runs on, which the built-in node names in its key.
+      HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
     volumes:
       - control:/control
       - harness:/harness
@@ -136,8 +138,11 @@ services:
     command: ["run", "--builtin"]
     restart: unless-stopped
     environment:
-      HORNHOOF_SERVER: http://app:8080
+      # Through front, like every visitor: front holds what the node sends while the app restarts.
+      HORNHOOF_SERVER: http://front:8080
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+      # The node signs in with a key of this machine, made from NODE_KEY, which itself never travels.
+      HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
       # What the computer has, which install.sh writes on a Mac, where Docker runs in a smaller system.
       HORNHOOF_HOST_CPU: ${HORNHOOF_HOST_CPU:-}
       HORNHOOF_HOST_CPUS: ${HORNHOOF_HOST_CPUS:-}
@@ -164,7 +169,7 @@ services:
       - no-new-privileges:true
       - apparmor:unconfined
     depends_on:
-      - app
+      - front
     networks:
       - default
 

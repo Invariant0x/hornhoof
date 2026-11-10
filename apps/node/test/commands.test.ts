@@ -11,6 +11,7 @@ import { Outbox } from '../src/outbox.js';
 import { markRemoved, readState } from '../src/state.js';
 import { eventually } from '../../../test-support/eventually.mjs';
 import { testPort } from '../../../test-support/ports.mjs';
+import { builtinKey } from '../src/keys.js';
 
 vi.mock('node:child_process', async importOriginal => {
   const original = await importOriginal<typeof import('node:child_process')>();
@@ -50,7 +51,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'FAKE_AGY_SETUP', 'HORNHOOF_SERVER', 'NODE_KEY']) delete process.env[k];
+  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'FAKE_AGY_SETUP', 'HORNHOOF_SERVER', 'NODE_KEY', 'HORNHOOF_MACHINE_ID']) delete process.env[k];
 });
 
 function io(input = '') {
@@ -320,6 +321,20 @@ describe('run --builtin', () => {
     const res = await run(['run', '--builtin']);
     expect(res.code).toBe(1);
     expect(res.err).toContain('HORNHOOF_SERVER');
+  });
+
+  it('signs in with the key of its machine when the machine has an id', async () => {
+    const server = await fakeServer();
+    const machine = 'a1b2c3d4'.repeat(4);
+    process.env.HORNHOOF_SERVER = server.url;
+    process.env.NODE_KEY = NODE_KEY;
+    process.env.HORNHOOF_MACHINE_ID = machine;
+    const node = await command(['run', '--builtin'], io().io);
+    if (typeof node === 'number') throw new Error(`run ended with ${node}`);
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.headers[0]).toBe(`Bearer ${builtinKey(NODE_KEY, machine)}`);
+    expect(server.headers[0]).toMatch(/^Bearer builtin\.[0-9a-f]{32}\.[0-9a-f]{64}$/);
   });
 
   it('runs each API key job with its own home and key, and ignores remove', async () => {
