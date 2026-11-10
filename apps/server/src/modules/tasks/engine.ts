@@ -10,8 +10,9 @@ import { echelonVerdict } from './echelons-verdict.js';
 import { takeMainAtTests } from './echelons-main.js';
 import { turnkeyReport, turnkeyWork } from './turnkey.js';
 import { createRoute, routeOf, changeRoute, cancelRoutes, type Route } from './echelons-store.js';
+import { lastTaskNumber } from './numbers.js';
 import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -391,10 +392,10 @@ async function checkIndependentExecutor(db: Db, departmentId: string | null, par
 }
 
 async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor): Promise<{ child: Task; wake: Wake }> {
-  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
+  const last = await lastTaskNumber(tx, parent.companyId);
   const [child] = await tx.insert(tasks).values({
     companyId: parent.companyId,
-    number: (last?.n ?? 0) + 1,
+    number: last + 1,
     turnId: parent.turnId,
     parentId: parent.id,
     departmentId: parent.departmentId,
@@ -529,7 +530,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   const above = await parentForNewTask(tx, parent);
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
   const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
-  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
+  const last = await lastTaskNumber(tx, assignee.companyId);
   const turnId = await turnForNewTask(tx, assignee.companyId, parent);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
      whether it waits: that one is done after the task is made, and starts it. */
@@ -537,7 +538,7 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   const waits = after.some(t => t.status !== 'done');
   const [row] = await tx
     .insert(tasks)
-    .values(newTaskValues(actor, input, setup, { urgent, turnId, number: (last?.n ?? 0) + 1 }))
+    .values(newTaskValues(actor, input, setup, { urgent, turnId, number: last + 1 }))
     .returning();
   await createRoute(tx, row!, input);
   const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {

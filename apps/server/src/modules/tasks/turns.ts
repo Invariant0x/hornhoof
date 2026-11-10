@@ -1,5 +1,6 @@
 import { createRoute } from './echelons-store.js';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray, sql } from 'drizzle-orm';
+import { lastTaskNumber, lastTurnNumber } from './numbers.js';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage, type TurnMode } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
@@ -123,8 +124,7 @@ const listsChanged = (ctx: Pick<Ctx, 'bus'>, companyId: string, items: BacklogIt
 /* Planned tasks wait in their turn without anyone holding them. */
 async function insertPlanned(tx: Tx, companyId: string, planner: Planner, turnId: string, items: Placed[], improvement?: string): Promise<Task[]> {
   const { agentId, personId } = planner;
-  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, companyId));
-  let n = last?.n ?? 0;
+  let n = await lastTaskNumber(tx, companyId);
   const rows: Task[] = [];
   for (const item of items) {
     const [row] = await tx
@@ -262,12 +262,12 @@ export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: s
   const items = await place(ctx, by, companyId, [...input.tasks, ...fromBacklog(listed, i => i.createdByPersonId)]);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
-    const [last] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
+    const last = await lastTurnNumber(tx, companyId);
     const messages = await newWords(tx, by, input.words ?? 1);
     const taken = await takeBacklog(tx, companyId, ids);
     const [turn] = await tx
       .insert(turns)
-      .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', mode: input.mode, messages, createdByAgentId: agentId })
+      .values({ companyId, number: last + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', mode: input.mode, messages, createdByAgentId: agentId })
       .returning();
     const planned = await insertPlanned(tx, companyId, { agentId }, turn!.id, items, input.improvement);
     if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by));
@@ -337,9 +337,9 @@ export async function scheduleBacklog(ctx: Ctx, by: { companyId: string; agentId
     await lockCompany(tx, companyId);
     const taken = await takeBacklog(tx, companyId, ids, departmentId);
     const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'), eq(turns.mode, mode))).orderBy(asc(turns.number)).limit(1);
-    const [last] = next ? [] : await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
+    const last = next ? 0 : await lastTurnNumber(tx, companyId);
     const goal = taken.map(i => i.title).join('; ').slice(0, 600);
-    const [turn] = next ? [next] : await tx.insert(turns).values({ companyId, number: (last?.n ?? 0) + 1, goal, status: 'planned', mode, createdByAgentId: agentId, startedBy: personId }).returning();
+    const [turn] = next ? [next] : await tx.insert(turns).values({ companyId, number: last + 1, goal, status: 'planned', mode, createdByAgentId: agentId, startedBy: personId }).returning();
     const planned = await insertPlanned(tx, companyId, { agentId, personId }, turn!.id, placed);
     const opened = await openNext(ctx, tx, companyId);
     return { turn: opened?.turn.id === turn!.id ? opened.turn : turn!, planned, opened, taken };
