@@ -50,12 +50,36 @@ function executable(name: string, body: string): void {
   chmodSync(file, 0o755);
 }
 
+/* What every fake PostgreSQL program does first: it reads its arguments and answers --version as version 17. */
+const common = `const fs=require('node:fs'); const p=require('node:path'); const a=process.argv.slice(2); if(a.includes('--version')) { console.log(p.basename(process.argv[1])+' (PostgreSQL) 17.4'); process.exit(0); }`;
 function fakePostgres(): void {
-  const common = `const fs=require('node:fs'); const p=require('node:path'); const a=process.argv.slice(2); if(a.includes('--version')) { console.log(p.basename(process.argv[1])+' (PostgreSQL) 17.4'); process.exit(0); }`;
   executable('initdb', `${common} if(process.env.INIT_MARKER) fs.appendFileSync(process.env.INIT_MARKER,'init\\n'); const dir=a[a.indexOf('-D')+1]; fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(p.join(dir,'PG_VERSION'),'17'); fs.writeFileSync(p.join(dir,'pg_hba.conf'),''); fs.writeFileSync(p.join(dir,'postgresql.conf'),'');`);
-  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs[fs.existsSync(swap+'.hard')?'linkSync':'symlinkSync'](fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
+  executable('postgres', `${common} if(a.includes('--single')) {const swap=p.join(p.dirname(process.argv[1]),'link-hba-to'); if(fs.existsSync(swap)){const hba=p.join(a[a.indexOf('-D')+1],'pg_hba.conf'); fs.rmSync(hba); fs[fs.existsSync(swap+'.hard')?'linkSync':'symlinkSync'](fs.readFileSync(swap,'utf8'),hba);} process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { if(process.env.SERVER_ARGS) fs.appendFileSync(process.env.SERVER_ARGS,JSON.stringify(a)+'\\n'); const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
   executable('pg_ctl', `${common} const dir=a[a.indexOf('-D')+1]; const file=p.join(dir,'postmaster.pid'); if(fs.existsSync(file)) process.kill(Number(fs.readFileSync(file,'utf8')),'SIGTERM');`);
   executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.SOCKET_TRACE) fs.writeFileSync(process.env.SOCKET_TRACE,process.env.PGHOST); if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
+}
+
+const HOUR = 3_600_000;
+const onFakeClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+/* A server whose stop lasts an hour on the test's fake clock: it takes its first stop request, writes STOP_MARKER with its
+   pid and stops only once the test writes STOP_RELEASE, after the clock has run through the hour. Later signals, but SIGKILL,
+   do not hurry it. */
+const HOUR_LONG_STOP = "let asked=false;const stopping=done=>{if(asked)return;asked=true;fs.writeFileSync(process.env.STOP_MARKER+'.tmp',JSON.stringify({pid:process.pid}));fs.renameSync(process.env.STOP_MARKER+'.tmp',process.env.STOP_MARKER);setInterval(()=>{if(fs.existsSync(process.env.STOP_RELEASE))done()},5)};";
+/* PostgreSQL with such a stop, and a pg_ctl that does what the real one does: it asks the server for a fast stop and, with
+   -W, returns at once. Otherwise it waits -t seconds (60 by default), and for a stop longer than that (STOP_MS) gives up at
+   once, as the real one does once they have passed. It records its arguments in PG_CTL_CALLS. */
+function hourLongPostgres(): void {
+  executable('postgres', `${common}${HOUR_LONG_STOP}if(a.includes('--single')){process.stdin.resume();process.stdin.on('end',()=>process.exit(0))}else{const pid=p.join(a[a.indexOf('-D')+1],'postmaster.pid');fs.writeFileSync(pid,String(process.pid));const stop=()=>stopping(()=>{fs.unlinkSync(pid);process.exit(0)});process.on('SIGINT',stop);process.on('SIGTERM',stop);setInterval(()=>{},100)}`);
+  executable('pg_ctl', `${common}fs.appendFileSync(process.env.PG_CTL_CALLS,JSON.stringify(a)+'\\n');const pid=p.join(a[a.indexOf('-D')+1],'postmaster.pid');if(!fs.existsSync(pid)){console.error('pg_ctl: PID file does not exist');process.exit(1)}process.kill(Number(fs.readFileSync(pid,'utf8')),'SIGINT');if(a.includes('-W')){console.log('server shutting down');process.exit(0)}const seconds=a.includes('-t')?Number(a[a.indexOf('-t')+1]):60;if(Number(process.env.STOP_MS)>seconds*1000){console.error('pg_ctl: server does not shut down');process.exit(1)}setInterval(()=>{if(!fs.existsSync(pid))process.exit(0)},5);`);
+}
+/* Starts what ends in a stop of an hour and returns once that stop has reached the server, with the server's pid. */
+async function stopping<T>(start: () => Promise<T>, marker: string): Promise<{ running: Promise<T>; pid: number }> {
+  const running = start();
+  let ended = false;
+  void running.then(() => { ended = true; }, () => { ended = true; });
+  await eventually(() => ended || existsSync(marker));
+  if (!existsSync(marker)) { await running; throw new Error('It ended before its stop reached the server'); }
+  return { running, pid: (JSON.parse(readFileSync(marker, 'utf8')) as { pid: number }).pid };
 }
 
 beforeEach(() => {
@@ -147,6 +171,42 @@ describe('lease guardian after its leader exits', () => {
       recorded.group.alive = false;
       vi.advanceTimersByTime(5);
       expect(recorded.messages).toEqual([{ supervisionFailed: false }]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    { name: 'its signal', message: { signal: 'SIGINT', graceMs: null }, sent: [{ pid: -123, signal: 'SIGINT' }] },
+    { name: 'no signal, as for a server pg_ctl asked to stop', message: { graceMs: null }, sent: [] },
+  ])('waits for the whole group with no grace of its own on an ordinary stop with $name', ({ message, sent }) => {
+    vi.useFakeTimers();
+    try {
+      const recorded = recordedGuardian(321);
+      recorded.guardian.emit('message', message);
+      recorded.job.emit('exit', 0);
+      vi.advanceTimersByTime(60_000);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual(sent);
+      expect(recorded.messages).toEqual([]);
+      expect(recorded.guardian.connected).toBe(true);
+      recorded.group.alive = false;
+      vi.advanceTimersByTime(5);
+      expect(recorded.messages).toEqual([{ supervisionFailed: false }]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('forces the group once a grace comes after an ordinary stop', () => {
+    vi.useFakeTimers();
+    try {
+      const recorded = recordedGuardian();
+      recorded.guardian.emit('message', { signal: 'SIGINT', graceMs: null });
+      recorded.job.emit('exit', 0);
+      recorded.guardian.emit('message', { signal: 'SIGTERM', graceMs: 10 });
+      vi.advanceTimersByTime(9);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([{ pid: -123, signal: 'SIGINT' }, { pid: -123, signal: 'SIGTERM' }]);
+      vi.advanceTimersByTime(1);
+      expect(recorded.signals.filter(s => s.signal !== 0)).toEqual([{ pid: -123, signal: 'SIGINT' }, { pid: -123, signal: 'SIGTERM' }, { pid: -123, signal: 'SIGKILL' }]);
+      vi.advanceTimersByTime(5);
+      expect(recorded.messages).toEqual([{ supervisionFailed: true }]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -292,6 +352,54 @@ describe('prepared native services', () => {
     expect(existsSync(readFileSync(trace, 'utf8'))).toBe(false);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
+  it('waits out an hour-long PostgreSQL stop on the fake clock, publishes the template and stops an attempt the same way', async () => {
+    hourLongPostgres();
+    const calls = join(root, 'pg_ctl');
+    const env = (name: string) => ({ STOP_MS: String(HOUR), STOP_MARKER: join(root, `${name}-stopping`), STOP_RELEASE: join(root, `${name}-release`), PG_CTL_CALLS: calls });
+    onFakeClock();
+    try {
+      /* The supervisor's own graces: no number of its own may end an ordinary stop. */
+      const prepared = await stopping(() => prepareServiceArtifacts(definitions, root, { ...context, graces: undefined, env: env('prepared'), cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) }), env('prepared').STOP_MARKER);
+      vi.advanceTimersByTime(HOUR);
+      writeFileSync(env('prepared').STOP_RELEASE, '');
+      const artifacts = await prepared.running;
+      expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(true);
+      const opened = await openServices(definitions, artifacts, { ...part('one'), graces: undefined, env: env('attempt') });
+      const attempt = await stopping(() => opened.close(), env('attempt').STOP_MARKER);
+      vi.advanceTimersByTime(HOUR);
+      writeFileSync(env('attempt').STOP_RELEASE, '');
+      await attempt.running;
+    } finally { vi.useRealTimers(); }
+    const stop = ['-D', expect.any(String), 'stop', '-m', 'fast', '-W'];
+    expect(readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[])).toEqual([stop, stop]);
+  });
+  it.each(['cancellation', 'deadline'] as const)('forces an unfinished PostgreSQL stop at its %s and publishes no template', async mode => {
+    hourLongPostgres();
+    const controller = new AbortController(), marker = join(root, 'stopping');
+    let pid = 0;
+    onFakeClock();
+    try {
+      const prepared = await stopping(() => prepareServiceArtifacts(definitions, root, { ...context, graces: undefined, signal: controller.signal, deadline: Date.now() + 2 * HOUR,
+        env: { STOP_MS: String(HOUR), STOP_MARKER: marker, STOP_RELEASE: join(root, 'release'), PG_CTL_CALLS: join(root, 'pg_ctl') }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) }), marker);
+      pid = prepared.pid;
+      if (mode === 'cancellation') controller.abort(); else vi.advanceTimersByTime(2 * HOUR);
+      /* The supervisor's own stop grace, whatever it is, runs out on the fake clock. */
+      vi.advanceTimersToNextTimer();
+      await expect(prepared.running).rejects.toThrow();
+    } finally { vi.useRealTimers(); }
+    expect(() => process.kill(pid, 0)).toThrow();
+    expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
+  });
+  it('starts the preparation server without fsync and the servers of attempts with it', async () => {
+    const trace = join(root, 'servers');
+    const artifacts = await prepareServiceArtifacts(definitions, root, { ...context, env: { SERVER_ARGS: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
+    const opened = await openServices(definitions, artifacts, { ...part('one'), env: { SERVER_ARGS: trace } });
+    await opened.close();
+    const settings = readFileSync(trace, 'utf8').trim().split('\n').map(line => (JSON.parse(line) as string[]).filter((_, at, all) => all[at - 1] === '-c'));
+    expect(settings).toHaveLength(2);
+    expect(settings[0]).toContain('fsync=off');
+    expect(settings[1]).not.toContain('fsync=off');
+  });
   it('does not inspect unrelated processes after its own process groups have exited', async () => {
     procVisibility.readable = false;
     const artifacts = await prep();
@@ -381,20 +489,61 @@ describe('managed process services', () => {
     await expect(openServices(defs, artifacts, { ...part('partial'), env: { BAD_READY: '1' } })).rejects.toThrow(/failed/);
     expect(existsSync(join(root, 'runs', 'partial', 'state'))).toBe(false);
   });
-  it('honors a longer stop grace while descendants flush prepared state', async () => {
+  it('lets descendants flush prepared state past the supervisor\'s stop grace', async () => {
     const defs = processDefinitions();
     const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');const leader=process.ppid;process.on('SIGINT',()=>setInterval(()=>{if(process.ppid===leader)return;fs.writeFileSync(p.join(d,'flushed'),'yes');process.exit(0)},5));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready')))fs.writeFileSync(p.join(d,'value'),'ready')},5);process.on('SIGINT',()=>process.exit(0));`);
     const artifact = await prepareServiceArtifacts(defs, root, { ...context, graces: { ...LASTING, stopMs: 1 }, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) });
     expect(readFileSync(join(artifact.paths.worker!, 'data', 'flushed'), 'utf8')).toBe('yes');
   });
-  it('never publishes state after the guardian forcibly stops a descendant', async () => {
+  it('keeps an ordinary stop waiting for a descendant that ignores it and publishes nothing once cancellation forces it', async () => {
     const defs = processDefinitions(1);
-    const child = "const fs=require('node:fs'),p=require('node:path');process.on('SIGTERM',()=>{});process.on('SIGINT',()=>{});fs.writeFileSync(p.join(process.env.HH_SERVICE_STATE,'data','child-ready'),'yes');setInterval(()=>{},100)";
+    const controller = new AbortController(), marker = join(root, 'asked');
+    const child = "const fs=require('node:fs'),p=require('node:path');process.on('SIGTERM',()=>{});process.on('SIGINT',()=>{fs.writeFileSync(process.env.STOP_MARKER+'.tmp',JSON.stringify({pid:process.pid}));fs.renameSync(process.env.STOP_MARKER+'.tmp',process.env.STOP_MARKER)});fs.writeFileSync(p.join(process.env.HH_SERVICE_STATE,'data','child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){fs.writeFileSync(p.join(d,'value'),'ready');process.exit(0)}},5);`);
-    await expect(prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) })).rejects.toMatchObject({
-      errors: [expect.objectContaining({ message: 'Service required forced stop; state cannot be published' })],
-    });
+    onFakeClock();
+    try {
+      const prepared = await stopping(() => prepareServiceArtifacts(defs, root, { ...context, graces: { ...LASTING, stopMs: 1 }, signal: controller.signal, env: { STOP_MARKER: marker }, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) }), marker);
+      controller.abort();
+      vi.advanceTimersToNextTimer();
+      await expect(prepared.running).rejects.toMatchObject({
+        errors: [expect.objectContaining({ message: 'Service required forced stop; state cannot be published' })],
+      });
+    } finally { vi.useRealTimers(); }
+    expect(existsSync(join(root, 'cache', 'c'.repeat(64), 'READY.json'))).toBe(false);
+  });
+  /* A service whose stop lasts an hour on the fake clock, with the longest stop grace a project may give it. */
+  function hourLongProcess(): ServiceDefinitions {
+    const defs = processDefinitions(30_000);
+    executable('service', `const fs=require('node:fs'),p=require('node:path');${HOUR_LONG_STOP}const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'value'),'prepared');process.on('SIGTERM',()=>{});process.on('SIGINT',()=>stopping(()=>{fs.writeFileSync(p.join(d,'stopped'),'yes');process.exit(0)}));setInterval(()=>{},100);`);
+    return defs;
+  }
+  it('waits out an hour-long stop of a process service on the fake clock and publishes its state', async () => {
+    const defs = hourLongProcess(), marker = join(root, 'stopping'), release = join(root, 'release');
+    onFakeClock();
+    try {
+      /* The supervisor's own graces: neither its numbers nor the service's grace may end an ordinary stop. */
+      const prepared = await stopping(() => prepareServiceArtifacts(defs, root, { ...context, graces: undefined, env: { STOP_MARKER: marker, STOP_RELEASE: release }, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) }), marker);
+      vi.advanceTimersByTime(HOUR);
+      writeFileSync(release, '');
+      const artifacts = await prepared.running;
+      expect(readFileSync(join(artifacts.paths.worker!, 'data', 'stopped'), 'utf8')).toBe('yes');
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['cancellation', 'deadline'] as const)('forces an unfinished stop of a process service at its %s and publishes no state', async mode => {
+    const defs = hourLongProcess(), controller = new AbortController(), marker = join(root, 'stopping');
+    let pid = 0;
+    onFakeClock();
+    try {
+      const prepared = await stopping(() => prepareServiceArtifacts(defs, root, { ...context, graces: undefined, signal: controller.signal, deadline: Date.now() + 2 * HOUR,
+        env: { STOP_MARKER: marker, STOP_RELEASE: join(root, 'release') }, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'd'.repeat(64) }), marker);
+      pid = prepared.pid;
+      if (mode === 'cancellation') controller.abort(); else vi.advanceTimersByTime(2 * HOUR);
+      /* The supervisor's own stop grace, whatever it is, runs out on the fake clock. */
+      vi.advanceTimersToNextTimer();
+      await expect(prepared.running).rejects.toThrow();
+    } finally { vi.useRealTimers(); }
+    expect(() => process.kill(pid, 0)).toThrow();
     expect(existsSync(join(root, 'cache', 'c'.repeat(64), 'READY.json'))).toBe(false);
   });
 });
