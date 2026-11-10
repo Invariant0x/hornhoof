@@ -19,7 +19,7 @@ import { backlogRoutes } from './modules/backlog/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
-import { outboundRoutes } from './modules/outbound/routes.js';
+import { outboundRoutes } from './modules/outbound/extension.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose } from './modules/nodes/messages.js';

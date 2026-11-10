@@ -25,7 +25,7 @@ import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensur
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { waitPolicyRoutes } from './wait-policy-routes.js';
 import { workModeRoutes } from './work-mode.js';
-import { modelCheckRoutes } from '../model-checks/routes.js';
+import { modelCheckRoutes } from '../outbound/extension.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { coversEveryPart } from '../testruns/github-status.js';

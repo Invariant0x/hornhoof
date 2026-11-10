@@ -16,9 +16,7 @@ import { harnessRound } from '../testruns/harness.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
-import { modelCheckRound } from '../model-checks/store.js';
-import { outboundReviewRound, outboundRound, reconcileOutbound } from '../outbound/dispatcher.js';
-import { certifyPassed, liveEvaluator } from '../outbound/live-checks.js';
+import { outboundRounds, reconcileOutbound } from '../outbound/extension.js';
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
@@ -129,9 +127,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     harnessRound(ctx, now).catch(failed('getting test harnesses to the machines failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     tellOfMachinesAway(ctx, now).catch(failed('telling of machines away failed')),
-    modelCheckRound(ctx, now, liveEvaluator(ctx), certifyPassed(ctx)).catch(failed('running model checks failed')),
-    outboundReviewRound(ctx, now).catch(failed('checking waiting outbound messages failed')),
-    outboundRound(ctx, now).catch(failed('sending outbound messages failed')),
+    ...outboundRounds(ctx, now).map(([round, why]) => round.catch(failed(why))),
   ]);
 }
 

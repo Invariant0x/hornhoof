@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agents, departments, personAccess, subscriptions, tasks, teams } from '../../db/schema.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
-import { outboundRecordsOf } from '../outbound/policies.js';
+import { outboundRecordsOf } from '../outbound/extension.js';
 
 const Name = z.string().trim().min(1).max(60);
 const Note = z.string().max(160);
