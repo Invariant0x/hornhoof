@@ -15,7 +15,7 @@ import { discardStaleTurn, taskWakeOf } from '../src/modules/tasks/wake-state.js
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, echelonsTurn, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'external-wait-test-node-key-0123456789abcdef';
 
@@ -34,6 +34,7 @@ async function fixture(env?: NodeJS.ProcessEnv) {
   ]).returning();
   app.ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'b'.repeat(40) });
   app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });
+  await echelonsTurn(db, company!.id);
   const clients = new Map<string, Client>();
   const tools = async (agentId = worker!.id) => {
     const existing = clients.get(agentId);

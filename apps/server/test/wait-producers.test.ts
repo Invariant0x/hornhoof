@@ -10,7 +10,7 @@ import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { resolveStuck } from '../src/modules/tasks/stuck.js';
 import { afterSourceKey, recordRunWait, requestSourceKey, reviewSourceKey, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 const HOUR = 3_600_000;
 const later = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
@@ -46,6 +46,7 @@ async function company() {
     finalReview: { headAgentId: head.id, anchorAt: later(4), intervalMs: HOUR },
     ...change,
   });
+  await echelonsTurn(db, companyId);
   return { ctx, db, atCommit, snapshot, companyId, CEO, ceo: ceo!, dev: dev!, ops: ops!, head, bruno, rita, task, policy, waitsOf, plan, hire };
 }
 

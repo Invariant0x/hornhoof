@@ -49,6 +49,14 @@ describe('Tests failure belongs to the current candidate', () => {
     await f.db.update(testRuns).set({ status: 'running', finishedAt: null }).where(eq(testRuns.id, f.failedRun.id));
     await expect(report(f.ctx, f.tester.id, f.task.id, f.input).then(() => null)).rejects.toMatchObject({ status: 409 });
   });
+  it('never sends a failed candidate back to its author on Development, whatever the report asks', async () => {
+    const f = await failedFixture();
+    const backwards = { ...f.input.verification, defect: true };
+    await expect(report(f.ctx, f.tester.id, f.task.id, { ...f.input, verification: backwards })).rejects.toMatchObject({ status: 409 });
+    expect((await f.detail()).echelons).toMatchObject({ phase: 'active', stage: 'tests', candidateId: f.snapshot.candidateId });
+    expect((await f.detail()).echelons.stages.find(step => step.stage === 'development')?.status).toBe('complete');
+    expect((await f.db.select().from(tasks).where(eq(tasks.id, f.task.id)))[0]).toMatchObject({ assigneeAgentId: f.tester.id });
+  });
   it('refuses a former owner reporting a Tests failure', async () => {
     const f = await failedFixture();
     await expect(report(f.ctx, f.author.id, f.task.id, f.input).then(() => null)).rejects.toMatchObject({ status: 403 });

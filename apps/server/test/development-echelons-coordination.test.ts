@@ -12,7 +12,7 @@ async function groupFixture(accepted: boolean, stale = false) {
   const f = await testsFixture();
   const group = (await f.create({ title: 'Coordinate totals', assigneeAgentId: f.head.id, executor: false, resultKind: 'coordination' })).task;
   const child = f.task;
-  const [turn] = await f.db.insert(turns).values({ companyId: child.companyId, number: 17, goal: 'Keep totals correct.', status: 'open', openedAt: new Date() }).returning();
+  const [turn] = await f.db.update(turns).set({ number: 17, goal: 'Keep totals correct.' }).where(eq(turns.id, child.turnId!)).returning();
   await f.db.update(tasks).set({ parentId: group.id, turnId: turn!.id }).where(eq(tasks.id, child.id));
   f.ctx.readCommit = async (_repo, ref) => ({ branch: 'branch' in ref ? ref.branch : `task-${ref.task}`, commitSha: f.finalCommit });
   const run = await f.run();

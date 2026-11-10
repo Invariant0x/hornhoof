@@ -12,7 +12,7 @@ import { wakeAll, wakeLeftBehind } from '../src/modules/tasks/wake.js';
 import { messageHeading } from '../src/modules/conversation/prompt.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 /* Reports are combined within ten seconds of the server's clock, and waits end by it: here it stands still unless a test
    moves it, so no window or wait runs out while a test works. */
@@ -32,6 +32,7 @@ async function fixture() {
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const worker = await hire('Bruno', 'worker', 'DEV-ENG');
   const reviewer = await hire('Rita', 'worker', 'DEV-REV');
+  await echelonsTurn(db, company!.id);
   const make = async () => (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: 'Build it.', departmentId: dept!.id, assigneeAgentId: worker.id, executor: true, small: true, reviewerAgentId: reviewer.id, paths: ['logic/totals.ts'] })).task;
   const notices = async (agentId: string) => (await listEvents(db, agentId, 0)).filter(e => e.kind === 'message' && e.message?.direction === 'in');
   return { app, db, head, worker, reviewer, ceo: ceo!, make, notices };

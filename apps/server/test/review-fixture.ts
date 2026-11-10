@@ -3,7 +3,7 @@ import { expect } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, testParts, testRuns } from '../src/db/schema.js';
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
-import { listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { echelonsTurn, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 export const BASE = '0'.repeat(40);
 export const FIRST = 'a'.repeat(40);
@@ -24,6 +24,7 @@ export async function fixture() {
   const head = await hire('Head', 'head', 'DEV-HEAD');
   const author = await hire('Author', 'worker', 'DEV-BE');
   const reviewer = await hire('Reviewer', 'worker', 'DEV-REV', codex!.id);
+  await echelonsTurn(db, companyId);
   const task = (await createTask(ctx, { agentId: head.id }, { title: 'Keep totals', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: author.id, executor: true, small: true, reviewerAgentId: reviewer.id, paths: ['logic/totals.ts'] })).task;
   let commit = FIRST;
   ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['logic/totals.ts'], diff: '@@ -3 +3 @@\n-old\n+new' });

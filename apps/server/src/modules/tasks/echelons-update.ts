@@ -2,10 +2,11 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, taskEvents, tasks } from '../../db/schema.js';
 import { checkerFor } from './echelons-assign.js';
-import { currentCandidate } from './echelons-candidates.js';
+import { checkedProducer, currentCandidate } from './echelons-candidates.js';
 import { changeRoute, routeOf, type Route } from './echelons-store.js';
 import { RepoPath } from './review-schema.js';
 import { CLOSED, note, published, refuse, type Task, type TaskChange, type Tx, type Wake } from './engine.js';
+import { turnkeyTeamOf, turnkeyWork } from './turnkey.js';
 
 export async function requireTaskHead(ctx: { db: Ctx['db'] | Tx }, task: Task, agentId: string): Promise<void> {
   const [actor] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, task.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
@@ -22,10 +23,30 @@ export function withCleanup(route: Route, enabled: boolean): Route['state'] {
   return { ...route.state, stages };
 }
 
-export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, agentId: string, change: TaskChange): Promise<{ state: Route['state']; set: Partial<Task>; paths: string[] }> {
-  let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
+type RouteChange = { state: Route['state']; set: Partial<Task>; paths: string[] };
+
+function changedPaths(route: Route, change: TaskChange): string[] {
   const paths = change.paths ?? route.paths;
   if (paths.some(path => !RepoPath.safeParse(path).success)) throw refuse(400, 'task_invalid', 'Repository scope contains an invalid path pattern.');
+  return paths;
+}
+
+/* Work with no echelons is done by its holder alone and takes no stage, Cleanup or checker. Outside a turn it goes to
+   anyone; in a turn it stays with a member of a turnkey team, as the turn's work goes through no echelons only there. */
+async function turnkeyChange(ctx: Ctx, task: Task, route: Route, change: TaskChange): Promise<RouteChange> {
+  if (change.cleanup !== undefined) throw turnkeyWork(task);
+  const paths = changedPaths(route, change);
+  const ownerId = change.ownerAgentId ?? change.executor;
+  if (!ownerId) return { state: route.state, set: {}, paths };
+  await requireAvailableOwner(ctx, task, ownerId);
+  if (task.turnId && !(await turnkeyTeamOf(ctx.db, task.companyId, ownerId))) throw refuse(409, 'task_invalid', `#${task.number} goes through no echelons in its turn, so it stays with a member of a turnkey team. Give other work as a new task.`);
+  return { state: route.state, set: { assigneeAgentId: ownerId, ...(task.executorAgentId || change.executor ? { executorAgentId: ownerId } : {}), status: 'open', silent: 0 }, paths };
+}
+
+export async function prepareRouteChange(ctx: Ctx, task: Task, route: Route, agentId: string, change: TaskChange): Promise<RouteChange> {
+  if (route.state.resultKind === 'turnkey') return turnkeyChange(ctx, task, route, change);
+  let state = change.cleanup === undefined ? route.state : withCleanup(route, change.cleanup);
+  const paths = changedPaths(route, change);
   state = withRisk(state, agentId, change.riskClass);
   requireProducerChange(state, change.executor);
   const ownerId = change.ownerAgentId ?? change.executor;
@@ -52,9 +73,11 @@ async function requireAvailableOwner(ctx: Ctx, task: Task, ownerId: string): Pro
 
 async function changedOwner(ctx: Ctx, task: Task, route: Route, state: Route['state'], ownerId: string, executor: TaskChange['executor']): Promise<{ state: Route['state']; set: Partial<Task> }> {
   await requireAvailableOwner(ctx, task, ownerId);
+  const team = await turnkeyTeamOf(ctx.db, task.companyId, ownerId);
+  if (team) throw refuse(409, 'task_invalid', `The new owner is in ${team.name}, a turnkey team, whose members take only work of their own and never enter the echelons.`);
   const abilities: Partial<Record<NonNullable<Route['state']['stage']>, string>> = { review: 'dev-review-diff', cleanup: 'dev-cleanup', security: 'dev-security-review', tests: 'dev-test-environment' };
   const ability = state.stage ? abilities[state.stage] : undefined;
-  const assignment = ability ? await checkerFor(ctx, task, (await currentCandidate(ctx.db, task, route)).producedBy, ability, ownerId) : null;
+  const assignment = ability ? await checkerFor(ctx, task, await checkedProducer(ctx.db, task, route, await currentCandidate(ctx.db, task, route)), ability, ownerId) : null;
   if (ability && !assignment) throw refuse(409, 'task_invalid', 'The proposed checker lacks the required ability or model capability.');
   const next: Route['state'] = { ...state, phase: 'active', assignment, stages: state.stages.map(step => step.stage === state.stage ? { ...step, status: 'active', ownerAgentId: ownerId, reason: null } : step) };
   const set: Partial<Task> = { assigneeAgentId: ownerId, status: ability && state.stage !== 'tests' ? 'review' : 'open', silent: 0 };

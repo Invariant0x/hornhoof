@@ -1,10 +1,11 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useId, useRef, useState } from 'react';
+import { api } from '../api';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTaskDepartments, useTasks, useTurns } from '../tasks';
 import { searchTasks } from '../task-search';
-import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TaskStatus, TurnView } from '../types';
+import type { Decisions, MachineAwayCard, Org, ProposalDecision, TaskDepartments, TaskLine, TaskStatus, TurnMode as Mode, TurnView } from '../types';
 import { Backlog } from '../ui/Backlog';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
@@ -80,9 +81,36 @@ function DepartmentPicker({ choices, value, onChange }: { choices: Choice[]; val
   );
 }
 
-/* A turn's head in the table: its number and state, its title and main point, how far the whole turn is, and the words it
-   came from on click. */
-function TurnHead({ turn }: { turn: TurnView }) {
+/* How a turn runs. A person who sees the whole company picks it while the turn is planned; once it starts it stays as it is,
+   so only its words show. */
+function TurnModeOf({ turn, whole }: { turn: TurnView; whole: boolean }) {
+  const t = useT();
+  const id = useId();
+  const [failure, setFailure] = useState<unknown>(null);
+  if (!whole || turn.status !== 'planned') return <small className="turn-wait">{t.tasks.turnModeIs[turn.mode]}</small>;
+  async function change(mode: Mode) {
+    setFailure(null);
+    try {
+      await api.patch(`/api/turns/${turn.number}`, { mode });
+    } catch (err) {
+      setFailure(err);
+    }
+  }
+  return (
+    <span className="turn-mode">
+      <label htmlFor={id}>{t.tasks.turnMode}</label>
+      <select id={id} value={turn.mode} onChange={e => void change(e.target.value as Mode)}>
+        <option value="echelons">{t.tasks.turnModes.echelons}</option>
+        <option value="turnkey">{t.tasks.turnModes.turnkey}</option>
+      </select>
+      {failure !== null && <span className="alert" role="alert">{errorText(t, failure)}</span>}
+    </span>
+  );
+}
+
+/* A turn's head in the table: its number and state, its title and main point, how it runs, how far the whole turn is, and
+   the words it came from on click. */
+function TurnHead({ turn, whole }: { turn: TurnView; whole: boolean }) {
   const t = useT();
   return (
     <span className="grp-head">
@@ -92,6 +120,7 @@ function TurnHead({ turn }: { turn: TurnView }) {
       </span>
       <b className="grp-title">{turn.title}</b>
       {turn.goal && turn.goal !== turn.title && <span className="muted">{turn.goal}</span>}
+      <TurnModeOf turn={turn} whole={whole} />
       {turn.status === 'planned' ? <small className="turn-wait">{t.tasks.plannedTasks(turn.tasks.total)}</small> : <TurnProgress tasks={turn.tasks} />}
       {turn.messages.length > 0 && (
         <details className="turn-words" onClick={e => e.stopPropagation()}>
@@ -110,9 +139,9 @@ function TurnHead({ turn }: { turn: TurnView }) {
 
 /* The groups of the department's table: the running turn and the planned ones with what is given outside turns, and
    apart from them what is over, folded. A turn that runs or waits shows even with no task of this department in it. */
-function groupsOf(t: Messages, tasks: TaskLine[], turns: TurnView[]): { now: TaskGroup[]; past: TaskGroup[] } {
+function groupsOf(t: Messages, tasks: TaskLine[], turns: TurnView[], whole: boolean): { now: TaskGroup[]; past: TaskGroup[] } {
   const of = (turn: TurnView) => tasks.filter(x => x.turn === turn.number);
-  const turnGroup = (turn: TurnView, folded = false): TaskGroup => ({ key: turn.id, head: <TurnHead turn={turn} />, tasks: of(turn), folded, empty: t.tasks.table.noneHere });
+  const turnGroup = (turn: TurnView, folded = false): TaskGroup => ({ key: turn.id, head: <TurnHead turn={turn} whole={whole} />, tasks: of(turn), folded, empty: t.tasks.table.noneHere });
   const outside = tasks.filter(x => x.turn === null);
   const open = outside.filter(x => !CLOSED.includes(x.status));
   const closed = outside.filter(x => CLOSED.includes(x.status));
@@ -129,12 +158,12 @@ function groupsOf(t: Messages, tasks: TaskLine[], turns: TurnView[]): { now: Tas
 
 /* The department's tasks: a search over all of them, or the tables by turn with the department's list for later turns
    between what runs and what is over. */
-function DepartmentTasks({ department, tasks, turns, rows }: { department: string; tasks: TaskLine[] | undefined; turns: TurnView[] | undefined; rows: Omit<Rows, 'all'> }) {
+function DepartmentTasks({ department, tasks, turns, whole, rows }: { department: string; tasks: TaskLine[] | undefined; turns: TurnView[] | undefined; whole: boolean; rows: Omit<Rows, 'all'> }) {
   const t = useT();
   const [query, setQuery] = useState('');
   const all = tasks ?? [];
   const table = { ...rows, all };
-  const { now, past } = groupsOf(t, all, turns ?? []);
+  const { now, past } = groupsOf(t, all, turns ?? [], whole);
   const found = query.trim() ? searchTasks(all, query) : null;
   return (
     <>
@@ -305,7 +334,7 @@ export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personI
       <DepartmentPicker choices={choices} value={department} onChange={setPicked} />
       {taskDepartments && !choices.length && <p className="muted">{t.tasks.noDepartments}</p>}
       {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
-      {department && <DepartmentTasks key={department} department={department} tasks={tasks} turns={turns} rows={rows} />}
+      {department && <DepartmentTasks key={department} department={department} tasks={tasks} turns={turns} whole={taskDepartments?.whole === true} rows={rows} />}
     </section>
   );
 }

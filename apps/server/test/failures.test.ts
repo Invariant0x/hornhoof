@@ -8,6 +8,7 @@ import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conver
 import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { createTask, report } from '../src/modules/tasks/engine.js';
 import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
+import { echelonsTurn } from './helpers.js';
 import { failureCompany } from './failure-company.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -20,6 +21,7 @@ const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, r
 const MIN = 60_000;
 async function atWork() {
   const c = await failureCompany();
+  await echelonsTurn(c.db, c.companyId);
   const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, resultKind: 'code' });
   await wakeAll(c.ctx, [{ agentId: c.agent.id, taskId: task.id, why: 'assigned' }]);
   return { ...c, task, first: (await c.turnsOf())[0]! };

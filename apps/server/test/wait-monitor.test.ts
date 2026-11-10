@@ -8,7 +8,7 @@ import { waitCompany } from './wait-company.js';
 
 const MINUTE = 60_000;
 async function quietDepartment() {
-  const c = await waitCompany();
+  const c = await waitCompany({ turn: false });
   const now = new Date();
   const since = new Date(now.getTime() - 15 * MINUTE);
   const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Deliver work', openedAt: since }).returning();

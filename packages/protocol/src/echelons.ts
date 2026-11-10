@@ -15,7 +15,8 @@ export type EchelonStep = {
 export type EchelonsSnapshot = {
   kind: 'development_echelons';
   version: 1;
-  resultKind: 'code' | 'coordination';
+  /* turnkey: its holder does it end to end alone, with no echelons. */
+  resultKind: 'code' | 'coordination' | 'turnkey';
   revision: number;
   stage: EchelonStage | null;
   phase: EchelonPhase;

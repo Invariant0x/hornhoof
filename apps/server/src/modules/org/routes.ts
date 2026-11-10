@@ -256,7 +256,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           repository: repositoryOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)
-            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly })),
+            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly, turnkey: t.turnkey })),
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),

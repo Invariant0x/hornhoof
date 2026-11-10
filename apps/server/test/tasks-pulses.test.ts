@@ -4,7 +4,7 @@ import { agents, companies, departments, people, subscriptions } from '../src/db
 import type { StreamMessage } from '../src/modules/events/bus.js';
 import { answer, ask, cancel, createTask, report, submit } from '../src/modules/tasks/engine.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -29,6 +29,7 @@ async function company() {
     const seen = heard.splice(0).flatMap(m => (m.type === 'pulse' ? [[m.from, m.to]] : []));
     return seen.map(([from, to]) => [from, to].map(e => (e!.kind === 'orchestrator' ? 'orchestrator' : `${e!.kind}:${e!.id}`)).join(' -> '));
   };
+  await echelonsTurn(db, companyId);
   return { ctx: app.ctx, CEO: { personId: ceo!.id }, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, head, bruno, rita, pulses };
 }
 

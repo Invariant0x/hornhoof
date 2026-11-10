@@ -23,8 +23,14 @@ export { SILENT_TURNS, startWork } from './engine.js';
 
 type Agent = typeof agents.$inferSelect;
 
+type RouteKind = ReturnType<typeof routeSnapshot>['resultKind'];
+
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
-function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
+function nextStep(task: Task, agentId: string, kind?: RouteKind): { finish: string; stuck: string } {
+  if (task.assigneeAgentId === agentId && kind === 'turnkey') return {
+    finish: 'carry it end to end alone, as the task says: code, checks, tests, merge and release; it goes through no echelons and nobody else is called onto it; close it with report done true and the evidence',
+    stuck: 'use blocked',
+  };
   if (task.assigneeAgentId === agentId) return {
     finish: 'follow task.echelons: report the Architecture plan; submit code and evidence from Development; check and fix in the same branch in Review, optional Cleanup or Security, then give verdict on the exact candidate; report verified final-candidate runs in Tests; integrate only with the head authorization',
     stuck: 'use blocked or escalate a wrong goal to the head',
@@ -37,8 +43,8 @@ const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled',
 
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
-export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
-  const prompt = reason(agent, task, w);
+export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
+  const prompt = reason(agent, task, w, kind);
   return w.note ? `${prompt}\n\n${w.note}` : prompt;
 }
 
@@ -46,9 +52,9 @@ const READ_TASK = 'Read it with the task tool first: its body is the current tru
 /* What a reviewer may take from the test runs on a task. */
 const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and candidate identity without rerunning unchanged author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
 
-function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
+function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
   const ref = `#${task.number} "${task.title}"`;
-  const { finish, stuck } = nextStep(task, w.agentId);
+  const { finish, stuck } = nextStep(task, w.agentId, kind);
   if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
   if (agent.kind === 'worker') return `${ref} is yours to do. ${READ_TASK} Do the assigned work and report its concrete checked result. If you cannot go on, use blocked; if only a person can answer, use ask_person.`;
@@ -58,17 +64,17 @@ function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string
 const waitEndedPrompt = (task: Task, text?: string): string =>
   `#${task.number} "${task.title}": the wait for "${text ?? ''}" ended; check and continue.`;
 
-function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
+function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake, kind?: RouteKind): string {
   const ref = `#${task.number} "${task.title}"`;
   const read = READ_TASK;
   /* What an employee wrote is marked as theirs; a person's answer or comment stays as they wrote it. */
   const said = w.text ? `:\n\n${EMPLOYEES_SAY.includes(w.why) ? quote(w.text) : w.text}\n\n` : '. ';
-  const { finish, stuck } = nextStep(task, w.agentId);
+  const { finish, stuck } = nextStep(task, w.agentId, kind);
   /* The orchestrator holds no task of his own: he runs the turn. */
   const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
   switch (w.why) {
     case 'assigned':
-      return assignedPrompt(agent, task, w);
+      return assignedPrompt(agent, task, w, kind);
     case 'wait_ended':
       return waitEndedPrompt(task, w.text);
     case 'review':
@@ -331,9 +337,10 @@ const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblo
 /* What a wake says, kept as the message of its turn. */
 async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {
   const notice = await wakeNotice(ctx, task, w);
-  const prompt = notice.action + wakePrompt(agent, task, w) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
-  const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }) : undefined;
-  return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w, routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId)), ...notice, reportContext };
+  const route = routeSnapshot(await routeOf(ctx.db, task), task.assigneeAgentId);
+  const prompt = notice.action + wakePrompt(agent, task, w, route.resultKind) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
+  const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }, route.resultKind) : undefined;
+  return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w, route), ...notice, reportContext };
 }
 
 async function waitsForBefore(db: Ctx['db'], task: Task, w: Wake): Promise<boolean> {

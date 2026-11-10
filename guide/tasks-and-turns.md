@@ -19,9 +19,19 @@ A turn has:
 
 - a short title;
 - its main point;
-- one task for each goal the CEO gave it, whole, for the department that owns it.
+- one task for each goal the CEO gave it, whole, for the department that owns it;
+- the way it runs.
 
 The people's own words it came from open on a click.
+
+A turn runs in one of two ways, chosen as it starts:
+
+- In stages. Code work goes through the checks below: Architecture, Development, Review, Security and Tests.
+- Turnkey. One employee of a sub-unit marked "Works turnkey" does the turn's work alone from start to finish. Hornhoof refuses this way while no sub-unit works turnkey.
+
+The orchestrator picks the way when he lays out a turn. When you put tasks from a department's off-turn list into the next turn, you pick it next to the button. A person who sees the whole company can change it on the Tasks tab while the turn is planned. Once the turn starts, its way stays.
+
+Work given outside any turn goes through no stages: whoever gets it does it alone from start to finish.
 
 ## What does the Tasks tab show?
 
@@ -46,7 +56,7 @@ In Development, each piece is a whole feature for one developer of the pool. Whe
 
 ## Which checks does a piece go through?
 
-Development uses one route for each executable task:
+In a turn that runs in stages, Development uses one route for each executable task:
 
 - Architecture writes the plan when the task is large. Small tasks start at Development.
 - Development produces the change and its checks.
@@ -54,6 +64,8 @@ Development uses one route for each executable task:
 - Cleanup runs after Review only when the head explicitly enables it for the task or turn. It is off by default and uses the existing dev-cleanup skill.
 - Security checks sensitive work when the head requires it or Review discovers the risk.
 - Tests verifies the final candidate, including repairs, using applicable checks and verified results at the same influencing fingerprint. Mutations cover only changed pure functions with fast tests.
+
+A task given to a member of a sub-unit marked "Works turnkey" goes through none of these stages: that member does it alone from start to finish and closes it.
 
 Each stage has one current owner. Review is required even when only one provider or subscription is available. The checker must use a model at least as capable as the producer's; an eligible different provider is preferred when available.
 
@@ -67,7 +79,7 @@ A coordination task with no executable result closes with a checked report and v
 4. The current stage owner checks and repairs the same branch, records its findings and exact candidate, then passes the task forward.
 5. Tests verifies that final candidate. The authorized head accepts the exact checked result through the task's integration route. Main and release still require the authorized person's approval of the exact commit.
 
-Review and Security keep their own repairs. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair. When Tests finds a defect of the candidate, also one that keeps its run from starting, it sends the task back to the author on Development with the failed runs, and the author's new candidate passes Review, Security and Tests again.
+Review and Security keep their own repairs, and nothing goes back to an earlier stage. Work that solves the wrong problem is escalated to the head. A failed applicable check stays visible; an old receipt cannot certify a newer repair. When the candidate's own change passed and it only needs the main line taken in, it stays at Tests: Tests takes the main line in and checks again.
 
 ## When does the head report?
 

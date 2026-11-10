@@ -12,7 +12,7 @@ import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, 
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
   const { app, db } = await testApp(env);
@@ -44,6 +44,7 @@ async function company(env?: NodeJS.ProcessEnv) {
     return job!;
   };
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  await echelonsTurn(db, companyId);
   return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
 

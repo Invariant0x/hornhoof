@@ -26,7 +26,7 @@ export async function testsFixture(fix = false) {
 }
 
 /* Reuse the authenticated run/receipt path for an existing candidate and its live Tests owner. */
-export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>>, 'ctx' | 'db' | 'task' | 'tester'>, snapshot: EchelonsSnapshot, finalCommit: string) {
+export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>>, 'ctx' | 'db' | 'task' | 'tester'>, snapshot: EchelonsSnapshot, finalCommit: string, baseCommit = BASE) {
   const [job] = await f.db.insert(jobs).values({ companyId: f.task.companyId, agentId: f.tester.id, subscriptionId: f.tester.subscriptionId!, taskId: f.task.id, kind: 'conversation', prompt: 'Verify final candidate', timeoutMs: 1000 }).returning();
   const start = async (command?: string) => {
     await startRun(f.ctx, { id: job!.id, companyId: f.task.companyId, agentId: f.tester.id, agentKind: f.tester.kind, departmentId: f.tester.departmentId }, {
@@ -67,7 +67,7 @@ export async function candidateChecks(f: Pick<Awaited<ReturnType<typeof fixture>
     const unit = description.inventory[0]!, fingerprints = [{ suiteId: unit.suiteId, file: unit.file, fingerprint: '1'.repeat(64) }];
     noteTestCapabilities(f.ctx, BUILTIN, { testEnvironmentVersion: 1, testRuntimes: runtimes });
     await acceptDescription(f.ctx, BUILTIN, { type: 'tests.described', requestId: request.requestId, commitSha: finalCommit,
-      result: { status: 'ready', description, fingerprints, baseFingerprints: { commitSha: BASE, fingerprints: fingerprints.map(print => ({ ...print, fingerprint: '2'.repeat(64) })) } } });
+      result: { status: 'ready', description, fingerprints, baseFingerprints: { commitSha: baseCommit, fingerprints: fingerprints.map(print => ({ ...print, fingerprint: '2'.repeat(64) })) } } });
     const planned = await f.db.select().from(testParts).where(eq(testParts.runId, value.id));
     if ((!options.cache && planned.length !== (options.finalChecks ? 2 : 1)) || planned.some(part => !part.environmentSelection)) throw new Error('The fixture needs authenticated candidate selections.');
     for (const part of planned.sort((a, b) => a.part - b.part)) {

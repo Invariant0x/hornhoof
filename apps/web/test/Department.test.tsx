@@ -756,12 +756,12 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     const [dana, bruno] = dev!.employees;
     const simon = { ...bruno!, id: 'b2', name: 'Simon', teamId: 'u1' };
-    const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false };
+    const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false, turnkey: false };
     let org: Org = { ...DEV_ORG, departments: [{ ...dev!, teams: [urgent], employees: [dana!, bruno!, simon] }] };
     const calls = shell(
       {
         'GET /api/org': () => [200, org],
-        'POST /api/departments/d2/teams': [201, { team: { id: 'u2', name: 'Hotfixes', about: '', stage: 0, gate: false } }],
+        'POST /api/departments/d2/teams': [201, { team: { id: 'u2', name: 'Hotfixes', about: '', stage: 0, gate: false, turnkey: false } }],
         'PATCH /api/departments/d2/teams/u1': [200, { team: { ...urgent, name: 'Fast lane' } }],
         'PATCH /api/agents/b1': [200, { ...CARD, team: { id: 'u1', name: 'Urgent fixes' } }],
         'DELETE /api/departments/d2/teams/u1': [204],

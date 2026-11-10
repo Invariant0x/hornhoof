@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, backlogItems, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, backlogItems, companies, departments, jobs, people, subscriptions, tasks, teams, turns } from '../src/db/schema.js';
 import { invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 /* Development with Hana at its head and Bruno in it, Sales with Sara at its head, and Dora, who has Development only. */
@@ -123,6 +123,24 @@ describe("a department's tasks and its list for later turns", () => {
     expect(await db.select().from(backlogItems)).toEqual([]);
   });
 
+  it('put the chosen items into the next turn of the mode the person picks, and refuse a turnkey turn with no turnkey team', async () => {
+    const { db, companyId, ceoToken, dora, dev, bruno, send, put } = await company();
+    const [a, b, c] = await put(dora, dev.id, 'A', 'B', 'C');
+    const schedule = (ids: string[], mode?: string) => send(dora, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids, ...(mode ? { mode } : {}) });
+    const refused = await schedule([a!], 'turnkey');
+    expect([refused.statusCode, refused.json().error.message]).toEqual([409, expect.stringMatching(/no turnkey team/)]);
+    expect(await db.select().from(turns)).toEqual([]);
+
+    const [team] = await db.insert(teams).values({ companyId, departmentId: dev.id, name: 'Lane', turnkey: true }).returning();
+    await db.update(agents).set({ teamId: team!.id }).where(eq(agents.id, bruno.id));
+    expect((await schedule([a!], 'turnkey')).statusCode).toBe(200);
+    /* The turnkey turn runs, so work in stages waits in a turn of its own, and later turnkey work in another one. */
+    expect((await schedule([b!])).statusCode).toBe(200);
+    expect((await send(ceoToken, 'POST', `/api/departments/${dev.id}/backlog/schedule`, { ids: [c], mode: 'turnkey' })).statusCode).toBe(200);
+    const rows = await db.select({ n: turns.number, mode: turns.mode, status: turns.status, goal: turns.goal }).from(turns).orderBy(asc(turns.number));
+    expect(rows.map(t => [t.n, t.mode, t.status, t.goal])).toEqual([[1, 'turnkey', 'open', 'A'], [2, 'echelons', 'planned', 'B'], [3, 'turnkey', 'planned', 'C']]);
+  });
+
   it('are no work for agents: nobody is woken, heads and members neither list nor read an item, and only the orchestrator takes it into a turn', async () => {
     const { db, ceoToken, orchestrator, hana, bruno, dev, tools, put } = await company();
     const [item] = await put(ceoToken, dev.id, 'Write the price page');
@@ -138,7 +156,7 @@ describe("a department's tasks and its list for later turns", () => {
     const boss = await tools(orchestrator);
     const lists = JSON.parse(text(await call(boss, 'backlog')));
     expect(lists).toMatchObject([{ department: { id: dev.id }, items: [{ id: item, title: 'Write the price page', text: 'Write the price page: what to do.', by: 'Ivan' }] }]);
-    const planned = await call(boss, 'plan_turn', { title: 'Prices', goal: 'Show the prices.', tasks: [], backlog: [item] });
+    const planned = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Prices', goal: 'Show the prices.', tasks: [], backlog: [item] });
     expect(planned.isError).toBeFalsy();
     const [task] = await db.select().from(tasks);
     expect(task).toMatchObject({ title: 'Write the price page', status: 'open', assigneeAgentId: hana.id, createdByAgentId: orchestrator.id });

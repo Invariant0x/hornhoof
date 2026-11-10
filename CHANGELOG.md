@@ -92,9 +92,6 @@ only Hornhoof's own side.
 - A cancelled task's route shows as cancelled, every stage reason is named, and an owner's raw id is never shown.
 - A node describes a candidate for Tests again: the node image now ships TypeScript, which choosing the changed functions to
   mutate needs, so such a run no longer ends with `commit_unavailable` before any part goes out.
-- Tests sends a defect of the candidate, also one that keeps its run from starting, back to its author on Development
-  (`report` with `done` false and `verification.defect` true, naming the failed runs), and the new candidate passes every
-  check again. Before, such a candidate could not leave Tests.
 - A handoff no longer takes the comparison with its base for unknown when GitHub lists a file but shows no patch of it,
   as it does for a large file such as a migration's snapshot. The file's path stays in the candidate and is checked
   against the task's paths as before, the diff names the file with its added and removed lines, and the count of changed
@@ -171,9 +168,6 @@ Hornhoof.
 - Журнал упавшей части кончается именем и ошибкой каждого упавшего теста, а не тем, что сказал сервис при остановке.
 - Исправлено: нода снова описывает кандидата для Тестов: образ ноды теперь несет TypeScript, без которого нельзя выбрать измененные
   функции для мутаций, и такой прогон больше не кончается `commit_unavailable` до раздачи частей.
-- Исправлено: Тесты возвращают дефект кандидата, в том числе такой, из-за которого прогон не может начаться, автору на
-  Development (`report` с `done` false и `verification.defect` true и номерами упавших прогонов), и новый кандидат снова
-  проходит все проверки. Раньше такой кандидат не мог уйти с Тестов.
 - Тесты выпуска проверяют только сторону Hornhoof: что он запускает, что вводит и как разбирает записанный вывод
   программы. Они больше не запускают tmux, программы агентов, npm и отказы операционной системы, не зависят от скорости
   машины и не берут случайные порты: каждый тестовый порт берется из своего узкого коридора. Навыки и шаблоны ролей

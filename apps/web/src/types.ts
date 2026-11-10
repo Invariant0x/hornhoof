@@ -90,7 +90,8 @@ export type SubView = {
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
-export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
+/* turnkey: each member does a task alone from start to finish, with no stages and nobody else of the department. */
+export type Team = { id: string; name: string; about: string; stage: number; gate: boolean; turnkey: boolean };
 
 export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 
@@ -505,12 +506,16 @@ export type Decisions = {
 
 /* A turn as the orchestrator laid it out: a short title, its main point, and the people's own words it came from (only for
    people who see the whole company). Planned turns wait in number order. */
+export type TurnMode = 'echelons' | 'turnkey';
+
 export type TurnView = {
   id: string;
   number: number;
   title: string;
   goal: string;
   status: 'planned' | 'open' | 'closed';
+  /* How the turn runs, fixed once it starts: through the stages, or by one employee of a turnkey team alone. */
+  mode: TurnMode;
   messages: { by: string; text: string; at: string }[];
   taskId: string | null;
   startedAt: string;

@@ -56,7 +56,7 @@ describe('head decisions on the current route', () => {
     await expect(updateTask(f.ctx, f.author.id, f.task.id, { ...{ ownerAgentId: f.reviewer.id } }).then(() => null)).rejects.toMatchObject({ status: 403 });
   });
   it('applies explicit Cleanup to the department turn and to new tasks of that turn', async () => {
-    const f = await fixture();
+    const f = await fixture({ turn: null });
     const [turn] = await f.db.insert(turns).values({ companyId: f.task.companyId, number: 1, title: 'Totals', goal: 'Correct totals', status: 'open', createdByAgentId: f.head.id }).returning();
     const first = (await f.create({ title: 'Turn first' })).task;
     const second = (await f.create({ title: 'Turn second' })).task;

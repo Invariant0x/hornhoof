@@ -66,7 +66,7 @@ export const ORG: Org = {
 export const ORG_WITH_TEAMS: Org = {
   ...ORG,
   departments: [
-    { id: 'd1', name: 'Marketing', templateKey: null, roleCode: 'CMO', about: '', agents: { total: 0, working: 0 }, products: [], teams: [{ id: 't1', name: 'Social', about: '', stage: 0, gate: false }, { id: 't2', name: 'Content', about: '', stage: 0, gate: false }], people: [], employees: [], roles: [] },
+    { id: 'd1', name: 'Marketing', templateKey: null, roleCode: 'CMO', about: '', agents: { total: 0, working: 0 }, products: [], teams: [{ id: 't1', name: 'Social', about: '', stage: 0, gate: false, turnkey: false }, { id: 't2', name: 'Content', about: '', stage: 0, gate: false, turnkey: false }], people: [], employees: [], roles: [] },
     { id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] },
   ],
 };
@@ -287,6 +287,7 @@ export const TURN: TurnView = {
   title: 'Payments',
   goal: 'Take card payments in the shop.',
   status: 'open',
+  mode: 'echelons',
   messages: [{ by: 'Ivan', text: 'We need card payments.\nStripe is fine.', at: '2026-10-30T06:50:00.000Z' }],
   taskId: null,
   startedAt: '2026-10-30T07:00:00.000Z',

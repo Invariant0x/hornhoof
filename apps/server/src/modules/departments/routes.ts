@@ -34,7 +34,8 @@ import { deptName, TEMPLATE_TEXT } from './templates.js';
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
 const TeamBody = z.object({ name: z.string().trim().min(1).max(60) }).strict();
-const TeamPatch = TeamBody.partial().extend({ urgentOnly: z.boolean().optional() }).strict().refine(patch => patch.name !== undefined || patch.urgentOnly !== undefined, { message: 'Say what changes.' });
+/* turnkey: each member does a task end to end alone, with no echelons; it holds for tasks given from then on. */
+const TeamPatch = TeamBody.partial().extend({ urgentOnly: z.boolean().optional(), turnkey: z.boolean().optional() }).strict().refine(patch => patch.name !== undefined || patch.urgentOnly !== undefined || patch.turnkey !== undefined, { message: 'Say what changes.' });
 export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
 export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
@@ -137,7 +138,7 @@ async function wakeFreed(ctx: Ctx, me: Person, freed: string[]): Promise<void> {
 /* Sub-unit routes on a department: create, rename and delete a sub-unit outside the pipeline. */
 function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
-  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly });
+  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly, turnkey: t.turnkey });
 
   app.post('/api/departments/:id/teams', async (req, reply) => {
     const me = await requirePerson(req, db);

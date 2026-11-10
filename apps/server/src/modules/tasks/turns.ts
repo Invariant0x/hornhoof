@@ -1,7 +1,7 @@
 import { createRoute } from './echelons-store.js';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
+import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage, type TurnMode } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
 import { keepWakes } from './outbox.js';
 import { refuseNotUrgent } from './urgency.js';
@@ -10,6 +10,7 @@ import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 import { keepSnapshot } from './pipeline-report.js';
 import { recordTurnSummary } from './wait-goals.js';
 import { backlogChanged, readBacklog, takeBacklog, type BacklogItem } from '../backlog/store.js';
+import { requireTurnkeyTeam } from './turnkey.js';
 
 type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'log'>>;
 export type Turn = typeof turns.$inferSelect;
@@ -252,9 +253,10 @@ const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
 
-/* A new turn with its tasks: it starts at once when no turn runs, else it waits after the planned ones. */
-export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number; improvement?: string; backlog?: string[] }): Promise<TurnMove> {
+/* A new turn with its tasks, in the mode it runs in: it starts at once when no turn runs, else it waits after the planned ones. */
+export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: string; mode: TurnMode; tasks: PlanItem[]; words?: number; improvement?: string; backlog?: string[] }): Promise<TurnMove> {
   const { companyId, agentId } = by;
+  if (input.mode === 'turnkey') await requireTurnkeyTeam(ctx.db, companyId);
   const ids = input.backlog ?? [];
   const listed = await readBacklog(ctx.db, companyId, ids);
   const items = await place(ctx, by, companyId, [...input.tasks, ...fromBacklog(listed, i => i.createdByPersonId)]);
@@ -265,7 +267,7 @@ export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: s
     const taken = await takeBacklog(tx, companyId, ids);
     const [turn] = await tx
       .insert(turns)
-      .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', messages, createdByAgentId: agentId })
+      .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', mode: input.mode, messages, createdByAgentId: agentId })
       .returning();
     const planned = await insertPlanned(tx, companyId, { agentId }, turn!.id, items, input.improvement);
     if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by));
@@ -323,19 +325,21 @@ export async function addTasks(ctx: Ctx, by: By, number: number, items: PlanItem
 }
 
 /* The next turn takes what a person puts into it from a department's list: the first planned one, or else a new one named
-   by the items, which starts at once when no turn runs. The orchestrator gives these tasks as he gives every task of a
-   turn, so they go and come back the same way. */
-export async function scheduleBacklog(ctx: Ctx, by: { companyId: string; agentId: string; personId: string }, departmentId: string, ids: string[]): Promise<{ turn: Turn; tasks: Task[]; wakes: Wake[] }> {
+   by the items, which starts at once when no turn runs. The person picks the mode: the items join a planned turn of that
+   mode only, so no turn runs half in each. The orchestrator gives these tasks as he gives every task of a turn, so they
+   go and come back the same way. */
+export async function scheduleBacklog(ctx: Ctx, by: { companyId: string; agentId: string; personId: string }, departmentId: string, ids: string[], mode: TurnMode = 'echelons'): Promise<{ turn: Turn; tasks: Task[]; wakes: Wake[] }> {
   const { companyId, agentId, personId } = by;
+  if (mode === 'turnkey') await requireTurnkeyTeam(ctx.db, companyId);
   const listed = await readBacklog(ctx.db, companyId, ids, departmentId);
   const placed = await place(ctx, { agentId }, companyId, fromBacklog(listed, () => personId));
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const taken = await takeBacklog(tx, companyId, ids, departmentId);
-    const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'))).orderBy(asc(turns.number)).limit(1);
+    const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'), eq(turns.mode, mode))).orderBy(asc(turns.number)).limit(1);
     const [last] = next ? [] : await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
     const goal = taken.map(i => i.title).join('; ').slice(0, 600);
-    const [turn] = next ? [next] : await tx.insert(turns).values({ companyId, number: (last?.n ?? 0) + 1, goal, status: 'planned', createdByAgentId: agentId, startedBy: personId }).returning();
+    const [turn] = next ? [next] : await tx.insert(turns).values({ companyId, number: (last?.n ?? 0) + 1, goal, status: 'planned', mode, createdByAgentId: agentId, startedBy: personId }).returning();
     const planned = await insertPlanned(tx, companyId, { agentId, personId }, turn!.id, placed);
     const opened = await openNext(ctx, tx, companyId);
     return { turn: opened?.turn.id === turn!.id ? opened.turn : turn!, planned, opened, taken };
@@ -350,12 +354,18 @@ export async function scheduleBacklog(ctx: Ctx, by: { companyId: string; agentId
   return { turn: done.turn, tasks: done.planned, wakes: wakesFor(done.opened.started) };
 }
 
-/* A new name or main point for a turn that has not closed. */
-export async function editTurn(ctx: Live, companyId: string, number: number, change: { title?: string; goal?: string }): Promise<Turn> {
+const modeFixed = (turn: Pick<Turn, 'number' | 'mode'>) => refuse(409, 'turn_mode_fixed', `Turn ${turn.number} has started in ${turn.mode}, so it keeps that mode: a turn never runs half in each. Plan other work in a new turn.`);
+
+/* A new name or main point for a turn that has not closed, or another mode while it is planned. */
+export async function editTurn(ctx: Live, companyId: string, number: number, change: { title?: string; goal?: string; mode?: TurnMode }): Promise<Turn> {
   const turn = await liveTurn(ctx.db, companyId, number);
-  const set = { ...(change.title?.trim() ? { title: change.title.trim() } : {}), ...(change.goal?.trim() ? { goal: change.goal.trim() } : {}) };
+  const remode = change.mode !== undefined && change.mode !== turn.mode;
+  if (remode && turn.status !== 'planned') throw modeFixed(turn);
+  if (remode && change.mode === 'turnkey') await requireTurnkeyTeam(ctx.db, companyId);
+  const set = { ...(change.title?.trim() ? { title: change.title.trim() } : {}), ...(change.goal?.trim() ? { goal: change.goal.trim() } : {}), ...(remode ? { mode: change.mode } : {}) };
   if (!Object.keys(set).length) return turn;
-  const [row] = await ctx.db.update(turns).set(set).where(eq(turns.id, turn.id)).returning();
+  const [row] = await ctx.db.update(turns).set(set).where(and(eq(turns.id, turn.id), remode ? eq(turns.status, 'planned') : undefined)).returning();
+  if (!row) throw modeFixed(turn);
   ctx.bus.publish(companyId, { type: 'org' });
   return row!;
 }
@@ -412,6 +422,7 @@ async function storeMerge(tx: Tx, by: Pick<By, 'companyId' | 'agentId'>, sourceN
   if (source.status !== 'planned') throw refuse(409, 'turn_open', `Turn ${sourceNumber} is running. Only a planned turn can be merged.`);
   const target = await requiredTurn(tx, by.companyId, targetNumber);
   if (target.status === 'closed') throw refuse(409, 'turn_unknown', `Turn ${targetNumber} is over. Add the work to the open turn or plan a new one.`);
+  if (target.mode !== source.mode) throw refuse(409, 'turn_mode_fixed', `Turn ${sourceNumber} runs in ${source.mode} and turn ${targetNumber} in ${target.mode}. Merge only turns of the same mode, so no turn runs half in each.`);
   const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, by.companyId), eq(tasks.turnId, source.id))).orderBy(asc(tasks.number));
   const moved = await moveTasks(tx, by, source, target, rows);
   const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.id, source.id), eq(turns.status, 'planned'))).returning();

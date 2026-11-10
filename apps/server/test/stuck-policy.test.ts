@@ -7,7 +7,7 @@ import { createTask, GOING_ON_TURNS, submit, verdict } from '../src/modules/task
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, listen, mcp, setUpCompany, testApp, echelonsTurn } from './helpers.js';
 
 const TOKEN = 'stuck-policy-tool-token-0123456789ab';
 
@@ -46,6 +46,7 @@ async function company() {
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, answering!.id));
     return { result, answering: answering! };
   };
+  await echelonsTurn(db, acme!.id);
   return { app, db, ctx: app.ctx, ceo, dev: dev!, sub: sub!, head, worker, reviewer, orchestrator: orchestrator!, taskFor, realProgram, finish, commentByHead };
 }
 

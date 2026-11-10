@@ -398,3 +398,46 @@ describe('decisions read failure', () => {
     expect(calls.filter(c => c.path === '/api/requests').length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('how a turn runs', () => {
+  it('shows how each turn runs, and lets a person who sees the whole company change it only while the turn is planned', async () => {
+    const user = userEvent.setup();
+    const calls = shell({ 'PATCH /api/turns/4': [200, { turn: { ...PLANNED_TURN, mode: 'turnkey' } }] });
+    await openTasks(user);
+    const modes = await screen.findAllByRole('combobox', { name: 'How the turn runs' });
+    expect(modes).toHaveLength(1);
+    expect(modes[0]).toHaveValue('echelons');
+    expect(screen.getAllByText('How the turn runs: in stages').length).toBeGreaterThanOrEqual(2);
+    await user.selectOptions(modes[0]!, 'turnkey');
+    await waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/turns/4', body: { mode: 'turnkey' } }));
+  });
+
+  it('shows a person who sees part of the company how each turn runs, without a way to change it', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/task-departments': [200, { whole: false, departments: [{ id: 'd2', name: 'Development', templateKey: 'development' }] }] });
+    await openTasks(user);
+    expect(await screen.findAllByText('How the turn runs: in stages')).not.toHaveLength(0);
+    expect(screen.queryByRole('combobox', { name: 'How the turn runs' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Choose: Price page', 'How the next turn runs', 'Turnkey, one employee alone', 'Put into the next turn: 1'],
+    ['ru', 'Выбрать: Price page', 'Как пойдет следующий ход', 'Под ключ, один сотрудник', 'Поставить в следующий ход: 1'],
+  ])('puts the chosen items into the next turn in the mode the person picks (%s)', async (lang, choose, mode, turnkey, put) => {
+    localStorage.setItem('hh-lang', lang);
+    try {
+      const user = userEvent.setup();
+      const calls = shell({
+        'GET /api/departments/d2/backlog': [200, { items: [{ id: 'i1', departmentId: 'd2', title: 'Price page', text: '', by: { id: 'p1', name: 'Ivan' }, at: '2026-10-30T08:00:00.000Z' }] }],
+        'POST /api/departments/d2/backlog/schedule': [200, { turn: { number: 5 }, tasks: [{ id: 't20', number: 20 }] }],
+      });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await user.click(await screen.findByRole('checkbox', { name: choose }));
+      await user.selectOptions(screen.getByRole('combobox', { name: mode }), turnkey);
+      await user.click(screen.getByRole('button', { name: put }));
+      await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path.endsWith('/schedule'))?.body).toEqual({ ids: ['i1'], mode: 'turnkey' }));
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+});

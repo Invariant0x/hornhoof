@@ -6,7 +6,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, people, requests, sessions, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { ask, comment, createTask, note, submit } from '../src/modules/tasks/engine.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, listen, mcp, setUpCompany, testApp, echelonsTurn } from './helpers.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
 import { routeOf } from '../src/modules/tasks/echelons-store.js';
 
@@ -26,6 +26,7 @@ async function fixture() {
   const head = await hire('Hana', 'DEV-HEAD');
   const worker = await hire('Bruno', 'DEV-BE');
   const reviewer = await hire('Rita', 'DEV-REV');
+  await echelonsTurn(db, company!.id);
   const make = () => createTask(app.ctx, { agentId: head.id }, { title: 'Full report', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker.id, executor: true, small: true, paths: ['logic/totals.ts'], reviewerAgentId: reviewer.id });
   app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: HEAD });
   app.ctx.readCompare = async (_repo, want) => ({ complete: true, baseSha: want.base, headSha: want.head, paths: ['logic/totals.ts'], diff: '@@ -1 +1 @@\n-old\n+new' });

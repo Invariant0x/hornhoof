@@ -225,7 +225,7 @@ describe('the snapshot of a turn', () => {
     const seven = await c.turn(7, 'open', 0, null);
     await c.task(seven.id, 1, { closedAt: new Date() });
     const client = await c.tools(c.orchestrator);
-    const planned = (await client.callTool({ name: 'plan_turn', arguments: { title: 'Next', goal: 'Go.', tasks: [{ department: c.dev.id, title: 'One', brief: '', body: '' }] } })) as { isError?: boolean };
+    const planned = (await client.callTool({ name: 'plan_turn', arguments: { mode: 'echelons', title: 'Next', goal: 'Go.', tasks: [{ department: c.dev.id, title: 'One', brief: '', body: '' }] } })) as { isError?: boolean };
     expect(planned.isError).toBeFalsy();
     expect(await c.db.select({ source: turnSnapshots.source }).from(turnSnapshots).where(eq(turnSnapshots.turnId, seven.id))).toEqual([{ source: 'closed' }]);
   });

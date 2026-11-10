@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "turnkey" boolean DEFAULT false NOT NULL;

@@ -13,7 +13,7 @@ import { answer, ask, createTask, submit, updateTask, verdict } from '../src/mod
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { routeOf, routeSnapshot } from '../src/modules/tasks/echelons-store.js';
 import { BASE, HEAD } from './development-echelons-fixture.js';
-import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode, echelonsTurn } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -62,6 +62,7 @@ async function company() {
   const off = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, id))));
   /* On, but without a subscription to check anything with. */
   const unable = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id))));
+  await echelonsTurn(db, companyId);
   return { app, db, ctx, ceo, builtin, companyId, sub: sub!, codex: codex!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, hire, patch, memberTask, snapshot, jobsOf, tools, off, unable };
 }
 
@@ -170,23 +171,23 @@ describe('giving work to agents that are on', () => {
     const { dev, hana, bruno, bea, rita, rex, orchestrator, off, tools, db } = await company();
     const boss = await tools(orchestrator);
     await off(hana.id);
-    const headless = await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const headless = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect(headless.isError).toBe(true);
     expect(text(headless)).toContain('switched off');
     await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, hana.id));
     await off(bruno.id, bea.id, rita.id, rex.id);
-    const empty = await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const empty = await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect(empty.isError).toBe(true);
     expect(text(empty)).toContain('switched off');
     await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, rex.id));
-    expect((await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] })).isError).toBeFalsy();
+    expect((await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] })).isError).toBeFalsy();
   });
 
   it("holds a planned task whose department's head was switched off before its turn, and tells the orchestrator", async () => {
     const { db, dev, hana, orchestrator, off, tools, jobsOf } = await company();
     const boss = await tools(orchestrator);
-    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { mode: 'echelons', title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     await off(hana.id);
     await call(boss, 'cancel_task', { task: 1, why: 'Not needed.' });
     expect((await db.select().from(tasks).where(eq(tasks.title, 'Refund button')))[0]).toMatchObject({ status: 'blocked', assigneeAgentId: null });

@@ -191,6 +191,8 @@ export const teams = pgTable('teams', {
   gate: boolean('gate').notNull().default(false),
   /* Its members take urgent work only. */
   urgentOnly: boolean('urgent_only').notNull().default(false),
+  /* Each member does a task end to end alone, with no echelons and no other member of the department. */
+  turnkey: boolean('turnkey').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -570,6 +572,9 @@ export const proposals = pgTable('proposals', {
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
+/* How a turn's work runs, chosen as it starts: through the echelons, or by one member of a turnkey team alone. */
+export const TURN_MODES = ['echelons', 'turnkey'] as const;
+export type TurnMode = (typeof TURN_MODES)[number];
 /* id is the message's agent event; words kept before it was recorded have none. */
 export type TurnMessage = { id?: string; by: string; text: string; at: string };
 
@@ -584,6 +589,8 @@ export const turns = pgTable(
     goal: text('goal').notNull(),
     /* Planned turns wait in number order; the lowest opens when the open one closes. */
     status: text('status', { enum: TURN_STATUSES }).notNull().default('open'),
+    /* Fixed once the turn opens, so no turn runs half in each mode. */
+    mode: text('mode', { enum: TURN_MODES }).notNull().default('echelons'),
     /* The people's own words the turn was laid out from, as they wrote them. */
     messages: jsonb('messages').$type<TurnMessage[]>().notNull().default([]),
     /* The orchestrator's task for a turn started by a person, from before he laid turns out himself. */

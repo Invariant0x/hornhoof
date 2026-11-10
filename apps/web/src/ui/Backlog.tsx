@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type DragEvent, type FormEvent, type MouseEvent } from 'react';
 import { addToBacklog, moved, orderBacklog, removeFromBacklog, scheduleBacklog, useBacklog } from '../backlog';
 import { errorText, useT } from '../i18n';
-import type { BacklogItem } from '../types';
+import type { BacklogItem, TurnMode } from '../types';
 import { Edge } from './Edge';
 import { Field } from './Field';
 
@@ -105,6 +105,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
   const { items, failure, load } = useBacklog(departmentId);
   const [order, setOrder] = useState<BacklogItem[] | null>(null);
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  const [mode, setMode] = useState<TurnMode>('echelons');
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -161,7 +162,7 @@ export function Backlog({ departmentId }: { departmentId: string }) {
   const remove = (id: string) => void act(async () => setOrder((await removeFromBacklog(departmentId, id)).items));
   const schedule = () => void act(async () => {
     const ids = list.filter(i => chosen.has(i.id)).map(i => i.id);
-    const done = await scheduleBacklog(departmentId, ids);
+    const done = await scheduleBacklog(departmentId, ids, mode);
     setOrder(list.filter(i => !chosen.has(i.id)));
     setChosen(new Set());
     load();
@@ -213,6 +214,13 @@ export function Backlog({ departmentId }: { departmentId: string }) {
       )}
       {list.length > 0 && (
         <div className="entry-actions">
+          <span className="turn-mode">
+            <label htmlFor={`${heading}-mode`}>{t.backlog.mode}</label>
+            <select id={`${heading}-mode`} value={mode} onChange={e => setMode(e.target.value as TurnMode)}>
+              <option value="echelons">{t.tasks.turnModes.echelons}</option>
+              <option value="turnkey">{t.tasks.turnModes.turnkey}</option>
+            </select>
+          </span>
           <button className="btn small" type="button" disabled={busy || !chosen.size} onClick={schedule}>{t.backlog.schedule(chosen.size)}</button>
         </div>
       )}
