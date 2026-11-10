@@ -13,6 +13,8 @@ import { certInfo } from '../tls/x509.js';
 import type { Term } from '../../db/net.js';
 import type { HeldCertificate } from './certificate.js';
 import { MachineIdentity, type Published } from './identity.js';
+import { PeerLink, type PeerPorts } from './peer-link.js';
+import type { PeerServices } from '../link/peer-client.js';
 import { LeaseHolder } from './lease-holder.js';
 import { KEEPER_DIR } from './machine-keys.js';
 import type { LeaseStore } from './lease-store.js';
@@ -20,7 +22,8 @@ import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
 import { updaterBusy } from './updater-status.js';
 
-export const KEEPER_PORTS = { peer: 7070, front: 7080, linkHttp: 7081 } as const;
+/* peerApp: what the relay's service for the app alone reaches, on this machine only. */
+export const KEEPER_PORTS = { peer: 7070, peerApp: 7071, front: 7080, linkHttp: 7081 } as const;
 
 const DOOR_PORTS = { front: KEEPER_PORTS.front, linkHttp: KEEPER_PORTS.linkHttp, linkTls: LINK_TLS_PORT };
 
@@ -34,7 +37,7 @@ export type KeeperOptions = {
   log: (line: string) => void;
   /* Where the front port listens. */
   host?: string;
-  ports?: { front?: number; linkHttp?: number; linkTls?: number };
+  ports?: { front?: number; linkHttp?: number; linkTls?: number; peer?: number; peerApp?: number };
   everyMs?: number;
   /* How often the link and its certificate are read. */
   linkEveryMs?: number;
@@ -52,6 +55,14 @@ export type KeeperOptions = {
   /* The machine's ports as compose publishes them, to report with its measures. */
   published?: Published;
   reportEveryMs?: number;
+  /* This machine's database, for peers that keep data: where the peer link's CONNECT db goes. */
+  dbTarget?: Target | null;
+  /* How often the app is asked what the network holds now: the revoked certificates and what the machine offers. */
+  peerEveryMs?: number;
+  /* How often the keeper asks whether another machine holds the company's data. */
+  guardEveryMs?: number;
+  /* What offers the machine to its peers through the relay; frpc unless a test says otherwise. */
+  peerClientFor?: (services: PeerServices, clientId: string, local: { data: number; app: number }) => Client;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -59,6 +70,7 @@ type ToServe = Awaited<ReturnType<typeof servedCertificate>>;
 
 const EVERY_MS = 1000;
 const LINK_EVERY_MS = 3000;
+const GUARD_EVERY_MS = 10_000;
 const FRPC_RESTART_MS = 2000;
 const NO_MACHINE_ID = 'The keeper carries no public link: HORNHOOF_MACHINE_ID is not set. Run the install command again.';
 const SETTINGS_KEPT = "The keeper cannot read the link's settings from the database: frpc stays as it is.";
@@ -181,6 +193,8 @@ function closeWithin(server: http.Server, ms: number): Promise<void> {
 export class Keeper {
   private readonly holder: LeaseHolder;
   private readonly identity: MachineIdentity | null;
+  private peers: PeerLink | null = null;
+  private guardTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
   private fencesTimer: NodeJS.Timeout | null = null;
   private certificateTimer: NodeJS.Timeout | null = null;
@@ -210,6 +224,12 @@ export class Keeper {
       : null;
   }
 
+  /* The ports the peer link listens on, once the keeper has checked its certificate and its list with the app. It never
+     resolves on a machine that serves none: one without an id or without a database. */
+  peerPorts(): Promise<PeerPorts> {
+    return this.peers?.ports() ?? new Promise<PeerPorts>(() => {});
+  }
+
   /* The certificate this machine holds in the company's network, once its app gave it one. */
   certificate(): HeldCertificate | null {
     return this.identity?.certificate() ?? null;
@@ -237,9 +257,14 @@ export class Keeper {
     const linkTls = await this.listener.listen(at.linkTls);
     this.timer = setInterval(() => void tick(), everyMs);
     this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
-    if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
+    /* One reader of the link's settings for both frpc children, so an outage of the database is said once. */
+    const settings = db ? keepingOnFailure(() => tunnelSettings(db, this.opts.config), () => this.opts.log(SETTINGS_KEPT)) : null;
+    if (db && settings) this.carryLink(db, settings, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
     this.identity?.start();
+    this.guardTimer = setInterval(() => void this.holder.guard(), this.opts.guardEveryMs ?? GUARD_EVERY_MS);
+    this.guardTimer.unref();
+    if (settings) await this.servePeers(settings, { peer: at.peer ?? KEEPER_PORTS.peer, peerApp: at.peerApp ?? KEEPER_PORTS.peerApp }, host);
     return { front, linkHttp, linkTls };
   }
 
@@ -247,9 +272,33 @@ export class Keeper {
     if (this.timer) clearInterval(this.timer);
     if (this.certificateTimer) clearInterval(this.certificateTimer);
     if (this.fencesTimer) clearInterval(this.fencesTimer);
-    this.timer = this.certificateTimer = this.fencesTimer = null;
-    await Promise.all([this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    if (this.guardTimer) clearInterval(this.guardTimer);
+    this.timer = this.certificateTimer = this.fencesTimer = this.guardTimer = null;
+    await Promise.all([this.peers?.stop(), this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
+  }
+
+  /* A machine with an id and a database keeps data, and serves the peer link. One that cannot start it serves the rest. */
+  private async servePeers(settings: () => Promise<TunnelSettings | null | undefined>, ports: PeerPorts, host: string): Promise<void> {
+    const { config, log } = this.opts;
+    if (!this.identity || !config.machineId) return;
+    this.peers = new PeerLink({
+      dir: this.opts.dir ?? KEEPER_DIR,
+      app: this.opts.app,
+      db: this.opts.dbTarget ?? null,
+      machineId: config.machineId,
+      commit: config.commit,
+      identity: this.identity,
+      mode: () => this.mode(),
+      settings,
+      ports,
+      host,
+      everyMs: this.opts.peerEveryMs,
+      holdMs: this.opts.holdMs,
+      peerClientFor: this.opts.peerClientFor,
+      log,
+    });
+    await this.peers.start().catch((err: Error) => log(`The peer link could not start: ${err.message}`));
   }
 
   /* The app goes by this word and keeps its mode while the word is stale, so a word that fails must stop no door. */
@@ -288,14 +337,13 @@ export class Keeper {
   }
 
   /* The certificate is followed also without a machine id: the app goes by the keeper's word on it either way. */
-  private carryLink(db: Db, local: FrpcLocal): void {
+  private carryLink(db: Db, read: () => Promise<TunnelSettings | null | undefined>, local: FrpcLocal): void {
     const { config, log, linkEveryMs } = this.opts;
     const everyMs = linkEveryMs ?? LINK_EVERY_MS;
     const follow = oneAtATime(keepingOnFailure(() => this.serveCertificate(db), () => log(CERTIFICATE_KEPT)));
     this.certificateTimer = setInterval(() => void follow(), everyMs);
     void follow();
     if (!config.machineId) return log(NO_MACHINE_ID);
-    const read = keepingOnFailure(() => tunnelSettings(db, config), () => log(SETTINGS_KEPT));
     this.tunnel = new TunnelKeeper({ read, everyMs, restartMs: FRPC_RESTART_MS, clientFor: settings => this.frpc(settings, local), log });
     this.tunnel.start();
   }

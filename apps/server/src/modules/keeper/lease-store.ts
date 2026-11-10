@@ -22,6 +22,8 @@ export type LeaseStore = {
   /* How many rows older than a week it removed, of the journal, the sources and the kept answers of tool calls, while this
      machine keeps the data alone and nobody reads them. */
   prune(batch?: number): Promise<number>;
+  /* Whether another machine is listed as keeping the company's data. Null: it cannot be told now. */
+  othersHoldData(): Promise<boolean | null>;
   close(): Promise<void>;
 };
 
@@ -61,6 +63,10 @@ const PRUNE = `WITH journal_gone AS (
       SELECT c.id FROM public.tool_calls c JOIN public.jobs j ON j.id = c.job_id WHERE c.${OLD} AND j.status <> 'running' ORDER BY c.at LIMIT $1
     ) AND ${ALONE} RETURNING 1
   ) SELECT ((SELECT count(*) FROM journal_gone) + (SELECT count(*) FROM sources_gone) + (SELECT count(*) FROM calls_gone))::int AS pruned`;
+
+/* The keeper of a new build runs a while on the schema of the build before, which has no roles yet: it asks first. */
+const HAS_ROLES = `SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'machines' AND column_name = 'role') AS there`;
+const OTHER_DATA = `SELECT EXISTS (SELECT FROM public.machines WHERE role = 'data' AND revoked_at IS NULL AND network_id IS DISTINCT FROM $1) AS there`;
 
 /* Any right on a table at all. */
 const TABLE_RIGHTS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].join(', ');
@@ -123,6 +129,16 @@ export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machi
     endSessions,
     problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles(), SOURCE_TABLES])).rows.map(row => row.line),
     prune: async (batch = PRUNE_BATCH) => (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned,
+    /* The lease says this machine keeps the data alone. With another data machine listed that would be untrue, and the
+       two could both lead: this machine then holds no such lease. */
+    async othersHoldData() {
+      try {
+        if (!(await sql.query<{ there: boolean }>(HAS_ROLES)).rows[0]!.there) return false;
+        return (await sql.query<{ there: boolean }>(OTHER_DATA, [opts.machineId])).rows[0]!.there;
+      } catch {
+        return null;
+      }
+    },
     close: async () => sql.close?.(),
   };
 }

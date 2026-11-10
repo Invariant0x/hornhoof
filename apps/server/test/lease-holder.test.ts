@@ -122,6 +122,42 @@ describe('the lease the keeper holds', () => {
     expect(k.h.mode()).toBe('lead');
   });
 
+  it('does not lead alone while another machine holds the data: its lease lapses, it says so once, and it leads again when that machine is gone', async () => {
+    const k = holder();
+    await k.h.tick();
+    await k.h.look();
+    expect(k.h.mode()).toBe('lead');
+
+    k.lease!.othersHold(true);
+    await k.h.guard();
+    const before = k.methods().length;
+    for (let second = 0; second < 11; second++) {
+      k.after(1000);
+      await k.h.tick();
+      await k.h.guard();
+    }
+    expect(k.methods().slice(before)).toEqual([]);
+    expect(k.h.mode()).toBe('read');
+    expect(k.h.term()).toBeNull();
+    expect(k.lines.filter(line => line === "Another machine holds the company's data, so this machine does not lead alone.")).toHaveLength(1);
+
+    /* A read that fails keeps the last answer. */
+    k.lease!.othersHold(null);
+    await k.h.guard();
+    k.after(1000);
+    await k.h.tick();
+    expect(k.h.mode()).toBe('read');
+
+    k.lease!.othersHold(false);
+    await k.h.guard();
+    k.after(1000);
+    await k.h.tick();
+    k.after(1000);
+    await k.h.tick();
+    expect(k.h.mode()).toBe('lead');
+    expect(k.h.term()).toEqual({ number: 2, machine: 'machine-a', split: false });
+  });
+
   it('never leads without a lease store, and still says when an update has the company in maintenance', async () => {
     const k = holder(null);
     await k.h.tick();

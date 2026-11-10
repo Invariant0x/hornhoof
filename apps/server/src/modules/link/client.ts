@@ -25,21 +25,19 @@ const LAST_LINES: Record<TunnelSettings['mode'], string> = {
 };
 
 /* A TOML string: JSON escapes quotes, backslashes and line breaks the way TOML reads them. */
-const quoted = (text: string) => JSON.stringify(text);
+export const quoted = (text: string) => JSON.stringify(text);
 
 /* The same on every start of this machine's frpc, so the relay knows it for the one that held the link before. */
 export const linkClientId = (name: string, machineId: string): string => `${name}-${machineId.slice(0, 8)}-link`;
 
-/* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
-   link's traffic to the keeper's own door and to nothing else on the company's network, whatever the relay says. */
-export function configFor(settings: TunnelSettings, { clientId, local }: Identity): string {
+/* How a frpc of this link logs in at the relay, whatever it then offers: the relay's server, the link's name and key, and
+   the id this client keeps across its starts. It refuses a link that is not what a link is, so nothing of the relay's
+   words reaches the config unread. */
+export function frpcHead(settings: TunnelSettings, clientId: string): string {
   const server = Server.parse(settings.tunnel);
   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
   if (!settings.key) throw new Error('the link has no key');
-  if (!CLIENT_ID.test(clientId) || !clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
-  /* The table's own names only: an object also answers to the names it inherits, such as toString. */
-  if (!Object.hasOwn(local, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
-  const door = local[settings.mode];
+  if (!clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
   return `serverAddr = ${quoted(server.serverAddr)}
 serverPort = ${server.serverPort}
 loginFailExit = false
@@ -54,7 +52,18 @@ transport.tcpMuxKeepaliveInterval = 10
 metadatas.name = ${quoted(settings.name)}
 metadatas.key = ${quoted(settings.key)}
 metadatas.client = ${quoted(clientId)}
+`;
+}
 
+/* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
+   link's traffic to the keeper's own door and to nothing else on the company's network, whatever the relay says. */
+export function configFor(settings: TunnelSettings, { clientId, local }: Identity): string {
+  if (!CLIENT_ID.test(clientId)) throw new Error(`${clientId} is not a client id of this link`);
+  const head = frpcHead(settings, clientId);
+  /* The table's own names only: an object also answers to the names it inherits, such as toString. */
+  if (!Object.hasOwn(local, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
+  const door = local[settings.mode];
+  return `${head}
 [[proxies]]
 name = ${quoted(settings.name)}
 type = ${quoted(settings.mode)}

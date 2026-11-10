@@ -80,7 +80,7 @@ async function keeperOn(app: Target, extra: Partial<KeeperOptions> = {}, dir: st
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
-    ports: { front: 0, linkHttp: 0, linkTls: 0 },
+    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
     ...extra,
   });
   const ports = await keeper.start();

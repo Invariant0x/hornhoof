@@ -14,7 +14,14 @@ function leaseOf(): LeaseStore | null {
   return leaseStore(keeperSql(config.databaseUrl), { machineId: config.machineId });
 }
 
-const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line), lease: leaseOf(), published: publishedFrom(process.env) });
+/* Where this machine's database listens, for the peers that keep data too. */
+function dbTargetOf(): { host: string; port: number } | null {
+  if (!config.databaseUrl) return null;
+  const { hostname, port } = new URL(config.databaseUrl);
+  return { host: hostname, port: Number(port) || 5432 };
+}
+
+const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line), lease: leaseOf(), published: publishedFrom(process.env), dbTarget: dbTargetOf() });
 
 await keeper.start();
 

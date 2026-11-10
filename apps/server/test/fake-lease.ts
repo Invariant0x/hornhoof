@@ -6,14 +6,16 @@ type Options = {
   take?: (kind: LeaseKind) => Promise<Term>;
   renew?: () => Promise<boolean>;
   prune?: () => Promise<number>;
+  othersHoldData?: boolean | null;
 };
 
 /* A lease store that keeps no database: each take gives the next term of machine-a, each renewal holds, every fence
-   stands, unless a test says otherwise. It lists the calls it got, in order. */
-export function fakeLease(opts: Options = {}): LeaseStore & { calls: { method: string; args: unknown[] }[]; problemsAre(lines: string[]): void } {
+   stands and no other machine holds the data, unless a test says otherwise. It lists the calls it got, in order. */
+export function fakeLease(opts: Options = {}): LeaseStore & { calls: { method: string; args: unknown[] }[]; problemsAre(lines: string[]): void; othersHold(now: boolean | null): void } {
   const calls: { method: string; args: unknown[] }[] = [];
   let taken = 0;
   let problems = opts.problems ?? [];
+  let others: boolean | null = opts.othersHoldData ?? false;
   const said = <T>(method: string, args: unknown[], answer: T): T => {
     calls.push({ method, args });
     return answer;
@@ -21,12 +23,14 @@ export function fakeLease(opts: Options = {}): LeaseStore & { calls: { method: s
   return {
     calls,
     problemsAre: lines => { problems = lines; },
+    othersHold: now => { others = now; },
     take: (kind, until) => said('take', [kind, until], opts.take ? opts.take(kind) : Promise.resolve({ number: ++taken, machine: 'machine-a', split: false })),
     renew: (term, kind, until, endSessions) => said('renew', [term, kind, until, endSessions], opts.renew ? opts.renew() : Promise.resolve(true)),
     fence: () => said('fence', [], Promise.resolve()),
     endSessions: () => said('endSessions', [], Promise.resolve(0)),
     problems: () => said('problems', [], Promise.resolve(problems)),
     prune: batch => said('prune', [batch], opts.prune ? opts.prune() : Promise.resolve(0)),
+    othersHoldData: () => Promise.resolve(others),
     close: () => said('close', [], Promise.resolve()),
   };
 }

@@ -100,7 +100,7 @@ async function keeperOn(db: Db, env: NodeJS.ProcessEnv = {}, extra: Partial<Keep
     frontHost: null,
     log: line => lines.push(line),
     host: '127.0.0.1',
-    ports: { front: 0, linkHttp: 0, linkTls: 0 },
+    ports: { front: 0, linkHttp: 0, linkTls: 0, peer: 0, peerApp: 0 },
     everyMs: 20,
     linkEveryMs: 50,
     clientFor: frpc.clientFor,
@@ -244,8 +244,8 @@ describe('the link in the keeper', () => {
     expect(frpc.alive(frpc.started()[0]!)).toBe(true);
     expect(await seenFingerprint(ports.linkTls)).toBe(fingerprint);
     expect(wordOfLink()).toEqual({ host: HOST, fingerprint256: fingerprint });
-    /* Once for each thing it reads, not once a read. */
-    expect(lines.filter(line => line.includes('cannot read'))).toHaveLength(2);
+    /* Once for each thing it reads from the database, not once a read. What it cannot read from its app is another line. */
+    expect(lines.filter(line => line.includes('cannot read') && !line.includes('from its app'))).toHaveLength(2);
   });
 
   it('uses the same client id after the keeper starts again', async () => {

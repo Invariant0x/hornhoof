@@ -1,10 +1,9 @@
 import type { Target } from '../../net/proxy.js';
-import { OWN_VIA, VIA } from '../network/via.js';
+import { askApp } from './app-call.js';
 import { CertificateKeeper, type HeldCertificate } from './certificate.js';
 import { machineKey, type MachineKey } from './machine-keys.js';
 import { Measures } from './measures.js';
 
-const ASK_MS = 10_000;
 const KEY_RETRY_MS = 60_000;
 const REPORT_EVERY_MS = 20_000;
 const SAY_AGAIN_MS = 3_600_000;
@@ -109,21 +108,10 @@ export class MachineIdentity {
     this.certificates.start();
   }
 
-  /* The keeper's own request to its app: from the keeper's address, with the header no door lets through. */
-  private async toApp(method: string, path: string, body: unknown): Promise<Response> {
-    const { host, port } = this.opts.app;
-    return fetch(`http://${host}:${port}${path}`, {
-      method,
-      headers: { 'content-type': 'application/json', [VIA]: OWN_VIA },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(ASK_MS),
-    });
-  }
-
   private async ask(signKey: string): Promise<HeldCertificate> {
-    const res = await this.toApp('POST', '/api/network/certificate', { signKey });
+    const res = await askApp(this.opts.app, 'POST', '/api/network/certificate', { signKey });
     if (!res.ok) throw new Error(`the app answered ${res.status}`);
-    return (await res.json()) as HeldCertificate;
+    return res.json() as HeldCertificate;
   }
 
   /* Only where the app leads, since only there the measures are kept. A report that fails is said once an hour at most. */
@@ -132,7 +120,7 @@ export class MachineIdentity {
     try {
       const { web, peer } = this.opts.published;
       const body = { ...this.measures.snapshot(), ...(this.opts.commit ? { commit: this.opts.commit.slice(0, 64) } : {}), ...(web ? { webPort: web } : {}), ...(peer ? { peerPort: peer } : {}) };
-      const res = await this.toApp('POST', '/api/network/report', body);
+      const res = await askApp(this.opts.app, 'POST', '/api/network/report', body);
       if (!res.ok) throw new Error(`the app answered ${res.status}`);
     } catch (err) {
       const now = Date.now();

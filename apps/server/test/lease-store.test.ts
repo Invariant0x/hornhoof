@@ -131,6 +131,32 @@ describe('the lease the keeper holds in the database', () => {
     expect((await s.run.query(`SELECT 1 FROM tool_calls WHERE job_id = '${RUNNING}'`)).rows).toHaveLength(1);
   });
 
+  it('knows when another machine holds the data', async () => {
+    const s = await store('a1b2c3d4'.repeat(4));
+    /* Machines as the network knows them, written past the checks that a company and a person stand behind each. */
+    const machine = (key: string, role: string, networkId: string | null, revoked = false) =>
+      s.run.query(`BEGIN; SET LOCAL session_replication_role = replica;
+        INSERT INTO machines (company_id, person_id, machine_key, role, network_id, revoked_at)
+          VALUES (gen_random_uuid(), gen_random_uuid(), '${key}', '${role}', ${networkId ? `'${networkId}'` : 'NULL'}, ${revoked ? 'now()' : 'NULL'}); COMMIT`);
+    expect(await s.lease.othersHoldData()).toBe(false);
+    await machine('server:mine', 'data', 'a1b2c3d4'.repeat(4));
+    await machine('worker', 'worker', 'f'.repeat(32));
+    await machine('gone', 'data', 'e'.repeat(32), true);
+    expect(await s.lease.othersHoldData()).toBe(false);
+    await machine('other', 'data', 'd'.repeat(32));
+    expect(await s.lease.othersHoldData()).toBe(true);
+    await s.run.query(`UPDATE machines SET revoked_at = now() WHERE machine_key = 'other'`);
+    expect(await s.lease.othersHoldData()).toBe(false);
+  });
+
+  it('leads alone on the schema of the build before the network, and cannot tell when the database does not answer', async () => {
+    const s = await store();
+    await s.run.query('ALTER TABLE machines DROP COLUMN role');
+    expect(await s.lease.othersHoldData()).toBe(false);
+    const broken = leaseStore({ query: () => Promise.reject(new Error('the database is away')) }, { machineId: 'machine-a' });
+    expect(await broken.othersHoldData()).toBeNull();
+  });
+
   it('ends no session where the app and the agents have none', async () => {
     const s = await store();
     expect(await s.lease.endSessions()).toBe(0);

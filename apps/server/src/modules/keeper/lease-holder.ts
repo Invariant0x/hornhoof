@@ -28,6 +28,7 @@ export class LeaseHolder {
   /* What the last look at the fences found. Null until the first look: nothing is known to hold yet. */
   private problems: string[] | null = null;
   private prunedAt: number | null = null;
+  private othersHold = false;
   /* The last line of each kind, so that a trouble that goes on is said once. */
   private readonly said = new Map<string, string>();
   private readonly now: () => Clocks;
@@ -50,12 +51,22 @@ export class LeaseHolder {
     const busy = this.opts.updaterBusy();
     if (busy !== null) this.maintenance = busy;
     const { lease } = this.opts;
-    if (!lease) return;
+    /* A lease says this machine keeps the data alone: with another data machine listed it takes and renews none, so the
+       one it holds lapses and the app reads. */
+    if (!lease || this.othersHold) return;
     const now = this.now();
     const step = nextLeaseStep({ now, last: this.last, held: this.held, maintenance: this.maintenance });
     this.last = now;
     await this.take(lease, step);
     await this.prune(lease, now);
+  }
+
+  /* Asks whether another machine holds the company's data. An answer that cannot be had keeps the last one. */
+  async guard(): Promise<void> {
+    const others = await this.opts.lease?.othersHoldData().catch(() => null);
+    if (others === null || others === undefined) return;
+    this.othersHold = others;
+    this.sayOnce('alone', others ? "Another machine holds the company's data, so this machine does not lead alone." : '');
   }
 
   /* Looks at every fence. A look that fails keeps what the last one found. */

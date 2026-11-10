@@ -14,16 +14,20 @@ export type TunnelSettings = z.infer<typeof Settings>;
 /* The program that carries the link's traffic, as it is started. */
 export type Client = { program: string; args: string[]; env?: Record<string, string> };
 
-type Options = {
+type Options<T> = {
   /* The settings now. Null: no link, and the client stops. Undefined: not known now, and the client it runs stays. */
-  read: () => Promise<TunnelSettings | null | undefined>;
+  read: () => Promise<T | null | undefined>;
   /* How often the settings are read. */
   everyMs: number;
   /* The first pause before a client that ended starts again; it doubles up to a minute while it keeps ending. */
   restartMs: number;
-  clientFor: (settings: TunnelSettings) => Client;
+  clientFor: (settings: T) => Client;
+  /* What it says when a client starts and when there is nothing to run; the public link's own words when not given. */
+  says?: { carrying: (settings: T) => string; waiting: string };
   log: (line: string) => void;
 };
+
+const LINK_WORDS = { carrying: (settings: unknown) => `Carrying ${(settings as TunnelSettings).url} to Hornhoof.`, waiting: 'No public link: the tunnel waits.' };
 
 const LONGEST_PAUSE_MS = 60_000;
 /* A client that ran this long counts as having worked, so the next pause starts short again. */
@@ -31,7 +35,7 @@ const WORKED_MS = 60_000;
 
 /* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
    when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
-export class TunnelKeeper {
+export class TunnelKeeper<T = TunnelSettings> {
   private timer: NodeJS.Timeout | null = null;
   private text: string | null = null;
   private child: ChildProcess | null = null;
@@ -40,7 +44,7 @@ export class TunnelKeeper {
   /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
   private reading = false;
 
-  constructor(private readonly opts: Options) {
+  constructor(private readonly opts: Options<T>) {
     this.pause = opts.restartMs;
   }
 
@@ -65,7 +69,7 @@ export class TunnelKeeper {
     if (settings !== undefined && this.timer) this.follow(settings);
   }
 
-  private follow(settings: TunnelSettings | null): void {
+  private follow(settings: T | null): void {
     const text = settings && JSON.stringify(settings);
     if (text === this.text) return;
     this.text = text;
@@ -73,11 +77,11 @@ export class TunnelKeeper {
     void this.end().then(() => {
       if (this.text !== text) return;
       if (text && settings) this.run(text, settings);
-      else this.opts.log('No public link: the tunnel waits.');
+      else this.opts.log((this.opts.says ?? LINK_WORDS).waiting);
     });
   }
 
-  private run(text: string, settings: TunnelSettings): void {
+  private run(text: string, settings: T): void {
     let client: Client;
     try {
       client = this.opts.clientFor(settings);
@@ -86,7 +90,7 @@ export class TunnelKeeper {
       return;
     }
     const began = Date.now();
-    this.opts.log(`Carrying ${settings.url} to Hornhoof.`);
+    this.opts.log((this.opts.says ?? LINK_WORDS).carrying(settings));
     /* Not the keeper's own environment: frpc fills in {{ .Envs.NAME }} wherever its config says so, the config carries
        what the relay gave, and that environment holds the company's secret and the database's password. */
     const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, ...client.env } });
