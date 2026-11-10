@@ -285,6 +285,8 @@ describe('staffing', () => {
     expect(team).toMatchObject({ name: 'Turnkey team', turnkey: true, urgentOnly: false });
     const members = await c.db.select().from(agents).where(eq(agents.teamId, team!.id));
     expect(members.map(a => [a.roleKey, a.kind, a.model, a.name])).toEqual([['MKT-WRITE', 'worker', 'claude-fable-5-1', 'Copywriter (Turnkey team)']]);
+    /* A member does every check of its department alone, so it carries the skill of each on top of its role's. */
+    expect(members[0]!.skills).toEqual(expect.arrayContaining(['mkt-copywriting', 'hh-check-work', 'mkt-product-context']));
     /* The same role outside the team keeps the strength the role asks for. */
     const [writer] = await c.db.select().from(agents).where(and(eq(agents.departmentId, marketing!.id), eq(agents.roleKey, 'MKT-WRITE'), isNull(agents.teamId)));
     expect(writer!.model).toBe('claude-sonnet-5-5');

@@ -28,13 +28,15 @@ export async function templateRoster(ctx: Pick<Ctx, 'db' | 'templates'>, dept: D
 }
 
 /* The members a team of a template starts with, for the sub-unit made for it: each on the first plan that runs the
-   strongest model, which a turnkey team asks for, or waiting for one. Several of one role are numbered. */
+   strongest model, which a turnkey team asks for, or waiting for one, with the skills of its role and those the team
+   adds. Several of one role are numbered. */
 export function teamRoster(ctx: Pick<Ctx, 'templates'>, team: TeamTemplate, teamId: string, serving: readonly Plan[]): HireLine[] {
   return team.members.flatMap(({ role: id, count }) => {
     const role = ctx.templates.roles.get(id)!;
     const tier = team.turnkey ? 'top' : role.tier;
     const plan = planFor(serving, { tier });
-    const line = { role: role.id, team: teamId, product: null, model: plan ? modelOnPlan(tier, plan) : '', subscription: plan?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
+    const skills = [...new Set([...role.skills.filter(s => s.on).map(s => s.id), ...team.skills])];
+    const line = { role: role.id, team: teamId, product: null, model: plan ? modelOnPlan(tier, plan) : '', subscription: plan?.id ?? null, skills };
     return Array.from({ length: count }, (_, i) => ({ ...line, name: `${role.title.en}${count > 1 ? ` ${i + 1}` : ''} (${team.title.en})` }));
   });
 }

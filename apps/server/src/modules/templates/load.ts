@@ -54,9 +54,9 @@ export type Role = {
   body: string;
   hash: string;
 };
-/* A sub-unit a department's template brings with it: its members by role, and whether each of them does a task whole,
-   with no stage after it. */
-export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; description: Lang; turnkey: boolean; urgentOnly: boolean; members: { role: string; count: number }[] };
+/* A sub-unit a department's template brings with it: its members by role, whether each of them does a task whole, with
+   no stage after it, and the skills each carries on top of its role's: whoever works alone does every check itself. */
+export type TeamTemplate = { id: string; department: TemplateKey; title: Lang; description: Lang; turnkey: boolean; urgentOnly: boolean; members: { role: string; count: number }[]; skills: string[] };
 /* The stages a department's work goes through in a turn run in echelons, in their order, and the skill whoever checks
    at a stage must carry. */
 export type StageRoute = { department: TemplateKey; stages: { stage: EchelonStage; ability: string | null }[] };
@@ -217,11 +217,12 @@ const TeamHead = z
     turnkey: z.boolean().default(false),
     urgentOnly: z.boolean().default(false),
     members: z.array(z.object({ role: z.string(), count: z.number().int().min(1).max(5).default(1) }).strict()).min(1).max(10),
+    skills: z.array(z.string()).default([]),
   })
   .strict();
 
 /* A team's members are members of its own department, and its id is no role's. */
-function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string, Role>): TeamTemplate {
+function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>): TeamTemplate {
   const team = parsed(TeamHead, file, readParts(file).head);
   if (team.department !== key) throw new Error(`${file} is in ${key} but says ${team.department}.`);
   if (roles.has(team.id)) throw new Error(`${file}: ${team.id} is the id of a role.`);
@@ -229,14 +230,15 @@ function parseTeamFile(file: string, key: TemplateKey, roles: ReadonlyMap<string
     const known = roles.get(role);
     if (!known || known.department !== key || known.kind !== 'member') throw new Error(`${file}: ${role} is not a member role of ${key}.`);
   }
+  for (const id of team.skills) if (!skills.has(id)) throw new Error(`${file} names the skill ${id}, which does not exist.`);
   return team;
 }
 
-function loadTeams(dir: string, roles: ReadonlyMap<string, Role>): Map<string, TeamTemplate> {
+function loadTeams(dir: string, roles: ReadonlyMap<string, Role>, skills: ReadonlyMap<string, Skill>): Map<string, TeamTemplate> {
   const teams = new Map<string, TeamTemplate>();
   for (const key of TEMPLATE_KEYS) {
     for (const f of markdown(join(dir, 'teams', key))) {
-      const team = parseTeamFile(join(dir, 'teams', key, f), key, roles);
+      const team = parseTeamFile(join(dir, 'teams', key, f), key, roles, skills);
       teams.set(team.id, team);
     }
   }
@@ -303,7 +305,7 @@ function templatesOf(roles: Map<string, Role>, skills: Map<string, Skill>, teams
 export function loadTemplates(dir: string): Templates {
   const skills = loadSkills(dir);
   const { roles, order } = loadRoles(dir, skills);
-  return templatesOf(roles, skills, loadTeams(dir, roles), loadRoutes(dir, skills), order);
+  return templatesOf(roles, skills, loadTeams(dir, roles, skills), loadRoutes(dir, skills), order);
 }
 
 /* Loaded templates again without reading their files: what the copy's holder changes in its roles and skills the
