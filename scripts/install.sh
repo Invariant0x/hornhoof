@@ -850,7 +850,7 @@ free_port() {
   done
   # Another person's company keeps its port too, in a folder this one cannot read.
   for id in $(hornhoof_servers | cut -d'|' -f3); do
-    for used in $("${DOCKER[@]}" inspect --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}} {{end}}{{end}}' "$id" 2> /dev/null || true); do
+    for used in $("${DOCKER[@]}" inspect --format '{{range .HostConfig.PortBindings}}{{range .}}{{.HostPort}} {{end}}{{end}}' "$id" 2> /dev/null || true); do
       claimed="$claimed$used "
     done
   done
