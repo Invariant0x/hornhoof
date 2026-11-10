@@ -15,6 +15,7 @@ import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
 import type { LeaseKind, LeaseSync } from '../src/db/net.js';
+import type { Sql } from '../src/modules/keeper/lease-store.js';
 import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -34,6 +35,14 @@ const LEASE_COLUMNS: Record<keyof LeaseChange, string> = { until: 'until', kind:
 export async function setLease(db: Db, change: LeaseChange): Promise<void> {
   const columns = (Object.keys(change) as (keyof LeaseChange)[]).map(name => sql`${sql.identifier(LEASE_COLUMNS[name])} = ${change[name] ?? null}`);
   await db.execute(sql`UPDATE net_local.lease SET ${sql.join(columns, sql`, `)}`);
+}
+
+/* One test database seen both ways: as the app's code reads it, and as the keeper's plain statements do. */
+export async function createTestSql(): Promise<{ db: Db; sql: Sql }> {
+  const { client, db } = await timed('setupMs', openTestDb);
+  onTestFinished(() => timed('teardownMs', () => client.close()));
+  const sql: Sql = { query: async <R>(text: string, params?: unknown[]) => ({ rows: (params ? (await client.query<R>(text, params)).rows : ((await client.exec(text)).at(-1)?.rows ?? [])) as R[] }) };
+  return { db, sql };
 }
 
 /* The tunnel container's address in tests: start the app with testApp({ TUNNEL_HOST: TUNNEL }). */

@@ -76,7 +76,7 @@ const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
 /* The rights stay the first guard, whatever the check of the text sees: PUBLIC loses EXECUTE on every overload of these, in the
    catalog of this database, so neither role can call them. Runs at every start, so a new overload is covered too. */
-const REFUSED_NAME_PATTERN = `^(${REFUSED_FUNCTIONS.map(name => name.replace('*', '.*')).join('|')})$`;
+export const REFUSED_NAME_PATTERN = `^(${REFUSED_FUNCTIONS.map(name => name.replace('*', '.*')).join('|')})$`;
 export const PUBLIC_REVOKES = `DO $revokes$
 DECLARE f regprocedure;
 BEGIN

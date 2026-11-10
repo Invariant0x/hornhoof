@@ -1,0 +1,156 @@
+import pg from 'pg';
+import { agentRole, readerRole, REFUSED_NAME_PATTERN } from '../../db/agent-sql.js';
+import { APP_NAME, KEEPER_NAME, stripSettings } from '../../db/client.js';
+import { keepErrors } from '../../db/confirm.js';
+import { FENCE_TRIGGER, JOURNAL_TRIGGER, type LeaseKind, type Term } from '../../db/net.js';
+
+/* The keeper's own way to the database: plain statements, one after another. */
+export type Sql = { query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }> };
+
+/* The lease as the database holds it. The keeper alone writes it: the app and the agents only stand on it, through
+   net.assert_lease, and have no right to these tables. */
+export type LeaseStore = {
+  /* Ends what was held, then a new term above every one this database has seen, in this machine's name. */
+  take(kind: LeaseKind, until: Date): Promise<Term>;
+  /* False when the lease is no longer that term's or has ended: a lease that lapsed is never brought back, only taken anew. */
+  renew(term: Term, kind: LeaseKind, until: Date, endSessions: boolean): Promise<boolean>;
+  fence(): Promise<void>;
+  /* How many sessions of the app and the agents it ended. */
+  endSessions(): Promise<number>;
+  /* What keeps this machine from leading, a line each; none when every fence holds. */
+  problems(): Promise<string[]>;
+  /* How many journal rows older than a week it removed, while this machine keeps the data alone and nobody reads them. */
+  prune(batch?: number): Promise<number>;
+  close(): Promise<void>;
+};
+
+export const PRUNE_BATCH = 10_000;
+
+const TAKE = `WITH next AS (
+    SELECT COALESCE(GREATEST((SELECT max(term_number) FROM net_local.state), (SELECT max(term_number) FROM net_local.lease)), 0) + 1 AS number
+  ), st AS (
+    INSERT INTO net_local.state (term_number, term_machine, term_split, machine, cluster)
+    SELECT next.number, $1, false, $1, (SELECT system_identifier::text FROM pg_control_system()) FROM next
+    ON CONFLICT (id) DO UPDATE SET term_number = EXCLUDED.term_number, term_machine = EXCLUDED.term_machine, term_split = false, machine = EXCLUDED.machine
+    RETURNING term_number
+  )
+  INSERT INTO net_local.lease (term_number, term_machine, term_split, kind, until, sync)
+  SELECT st.term_number, $1, false, $2, $3, 'alone' FROM st
+  ON CONFLICT (id) DO UPDATE SET term_number = EXCLUDED.term_number, term_machine = EXCLUDED.term_machine, term_split = false, kind = EXCLUDED.kind, until = EXCLUDED.until, sync = 'alone'
+  RETURNING term_number::int AS number`;
+
+const RENEW = `UPDATE net_local.lease SET kind = $4, until = $5
+  WHERE (term_number, term_machine, term_split) = ($1, $2, $3) AND until > clock_timestamp() RETURNING 1`;
+
+const FENCE = `UPDATE net_local.lease SET until = '-infinity'`;
+
+const END_SESSIONS = `SELECT count(*) FILTER (WHERE pg_terminate_backend(pid))::int AS ended FROM pg_stat_activity
+  WHERE datname = current_database() AND pid <> pg_backend_pid() AND (application_name = $1 OR usename = ANY($2::text[]))`;
+
+const PRUNE = `WITH gone AS (
+    DELETE FROM net.journal WHERE id IN (SELECT id FROM net.journal WHERE at < now() - interval '7 days' ORDER BY at LIMIT $1)
+      AND (SELECT sync FROM net_local.lease) = 'alone' RETURNING 1
+  ) SELECT count(*)::int AS pruned FROM gone`;
+
+/* Every fence, in the order a person would mend them. A trigger counts only as Hornhoof leaves it: enabled the ordinary
+   way, and the fence deferred to the commit. */
+const PROBLEMS = `SELECT line FROM (
+    SELECT 1 AS at, format('public.%s has no journal trigger', p.name) AS line FROM net.public_tables() p
+      WHERE NOT EXISTS (SELECT FROM pg_trigger t WHERE t.tgrelid = p.tbl AND t.tgname = '${JOURNAL_TRIGGER}' AND t.tgenabled = 'O')
+    UNION ALL
+    SELECT 2, format('net.%s has no fence trigger', c.relname) FROM pg_class c
+      WHERE c.relnamespace = 'net'::regnamespace AND c.relkind = 'r'
+        AND NOT EXISTS (SELECT FROM pg_trigger t WHERE t.tgrelid = c.oid AND t.tgname = '${FENCE_TRIGGER}' AND t.tgenabled = 'O' AND t.tgdeferrable AND t.tginitdeferred)
+    UNION ALL
+    SELECT 3, format('PUBLIC may still run %s', p.oid::regprocedure) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE ((n.nspname = 'pg_catalog' AND p.proname ~ $1) OR n.nspname = 'net') AND has_function_privilege('public', p.oid, 'EXECUTE')
+    UNION ALL
+    SELECT 4, format('%s is a superuser', r.rolname) FROM pg_roles r WHERE r.rolname = ANY($2::text[]) AND r.rolsuper
+    UNION ALL
+    SELECT 5, format('%s may signal other sessions', r.rolname) FROM pg_roles r
+      WHERE r.rolname = ANY($2::text[]) AND pg_has_role(r.oid, 'pg_signal_backend', 'MEMBER')
+    UNION ALL
+    SELECT 6, format('%s may reach %s.%s', r.rolname, n.nspname, c.relname) FROM pg_roles r, pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE r.rolname = ANY($2::text[]) AND n.nspname IN ('net', 'net_local') AND c.relkind = 'r'
+        AND has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+    UNION ALL
+    SELECT 7, format('%s may run %s', r.rolname, p.oid::regprocedure) FROM pg_roles r, pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE r.rolname = ANY($2::text[]) AND n.nspname = 'net' AND p.proname <> 'assert_lease' AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+    UNION ALL
+    SELECT 8, format('max_prepared_transactions is %s, not 0', current_setting('max_prepared_transactions'))
+      WHERE current_setting('max_prepared_transactions') <> '0'
+  ) found ORDER BY at, line`;
+
+export function leaseStore(sql: Sql & { close?(): Promise<void> }, opts: { machineId: string }): LeaseStore {
+  /* The agents' roles are named after the database, which does not change under a connection. */
+  let roles: Promise<string[]> | null = null;
+  const agentRoles = (): Promise<string[]> =>
+    (roles ??= sql.query<{ name: string }>('SELECT current_database() AS name').then(({ rows }) => [agentRole(rows[0]!.name), readerRole(rows[0]!.name)]));
+  const endSessions = async (): Promise<number> => (await sql.query<{ ended: number }>(END_SESSIONS, [APP_NAME, await agentRoles()])).rows[0]!.ended;
+  const fence = async (): Promise<void> => {
+    await sql.query(FENCE);
+    await endSessions();
+  };
+  return {
+    async take(kind, until) {
+      await fence();
+      const { rows } = await sql.query<{ number: number }>(TAKE, [opts.machineId, kind, until]);
+      return { number: rows[0]!.number, machine: opts.machineId, split: false };
+    },
+    async renew(term, kind, until, ending) {
+      const { rows } = await sql.query(RENEW, [term.number, term.machine, term.split, kind, until]);
+      if (rows.length === 0) return false;
+      if (ending) await endSessions();
+      return true;
+    },
+    fence,
+    endSessions,
+    problems: async () => (await sql.query<{ line: string }>(PROBLEMS, [REFUSED_NAME_PATTERN, await agentRoles()])).rows.map(row => row.line),
+    prune: async (batch = PRUNE_BATCH) => (await sql.query<{ pruned: number }>(PRUNE, [batch])).rows[0]!.pruned,
+    close: async () => sql.close?.(),
+  };
+}
+
+/* One connection at a time under the keeper's name, with no statement timeout of the database's own: each connect and each
+   query has timeoutMs, and one that fails or runs out drops its connection without waiting for it to end, so the next
+   query opens a new one. A commit counts here once this machine wrote it (synchronous_commit local): the lease is a
+   fact of this machine alone. Queries run one after another, each waiting for the one before to settle. */
+export function keeperSql(url: string, opts: { timeoutMs?: number } = {}): Sql & { close(): Promise<void> } {
+  const timeoutMs = opts.timeoutMs ?? 2000;
+  let client: pg.Client | null = null;
+  let last: Promise<unknown> = Promise.resolve();
+  const drop = (): void => {
+    const gone = client;
+    client = null;
+    void gone?.end().catch(() => {});
+  };
+  const connected = async (): Promise<pg.Client> => {
+    if (client) return client;
+    const next = new pg.Client({ connectionString: stripSettings(url), application_name: KEEPER_NAME, options: '-c synchronous_commit=local', connectionTimeoutMillis: timeoutMs, query_timeout: timeoutMs });
+    keepErrors(next);
+    next.on('error', () => { if (client === next) client = null; });
+    await next.connect();
+    client = next;
+    return next;
+  };
+  const run = async <R>(text: string, params?: unknown[]): Promise<{ rows: R[] }> => {
+    try {
+      const { rows } = await (await connected()).query(text, params);
+      return { rows: rows as R[] };
+    } catch (err) {
+      drop();
+      throw err;
+    }
+  };
+  return {
+    query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }> {
+      const answer = last.then(() => run<R>(text, params));
+      last = answer.catch(() => {});
+      return answer;
+    },
+    async close() {
+      await last;
+      drop();
+    },
+  };
+}
