@@ -60,7 +60,7 @@ describe('moving a session from before the switch', () => {
   const meWithOldCookie = (token: string) => app.inject({ url: '/api/me', ...viaLink(), cookies: { hh_session: token } });
   const movedTo = (res: { cookies: { name: string; value: string }[] }): string => res.cookies.find(c => c.name === LINK_SESSION_COOKIE)!.value;
 
-  it('lets two hand-overs of one session at once through, each with a session of its own', async () => {
+  it('lets two hand-overs of one session at once through, into one new session', async () => {
     const { token, personId } = await olderSessionOf('burst');
     const holder = await holding(SESSION_ROW, [hashToken(token)]);
     const moves = [meWithOldCookie(token), meWithOldCookie(token)];
@@ -68,16 +68,15 @@ describe('moving a session from before the switch', () => {
     await holder.query('COMMIT');
     const answers = await Promise.all(moves);
     expect(answers.map(a => a.statusCode)).toEqual([200, 200]);
+    /* Both get the same new session: the second waits for the first's commit and finds its session there. */
     const fresh = answers.map(movedTo);
-    expect(new Set(fresh).size).toBe(2);
-    const signedIn = await Promise.all(fresh.map(t => app.inject({ url: '/api/me', ...viaLink(t) })));
-    expect(signedIn.map(a => a.statusCode)).toEqual([200, 200]);
+    expect(new Set(fresh).size).toBe(1);
+    expect((await app.inject({ url: '/api/me', ...viaLink(fresh[0]) })).statusCode).toBe(200);
     const { rows } = await real.admin.query(
       "SELECT before_host_cookie, expires_at <= now() + interval '60 seconds' AS ends_within_a_minute FROM sessions WHERE person_id = $1 ORDER BY before_host_cookie",
       [personId],
     );
     expect(rows).toEqual([
-      { before_host_cookie: false, ends_within_a_minute: false },
       { before_host_cookie: false, ends_within_a_minute: false },
       { before_host_cookie: true, ends_within_a_minute: true },
     ]);

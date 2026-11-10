@@ -165,7 +165,7 @@ describe('POST /api/auth/login limits in the database', () => {
     expect(answers.filter(a => a.statusCode === 429)).toHaveLength(70);
     /* PGlite has one connection, so this shows the order of the lock and the insert, and the next test their one
        transaction; tries really racing on a pool of connections need real Postgres, which plan 3 Task 1's harness
-       brings (test/real/auth-locks.test.ts). */
+       brings (test/real/auth-locks.real.ts). */
     const inserts = seen.flatMap((s, at) => (s.sql.includes('INSERT INTO sign_in_attempts') ? [at] : []));
     expect(inserts).toHaveLength(100);
     for (const at of inserts) {
