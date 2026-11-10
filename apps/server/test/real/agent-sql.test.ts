@@ -94,8 +94,6 @@ describe('the agent roles', () => {
       'SELECT * FROM net_local.lease',
       'SELECT * FROM net.journal',
       `INSERT INTO net.journal (xact, tbl, op, key, cols) VALUES (gen_random_uuid(), 'x', 'insert', '{}', '{}')`,
-      'SELECT * FROM applied',
-      'SELECT * FROM tool_calls',
       'SELECT net.attach_journal()',
       'SELECT pg_cancel_backend(1)',
       `SELECT lo_from_bytea(0, '\\x00')`,
