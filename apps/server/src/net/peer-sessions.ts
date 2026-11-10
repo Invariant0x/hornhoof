@@ -1,0 +1,319 @@
+import { X509Certificate } from 'node:crypto';
+import http2, { type ClientHttp2Session } from 'node:http2';
+import type { Duplex } from 'node:stream';
+import tls from 'node:tls';
+import { z } from 'zod';
+import { MACHINE_ROLES, type LinkPath } from '../db/schema.js';
+import type { HeldCertificate } from '../modules/keeper/certificate.js';
+import type { MachineKey } from '../modules/keeper/machine-keys.js';
+import { certFacts } from '../modules/network/authority.js';
+import { APP_AUTHORITY, PEER_PATHS } from './peer-server.js';
+
+/* A data machine to keep a session to. machine: its row's id, which its certificate names. networkId: its keeper's id,
+   which its services at the relay are named after. relayPort: the loopback port this keeper's visitor frpc opens to it,
+   when there is one. */
+export type DialTarget = { machine: string; networkId: string; addresses: string[]; peerPort: number | null; relayPort: number | null };
+export type Hello = z.infer<typeof HelloBody>;
+export type PeerSessionsOptions = {
+  held: () => HeldCertificate | null;
+  key: MachineKey;
+  /* The certificates this machine was told are revoked: a data machine that shows one is not dialed further. */
+  revoked: () => ReadonlySet<string>;
+  /* This machine's own addresses, to tell a data machine on its network from one elsewhere. */
+  own: () => string[];
+  log: (line: string) => void;
+  /* What one address gets to connect and say hello. */
+  connectMs?: number;
+  /* How often a machine with no session is dialed again. */
+  everyMs?: number;
+  helloMs?: number;
+  /* How often the direct path is tried again while the session goes through the relay. */
+  directEveryMs?: number;
+  /* A session whose ping is not answered by the next one is ended. */
+  pingMs?: number;
+  /* Called when a session came or went, or a hello said something new. */
+  changed?: () => void;
+};
+
+const CONNECT_MS = 3000;
+const EVERY_MS = 5000;
+const HELLO_MS = 10_000;
+const DIRECT_EVERY_MS = 60_000;
+const PING_MS = 15_000;
+const WINDOW = 1024 * 1024;
+const HELLO_BYTES = 64 * 1024;
+const LOOPBACK = '127.0.0.1';
+const NO_LEADER = 'No leader of the company is in reach.';
+
+const HelloBody = z.object({ machine: z.string(), role: z.enum(MACHINE_ROLES), lead: z.boolean(), commit: z.string(), seen: z.string() });
+
+type Session = { h2: ClientHttp2Session; path: LinkPath; hello: Hello; timers: NodeJS.Timeout[]; pinged: boolean };
+/* failed: the addresses whose last direct try failed. */
+type Kept = { target: DialTarget; session: Session | null; dialing: boolean; failed: Set<string>; directTriedAt: number };
+
+const ignore = (): void => {};
+/* Two IPv4 addresses on one /24, as two machines behind one home router are. */
+const sameNetwork = (a: string, b: string): boolean => a.split('.').slice(0, 3).join('.') === b.split('.').slice(0, 3).join('.');
+
+/* One answer of the peer link's hello on a session, or a rejection when it does not come whole within ms. */
+function askHello(h2: ClientHttp2Session, ms: number): Promise<Hello> {
+  return new Promise((resolve, reject) => {
+    /* A session that ended since throws here, and the promise rejects with it. */
+    const stream = h2.request({ ':method': 'GET', ':path': PEER_PATHS.hello });
+    const chunks: Buffer[] = [];
+    let status = 0;
+    let size = 0;
+    const giveUp = setTimeout(() => stream.close(), ms);
+    stream.on('error', ignore);
+    stream.once('response', headers => (status = Number(headers[':status'])));
+    stream.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size > HELLO_BYTES) stream.close();
+    });
+    stream.once('close', () => {
+      clearTimeout(giveUp);
+      try {
+        if (status !== 200) throw new Error(`The peer link answered its hello with ${status}.`);
+        resolve(HelloBody.parse(JSON.parse(Buffer.concat(chunks).toString())));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+    stream.end();
+  });
+}
+
+/* A worker's sessions to the company's data machines: to each one its view lists it keeps one session open, directly at
+   the machine's addresses when one answers, else through the relay, and it asks each who leads. Inside either path the
+   two prove themselves by their certificates: the worker shows its own, and takes only a certificate of the company's
+   authority, of a data machine, for the very machine it dialed, and not on its list of revoked ones. */
+export class PeerSessions {
+  private kept: Kept[] = [];
+  private timer: NodeJS.Timeout | undefined;
+  private closed = false;
+  /* Since the last session, a data machine proved to be the one dialed and then hung up before its first answer. */
+  private refused = false;
+
+  constructor(private readonly opts: PeerSessionsOptions) {}
+
+  /* The data machines to keep sessions to, from the last view. A machine no longer among them loses its session. */
+  use(targets: DialTarget[]): void {
+    if (this.closed) return;
+    const before = this.kept;
+    this.kept = targets.map(target => {
+      const same = before.find(kept => kept.target.machine === target.machine);
+      return same ? Object.assign(same, { target }) : { target, session: null, dialing: false, failed: new Set<string>(), directTriedAt: 0 };
+    });
+    for (const gone of before.filter(kept => !this.kept.includes(kept))) this.end(gone);
+    this.timer ??= setInterval(() => this.look(), this.opts.everyMs ?? EVERY_MS).unref();
+    this.look();
+  }
+
+  /* The first data machine, in the view's order, whose hello says it leads. */
+  leader(): { machine: string; path: LinkPath; hello: Hello } | null {
+    const kept = this.leading();
+    return kept?.session ? { machine: kept.target.machine, path: kept.session.path, hello: kept.session.hello } : null;
+  }
+
+  /* The addresses the data machines saw this machine come from. */
+  seen(): string[] {
+    return [...new Set(this.kept.flatMap(kept => (kept.session ? [kept.session.hello.seen] : [])))];
+  }
+
+  /* path: how the leader is reached, else any data machine. directFails: the session goes through the relay though the
+     data machine has an address on this machine's own network, which did not take the connection. refused: a data
+     machine did not take this machine's certificate, and no session came since. */
+  state(): { path: LinkPath | null; directFails: boolean; refused: boolean } {
+    const kept = this.leading() ?? this.kept.find(one => one.session);
+    const session = kept?.session;
+    const own = this.opts.own();
+    const directFails = session?.path === 'relay' && [...kept!.failed].some(address => own.some(mine => sameNetwork(address, mine)));
+    return { path: session?.path ?? null, directFails, refused: this.refused };
+  }
+
+  /* A stream to the leader's app, as a connection to it: what is written reaches the app's door as bytes of HTTP. */
+  connectApp(): Promise<Duplex> {
+    const session = this.leading()?.session;
+    if (!session) return Promise.reject(new Error(NO_LEADER));
+    return new Promise((resolve, reject) => {
+      /* A session that ended since throws here, and the promise rejects with it. */
+      const stream = session.h2.request({ ':method': 'CONNECT', ':authority': APP_AUTHORITY });
+      stream.on('error', ignore);
+      stream.once('response', headers => {
+        if (headers[':status'] === 200) return resolve(stream);
+        stream.close();
+        reject(new Error(`The leader did not open its app: ${String(headers[':status'])}.`));
+      });
+      stream.once('close', () => reject(new Error(NO_LEADER)));
+    });
+  }
+
+  close(): Promise<void> {
+    this.closed = true;
+    clearInterval(this.timer);
+    for (const kept of this.kept.splice(0)) this.end(kept);
+    return Promise.resolve();
+  }
+
+  private leading(): Kept | undefined {
+    return this.kept.find(kept => kept.session?.hello.lead);
+  }
+
+  private end(kept: Kept): void {
+    kept.session?.h2.destroy();
+    kept.session = null;
+  }
+
+  /* A machine with no session is dialed; one reached through the relay gets its direct addresses tried again in time. */
+  private look(): void {
+    for (const kept of this.kept) {
+      if (kept.dialing) continue;
+      if (!kept.session) void this.dial(kept, true);
+      else if (kept.session.path === 'relay' && Date.now() - kept.directTriedAt >= (this.opts.directEveryMs ?? DIRECT_EVERY_MS)) void this.dial(kept, false);
+    }
+  }
+
+  private async dial(kept: Kept, relayToo: boolean): Promise<void> {
+    kept.dialing = true;
+    try {
+      const session = (await this.dialDirect(kept)) ?? (relayToo ? await this.dialRelay(kept) : null);
+      if (session) this.keep(kept, session);
+    } finally {
+      kept.dialing = false;
+    }
+  }
+
+  private async dialDirect(kept: Kept): Promise<Session | null> {
+    kept.directTriedAt = Date.now();
+    const { addresses, peerPort } = kept.target;
+    if (!peerPort) return null;
+    for (const address of addresses) {
+      const session = await this.open(kept.target, address, peerPort, 'direct');
+      if (session) {
+        kept.failed.clear();
+        return session;
+      }
+      kept.failed.add(address);
+    }
+    return null;
+  }
+
+  private dialRelay(kept: Kept): Promise<Session | null> {
+    const { relayPort } = kept.target;
+    return relayPort ? this.open(kept.target, LOOPBACK, relayPort, 'relay') : Promise.resolve(null);
+  }
+
+  /* Why this certificate is not the dialed machine's, or nothing when it is. */
+  private notTheMachine(target: DialTarget, raw: Buffer): Error | undefined {
+    try {
+      const facts = certFacts(new X509Certificate(raw).toString());
+      if (facts.machineId !== target.machine) return new Error('The certificate names another machine.');
+      if (facts.role !== 'data') return new Error('The certificate is not of a machine that keeps data.');
+      return this.opts.revoked().has(facts.serial) ? new Error('The certificate was revoked.') : undefined;
+    } catch (err) {
+      return err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  /* A session that said hello, or null: nothing answered there in time, the machine there is not the one dialed, or it
+     did not take this machine's certificate. With TLS 1.3 the handshake is through on this side before the data machine
+     has looked at this machine's certificate, and a keeper that refuses one closes the connection with no word. So a
+     session counts from its first hello, and a machine that showed the right certificate and then hung up before that
+     hello is taken to have refused this one's. */
+  private open(target: DialTarget, host: string, port: number, path: LinkPath): Promise<Session | null> {
+    const held = this.opts.held();
+    if (!held || this.closed) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const socket = tls.connect({
+        host,
+        port,
+        cert: held.certPem,
+        key: this.opts.key.privatePem,
+        ca: held.authorityPem,
+        minVersion: 'TLSv1.3',
+        ALPNProtocols: ['h2'],
+        checkServerIdentity: (_name, cert) => this.notTheMachine(target, cert.raw),
+      });
+      let h2: ClientHttp2Session | undefined;
+      let settled = false;
+      const settle = (session: Session | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(giveUp);
+        if (!session) {
+          h2?.destroy();
+          socket.destroy();
+        }
+        resolve(session);
+      };
+      /* hungUp: the other side ended it, and not this side's patience. */
+      const fail = (hungUp: boolean) => {
+        if (hungUp && h2 && !settled) this.refuse();
+        settle(null);
+      };
+      const giveUp = setTimeout(() => fail(false), this.opts.connectMs ?? CONNECT_MS);
+      socket.on('error', () => fail(true));
+      socket.once('close', () => fail(true));
+      socket.once('secureConnect', () => {
+        h2 = http2.connect(`https://${host}:${port}`, { createConnection: () => socket, settings: { initialWindowSize: WINDOW } });
+        h2.on('error', ignore);
+        const session = h2;
+        askHello(session, this.opts.connectMs ?? CONNECT_MS).then(
+          hello => settle({ h2: session, path, hello, timers: [], pinged: true }),
+          () => fail(true),
+        );
+      });
+    });
+  }
+
+  private refuse(): void {
+    if (this.refused) return;
+    this.refused = true;
+    this.opts.log("A data machine of the company did not take this machine's certificate.");
+    this.opts.changed?.();
+  }
+
+  private keep(kept: Kept, session: Session): void {
+    if (this.closed || !this.kept.includes(kept) || session.h2.destroyed) return void session.h2.destroy();
+    /* A direct session takes the place of the one through the relay. */
+    const before = kept.session;
+    kept.session = session;
+    before?.h2.destroy();
+    this.refused = false;
+    session.h2.once('close', () => {
+      for (const timer of session.timers) clearInterval(timer);
+      if (kept.session !== session) return;
+      kept.session = null;
+      this.opts.changed?.();
+    });
+    session.timers.push(
+      setInterval(() => this.hello(session), this.opts.helloMs ?? HELLO_MS).unref(),
+      setInterval(() => this.ping(session), this.opts.pingMs ?? PING_MS).unref(),
+    );
+    this.opts.changed?.();
+  }
+
+  private hello(session: Session): void {
+    if (session.h2.destroyed) return;
+    askHello(session.h2, this.opts.helloMs ?? HELLO_MS).then(
+      hello => {
+        const news = hello.lead !== session.hello.lead;
+        session.hello = hello;
+        if (news) this.opts.changed?.();
+      },
+      () => session.h2.destroy(),
+    );
+  }
+
+  /* A machine that went away without a word answers no ping, and its session would else stay for as long as TCP waits. */
+  private ping(session: Session): void {
+    if (session.h2.destroyed) return;
+    if (!session.pinged) return void session.h2.destroy();
+    session.pinged = false;
+    const sent = session.h2.ping(err => {
+      if (!err) session.pinged = true;
+    });
+    if (!sent) session.h2.destroy();
+  }
+}
