@@ -1,10 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { HIDDEN, SECRET, type SqlMode } from '../../db/agent-sql.js';
+import { HIDDEN, SECRET, type SqlAnswer, type SqlCall, type SqlMode } from '../../db/agent-sql.js';
 import { notConfirmed } from '../../db/confirm.js';
 import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
+import { sources } from '../../db/sources.js';
 import { answersCeoOrDelegate, withInputLock } from '../conversation/decision-context.js';
+import { currentInvocation, keptAnswer } from './calls.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
@@ -109,14 +111,36 @@ async function modeNow(ctx: Ctx, job: ToolJob, mode: SqlMode): Promise<SqlMode> 
   return (await answersCeoOrDelegate(ctx.db, job.id)) ? 'write' : 'read';
 }
 
+/* What the agent reads of a call that ran. */
+function answerOf(answers: SqlAnswer[]) {
+  const body = JSON.stringify(answers);
+  return say(body.length > MAX_ANSWER ? `${body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : body);
+}
+
+/* A change made by a call that front gave an id is recorded by the lease check itself, with the answer the agent will
+   read, in the change's own commit: so the call's first step is taken there, and the source goes on from the next. */
+function recorded(job: ToolJob): SqlCall | undefined {
+  const invocation = currentInvocation();
+  if (!invocation) return undefined;
+  return {
+    invocation,
+    jobId: job.id,
+    answer: results => {
+      const source = sources.getStore()!;
+      source.next = Math.max(source.next, 1);
+      source.wrote = true;
+      return keptAnswer(answerOf(results));
+    },
+  };
+}
+
 async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: ToolJob, sql: string, mode: SqlMode) {
   const now = await modeNow(ctx, job, mode);
   try {
     await checkAgentSql(sql);
-    const answers = await agentSql.run(sql, now);
+    const answers = await agentSql.run(sql, now, now === 'write' ? recorded(job) : undefined);
     if (answers.some(a => a.changed > 0)) ctx.bus.publish(job.companyId, { type: 'org' });
-    const body = JSON.stringify(answers);
-    return say(body.length > MAX_ANSWER ? `${body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : body);
+    return answerOf(answers);
   } catch (err) {
     return say(failureText(err as Error, now, WHY_READ_ONLY[mode]), true);
   }

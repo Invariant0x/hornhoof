@@ -14,7 +14,7 @@ export async function isAddressOf(name: string | null | undefined, address: stri
 }
 
 /* Whether the request came from the keeper container's own address. */
-const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean> => isAddressOf(config.tunnelHost, socketAddress(req.raw));
+export const fromTunnel = (req: FastifyRequest, config: Config): Promise<boolean> => isAddressOf(config.tunnelHost, socketAddress(req.raw));
 
 /* A request the keeper passed on from the link, which only it marks as https. Anyone can write that header, so it is
    believed only from the keeper container. */

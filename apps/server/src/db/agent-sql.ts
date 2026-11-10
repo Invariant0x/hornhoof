@@ -12,8 +12,11 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
 /* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
 export type SqlMode = 'write' | 'read';
 
+/* A tool call with an id of its own: the answer the agent will read, made from what the statements answered. */
+export type SqlCall = { invocation: string; jobId: string; answer: (results: SqlAnswer[]) => unknown };
+
 /* Agents' own way into the database. Each call is one transaction under the role of its mode. */
-export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+export type AgentSql = { run: (text: string, mode: SqlMode, call?: SqlCall) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
@@ -88,7 +91,11 @@ END $revokes$`;
 
 /* What the write role runs right before its COMMIT. Its text may have set any of these for the transaction, and the lease must
    still hold after what the text took: a margin, as the commit itself still takes a moment. */
-export const PRE_COMMIT = "SET LOCAL synchronous_commit = on; SET LOCAL statement_timeout = 0; SET LOCAL client_min_messages = warning; SELECT net.assert_lease('2 s', NULL)";
+export const PRE_COMMIT_SETTINGS = 'SET LOCAL synchronous_commit = on; SET LOCAL statement_timeout = 0; SET LOCAL client_min_messages = warning';
+export const PRE_COMMIT = `${PRE_COMMIT_SETTINGS}; SELECT net.assert_lease('2 s', NULL)`;
+/* The same check for a tool call that front gave an id: it also keeps the call's answer and lists the call as applied, in
+   the change's own commit. */
+export const RECORD_CALL = "SELECT net.assert_lease('2 s', $1, $2, $3::jsonb)";
 
 /* One pair of roles per database, so two Hornhoofs on one Postgres do not share them. */
 const roleOf = (database: string, suffix: string) => `${database.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 63 - suffix.length)}${suffix}`;
@@ -142,6 +149,7 @@ ${readVisible(READ_ONLY, name)}
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
   GRANT USAGE ON SCHEMA net TO "${name}";
   GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid) TO "${name}";
+  GRANT EXECUTE ON FUNCTION net.assert_lease(interval, uuid, uuid, jsonb) TO "${name}";
   EXECUTE $trigger$
     CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
     BEGIN
@@ -171,12 +179,18 @@ const answersOf = (result: pg.QueryResult | pg.QueryResult[]): SqlAnswer[] =>
   (Array.isArray(result) ? result : [result]).map(r => ({ rows: r.rows ?? [], changed: WRITES.has(r.command) ? (r.rowCount ?? 0) : 0 }));
 
 /* The text runs between a BEGIN and a COMMIT it did not write. */
-export async function inOneTransaction(client: pg.ClientBase, text: string, mode: SqlMode): Promise<SqlAnswer[]> {
+export async function inOneTransaction(client: pg.ClientBase, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
   await client.query(mode === 'read' ? 'BEGIN READ ONLY' : 'BEGIN');
-  const result = (await client.query(text)) as unknown as pg.QueryResult | pg.QueryResult[];
-  if (mode === 'write') await client.query(PRE_COMMIT);
+  const answers = answersOf((await client.query(text)) as unknown as pg.QueryResult | pg.QueryResult[]);
+  if (mode === 'write') await beforeCommit(client, answers, call);
   await client.query('COMMIT');
-  return answersOf(result);
+  return answers;
+}
+
+async function beforeCommit(client: pg.ClientBase, answers: SqlAnswer[], call?: SqlCall): Promise<void> {
+  if (!call) return void (await client.query(PRE_COMMIT));
+  await client.query(PRE_COMMIT_SETTINGS);
+  await client.query(RECORD_CALL, [call.invocation, call.jobId, JSON.stringify(call.answer(answers))]);
 }
 
 /* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. */
@@ -196,10 +210,10 @@ async function poolOfRole(admin: pg.Client, url: string, name: string, grants: s
   return pool;
 }
 
-async function runOn(pool: pg.Pool, text: string, mode: SqlMode): Promise<SqlAnswer[]> {
+async function runOn(pool: pg.Pool, text: string, mode: SqlMode, call?: SqlCall): Promise<SqlAnswer[]> {
   const client = await pool.connect();
   try {
-    return await inOneTransaction(client, text, mode);
+    return await inOneTransaction(client, text, mode, call);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -220,7 +234,7 @@ async function openRoles(admin: pg.Client, url: string, pools: pg.Pool[]): Promi
   const database = (await admin.query<{ db: string }>('SELECT current_database() AS db')).rows[0]!.db;
   const byMode = { write: await open(agentRole(database), grantsFor(agentRole(database))), read: await open(readerRole(database), readerGrantsFor(readerRole(database))) };
   return {
-    run: (text, mode) => runOn(byMode[mode], text, mode),
+    run: (text, mode, call) => runOn(byMode[mode], text, mode, call),
     close: async () => {
       await Promise.all(pools.map(p => p.end()));
     },

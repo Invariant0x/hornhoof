@@ -252,6 +252,32 @@ async function commitsGoOn(): Promise<void> {
   await real.admin.query('UPDATE companies SET name = name');
 }
 
+describe('a database call that front gave an id', () => {
+  const INVOCATION = '00000000-0000-4000-8000-0000000000a1';
+  const LATE = '00000000-0000-4000-8000-0000000000a2';
+  const JOB = '00000000-0000-4000-8000-0000000000b1';
+  const kept = async (id: string) => ({
+    calls: (await real.admin.query('SELECT answer FROM tool_calls WHERE id = $1', [id])).rows,
+    sources: (await real.admin.query('SELECT source FROM applied WHERE base = $1', [`tool:${id}`])).rows,
+  });
+
+  it('is recorded in the commit that the fence checks, and not at all when that commit is refused', async () => {
+    const agents = await agentSql();
+    /* A job with nothing behind it, which the check of that is told to let pass. */
+    await real.admin.query(`BEGIN; SET LOCAL session_replication_role = replica;
+      INSERT INTO jobs (id, company_id, subscription_id, prompt, timeout_ms, status) VALUES ('${JOB}', gen_random_uuid(), gen_random_uuid(), 'x', 1000, 'running'); COMMIT`);
+    const call = (invocation: string) => ({ invocation, jobId: JOB, answer: (results: unknown[]) => ({ said: results.length }) });
+
+    await agents.run('UPDATE agents SET name = name', 'write', call(INVOCATION));
+    expect(await kept(INVOCATION)).toEqual({ calls: [{ answer: { said: 1 } }], sources: [{ source: `tool:${INVOCATION}:0` }] });
+
+    await real.admin.query(`UPDATE net_local.lease SET until = '-infinity'`);
+    onTestFinished(async () => void (await real.admin.query(`UPDATE net_local.lease SET until = 'infinity'`)));
+    expect(await failureOf(agents.run('UPDATE agents SET name = name', 'write', call(LATE)))).toMatchObject({ code: LEASE_REFUSED });
+    expect(await kept(LATE)).toEqual({ calls: [], sources: [] });
+  });
+});
+
 describe('a commit that waits for a copy', () => {
   const notesSaying = async (text: string): Promise<number> => (await real.admin.query('SELECT 1 FROM notebook_notes WHERE text = $1', [text])).rowCount ?? 0;
   const aNote = (text: string): string => `INSERT INTO notebook_notes (company_id, number, text) SELECT id, (SELECT count(*) + 1 FROM notebook_notes), '${text}' FROM companies`;

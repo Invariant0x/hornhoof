@@ -8,6 +8,7 @@ import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { appendEvent } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
+import { guardTools, invocationOf } from './calls.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
 import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
@@ -46,8 +47,10 @@ async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
    and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
+function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, invocation: string | null): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
+  /* Before any tool is registered, so that every one of them is covered. */
+  guardTools(server, ctx, job, invocation);
   server.registerTool(
     'company',
     { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
@@ -155,7 +158,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/mcp', async (req, reply) => {
     const job = await jobOf(ctx, req);
-    const server = toolsFor(ctx, app, job);
+    const server = toolsFor(ctx, app, job, await invocationOf(req, ctx.config));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {
