@@ -61,11 +61,14 @@ function framingOf(req: http.IncomingMessage): http.OutgoingHttpHeaders {
   return length ? { 'content-length': length } : {};
 }
 
+/* Hornhoof's own headers say who a request is from, so none that came in goes on. The stamp and the signature of a
+   delivery receipt do: a sender outside signs them, and only the check of that signature believes them. */
+const SIGNED_OUTSIDE: ReadonlySet<string> = new Set(['x-hornhoof-timestamp', 'x-hornhoof-signature']);
+const hornhoofsOwn = (name: string): boolean => name.startsWith('x-hornhoof-') && !SIGNED_OUTSIDE.has(name);
+
 function passedHeaders(req: http.IncomingMessage, added: Record<string, string>): http.OutgoingHttpHeaders {
   const endsHere = hopByHop(req);
-  const kept = Object.entries(req.headers).filter(
-    ([name]) => !endsHere(name) && !FORWARDING.has(name) && !name.startsWith('x-hornhoof-'),
-  );
+  const kept = Object.entries(req.headers).filter(([name]) => !endsHere(name) && !FORWARDING.has(name) && !hornhoofsOwn(name));
   return { ...Object.fromEntries(kept), ...framingOf(req), ...added };
 }
 

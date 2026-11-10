@@ -570,6 +570,16 @@ describe('neither dropped nor doubled', () => {
 });
 
 describe('headers', () => {
+  it('passes the stamp and the signature of a signed delivery receipt, which only their own check believes', async () => {
+    const { target, seen } = await recording();
+    const proxy = await through(target);
+    await send(proxy, { headers: { 'x-hornhoof-timestamp': '1794300000', 'x-hornhoof-signature': 'abc', 'x-hornhoof-internal': 'forged' } });
+    const { headers } = seen[0];
+    expect(headers['x-hornhoof-timestamp']).toBe('1794300000');
+    expect(headers['x-hornhoof-signature']).toBe('abc');
+    expect(headers['x-hornhoof-internal']).toBeUndefined();
+  });
+
   it('drops forwarding headers that came in and adds its own', async () => {
     const { target, seen } = await recording();
     const proxy = await through(target, {
