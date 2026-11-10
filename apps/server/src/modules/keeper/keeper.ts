@@ -11,7 +11,10 @@ import { LINK_TLS_PORT, LinkListener, linkVisitor } from '../tls/listener.js';
 import { servedCertificate } from '../tls/store.js';
 import { certInfo } from '../tls/x509.js';
 import type { Term } from '../../db/net.js';
+import type { HeldCertificate } from './certificate.js';
+import { MachineIdentity, type Published } from './identity.js';
 import { LeaseHolder } from './lease-holder.js';
+import { KEEPER_DIR } from './machine-keys.js';
 import type { LeaseStore } from './lease-store.js';
 import type { Clocks } from './lease.js';
 import { writeKeeperState, type KeeperState, type Mode } from './state.js';
@@ -44,6 +47,11 @@ export type KeeperOptions = {
   /* For how long a door holds a request while the app is away, and the pause between its tries. 0: it answers at once. */
   holdMs?: number;
   holdEveryMs?: number;
+  /* The keeper's own folder, where the machine's key and certificate are kept. */
+  dir?: string;
+  /* The machine's ports as compose publishes them, to report with its measures. */
+  published?: Published;
+  reportEveryMs?: number;
 };
 
 type LinkWord = NonNullable<KeeperState['link']>;
@@ -172,6 +180,7 @@ function closeWithin(server: http.Server, ms: number): Promise<void> {
    and carries what comes in from front and the link to the app. */
 export class Keeper {
   private readonly holder: LeaseHolder;
+  private readonly identity: MachineIdentity | null;
   private timer: NodeJS.Timeout | null = null;
   private fencesTimer: NodeJS.Timeout | null = null;
   private certificateTimer: NodeJS.Timeout | null = null;
@@ -187,6 +196,23 @@ export class Keeper {
     const log = { warn: (_detail: unknown, message?: string) => opts.log(String(message)) };
     this.listener = new LinkListener({ server: this.door(visitorFromTls, { link: true }), log });
     this.holder = new LeaseHolder({ lease: opts.lease, updaterBusy: () => updaterBusy(opts.config.controlDir), now: opts.now, pruneEveryMs: opts.pruneEveryMs, log: opts.log });
+    /* A machine without an id is none of the company's network, as it carries no public link. */
+    this.identity = opts.config.machineId
+      ? new MachineIdentity({
+          dir: opts.dir ?? KEEPER_DIR,
+          app: opts.app,
+          commit: opts.config.commit,
+          published: opts.published ?? { web: null, peer: null },
+          leading: () => this.mode() === 'lead',
+          log: opts.log,
+          reportEveryMs: opts.reportEveryMs,
+        })
+      : null;
+  }
+
+  /* The certificate this machine holds in the company's network, once its app gave it one. */
+  certificate(): HeldCertificate | null {
+    return this.identity?.certificate() ?? null;
   }
 
   mode(): Mode {
@@ -212,6 +238,8 @@ export class Keeper {
     this.timer = setInterval(() => void tick(), everyMs);
     this.fencesTimer = setInterval(() => void this.holder.look(), linkEveryMs);
     if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
+    /* After the doors, the lease and the link: none of them waits for the machine's key or its certificate. */
+    this.identity?.start();
     return { front, linkHttp, linkTls };
   }
 
@@ -220,7 +248,7 @@ export class Keeper {
     if (this.certificateTimer) clearInterval(this.certificateTimer);
     if (this.fencesTimer) clearInterval(this.fencesTimer);
     this.timer = this.certificateTimer = this.fencesTimer = null;
-    await Promise.all([this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
+    await Promise.all([this.identity?.stop(), this.tunnel?.stop(), this.listener.close(STOP_GRACE_MS), ...this.doors.map(door => closeWithin(door, STOP_GRACE_MS))]);
     await this.opts.lease?.close().catch(() => undefined);
   }
 

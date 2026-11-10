@@ -47,12 +47,13 @@ const FULL_ENV = {
 };
 
 describe('the web port', () => {
-  it('is published by front alone, and no other service names it', () => {
+  it('is published by front alone: the keeper only hears its number, to report it', () => {
     expect(compose.services.tunnel).toBeUndefined();
     expect(front!.ports).toEqual(['${HORNHOOF_PORT:-8080}:8080']);
     expect(app!.ports).toBeUndefined();
     for (const [name, service] of Object.entries(compose.services)) {
-      if (name !== 'front') expect(JSON.stringify(service)).not.toContain('HORNHOOF_PORT');
+      if (name !== 'front') expect(JSON.stringify(service.ports ?? []), name).not.toContain('HORNHOOF_PORT');
+      if (name !== 'front' && name !== 'keeper') expect(JSON.stringify(service), name).not.toMatch(/HORNHOOF_PORT\b/);
     }
   });
 
@@ -76,10 +77,22 @@ describe('front, keeper and migrate', () => {
 
   it('gives the keeper the peer port, the database, the control folder and nothing of Docker', () => {
     expect(keeper!.ports).toEqual(['${HORNHOOF_PEER_PORT:-8180}:7070']);
-    expect(Object.keys(keeper!.environment!)).toEqual(['DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID']);
-    expect(keeper!.volumes).toEqual(['control:/control']);
+    expect(Object.keys(keeper!.environment!)).toEqual(['DATABASE_URL', 'HORNHOOF_SECRET', 'ACME_DIRECTORY', 'RELAY_URL', 'HORNHOOF_MACHINE_ID', 'HORNHOOF_PORT', 'HORNHOOF_PEER_PORT']);
+    /* Its own volume holds the machine's key, which no other service reads. */
+    expect(keeper!.volumes).toEqual(['control:/control', 'keeper:/keeper']);
+    expect(Object.keys((parse(composeText) as { volumes: Record<string, unknown> }).volumes)).toContain('keeper');
+    for (const [name, service] of Object.entries(compose.services)) if (name !== 'keeper') expect(JSON.stringify(service.volumes ?? []), name).not.toContain('keeper:');
+    /* It hears which ports the machine publishes, to report them, and publishes the web port no more than before. */
+    expect(filled(keeper!, { ...FULL_ENV, HORNHOOF_PORT: '8081', HORNHOOF_PEER_PORT: '8181' })).toMatchObject({ HORNHOOF_PORT: '8081', HORNHOOF_PEER_PORT: '8181' });
+    expect(filled(keeper!, FULL_ENV)).toMatchObject({ HORNHOOF_PORT: '8080', HORNHOOF_PEER_PORT: '8180' });
     expect(JSON.stringify(keeper)).not.toContain('docker.sock');
     expect(keeper!.networks).toEqual(['default', 'internal']);
+  });
+
+  it("prepares the keeper's folder in the image as the control folder is, so a new volume is the node user's", () => {
+    const dockerfile = readFileSync(fileURLToPath(new URL('../../../Dockerfile', import.meta.url)), 'utf8');
+    expect(dockerfile).toMatch(/mkdir [^\n]*\/control[^\n]* \/keeper/);
+    expect(dockerfile).toContain('COPY --from=deps --chown=node:node /keeper /keeper');
   });
 
   /* The keeper reads the link with the app's own functions, so these Config fields must come out the same in both. */

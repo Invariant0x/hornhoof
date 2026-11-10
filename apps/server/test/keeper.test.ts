@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,11 +8,13 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { clientAddress } from '../src/auth/tunnel.js';
 import { loadConfig } from '../src/config.js';
+import { machines } from '../src/db/schema.js';
 import { Keeper, KEEPER_PORTS, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { freshState, readKeeperState } from '../src/modules/keeper/state.js';
 import { updaterBusy } from '../src/modules/keeper/updater-status.js';
@@ -285,6 +287,32 @@ describe('the keeper', () => {
     statusSays(dir, 'running', 'install');
     await until(() => keeper.mode() === 'maintenance');
     expect(JSON.parse((await waiting).body).error.reason).toBe('maintenance');
+  });
+
+  it("gets its machine's certificate from its app and reports the machine's measures while it leads", async () => {
+    const MACHINE_ID = 'a1b2c3d4'.repeat(4);
+    const { app, db } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_MACHINE_ID: MACHINE_ID });
+    await setUpCompany(app);
+    const dir = folder();
+    const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: MACHINE_ID });
+    const { keeper } = await keeperOn(await appListening(app), { config, dir, published: { web: 8123, peer: 8223 }, reportEveryMs: 20 });
+    await until(() => keeper.certificate() !== null);
+    const row = async () => (await db.select().from(machines).where(eq(machines.networkId, MACHINE_ID)))[0]!;
+    expect(keeper.certificate()).toMatchObject({ machine: (await row()).id, role: 'data' });
+    expect(existsSync(join(dir, 'certificate.json'))).toBe(true);
+    await until(async () => (await row()).reportAt !== null);
+    expect(await row()).toMatchObject({ webPort: 8123, peerPort: 8223 });
+  });
+
+  it('keeps leading and serving when its own folder cannot be written', async () => {
+    const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: folder(), HORNHOOF_MACHINE_ID: 'a1b2c3d4'.repeat(4) });
+    const notAFolder = join(folder(), 'keeper');
+    writeFileSync(notAFolder, 'a file where the folder should be');
+    const { keeper, lines, front } = await keeperOn(await echoHeaders(), { config, dir: notAFolder });
+    expect(keeper.mode()).toBe('lead');
+    expect((await send(front)).status).toBe(200);
+    expect(keeper.certificate()).toBeNull();
+    expect(lines.filter(line => line.startsWith("The keeper cannot keep this machine's key"))).toHaveLength(1);
   });
 
   it("passes front's invocation id on, and no one else's", async () => {

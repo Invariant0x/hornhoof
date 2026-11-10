@@ -31,7 +31,7 @@ WORKDIR /app
 COPY --from=manifests /app/ ./
 RUN cpu="$(case "${TARGETARCH:-}" in amd64) echo x64 ;; '') node -p process.arch ;; *) echo "$TARGETARCH" ;; esac)" \
   && npm ci --omit=dev --cpu="$cpu" --workspace apps/server --workspace packages/protocol && npm cache clean --force \
-  && rm -f node_modules/.package-lock.json && mkdir /control /harness
+  && rm -f node_modules/.package-lock.json && mkdir /control /harness /keeper
 
 FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
 ENV NODE_ENV=production PORT=8080
@@ -63,6 +63,8 @@ ARG HORNHOOF_NODE_BUILD=
 ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT HORNHOOF_NODE_BUILD=$HORNHOOF_NODE_BUILD
 # The folder the app shares with the updater; a new volume takes this owner.
 COPY --from=deps --chown=node:node /control /control
+# The keeper's own folder, with the machine's key: a new volume there takes this owner, as the control folder's does.
+COPY --from=deps --chown=node:node /keeper /keeper
 # What machines share of test harnesses, in a volume of its own that takes this owner too.
 COPY --from=deps --chown=node:node /harness /harness
 USER node

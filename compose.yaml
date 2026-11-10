@@ -33,8 +33,13 @@ services:
       RELAY_URL: ${RELAY_URL:-}
       # The id frpc logs in with, written once by install.sh.
       HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
+      # The ports this machine publishes, which the keeper reports to the app; it publishes only the peer port itself.
+      HORNHOOF_PORT: ${HORNHOOF_PORT:-8080}
+      HORNHOOF_PEER_PORT: ${HORNHOOF_PEER_PORT:-8180}
     volumes:
       - control:/control
+      # The machine's own key, which never leaves this volume.
+      - keeper:/keeper
     depends_on:
       db:
         condition: service_healthy
@@ -206,3 +211,4 @@ volumes:
   nodedata:
   control:
   harness:
+  keeper:

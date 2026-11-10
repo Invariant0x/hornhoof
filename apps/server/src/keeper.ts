@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { KEEPER_NAME, openDb } from './db/client.js';
+import { publishedFrom } from './modules/keeper/identity.js';
 import { Keeper } from './modules/keeper/keeper.js';
 import { keeperSql, leaseStore, type LeaseStore } from './modules/keeper/lease-store.js';
 
@@ -13,7 +14,7 @@ function leaseOf(): LeaseStore | null {
   return leaseStore(keeperSql(config.databaseUrl), { machineId: config.machineId });
 }
 
-const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line), lease: leaseOf() });
+const keeper = new Keeper({ config, db, app: { host: 'app', port: 8080 }, frontHost: 'front', log: line => console.log(line), lease: leaseOf(), published: publishedFrom(process.env) });
 
 await keeper.start();
 

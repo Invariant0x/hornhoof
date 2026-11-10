@@ -94,6 +94,8 @@ async function keeperOn(db: Db, env: NodeJS.ProcessEnv = {}, extra: Partial<Keep
     db,
     /* A lease that always holds, as on a healthy machine, unless the test gives another. */
     lease: fakeLease(),
+    /* The keeper's own folder, where it keeps the key of this machine. */
+    dir: folder(),
     app: NOWHERE,
     frontHost: null,
     log: line => lines.push(line),
@@ -432,13 +434,15 @@ describe('the lease proof on the link', () => {
   const LEASE = `/api/network/lease?nonce=${NONCE}`;
   const BAD_NONCE = { error: { code: 'validation', message: 'nonce must be 16 to 128 letters, digits, - or _.' } };
 
-  /* An app that notes every request it gets, so a test sees what the keeper answered by itself. */
+  /* An app that notes every request the keeper passed on to it, so a test sees what the keeper answered by itself. What
+     the keeper asks the app for itself, as its machine's certificate, is none of those. */
   async function notingApp() {
     const got: string[] = [];
     const target = await listening(
       http.createServer((req, res) => {
-        got.push(`${req.method} ${req.url}`);
         req.resume();
+        if (req.headers['x-hornhoof-via'] === 'keeper') return void res.writeHead(503).end();
+        got.push(`${req.method} ${req.url}`);
         res.end('the app');
       }),
     );
