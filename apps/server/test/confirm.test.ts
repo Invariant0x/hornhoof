@@ -107,14 +107,28 @@ describe('notConfirmed', () => {
     ['NotConfirmed', new NotConfirmed(WARNING)],
     ['a session the server ended', { code: '57P01' }],
     ['a transaction the limit ended', { code: '25P04' }],
-    ['a reset connection', { code: 'ECONNRESET' }],
-    ['a broken pipe', { code: 'EPIPE' }],
     ['a lost connection', new Error('Connection terminated unexpectedly')],
     ["drizzle's ROLLBACK on a dead connection", new Error('Client has encountered a connection error and is not queryable')],
     ['a wrapped loss', new DrizzleQueryError('commit', [], withCode('57P01'))],
     ['a wrapped dead connection', new DrizzleQueryError('rollback', [], new Error('Client has encountered a connection error and is not queryable'))],
   ])('is true for %s', (_name, err) => {
     expect(notConfirmed(err)).toBe(true);
+  });
+
+  /* The same codes come from any socket, as when a call to another service breaks: only a query of the database that
+     broke may have changed the data. */
+  it.each(['ECONNRESET', 'EPIPE'])('is true for a connection that broke with %s under a query, and false for the same code from anything else', async code => {
+    const client = confirming();
+    client.answer = { error: withCode(code) };
+    const underQuery: unknown = await client.asPg.query('UPDATE t SET a = 1').catch((err: unknown) => err);
+    expect(notConfirmed(underQuery)).toBe(true);
+    expect(notConfirmed(new DrizzleQueryError('update', [], underQuery as Error))).toBe(true);
+    client.answer = { error: withCode(code) };
+    const byCallback: unknown = await answerOf(done => void client.asPg.query('COMMIT', done)).catch((err: unknown) => err);
+    expect(notConfirmed(byCallback)).toBe(true);
+
+    expect(notConfirmed(withCode(code))).toBe(false);
+    expect(notConfirmed(new Error('fetch failed', { cause: withCode(code) }))).toBe(false);
   });
 
   it.each<[string, unknown]>([
