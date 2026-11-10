@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { parse } from 'yaml';
 import { loadConfig } from '../src/config.js';
 
@@ -167,5 +170,41 @@ describe('the updater', () => {
   it('runs commands on the computer in its own image', () => {
     const { updater } = compose.services;
     expect(updater!.environment!.HORNHOOF_COMPUTER_IMAGE).toBe(updater!.image);
+  });
+});
+
+describe('the real tests', () => {
+  /* The two must not drift apart: what passes there has to hold on the database a company runs. Each -c of db's command
+     is held to run.sh from the moment compose has one. */
+  it("starts the real tests' Postgres as compose starts db", () => {
+    const runScript = readFileSync(fileURLToPath(new URL('./real/run.sh', import.meta.url)), 'utf8');
+    const { image, command = [] } = compose.services.db!;
+    expect(runScript).toContain(image);
+    for (const setting of command.join(' ').match(/-c \S+/g) ?? []) expect(runScript).toContain(setting);
+  });
+
+  /* Stands in for docker, curl and npx: what a run asks docker for, and what it hears, goes to a file beside it. */
+  const STAND_IN = `#!/bin/sh
+case "$*" in
+  'port '*) echo 127.0.0.1:5432 ;;
+  'run '*postgres*) echo "\${POSTGRES_PASSWORD:+heard}" >> "$CALLS"; echo "$*" >> "$CALLS" ;;
+esac
+`;
+
+  it("gives Postgres its password by name, so that the value is on no command line", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-run-sh-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    for (const name of ['docker', 'curl', 'npx']) {
+      writeFileSync(join(dir, name), STAND_IN);
+      chmodSync(join(dir, name), 0o755);
+    }
+    const calls = join(dir, 'calls');
+    const script = fileURLToPath(new URL('./real/run.sh', import.meta.url));
+
+    execFileSync('sh', [script], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALLS: calls, HH_REAL_PG: '', POSTGRES_PASSWORD: '' } });
+
+    const [heard, commandLine] = readFileSync(calls, 'utf8').split('\n');
+    expect(heard).toBe('heard');
+    expect(commandLine!.includes('POSTGRES_PASSWORD=')).toBe(false);
   });
 });
