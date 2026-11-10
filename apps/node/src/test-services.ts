@@ -340,6 +340,10 @@ function postgresLocale(service: Postgres): string {
   if (locale !== 'C.UTF-8') throw new Error('PostgreSQL services require the deterministic locale C.UTF-8');
   return locale;
 }
+function serverArgs(state: string, socket: string, fresh: boolean): string[] {
+  const args = ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256'];
+  return fresh ? [...args, ...PREPARATION_SETTINGS] : args;
+}
 async function postgres(service: Postgres, state: string, context: ServiceContext, hidden: string[], fresh: boolean): Promise<Active> {
   const bin = context.postgresBin ?? PG_BIN;
   const locale = postgresLocale(service);
@@ -358,7 +362,7 @@ async function postgres(service: Postgres, state: string, context: ServiceContex
   hba(state, context);
   const socket = privateSocket(context);
   const env = pgEnv(socket, fresh ? 'postgres' : service.options.database, passwords.admin);
-  const server = launch(join(bin, 'postgres'), ['-D', state, '-c', "listen_addresses=", '-c', `unix_socket_directories=${socket}`, '-c', 'unix_socket_permissions=0700', '-c', 'password_encryption=scram-sha-256', ...(fresh ? PREPARATION_SETTINGS : [])], '/tmp', {}, context, hidden);
+  const server = launch(join(bin, 'postgres'), serverArgs(state, socket, fresh), '/tmp', {}, context, hidden);
   let closing: Promise<void> | undefined;
   const close = () => closing ??= stopPostgres(server, state, socket, context, hidden);
   try {
