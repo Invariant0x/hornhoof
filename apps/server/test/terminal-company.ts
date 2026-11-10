@@ -58,7 +58,13 @@ export async function handled(node: FakeNode): Promise<void> {
 
 export const onPlan = (c: AclCompany, agentId: string, planId: string) => c.db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, agentId));
 export const moved = (c: AclCompany, agentId: string, planId: string) => c.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, payload: { subscription: planId }, ...as(c.tokens.ceo) });
-export const turnOn = async (c: AclCompany, agentId: string, planId: string, status: 'running' | 'done' = 'running') =>
-  (await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: planId, agentId, kind: 'conversation', prompt: 'A turn.', timeoutMs: 900000, status, startedAt: new Date(), ...(status === 'done' ? { finishedAt: new Date() } : {}) }).returning())[0]!;
+/* Each turn starts after the one before it, as an agent's turns follow one another on a machine: two inserts in a row can
+   fall into one millisecond, and turns that started together have no last one. */
+let lastStart = 0;
+export const turnOn = async (c: AclCompany, agentId: string, planId: string, status: 'running' | 'done' = 'running') => {
+  lastStart = Math.max(Date.now(), lastStart + 1);
+  const startedAt = new Date(lastStart);
+  return (await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: planId, agentId, kind: 'conversation', prompt: 'A turn.', timeoutMs: 900000, status, startedAt, ...(status === 'done' ? { finishedAt: startedAt } : {}) }).returning())[0]!;
+};
 export const ended = (c: AclCompany, jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
 export const state = async (c: AclCompany, token: string, agentId: string) => (await c.app.inject({ url: `/api/agents/${agentId}/events`, ...as(token) })).json().state;
